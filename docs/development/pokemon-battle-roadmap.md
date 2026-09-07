@@ -108,14 +108,17 @@ Mỗi giai đoạn là một điểm dừng tự nhiên: build được, test đ
 
 **Giới hạn phạm vi đã biết** (không phải thiếu sót, là ranh giới scope): không model stat-stage (Attack/Defense/Speed/Accuracy/Evasion boost từ Growl, Swords Dance, Reflect...) — các chiêu này chỉ có thể trúng/trượt, không có hiệu ứng gì thêm. Không model crit hit. Move target luôn là đối thủ (không có self-target như Rest).
 
-### GĐ 3 — Lưu trữ
+### GĐ 3 — Lưu trữ ✅ XONG (commit `da111328`)
 
-- [ ] `PokemonState` v3: append `bagCounts[N]` (uint8, stack ≤99) và `uint16_t battleProgress` (8 bit gym + 4 bit Elite Four) **sau byte 115**. `itemCounts[6]` cũ giữ nguyên offset 54..65.
-- [ ] `snapshotStateBytes()` + `decodeState()` thêm nhánh v2 (field mới = 0). Migration chạy tự động vì commit luôn ghi version hiện tại.
-- [ ] `validateState()` ràng buộc `battleProgress` — **phải thỏa mãn với state v2 zero-extend**, nếu không save cũ thành không đọc được.
-- [ ] `PendingEventKind::MoveLearn`: dùng lại đúng 10 byte sẵn có (`recordId` = Pokémon, trường `speciesId` chứa moveId, `level` = level học) → chỉ thêm case vào `validatePendingEvent()`, không đổi kích thước.
-- [ ] `src/pokemon/PokemonBattleStore.h/.cpp`: file phụ 16 byte/entry (`recordId(4) + moves[4] + pp[4] + currentHp(2) + status(1) + statusTurns(1)`) + CRC32. Tạo lazy; CRC sai hoặc thiếu entry → **dựng lại từ learnset, HP/PP đầy**, không bao giờ chặn người chơi.
-- [ ] Test migration native theo mẫu `test/pokemon_store/PokemonStoreTest.cpp` (xem test `legacySnapshotMigratesToV2...` làm mẫu).
+- [x] `PokemonState` v3: append `bagCounts[77]` (uint8) và `uint16_t battleProgress` (8 bit gym + 4 bit Elite Four, 4 bit dự phòng) **sau byte 115**. `itemCounts[6]` cũ giữ nguyên offset 54..65.
+- [x] `snapshotStateBytes()` + `decodeState()` thêm nhánh v2 (`POKEMON_SNAPSHOT_VERSION_V2 = 2`, field mới = 0 khi decode). Migration chạy tự động vì commit luôn ghi version hiện tại (v3).
+- [x] `validateState()` ràng buộc `battleProgress` (bit dự phòng phải =0) — thỏa mãn với state v2 zero-extend, save cũ vẫn đọc được bình thường.
+- [x] `PendingEventKind::MoveLearn` (=4): dùng lại đúng 10 byte sẵn có (`recordId` = Pokémon, trường `speciesId` chứa moveId, `level` = level học) → chỉ thêm case vào `validatePendingEvent()`, không đổi kích thước `PendingEvent`.
+- [x] `lib/Pokemon/PokemonBattleStoreCodec.h/.cpp` (mã hóa thuần, dùng `std::array` cố định — không `std::vector`, đúng convention toàn module) + `src/pokemon/PokemonBattleStore.h/.cpp` (I/O qua `HalStorage`, cùng idiom với `PokemonStore.cpp`): file phụ `/.crosspoint/pokemon-battle.bin`, 16 byte/entry (`recordId(4) + moves[4] + pp[4] + currentHp(2) + status(1) + statusTurns(1)`) + CRC32 toàn file, tối đa `PARTY_SIZE=6` entry (PC không cần track). Tạo lazy qua `load()` tự gọi ở lần dùng đầu (kể cả từ hàm `const` nhờ `mutable`); CRC sai hoặc thiếu entry → coi như rỗng, không bao giờ chặn người chơi.
+- [x] Test: `test/pokemon_battle_store/` (`PokemonBattleStoreCodecTest` — mã hóa thuần; `PokemonBattleStoreTest` — I/O qua stub `HalStorage` có sẵn ở `test/pokemon_store/stubs/`) + thêm case vào `PokemonStoreCodecTest.cpp` cho v2→v3 zero-extend và battleProgress reserved-bit.
+- [x] Cập nhật `docs/file-formats.md` với layout v3 đầy đủ và format `pokemon-battle.bin`.
+
+**Lỗi phát hiện khi sửa test cũ (không phải bug logic)**: 3 test trong `PokemonStoreTest.cpp`/`PokemonStoreCodecTest.cpp` dùng số "3" làm giá trị version giả lập "chưa hỗ trợ" — giờ 3 chính là `POKEMON_SNAPSHOT_VERSION` thật, phải đổi sang `POKEMON_SNAPSHOT_VERSION + 1`. Bài học: nên dùng giá trị tương đối (`CURRENT+1`) thay vì số cứng khi ý định là "giá trị không hợp lệ", để tránh vỡ khi version tăng.
 
 ### GĐ 4 — Service + rơi đồ ✅ XONG (commit `18a0eeca`) — mốc đo dung lượng đầu tiên có ý nghĩa
 
