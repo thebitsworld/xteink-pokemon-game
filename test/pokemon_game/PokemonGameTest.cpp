@@ -484,12 +484,18 @@ void itemRollAndPityPreferAnOwnedEvolutionNeed() {
 }
 
 void saturatedItemsDoNotRejectReadingCredit() {
+  // All six evolution stones saturated no longer means "no item drop": the
+  // pool widened to 83 items (GĐ 4), so the roll falls through to the first
+  // eligible non-stone item (id 7, Poke Ball) instead of coming up empty.
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
   state.itemCounts.fill(UINT16_MAX);
   state.itemMisses = 19;
   state.readingMinuteRemainder = 59;
-  constexpr uint32_t draws[] = {2};
+  constexpr uint32_t draws[] = {
+      0,  // Select the first eligible item once all six stones are saturated (Poke Ball, id 7).
+      2,  // Miss the encounter due at the same hourly boundary.
+  };
   SequenceRandom sequence{draws, std::size(draws)};
   pokemon::RandomSource random{&sequence, SequenceRandom::next};
 
@@ -497,13 +503,16 @@ void saturatedItemsDoNotRejectReadingCredit() {
       pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, random);
 
   CHECK(result.status == pokemon::CreditStatus::Applied);
-  CHECK(result.generatedEvent == pokemon::PendingEventKind::None);
+  CHECK(result.generatedEvent == pokemon::PendingEventKind::Item);
+  CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::Item);
+  CHECK(static_cast<uint8_t>(state.pendingEvents[0].item) == 7);
   CHECK(leader.totalXp == 53);
   CHECK(state.lifetimeMinutes == 1);
   CHECK(state.itemMisses == 0);
-  CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::None);
-  CHECK(sequence.index == 1);
-  for (const uint16_t count : state.itemCounts) CHECK(count == UINT16_MAX);
+  CHECK(state.encounterMisses == 1);
+  CHECK(sequence.index == 2);
+  for (const uint16_t count : state.itemCounts) CHECK(count == UINT16_MAX);  // stones themselves stay untouched
+  CHECK(state.bagCounts[0] == 1);  // bagCounts[0] = item id 7 (Poke Ball)
 
   state = stateWithLeader(leader);
   state.itemCounts[2] = UINT16_MAX;

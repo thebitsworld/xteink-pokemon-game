@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 
+#include "PokemonBattleTypes.h"
 #include "PokemonSpecies.h"
 
 namespace pokemon {
@@ -238,29 +239,81 @@ bool createEncounter(PokemonState& state, const uint8_t bookProgressPercent, con
   return finalizeEncounter(state, speciesId, bookProgressPercent, random);
 }
 
+bool itemCountIsFull(const PokemonState& state, const uint8_t itemId) {
+  return itemId <= EVOLUTION_ITEM_COUNT ? state.itemCounts[itemId - 1U] == UINT16_MAX
+                                        : state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U] == UINT8_MAX;
+}
+
+void incrementItemCount(PokemonState& state, const uint8_t itemId) {
+  if (itemId <= EVOLUTION_ITEM_COUNT) {
+    ++state.itemCounts[itemId - 1U];
+  } else {
+    ++state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U];
+  }
+}
+
+// Builds a drop_weight-weighted candidate list across all ITEM_COUNT items
+// (not just the original 6 evolution stones), skipping any item already at
+// its per-slot storage cap. When `preferOwnedNeeds` is set, only evolution
+// stones/Link Cable a currently-owned Pokemon can actually evolve with are
+// offered - mirrors the pre-item-expansion behavior exactly.
+uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds,
+                             const bool preferOwnedNeeds, std::array<uint8_t, ITEM_COUNT>& candidateItemIds,
+                             std::array<uint32_t, ITEM_COUNT>& candidateWeights, size_t& candidateCount) {
+  candidateCount = 0;
+  uint32_t totalWeight = 0;
+  for (uint16_t itemId = 1; itemId <= ITEM_COUNT; ++itemId) {
+    if (preferOwnedNeeds) {
+      if (itemId > EVOLUTION_ITEM_COUNT) break;  // stones are ids 1..EVOLUTION_ITEM_COUNT, tried first in order
+      if ((ownedEvolutionNeeds.mask & static_cast<uint8_t>(1U << (itemId - 1U))) == 0) continue;
+    }
+    if (itemCountIsFull(state, static_cast<uint8_t>(itemId))) continue;
+    const ItemData* item = itemData(static_cast<uint8_t>(itemId));
+    if (item == nullptr || item->dropWeight == 0) continue;
+    candidateItemIds[candidateCount] = static_cast<uint8_t>(itemId);
+    candidateWeights[candidateCount] = item->dropWeight;
+    totalWeight += item->dropWeight;
+    ++candidateCount;
+  }
+  return totalWeight;
+}
+
 bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds, const RandomSource& random,
                 bool& created) {
   created = false;
-  std::array<uint8_t, EVOLUTION_ITEM_COUNT> candidates{};
+  std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
+  std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
-  for (uint8_t index = 0; index < EVOLUTION_ITEM_COUNT; ++index) {
-    if (state.itemCounts[index] != UINT16_MAX && (ownedEvolutionNeeds.mask & static_cast<uint8_t>(1U << index)) != 0) {
-      candidates[candidateCount++] = index;
-    }
-  }
+  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, candidateItemIds, candidateWeights,
+                                             candidateCount);
   if (candidateCount == 0) {
-    for (uint8_t index = 0; index < EVOLUTION_ITEM_COUNT; ++index) {
-      if (state.itemCounts[index] != UINT16_MAX) candidates[candidateCount++] = index;
+    totalWeight =
+        buildItemCandidates(state, ownedEvolutionNeeds, false, candidateItemIds, candidateWeights, candidateCount);
+  }
+  if (candidateCount == 0 || totalWeight == 0) return true;
+
+  uint8_t selectedItemId = candidateItemIds[0];
+  if (candidateCount > 1) {
+    // Skip the roll entirely when there is only one possible outcome - both
+    // an efficiency win and what keeps this call-for-call compatible with
+    // the pre-item-expansion behavior (which only rolled when there was an
+    // actual choice to make), preserving determinism for anything that
+    // scripts an exact RandomSource call sequence.
+    uint32_t roll = 0;
+    if (!randomBelow(random, totalWeight, roll)) return false;
+    selectedItemId = candidateItemIds[candidateCount - 1U];
+    for (size_t index = 0; index < candidateCount; ++index) {
+      if (roll < candidateWeights[index]) {
+        selectedItemId = candidateItemIds[index];
+        break;
+      }
+      roll -= candidateWeights[index];
     }
   }
-  if (candidateCount == 0) return true;
 
-  uint32_t selectedIndex = 0;
-  if (candidateCount > 1 && !randomBelow(random, static_cast<uint32_t>(candidateCount), selectedIndex)) return false;
-  const uint8_t itemIndex = candidates[selectedIndex];
-  ++state.itemCounts[itemIndex];
+  incrementItemCount(state, selectedItemId);
   const PendingEvent event{
-      0, 0, 0, Gender::Unknown, static_cast<EvolutionItem>(itemIndex + 1U), PendingEventKind::Item};
+      0, 0, 0, Gender::Unknown, static_cast<EvolutionItem>(selectedItemId), PendingEventKind::Item};
   if (!enqueuePendingEvent(state, event)) return false;
   refreshDashboardNotice(state);
   created = true;

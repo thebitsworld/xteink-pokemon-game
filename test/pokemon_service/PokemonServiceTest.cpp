@@ -60,8 +60,9 @@ void appendOwnedPokemon(pokemon::PokemonStore& store, const pokemon::PokemonReco
 TEST(PokemonService, VerifiedCheckpointDurablyCreditsStateAndLeader) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   ASSERT_TRUE(service.beginReadingSession());
   service.setBookProgressPercent(64);
@@ -81,8 +82,9 @@ TEST(PokemonService, VerifiedCheckpointDurablyCreditsStateAndLeader) {
 TEST(PokemonService, FailedSnapshotWriteAdvancesNeitherStateNorLeader) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
   ASSERT_TRUE(service.beginReadingSession());
 
   Storage.setFailWritableOpen(true);
@@ -102,8 +104,9 @@ TEST(PokemonService, FailedSnapshotWriteAdvancesNeitherStateNorLeader) {
 TEST(PokemonService, FailedSyncRetryCannotDoubleCreditOnTheNextReaderSession) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
   ASSERT_TRUE(service.beginReadingSession());
   service.setBookProgressPercent(64);
   service.onSuccessfulPageTurn(0);
@@ -124,9 +127,10 @@ TEST(PokemonService, FailedSyncRetryCannotDoubleCreditOnTheNextReaderSession) {
 TEST(PokemonService, ReadingSessionDoesNotStartBeforeStarterExists) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   ASSERT_EQ(store.begin(), pokemon::StoreBeginResult::Empty);
   ASSERT_TRUE(store.commit({}));
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_FALSE(service.beginReadingSession());
 }
@@ -134,7 +138,8 @@ TEST(PokemonService, ReadingSessionDoesNotStartBeforeStarterExists) {
 TEST(PokemonService, CreatesOneDurableStarterWithChosenIdentity) {
   Storage.clear();
   pokemon::PokemonStore store;
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.createStarter(25, pokemon::Gender::Female, "CinderVolt"), pokemon::ServiceStatus::Ok);
 
@@ -161,7 +166,8 @@ TEST(PokemonService, CreatesOneDurableStarterWithChosenIdentity) {
 TEST(PokemonService, RejectsSecondStarterWithoutChangingTheSave) {
   Storage.clear();
   pokemon::PokemonStore store;
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
   ASSERT_EQ(service.createStarter(1, pokemon::Gender::Male, ""), pokemon::ServiceStatus::Ok);
 
   EXPECT_EQ(service.createStarter(4, pokemon::Gender::Female, ""), pokemon::ServiceStatus::AlreadyStarted);
@@ -176,8 +182,9 @@ TEST(PokemonService, RejectsSecondStarterWithoutChangingTheSave) {
 TEST(PokemonService, RenamesDurablyAndLeavesTheOldNameWhenSavingFails) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.renamePokemon(1, "Sparky"), pokemon::ServiceStatus::Ok);
   pokemon::PokemonRecord renamed{};
@@ -197,8 +204,9 @@ TEST(PokemonService, RenamesDurablyAndLeavesTheOldNameWhenSavingFails) {
 TEST(PokemonService, RejectsMovingOnlyMemberIntoAnEmptySlotWithoutWriting) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.movePartyMember(0, 5), pokemon::ServiceStatus::Invalid);
 
@@ -214,10 +222,11 @@ TEST(PokemonService, RejectsMovingOnlyMemberIntoAnEmptySlotWithoutWriting) {
 TEST(PokemonService, ReordersOnlyOccupiedPartySlotsAndChangesTheLeader) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 4), true);
   appendOwnedPokemon(store, caughtPokemon(3, 7), true);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.movePartyMember(2, 0), pokemon::ServiceStatus::Ok);
 
@@ -233,8 +242,9 @@ TEST(PokemonService, ReordersOnlyOccupiedPartySlotsAndChangesTheLeader) {
 TEST(PokemonService, ProtectsTheLastPartyMemberAndSupportsDepositWithdraw) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
   EXPECT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::LastPokemon);
 
   appendOwnedPokemon(store, caughtPokemon(2, 4), true);
@@ -253,11 +263,12 @@ TEST(PokemonService, ProtectsTheLastPartyMemberAndSupportsDepositWithdraw) {
 TEST(PokemonService, RejectsWithdrawalWhenThePartyIsFull) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   for (uint32_t id = 2; id <= 7; ++id) {
     appendOwnedPokemon(store, caughtPokemon(id, static_cast<uint16_t>(id + 3)), id <= 6);
   }
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.withdrawPokemon(7), pokemon::ServiceStatus::PartyFull);
 
@@ -269,6 +280,7 @@ TEST(PokemonService, RejectsWithdrawalWhenThePartyIsFull) {
 TEST(PokemonService, ResolvesEncounterCatchThenAllowsNickname) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
@@ -278,7 +290,7 @@ TEST(PokemonService, ResolvesEncounterCatchThenAllowsNickname) {
   state.pendingEvents[0].gender = pokemon::Gender::Female;
   state.dashboardNotice = pokemon::DashboardNotice::NewPokemon;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   uint32_t caughtRecordId = 0;
   ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId), pokemon::ServiceStatus::Ok);
@@ -297,6 +309,7 @@ TEST(PokemonService, ResolvesEncounterCatchThenAllowsNickname) {
 TEST(PokemonService, ResolvesEncounterPassWithoutCreatingARecord) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
@@ -306,7 +319,7 @@ TEST(PokemonService, ResolvesEncounterPassWithoutCreatingARecord) {
   state.pendingEvents[0].gender = pokemon::Gender::Male;
   state.dashboardNotice = pokemon::DashboardNotice::NewPokemon;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   uint32_t caughtRecordId = 99;
   ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Pass, caughtRecordId), pokemon::ServiceStatus::Ok);
@@ -320,6 +333,7 @@ TEST(PokemonService, ResolvesEncounterPassWithoutCreatingARecord) {
 TEST(PokemonService, AcknowledgesItemAndPublishesBoundedDashboardSnapshot) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
@@ -332,7 +346,7 @@ TEST(PokemonService, AcknowledgesItemAndPublishesBoundedDashboardSnapshot) {
   state.itemCounts[2] = 1;
   state.dashboardNotice = pokemon::DashboardNotice::ItemFound;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   pokemon::PokemonDashboardSnapshot dashboard{};
   ASSERT_EQ(service.loadDashboardSnapshot(dashboard), pokemon::ServiceStatus::Ok);
@@ -355,6 +369,7 @@ TEST(PokemonService, AcknowledgesItemAndPublishesBoundedDashboardSnapshot) {
 TEST(PokemonService, EvolvesByLevelAndCanDisableFuturePrompts) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   ASSERT_EQ(store.begin(), pokemon::StoreBeginResult::Empty);
   pokemon::PokemonRecord bulbasaur = caughtPokemon(1, 1);
   bulbasaur.origin = pokemon::Origin::Starter;
@@ -368,7 +383,7 @@ TEST(PokemonService, EvolvesByLevelAndCanDisableFuturePrompts) {
   ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 1));
   ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 1));
   ASSERT_TRUE(store.commit(state, {1, bulbasaur, pokemon::RecordMutationKind::Append}));
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.resolveEvolution(pokemon::EvolutionChoice::Evolve), pokemon::ServiceStatus::Ok);
   pokemon::PokemonRecord evolved{};
@@ -382,12 +397,13 @@ TEST(PokemonService, EvolvesByLevelAndCanDisableFuturePrompts) {
 TEST(PokemonService, ConsumesStoneOnlyForApplicableEvolution) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
   state.itemCounts[2] = 1;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.useEvolutionItem(1, pokemon::EvolutionItem::WaterStone), pokemon::ServiceStatus::NotApplicable);
   ASSERT_EQ(service.useEvolutionItem(1, pokemon::EvolutionItem::ThunderStone), pokemon::ServiceStatus::Ok);
@@ -401,10 +417,11 @@ TEST(PokemonService, ConsumesStoneOnlyForApplicableEvolution) {
 TEST(PokemonService, ReadsBoundedPcPagesAndResetsToEmpty) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 7), false);
   appendOwnedPokemon(store, caughtPokemon(3, 4), false);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   std::array<pokemon::PokemonRecord, 6> page{};
   size_t count = 0;
@@ -426,8 +443,9 @@ TEST(PokemonService, ReadsBoundedPcPagesAndResetsToEmpty) {
 TEST(PokemonService, PcReadFailureReturnsStorageErrorInsteadOfAnEmptyPage) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, zeroRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
   std::array<pokemon::PokemonRecord, 6> page{};
   size_t count = 99;
 
@@ -437,11 +455,142 @@ TEST(PokemonService, PcReadFailureReturnsStorageErrorInsteadOfAnEmptyPage) {
   EXPECT_EQ(count, 0U);
 }
 
+TEST(PokemonService, LoadBattleEntrySynthesizesFromTheLearnsetWhenNoneExists) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu (species 25), level 5
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(entry.recordId, 1U);
+  EXPECT_EQ(entry.currentHp, 18U);  // battleMaxHp(baseHp=35, level=5)
+  EXPECT_EQ(entry.moves[0], 84U);   // Thunder Shock: most recently learned move at or below level 5
+  EXPECT_EQ(entry.moves[1], 45U);   // Growl: the other level-1 move
+  EXPECT_EQ(entry.moves[2], 0U);
+  EXPECT_EQ(entry.pp[0], 30U);
+  EXPECT_EQ(entry.pp[1], 40U);
+  EXPECT_EQ(entry.status, pokemon::Ailment::None);
+
+  // The synthesized entry is persisted, not just returned.
+  const pokemon::BattleRecordEntry* persisted = battleStore.findEntry(1);
+  ASSERT_NE(persisted, nullptr);
+  EXPECT_EQ(*persisted, entry);
+}
+
+TEST(PokemonService, SaveBattleEntryPersistsAndAFollowingLoadReturnsTheSavedVersionNotAFreshSynthesis) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.currentHp = 5;
+  entry.status = pokemon::Ailment::Poison;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  pokemon::BattleRecordEntry reloaded{};
+  ASSERT_EQ(service.loadBattleEntry(1, reloaded), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(reloaded.currentHp, 5U);
+  EXPECT_EQ(reloaded.status, pokemon::Ailment::Poison);
+}
+
+TEST(PokemonService, ConsumeBagItemDecrementsStonesAndNonStoneItemsInTheirOwnArrays) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.consumeBagItem(1), pokemon::ServiceStatus::NotApplicable);  // Moon Stone count is 0
+  EXPECT_EQ(service.consumeBagItem(7), pokemon::ServiceStatus::NotApplicable);  // Poke Ball count is 0
+  EXPECT_EQ(service.consumeBagItem(0), pokemon::ServiceStatus::Invalid);
+  EXPECT_EQ(service.consumeBagItem(pokemon::POKEMON_ITEM_ID_MAX + 1), pokemon::ServiceStatus::Invalid);
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.itemCounts[0] = 3;  // Moon Stone
+  state.bagCounts[0] = 2;   // Poke Ball (item id 7)
+  ASSERT_TRUE(store.commit(state));
+
+  ASSERT_EQ(service.consumeBagItem(1), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.consumeBagItem(7), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.itemCounts[0], 2U);
+  EXPECT_EQ(state.bagCounts[0], 1U);
+}
+
+TEST(PokemonService, MarkGymDefeatedEnforcesLinearUnlockAndIsIdempotent) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.markGymDefeated(2), pokemon::ServiceStatus::NotApplicable);  // gym 1 not yet defeated
+  EXPECT_EQ(service.markGymDefeated(9), pokemon::ServiceStatus::NotApplicable);  // no gyms defeated yet
+  EXPECT_EQ(service.markGymDefeated(0), pokemon::ServiceStatus::Invalid);
+  EXPECT_EQ(service.markGymDefeated(13), pokemon::ServiceStatus::Invalid);
+
+  for (uint8_t gym = 1; gym <= 8; ++gym) {
+    ASSERT_EQ(service.markGymDefeated(gym), pokemon::ServiceStatus::Ok);
+  }
+  EXPECT_EQ(service.markGymDefeated(1), pokemon::ServiceStatus::Ok);  // re-marking an already-defeated gym is a no-op
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.battleProgress, 0x00FFU);
+
+  ASSERT_EQ(service.markGymDefeated(9), pokemon::ServiceStatus::Ok);  // all 8 gyms down, Elite Four #1 unlocks
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.battleProgress, 0x01FFU);
+}
+
+TEST(PokemonService, ReadingCreditHealsAnExistingBattleEntryAndClearsStatusOnceFull) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(entry.currentHp, 18U);
+  entry.currentHp = 10;
+  entry.status = pokemon::Ailment::Poison;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_TRUE(service.creditMinutes(10, 10));  // +1 HP/minute heals 10->20, capped at maxHp 18
+
+  const pokemon::BattleRecordEntry* healed = battleStore.findEntry(1);
+  ASSERT_NE(healed, nullptr);
+  EXPECT_EQ(healed->currentHp, 18U);
+  EXPECT_EQ(healed->status, pokemon::Ailment::None);
+}
+
+TEST(PokemonService, ReadingCreditLeavesAPartyMemberWithNoBattleEntryAlone) {
+  // A Pokemon that has never fought has no battle-store entry yet; crediting
+  // reading minutes must not create or touch one on its behalf - it will be
+  // synthesized fresh (full HP/PP) whenever it is first needed instead.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  ASSERT_TRUE(service.creditMinutes(5, 10));
+  EXPECT_EQ(battleStore.findEntry(1), nullptr);
+}
+
 TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   Storage.clear();
   pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, {nullptr, itemEventRandom});
+  pokemon::PokemonService service(store, battleStore, {nullptr, itemEventRandom});
   ASSERT_TRUE(service.beginReadingSession());
 
   ASSERT_TRUE(service.creditMinutes(60, 64));

@@ -105,8 +105,13 @@ bool validatePendingEvent(const PendingEvent& event) {
              event.level >= 1 && event.level <= 100 && genderMatchesSpecies(event.speciesId, event.gender) &&
              event.item == EvolutionItem::None;
     case PendingEventKind::Item:
+      // `item` doubles as a general 1..POKEMON_ITEM_ID_MAX item id here (not
+      // just an EvolutionItem 1-6): PokemonGame.cpp's createItem() can now
+      // drop any of the 83 items, not only the original 6 evolution stones.
+      // Ids 1-6 are pinned to match EvolutionItem exactly, so a save
+      // written before this change keeps decoding correctly.
       return event.recordId == 0 && event.speciesId == 0 && event.level == 0 && event.gender == Gender::Unknown &&
-             event.item >= EvolutionItem::MoonStone && event.item <= EvolutionItem::LinkCable;
+             static_cast<uint8_t>(event.item) >= 1 && static_cast<uint8_t>(event.item) <= POKEMON_ITEM_ID_MAX;
     case PendingEventKind::Evolution:
       return event.recordId != 0 && event.speciesId >= 1 && event.speciesId <= KANTO_SPECIES_COUNT &&
              event.level == 0 && event.gender == Gender::Unknown && event.item == EvolutionItem::None;

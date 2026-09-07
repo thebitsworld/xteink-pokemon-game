@@ -3,6 +3,8 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(POKEMON_SPECIES_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(POKEMON_SPECIES_GENERATED_HEADER
     "${POKEMON_SPECIES_GENERATED_DIR}/PokemonSpecies.generated.h")
+set(POKEMON_ITEMS_GENERATED_HEADER
+    "${POKEMON_SPECIES_GENERATED_DIR}/PokemonItems.generated.h")
 
 add_custom_command(
   OUTPUT "${POKEMON_SPECIES_GENERATED_HEADER}"
@@ -17,11 +19,26 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT "${POKEMON_ITEMS_GENERATED_HEADER}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${POKEMON_SPECIES_GENERATED_DIR}"
+  COMMAND ${Python3_EXECUTABLE}
+          "${REPO_ROOT}/scripts/generate_pokemon_items.py"
+          --input "${REPO_ROOT}/scripts/data/pokemon-items.csv"
+          --output "${POKEMON_ITEMS_GENERATED_HEADER}"
+  DEPENDS
+    "${REPO_ROOT}/scripts/generate_pokemon_items.py"
+    "${REPO_ROOT}/scripts/data/pokemon-items.csv"
+  VERBATIM
+)
+
 add_executable(PokemonGameTest
   PokemonGameTest.cpp
   "${POKEMON_SPECIES_GENERATED_HEADER}"
+  "${POKEMON_ITEMS_GENERATED_HEADER}"
   ${REPO_ROOT}/lib/Pokemon/PokemonTypes.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonSpecies.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonItemData.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonGame.cpp
 )
 

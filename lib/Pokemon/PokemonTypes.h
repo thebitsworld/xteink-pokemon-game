@@ -24,6 +24,7 @@ constexpr size_t PENDING_EVENT_CAPACITY = 3;
 // static_assert cross-checking these stay in sync with their source of truth.
 constexpr uint16_t POKEMON_MOVE_ID_MAX = 165;
 constexpr size_t POKEMON_BAG_SLOT_COUNT = 77;  // ITEM_COUNT(83) - the 6 evolution stones tracked in itemCounts
+constexpr uint8_t POKEMON_ITEM_ID_MAX = 83;    // = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT
 constexpr uint16_t POKEMON_GYM_PROGRESS_BITS = 12;  // 8 gyms + 4 Elite Four
 constexpr uint16_t POKEMON_GYM_PROGRESS_MASK = static_cast<uint16_t>((1U << POKEMON_GYM_PROGRESS_BITS) - 1U);
 

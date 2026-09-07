@@ -5,6 +5,8 @@
 #include <Logging.h>
 #include <PokemonSpecies.h>
 
+#include <algorithm>
+
 #if !defined(POKEMON_SERVICE_HOST_TEST)
 #include <Arduino.h>
 #endif
@@ -298,6 +300,149 @@ ServiceStatus PokemonService::useEvolutionItem(const uint32_t recordId, const Ev
   return ServiceStatus::Ok;
 }
 
+ServiceStatus PokemonService::consumeBagItem(const uint8_t itemId) {
+  if (itemId == 0 || itemId > POKEMON_ITEM_ID_MAX) return ServiceStatus::Invalid;
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+
+  if (itemId <= EVOLUTION_ITEM_COUNT) {
+    const size_t index = itemId - 1U;
+    if (state.itemCounts[index] == 0) return ServiceStatus::NotApplicable;
+    --state.itemCounts[index];
+  } else {
+    const size_t index = itemId - EVOLUTION_ITEM_COUNT - 1U;
+    if (state.bagCounts[index] == 0) return ServiceStatus::NotApplicable;
+    --state.bagCounts[index];
+  }
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to consume bag item");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::markGymDefeated(const uint8_t gymIndex) {
+  if (gymIndex == 0 || gymIndex > POKEMON_GYM_PROGRESS_BITS) return ServiceStatus::Invalid;
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+
+  const uint16_t bit = static_cast<uint16_t>(1U << (gymIndex - 1U));
+  if ((state.battleProgress & bit) != 0) return ServiceStatus::Ok;  // idempotent: already recorded
+
+  if (gymIndex <= 8U) {
+    const uint16_t requiredMask = static_cast<uint16_t>(bit - 1U);  // every earlier gym bit
+    if ((state.battleProgress & requiredMask) != requiredMask) return ServiceStatus::NotApplicable;
+  } else {
+    constexpr uint16_t ALL_GYMS_MASK = 0x00FFU;  // bits 0-7: all 8 gyms
+    if ((state.battleProgress & ALL_GYMS_MASK) != ALL_GYMS_MASK) return ServiceStatus::NotApplicable;
+  }
+
+  state.battleProgress = static_cast<uint16_t>(state.battleProgress | bit);
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to record gym victory");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+BattleRecordEntry PokemonService::synthesizeBattleEntry(const PokemonRecord& record) const {
+  BattleRecordEntry entry{};
+  entry.recordId = record.recordId;
+  const uint8_t level = levelForXp(record.totalXp);
+  const BaseStats* stats = baseStatsFor(record.speciesId);
+  entry.currentHp = stats == nullptr ? 1 : battleMaxHp(stats->hp, level);
+
+  // Pick up to BATTLE_MOVE_SLOTS moves: the learnset is stored ascending by
+  // level, so walking it backwards yields the most-recently-learned moves
+  // at or below the current level first, matching how the real games pick
+  // a newly-caught/leveled Pokemon's active moveset.
+  const std::span<const LearnsetEntry> learnset = learnsetFor(record.speciesId);
+  size_t filled = 0;
+  for (size_t index = learnset.size(); index-- > 0 && filled < BATTLE_MOVE_SLOTS;) {
+    if (learnset[index].level > level) continue;
+    entry.moves[filled] = learnset[index].moveId;
+    const MoveData* move = moveData(learnset[index].moveId);
+    entry.pp[filled] = move == nullptr ? 0 : move->pp;
+    ++filled;
+  }
+  entry.status = Ailment::None;
+  entry.statusTurns = 0;
+  return entry;
+}
+
+ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRecordEntry& output) {
+  PokemonRecord record{};
+  const ServiceStatus readStatus = readRecord(recordId, record);
+  if (readStatus != ServiceStatus::Ok) return readStatus;
+
+  if (const BattleRecordEntry* existing = battleStore_.findEntry(recordId); existing != nullptr) {
+    output = *existing;
+    return ServiceStatus::Ok;
+  }
+
+  const BattleRecordEntry synthesized = synthesizeBattleEntry(record);
+  if (!battleStore_.upsertEntry(synthesized)) {
+    LOG_ERR("PokemonService", "Failed to persist synthesized battle entry");
+    return ServiceStatus::StorageError;
+  }
+  output = synthesized;
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
+  if (!battleStore_.upsertEntry(entry)) {
+    LOG_ERR("PokemonService", "Failed to save battle entry");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t minutes) {
+  constexpr uint16_t HP_HEAL_PER_MINUTE = 1;
+  constexpr uint16_t MINUTES_PER_PP_TICK = 10;
+
+  for (const uint32_t recordId : state.partyRecordIds) {
+    if (recordId == 0) continue;
+    const BattleRecordEntry* existing = battleStore_.findEntry(recordId);
+    // Nothing to heal if it was never fought - it will synthesize at full
+    // HP/PP the first time it is needed anyway.
+    if (existing == nullptr) continue;
+
+    PokemonRecord record{};
+    if (!store_.readRecord(recordId, record)) continue;
+    const BaseStats* stats = baseStatsFor(record.speciesId);
+    if (stats == nullptr) continue;
+    const uint16_t maxHp = battleMaxHp(stats->hp, levelForXp(record.totalXp));
+
+    BattleRecordEntry healed = *existing;
+    const uint32_t healedHp = static_cast<uint32_t>(healed.currentHp) + static_cast<uint32_t>(HP_HEAL_PER_MINUTE) * minutes;
+    healed.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healedHp));
+
+    const uint16_t ppTicks = static_cast<uint16_t>(minutes / MINUTES_PER_PP_TICK);
+    if (ppTicks > 0) {
+      for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+        if (healed.moves[slot] == 0) continue;
+        const MoveData* move = moveData(healed.moves[slot]);
+        const uint8_t maxPp = move == nullptr ? 0 : move->pp;
+        const uint32_t healedPp = static_cast<uint32_t>(healed.pp[slot]) + ppTicks;
+        healed.pp[slot] = static_cast<uint8_t>(std::min<uint32_t>(maxPp, healedPp));
+      }
+    }
+
+    if (healed.currentHp >= maxHp && healed.status != Ailment::None) {
+      healed.status = Ailment::None;
+      healed.statusTurns = 0;
+    }
+
+    if (healed == *existing) continue;  // avoid a pointless SD write when there was nothing to heal
+    // Best-effort: a battle-store write failure here should not fail the
+    // reading-credit commit that already succeeded.
+    battleStore_.upsertEntry(healed);
+  }
+}
+
 ServiceStatus PokemonService::reset() {
   readingSessionActive_ = false;
   if (!store_.reset()) {
@@ -381,13 +526,15 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
     LOG_ERR("PokemonService", "Failed to commit credited reading");
     return false;
   }
+  healPartyOnRead(state, minutes);
   return true;
 }
 
 #if !defined(POKEMON_SERVICE_HOST_TEST)
 PokemonService& devicePokemonService() {
   static PokemonStore store;
-  static PokemonService service(store, {nullptr, deviceRandomBelow});
+  static PokemonBattleStore battleStore;
+  static PokemonService service(store, battleStore, {nullptr, deviceRandomBelow});
   return service;
 }
 #endif
