@@ -97,6 +97,10 @@ struct GymData {
   uint8_t teamCount;
 };
 
+// Combined type-effectiveness multiplier as a percent (0/25/50/100/200/400),
+// folding in the defender's second type when present. 100 = neutral.
+uint16_t typeEffectivenessPercent(PokemonType attackerType, PokemonType defenderPrimary, PokemonType defenderSecondary);
+
 const MoveData* moveData(uint8_t moveId);
 const BaseStats* baseStatsFor(uint16_t speciesId);
 std::span<const LearnsetEntry> learnsetFor(uint16_t speciesId);
