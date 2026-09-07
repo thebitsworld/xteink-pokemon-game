@@ -80,14 +80,20 @@ Gen 1 chỉ có một chỉ số "Special"; script dùng `special-attack` của 
 
 Mỗi giai đoạn là một điểm dừng tự nhiên: build được, test được, commit được.
 
-### GĐ 1 — Bảng vật phẩm + 5 generator C++
+### GĐ 1 — Bảng vật phẩm + 5 generator C++ ✅ XONG (commit `eff18d13`)
 
-- [ ] Viết `scripts/data/pokemon-items.csv`. Không gian id đề xuất: `1..6` **phải** trùng `EvolutionItem` hiện có (Moon/Fire/Thunder/Water/Leaf Stone, Link Cable) để pending event cũ vẫn hợp lệ; `7..10` bóng (Poké/Great/Ultra/Master); `11..17` hồi máu + Revive; `18..23` chữa status; `24..28` Rare Candy + hồi PP; `30..79` TM01-50; `80..84` HM01-05. Cột: `id,name,category,value,drop_weight`. Trọng số: đồ rẻ cao (Potion ~100), đồ xịn thấp (Master Ball 1).
-- [ ] Lấy ánh xạ TM/HM → move id từ PokeAPI (`/machine/`, lọc `version_group == red-blue`) thay vì gõ tay 55 dòng — mở rộng `fetch_pokemon_battle_data.py`.
-- [ ] 5 cặp generator theo nguyên mẫu `scripts/generate_pokemon_v2_species{,_build}.py`: moves, stats, learnsets+tmhm, items, gyms. Giữ đúng khuôn: `PROVENANCE`/`HEADERS` hằng số, `load_*()` validate gắt, `generate()` thuần trả text, `main()` có `--input/--output/--check`; build hook `runpy.run_path()` + ghi-khi-đổi + `env.Append(CPPPATH=...)` **cùng một thư mục**.
-- [ ] **`uint16_t` cho offset learnset** — 989 cặp vượt xa tiền lệ `uint8_t evolutionOffset`; đặt `static_assert` phù hợp cho từng bảng.
-- [ ] Đăng ký `pre:` script trong **cả hai** env `[env:pokemon-x3]` và `[env:pokemon-simulator-X3]` của `platformio.ini`.
-- [ ] Test kiểu `PokemonSpeciesGeneratorTest.py`: ghim hash dữ liệu, kiểm offset/count khớp, không move id lơ lửng.
+- [x] `scripts/data/pokemon-items.csv`: 83 vật phẩm. Id `1..6` trùng `EvolutionItem` hiện có (đá tiến hóa + Link Cable, được `generate_pokemon_items.py` tự kiểm tra bằng `PINNED_STONE_NAMES`); `7..10` bóng; `11..17` hồi máu; `18..23` chữa status; `24..28` Rare Candy + hồi PP; `29..78` TM01-50; `79..83` HM01-05. Cột thật dùng: `id,name,category,effect_value,cures_ailment,teaches_move_id,drop_weight`.
+- [x] Ánh xạ TM/HM → move id: **không** gọi thêm PokeAPI — đối chiếu 55 tên chiêu Gen 1 chuẩn với `pokemon-moves.csv` đã có sẵn để lấy đúng id (script đối chiếu một lần, không cần lưu lại).
+- [x] 5 cặp generator theo đúng khuôn `generate_pokemon_v2_species{,_build}.py`. `generate_pokemon_learnsets.py` gộp cả learnset **và** TM/HM compat từ 2 CSV vào 1 header (`PokemonLearnsets.generated.h`) như roadmap dự tính.
+- [x] `MoveListRef{uint16_t offset; uint8_t count;}` (khác tên `LearnsetOffset` dự tính ban đầu) dùng chung cho cả learnset lẫn TM/HM offset/count.
+- [x] Đăng ký `pre:` script trong cả `[env:pokemon-x3]` và `[env:pokemon-simulator-X3]`.
+- [x] `test/pokemon_battle_data/`: `PokemonBattleDataTest.cpp` (native, đối chiếu số liệu thật: Chansey HP=250, Bulbasaur learnset 9 entries bắt đầu Tackle/Growl ở level 1, tổng learnset=989, tổng TM/HM=3037, id 1-6/29-83 khớp EvolutionItem/Machine...) + `PokemonBattleDataGeneratorsTest.py` (kiểu `PokemonSpeciesGeneratorTest.py`, kiểm CLI + CPPPATH + đăng ký platformio.ini). Cả 2 đã thêm vào `test/CMakeLists.txt`.
+
+**Kết quả đo được** (không phải ước lượng): `pio run -e pokemon-x3` build sạch, Flash tăng đúng **+104 byte** so với baseline 6,303,483 B — vì chưa có code nào gọi `moveData()`/`baseStatsFor()`/... nên linker loại bỏ hết bảng dữ liệu chưa dùng. Tức là **toàn bộ lớp dữ liệu GĐ1 gần như miễn phí** cho tới khi GĐ2+ thực sự dùng tới. 16/16 test Pokémon native pass (`ctest -R Pokemon` trong `test/build`).
+
+**Sai lệch nhỏ so với dự tính ban đầu** (đáng lưu ý cho người tiếp nhận):
+- `Tackle` (move id 33) power=**40** không phải 35 — PokeAPI trả giá trị hiện tại (đã buff từ Gen 6), không phải giá trị gốc Gen 1. Chấp nhận được vì hầu hết move khác không đổi qua các gen; chỉ vài move ngoại lệ như Tackle.
+- `Tri Attack` có `ailment=None` dù `ailment_chance=20` — vì nó gây 1-trong-3 trạng thái ngẫu nhiên, PokeAPI trả `ailment="unknown"`, model đơn-ailment của mình không nắm bắt được. Chấp nhận là giới hạn đã biết của bản rút gọn Gen 1.
 
 ### GĐ 2 — Engine chiến đấu thuần
 

@@ -41,7 +41,10 @@ Ghi chú ngữ cảnh cho Claude ở phiên làm việc sau (hoặc trên máy k
 
 Phạm vi: học chiêu theo level (dữ liệu Red thật), vật phẩm + TM/HM rơi khi đọc sách, chiến đấu turn-based đầy đủ status effect, bắt Pokémon bằng 4 loại bóng, 8 gym + Elite Four theo thứ tự, màn hình huy hiệu.
 
-**Tiến độ**: GĐ 0 (dữ liệu nguồn) đã xong — đã fetch dữ liệu Gen 1 thật từ PokeAPI vào `scripts/data/pokemon-{stats,moves,learnsets,tmhm}.csv` (151 loài / 165 chiêu / 989 learnset / 3037 dòng TM-HM) cộng `pokemon-gyms.csv` viết tay. Còn GĐ 1-8 (generator → engine → lưu trữ → service → UI → hoàn thiện).
+**Tiến độ**: GĐ 0 và GĐ 1 đã xong (commit `b4d21f31`, `eff18d13` trên `feat/pokemon-battle-system`, đã push). Còn GĐ 2-8 (engine chiến đấu thuần → lưu trữ → service → UI → hoàn thiện) — **đọc mục "GĐ 2" trong roadmap và bắt đầu từ đó**.
+
+- GĐ 0: dữ liệu nguồn — `scripts/data/pokemon-{stats,moves,learnsets,tmhm}.csv` từ PokeAPI (151/165/989/3037 dòng) + `pokemon-gyms.csv` viết tay (8 gym + 4 Elite Four).
+- GĐ 1: 5 generator C++ (`scripts/generate_pokemon_{moves,stats,learnsets,items,gyms}{,_build}.py`) sinh header vào `$BUILD_DIR/generated/pokemon`, cộng struct thủ công `lib/Pokemon/PokemonBattleTypes.h` + 5 file accessor `.cpp`. Build thật đo được: **Flash chỉ tăng +104 byte** (6,303,483 → 6,303,587) vì chưa có code nào gọi tới các hàm tra cứu — dữ liệu bị linker loại bỏ hết cho tới khi dùng thật. 16/16 native test Pokémon pass (`cd test && ctest -R Pokemon`, cần cmake của PlatformIO: `export PATH="$HOME/.platformio/packages/tool-cmake/bin:$PATH"` vì máy không cài cmake hệ thống).
 
 **Bốn ràng buộc dễ gây hỏng nhất** (chi tiết trong roadmap):
 1. Flash chỉ còn ~230KB — build đo lại sau mỗi giai đoạn.
@@ -61,3 +64,17 @@ pio run -e simulator      # build cho simulator (test nhanh, không cần thiế
 ```
 
 Số liệu Flash/RAM thực xuất hiện ở cuối log build (`RAM:`, `Flash:` percentages) và trong output của `check_firmware_size.py`.
+
+### Chạy native test suite (nhanh hơn build firmware nhiều, không cần thiết bị)
+
+Máy này **không có `cmake` hệ thống**, nhưng PlatformIO có bundle sẵn:
+
+```sh
+export PATH="$HOME/.platformio/penv/bin:$HOME/.platformio/packages/tool-cmake/bin:$PATH"
+cd /home/vutq/project/xteink-pokemon-game/test
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # lần đầu sẽ fetch googletest, hơi lâu
+cmake --build build -j4                          # build toàn bộ target (hoặc --target <Tên> cho 1 cái)
+cd build && ctest -R "Pokemon" --output-on-failure
+```
+
+`test/build/` đã có trong `.gitignore` (`build` — dòng 11).
