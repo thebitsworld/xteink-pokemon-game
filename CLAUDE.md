@@ -41,10 +41,12 @@ Ghi chú ngữ cảnh cho Claude ở phiên làm việc sau (hoặc trên máy k
 
 Phạm vi: học chiêu theo level (dữ liệu Red thật), vật phẩm + TM/HM rơi khi đọc sách, chiến đấu turn-based đầy đủ status effect, bắt Pokémon bằng 4 loại bóng, 8 gym + Elite Four theo thứ tự, màn hình huy hiệu.
 
-**Tiến độ**: GĐ 0 và GĐ 1 đã xong (commit `b4d21f31`, `eff18d13` trên `feat/pokemon-battle-system`, đã push). Còn GĐ 2-8 (engine chiến đấu thuần → lưu trữ → service → UI → hoàn thiện) — **đọc mục "GĐ 2" trong roadmap và bắt đầu từ đó**.
+**Tiến độ**: GĐ 0, 1, 2 đã xong local (commit `b4d21f31`, `eff18d13`, `f1ff1bd2` trên `feat/pokemon-battle-system`). **Push đang do người dùng tự làm thủ công** — máy này không có credential GitHub hoạt động (xem "Trạng thái git" bên dưới), đừng tự ý thử push nữa trừ khi được yêu cầu lại. Còn GĐ 3-8 (lưu trữ → service → UI → hoàn thiện) — **đọc mục "GĐ 3" trong roadmap và bắt đầu từ đó**.
 
 - GĐ 0: dữ liệu nguồn — `scripts/data/pokemon-{stats,moves,learnsets,tmhm}.csv` từ PokeAPI (151/165/989/3037 dòng) + `pokemon-gyms.csv` viết tay (8 gym + 4 Elite Four).
-- GĐ 1: 5 generator C++ (`scripts/generate_pokemon_{moves,stats,learnsets,items,gyms}{,_build}.py`) sinh header vào `$BUILD_DIR/generated/pokemon`, cộng struct thủ công `lib/Pokemon/PokemonBattleTypes.h` + 5 file accessor `.cpp`. Build thật đo được: **Flash chỉ tăng +104 byte** (6,303,483 → 6,303,587) vì chưa có code nào gọi tới các hàm tra cứu — dữ liệu bị linker loại bỏ hết cho tới khi dùng thật. 16/16 native test Pokémon pass (`cd test && ctest -R Pokemon`, cần cmake của PlatformIO: `export PATH="$HOME/.platformio/packages/tool-cmake/bin:$PATH"` vì máy không cài cmake hệ thống).
+- GĐ 1: 5 generator C++ (`scripts/generate_pokemon_{moves,stats,learnsets,items,gyms}{,_build}.py`) sinh header vào `$BUILD_DIR/generated/pokemon`, cộng struct thủ công `lib/Pokemon/PokemonBattleTypes.h` + 5 file accessor `.cpp`.
+- GĐ 2: `lib/Pokemon/PokemonBattle.h/.cpp` (engine thuần: damage, 6 status, catch) + `lib/Pokemon/PokemonTypeChart.cpp` (bảng khắc chế 18×18 viết tay, không qua generator). Sửa 1 bug dữ liệu thật khi nối dây: `ailment_chance=0` của PokeAPI cho chiêu Status nghĩa là "chắc chắn 100%", không phải "không bao giờ" — soát kỹ mục tương tự nếu làm tiếp GĐ sau.
+- **Cả 2 giai đoạn đều đo Flash = 6,303,587 B, y hệt nhau** — chưa có gì trong `pokemon-x3` thực sự gọi tới dữ liệu/engine mới nên linker loại bỏ hết. Số Flash sẽ bắt đầu tăng thật từ GĐ4 (service) trở đi. 17/17 native test Pokémon pass (`cd test && ctest -R Pokemon`, cần cmake của PlatformIO: `export PATH="$HOME/.platformio/packages/tool-cmake/bin:$PATH"` vì máy không cài cmake hệ thống).
 
 **Bốn ràng buộc dễ gây hỏng nhất** (chi tiết trong roadmap):
 1. Flash chỉ còn ~230KB — build đo lại sau mỗi giai đoạn.
