@@ -117,12 +117,19 @@ Mỗi giai đoạn là một điểm dừng tự nhiên: build được, test đ
 - [ ] `src/pokemon/PokemonBattleStore.h/.cpp`: file phụ 16 byte/entry (`recordId(4) + moves[4] + pp[4] + currentHp(2) + status(1) + statusTurns(1)`) + CRC32. Tạo lazy; CRC sai hoặc thiếu entry → **dựng lại từ learnset, HP/PP đầy**, không bao giờ chặn người chơi.
 - [ ] Test migration native theo mẫu `test/pokemon_store/PokemonStoreTest.cpp` (xem test `legacySnapshotMigratesToV2...` làm mẫu).
 
-### GĐ 4 — Service + rơi đồ  ⟵ mốc đo dung lượng đầu tiên
+### GĐ 4 — Service + rơi đồ ✅ XONG (commit `18a0eeca`) — mốc đo dung lượng đầu tiên có ý nghĩa
 
-- [ ] `PokemonService`: API túi đồ (thêm/bớt/đọc), đọc/ghi chiêu qua battle store, đọc/ghi tiến trình gym. Mẫu sẵn có: `renamePokemon()`/`setEvolutionPrompts()` cho Replace-một-record, `movePartyMember()` cho state-only.
-- [ ] Hồi phục khi đọc trong `PokemonService::creditMinutes()` — nơi duy nhất có sẵn cả lối gọi game lẫn quyền truy cập file phụ. `PokemonGame.cpp` **không** bị đụng ở đây.
-- [ ] Mở rộng `createItem()` trong `PokemonGame.cpp` từ 6 đá tiến hóa sang bảng ~80 vật phẩm có trọng số. Đây là thay đổi **duy nhất** chạm vào `PokemonGame.cpp`.
-- [ ] **`pio run -e pokemon-x3`** → so với baseline 6,303,483 B. Đủ data+engine+storage+service mà chưa có UI, nên biết được phần "nền" tốn bao nhiêu trước khi đầu tư viết UI.
+- [x] `PokemonService` thêm dependency `PokemonBattleStore&` (constructor giờ nhận 3 tham số: `store, battleStore, random` — đã cập nhật cả `devicePokemonService()` lẫn 19 call site trong `PokemonServiceTest.cpp` bằng sed).
+- [x] `consumeBagItem(itemId)` — trừ 1 ở `itemCounts` (đá, id 1-6) hoặc `bagCounts` (còn lại, id 7-83).
+- [x] `markGymDefeated(gymIndex)` — set bit `battleProgress`, ép mở khóa tuyến tính (gym N cần 1..N-1 đã hạ; Elite Four cần đủ 8 gym). Idempotent nếu gọi lại gym đã hạ. Không đụng XP/encounter/`PokemonGame.cpp`.
+- [x] `loadBattleEntry(recordId)` — trả entry có sẵn trong battle store, hoặc **tự tổng hợp** từ level + learnset (duyệt ngược learnset để lấy 4 chiêu học gần nhất ở level hiện tại) tại HP/PP đầy, không status — rồi lưu lại để lần sau khỏi tổng hợp lại. `saveBattleEntry()` ghi ngược lại.
+- [x] Hồi phục khi đọc: `creditMinutes()` sau khi commit thành công sẽ hồi HP/PP cho **battle entry đã tồn tại** của từng thành viên Party (+1 HP/phút đọc, +1 PP/chiêu mỗi 10 phút, đều có trần; hết máu status tự xóa). Pokémon chưa có entry thì bỏ qua (sẽ tự tổng hợp đầy đủ máu khi cần) — không đụng `PokemonGame.cpp`.
+- [x] Mở rộng `createItem()` — đúng như dự tính, **thay đổi duy nhất** chạm `PokemonGame.cpp`: chọn theo trọng số (`ItemData::dropWeight`) trên toàn bộ 83 vật phẩm, vẫn ưu tiên đá tiến hóa Pokémon đang sở hữu cần trước (giữ nguyên hành vi cũ khi có nhu cầu thật). Giữ lại tối ưu "bỏ qua roll khi chỉ có 1 ứng viên" của code cũ — vừa đỡ tốn 1 lần random, vừa giữ tương thích với test đã script sẵn chuỗi random.
+- [x] `PendingEventKind::Item`'s `item` field giờ mang ý nghĩa id vật phẩm chung 1-83 (không chỉ `EvolutionItem` 1-6) — nới `validatePendingEvent`, giữ id 1-6 khớp `EvolutionItem` nên save cũ vẫn đọc đúng.
+- [x] Test: 6 test mới trong `PokemonServiceTest.cpp` (đối chiếu số liệu thật: Pikachu tổng hợp đúng 2 chiêu [Thunder Shock, Growl] ở level 5, đúng bit gym, đúng catch math). 2 test trong `PokemonGameTest.cpp` phải sửa vì thuật toán chọn item đổi thật (không phải do bug — "6 đá đầy = không rơi gì" không còn đúng nữa vì còn 77 vật phẩm khác).
+- [x] **`pio run -e pokemon-x3`**: Flash **6,314,621 B (96.4%, còn 224,832 B ≈ 220KB)** — tăng thật **+10,588 B** so với GĐ3 (6,304,033 B), vì giờ `PokemonService` **thực sự gọi** `moveData()`/`baseStatsFor()`/`learnsetFor()`/`itemData()` nên linker không loại bỏ được nữa. Đây đúng là điểm ngoặt roadmap dự đoán — GĐ1/2 gần như miễn phí, GĐ3/4 mới là chi phí thật.
+
+**Chưa chạy được simulator để test runtime thật** — máy build thiếu `libsdl2-dev`, không cài được do `sudo` cần xác thực tương tác (không có trong môi trường phi tương tác). Firmware `pokemon-x3` build sạch + 19/19 test pass là bằng chứng duy nhất có được ở giai đoạn này; **chưa có UI nên chưa có gì khác biệt để thấy khi chạy trên thiết bị thật** — GĐ4 chỉ là lớp nền, cần GĐ5+ mới "chơi được".
 
 ### GĐ 5 — UI: Battle + bắt bằng bóng
 
