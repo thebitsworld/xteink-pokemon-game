@@ -16,6 +16,17 @@ constexpr size_t PARTY_SIZE = 6;
 constexpr size_t EVOLUTION_ITEM_COUNT = 6;
 constexpr size_t PENDING_EVENT_CAPACITY = 3;
 
+// Pinned copies of constants that really live in PokemonBattleTypes.h
+// (MOVE_COUNT, ITEM_COUNT, GYM_COUNT). PokemonTypes.h/.cpp is the core layer
+// that PokemonBattleTypes.h itself depends on (via PokemonSpecies.h), so it
+// cannot include the battle layer without inverting that dependency -
+// PokemonMoveData.cpp/PokemonItemData.cpp/PokemonGymData.cpp each carry a
+// static_assert cross-checking these stay in sync with their source of truth.
+constexpr uint16_t POKEMON_MOVE_ID_MAX = 165;
+constexpr size_t POKEMON_BAG_SLOT_COUNT = 77;  // ITEM_COUNT(83) - the 6 evolution stones tracked in itemCounts
+constexpr uint16_t POKEMON_GYM_PROGRESS_BITS = 12;  // 8 gyms + 4 Elite Four
+constexpr uint16_t POKEMON_GYM_PROGRESS_MASK = static_cast<uint16_t>((1U << POKEMON_GYM_PROGRESS_BITS) - 1U);
+
 enum class Gender : uint8_t {
   Unknown = 0,
   Male = 1,
@@ -48,6 +59,10 @@ enum class PendingEventKind : uint8_t {
   Encounter = 1,
   Item = 2,
   Evolution = 3,
+  // Reuses PendingEvent's existing 10-byte layout: `speciesId` holds the
+  // moveId being learned (1..POKEMON_MOVE_ID_MAX) and `level` holds the
+  // level it was learned at. No size change to PendingEvent/PokemonState.
+  MoveLearn = 4,
 };
 
 enum class DashboardNotice : uint8_t {
@@ -105,6 +120,10 @@ struct PokemonState {
   uint8_t encounterMisses = 0;
   uint8_t itemMisses = 0;
   DashboardNotice dashboardNotice = DashboardNotice::None;
+  // v3: appended after the v2 layout (PokemonStoreCodec.cpp's byte 116) so
+  // a v2 save zero-extends cleanly instead of requiring a field shuffle.
+  std::array<uint8_t, POKEMON_BAG_SLOT_COUNT> bagCounts{};
+  uint16_t battleProgress = 0;  // bit N (0-7) = gym N+1 defeated, bit 8+M (0-3) = Elite Four member M+1 defeated
 
   bool operator==(const PokemonState&) const = default;
 };

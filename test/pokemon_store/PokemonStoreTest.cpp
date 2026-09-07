@@ -582,7 +582,7 @@ void startupClassifiesCorruptAndUnsupportedSnapshotsAndFallsBackToValidOlderData
   Storage.clear();
   CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
   CHECK(store.commit(state));
-  Storage.setByte("/.crosspoint/pokemon-a.bin", 4, 3);
+  Storage.setByte("/.crosspoint/pokemon-a.bin", 4, pokemon::POKEMON_SNAPSHOT_VERSION + 1);
   pokemon::PokemonStore unsupported;
   CHECK(unsupported.begin() == pokemon::StoreBeginResult::Unsupported);
 
@@ -609,7 +609,7 @@ void startupBlocksDowngradesAndMixedUnsupportedCorruption() {
   CHECK(store.commit(state));
   state.lifetimeMinutes = 20;
   CHECK(store.commit(state));
-  Storage.setByte("/.crosspoint/pokemon-b.bin", 4, 3);
+  Storage.setByte("/.crosspoint/pokemon-b.bin", 4, pokemon::POKEMON_SNAPSHOT_VERSION + 1);
 
   pokemon::PokemonStore downgraded;
   CHECK(downgraded.begin() == pokemon::StoreBeginResult::Unsupported);
@@ -627,7 +627,7 @@ void failedResetDoesNotBypassProtectedStoreGating() {
   CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
   pokemon::PokemonState state{};
   CHECK(store.commit(state));
-  Storage.setByte("/.crosspoint/pokemon-a.bin", 4, 3);
+  Storage.setByte("/.crosspoint/pokemon-a.bin", 4, pokemon::POKEMON_SNAPSHOT_VERSION + 1);
 
   pokemon::PokemonStore protectedStore;
   CHECK(protectedStore.begin() == pokemon::StoreBeginResult::Unsupported);

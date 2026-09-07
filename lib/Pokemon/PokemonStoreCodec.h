@@ -9,9 +9,13 @@
 namespace pokemon {
 
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V1 = 1;
-constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 2;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V2 = 2;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 3;
 constexpr size_t POKEMON_STATE_V1_BYTES = 96;
-constexpr size_t POKEMON_STATE_BYTES = 116;
+constexpr size_t POKEMON_STATE_V2_BYTES = 116;
+// v3 appends bagCounts[POKEMON_BAG_SLOT_COUNT] and battleProgress (uint16_t)
+// after the v2 layout; see PokemonState in PokemonTypes.h.
+constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V2_BYTES + POKEMON_BAG_SLOT_COUNT + 2;
 using StateBytes = std::array<uint8_t, POKEMON_STATE_BYTES>;
 
 constexpr size_t POKEMON_SNAPSHOT_HEADER_BYTES = 24;

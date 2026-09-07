@@ -5,6 +5,11 @@
 
 namespace pokemon {
 
+// PokemonTypes.h pins its own copy of this bound (POKEMON_GYM_PROGRESS_BITS)
+// since it cannot include this battle layer without inverting the
+// dependency direction; keep the two in sync.
+static_assert(POKEMON_GYM_PROGRESS_BITS == GYM_COUNT);
+
 const GymData* gymData(const uint8_t gymIndex) {
   if (gymIndex == 0 || gymIndex > GYM_COUNT) return nullptr;
   return &generated::GYMS[gymIndex - 1U];

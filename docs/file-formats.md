@@ -7,6 +7,35 @@ fixed-size char buffer.
 
 ## `/.crosspoint/pokemon-{a,b}.bin`
 
+### Version 3
+
+Version 3 appends two fields after the version 2 state payload, without
+moving or resizing anything at offsets 0-115: a 77-entry item-count bag
+(`u8` each, one per non-stone item — Poké/Great/Ultra/Master Ball, potions
+and other medicine, status cures, Rare Candy, PP restoratives, and the 50
+TMs + 5 HMs; ids 1-6, the six evolution stones, remain in the existing
+version-2 item-count array) and a `u16` gym/Elite Four progress bitmask (bit
+`N` for `0 <= N < 8` = gym `N+1` defeated, bit `8+M` for `0 <= M < 4` = Elite
+Four member `M+1` defeated; the remaining 4 bits are reserved and must be
+zero). The 195-byte version 3 state payload is the version 2 payload below,
+plus:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 116 | 77 | Non-stone item counts (`u8` each) |
+| 193 | 2 | Gym/Elite Four progress bitmask |
+
+A `PendingEventKind` value of `4` (`MoveLearn`) was added; it reuses the
+existing 10-byte pending-event layout unchanged — species ID holds the move
+ID being learned (1-165) and level holds the level it was learned at.
+
+A file's live battle state (which 4 moves a Party member currently knows,
+each move's remaining PP, current HP, and any status ailment) is **not**
+stored here. It lives in the separate, fully-reconstructible
+`/.crosspoint/pokemon-battle.bin` (see below) so that corruption there can
+never cost a Pokémon, only reset it to full HP/PP with its learnset-derived
+moves.
+
 ### Version 2
 
 The `pokemon-x3` build alternates complete snapshots between
@@ -37,10 +66,10 @@ written. The file is:
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 4 | Magic `PKV2` |
-| 4 | 2 | Format version (`2`) |
+| 4 | 2 | Format version (`1`, `2`, or `3`; a build always writes the newest it knows) |
 | 6 | 2 | Header size (`24`) |
 | 8 | 4 | Non-zero snapshot sequence |
-| 12 | 2 | State size (`116`) |
+| 12 | 2 | State size (`116` for version 2, `195` for version 3 — see per-version tables below) |
 | 14 | 2 | Record size (`48`) |
 | 16 | 4 | Record count |
 | 20 | 4 | Payload size (`116 + recordCount * 48`) |
@@ -93,6 +122,41 @@ is already present. Back up both files before updates or resets. Choosing
 **Reset Pokémon** in the Pokémon menu deletes both snapshots and returns to
 starter selection; it does not alter books, reading positions, or CrossInk
 reading statistics.
+
+## `/.crosspoint/pokemon-battle.bin`
+
+Holds each Party member's *live* battle state: which of its up-to-4 moves it
+currently knows, each move's remaining PP, its current HP, and any status
+ailment. Introduced alongside save format version 3 above. Unlike
+`pokemon-{a,b}.bin`, this file is fully reconstructible from data already in
+the main save (a record's species and level determine its learnset-derived
+moves and max HP), so it does not use double-buffering, a header, or a
+sequence number — a single file with a trailing whole-file CRC-32 is enough.
+On any read failure (missing file, wrong size, bad CRC, or a semantically
+invalid entry) every Party member is simply treated as "unknown" and rebuilt
+on demand with full HP/PP and no status; this never blocks play and never
+loses a Pokémon, only its in-progress battle condition.
+
+At most one entry per Party slot (6 maximum); PC-boxed Pokémon are not
+battling and carry no entry. Entries are packed at the front in ascending
+record-ID order, matching the "no gaps" convention `PokemonState`'s own
+arrays use. All integers are little-endian; the file is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | `entryCount * 16` | Entries in ascending record-ID order (below) |
+| `entryCount * 16` | 4 | Standard CRC-32 over the entries above |
+
+Each 16-byte entry:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Record ID (matches a `PokemonRecord` in the main save) |
+| 4 | 4 | Move IDs (`u8` each, 4 slots; `0` = empty, packed at the front) |
+| 8 | 4 | Remaining PP per move slot (`u8` each) |
+| 12 | 2 | Current HP |
+| 14 | 1 | Status ailment (`0` none, `1` paralysis, `2` sleep, `3` freeze, `4` burn, `5` poison, `6` confusion) |
+| 15 | 1 | Status turn counter (sleep/confusion only; `0` for the other four ailments) |
 
 ## `/pokemon/`
 

@@ -55,6 +55,7 @@ PendingEvent decodePendingEvent(const uint8_t* bytes) {
 
 size_t snapshotStateBytes(const uint16_t version) {
   if (version == POKEMON_SNAPSHOT_VERSION_V1) return POKEMON_STATE_V1_BYTES;
+  if (version == POKEMON_SNAPSHOT_VERSION_V2) return POKEMON_STATE_V2_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION) return POKEMON_STATE_BYTES;
   return 0;
 }
@@ -136,6 +137,8 @@ bool encodeState(const PokemonState& state, StateBytes& output) {
   candidate[113] = state.encounterMisses;
   candidate[114] = state.itemMisses;
   candidate[115] = static_cast<uint8_t>(state.dashboardNotice);
+  std::memcpy(candidate.data() + POKEMON_STATE_V2_BYTES, state.bagCounts.data(), state.bagCounts.size());
+  write16(candidate.data(), POKEMON_STATE_V2_BYTES + POKEMON_BAG_SLOT_COUNT, state.battleProgress);
   output = candidate;
   return true;
 }
@@ -158,6 +161,9 @@ bool decodeState(const uint8_t* bytes, const size_t size, const uint16_t version
     candidate.itemMisses = bytes[94];
     candidate.dashboardNotice = static_cast<DashboardNotice>(bytes[95]);
   } else {
+    // Shared by v2 and v3: the byte 0..115 layout never changed, only what
+    // (if anything) follows it. bagCounts/battleProgress stay zero-valued
+    // (from `PokemonState candidate{};` above) for a v2 file.
     for (size_t index = 0; index < PENDING_EVENT_CAPACITY; ++index) {
       candidate.pendingEvents[index] = decodePendingEvent(bytes + 24U + index * PENDING_EVENT_BYTES);
     }
@@ -172,6 +178,10 @@ bool decodeState(const uint8_t* bytes, const size_t size, const uint16_t version
     candidate.encounterMisses = bytes[113];
     candidate.itemMisses = bytes[114];
     candidate.dashboardNotice = static_cast<DashboardNotice>(bytes[115]);
+    if (version == POKEMON_SNAPSHOT_VERSION) {
+      std::memcpy(candidate.bagCounts.data(), bytes + POKEMON_STATE_V2_BYTES, candidate.bagCounts.size());
+      candidate.battleProgress = read16(bytes, POKEMON_STATE_V2_BYTES + POKEMON_BAG_SLOT_COUNT);
+    }
   }
   if (!validateState(candidate)) return false;
   output = candidate;

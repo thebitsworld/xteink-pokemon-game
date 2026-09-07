@@ -48,8 +48,9 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonical116ByteLayout() {
-  static_assert(pokemon::POKEMON_STATE_BYTES == 116);
+void stateCodecUsesTheCanonicalV3Layout() {
+  static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
+  static_assert(pokemon::POKEMON_STATE_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
   state.partyRecordIds[0] = 7;
@@ -69,6 +70,9 @@ void stateCodecUsesTheCanonical116ByteLayout() {
   state.encounterMisses = 5;
   state.itemMisses = 19;
   state.dashboardNotice = pokemon::DashboardNotice::ItemFound;
+  state.bagCounts[0] = 42;
+  state.bagCounts[state.bagCounts.size() - 1] = 7;
+  state.battleProgress = pokemon::POKEMON_GYM_PROGRESS_MASK;  // all bits set is the widest legal value
 
   pokemon::StateBytes bytes{};
   CHECK(pokemon::encodeState(state, bytes));
@@ -87,10 +91,41 @@ void stateCodecUsesTheCanonical116ByteLayout() {
   CHECK(bytes[113] == 5);
   CHECK(bytes[114] == 19);
   CHECK(bytes[115] == static_cast<uint8_t>(pokemon::DashboardNotice::ItemFound));
+  CHECK(bytes[116] == 42);
+  CHECK(bytes[116 + pokemon::POKEMON_BAG_SLOT_COUNT - 1] == 7);
+  CHECK((bytes[116 + pokemon::POKEMON_BAG_SLOT_COUNT] | (bytes[116 + pokemon::POKEMON_BAG_SLOT_COUNT + 1] << 8)) ==
+        pokemon::POKEMON_GYM_PROGRESS_MASK);
 
   pokemon::PokemonState decoded{};
   CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION, decoded));
   CHECK(decoded == state);
+}
+
+void v2StateDecodesWithZeroedBagAndBattleProgress() {
+  pokemon::PokemonState v2State{};
+  v2State.partyRecordIds[0] = 3;
+  v2State.lifetimeMinutes = 500;
+
+  std::array<uint8_t, pokemon::POKEMON_STATE_V2_BYTES> bytes{};
+  write32(bytes.data(), 0, v2State.partyRecordIds[0]);
+  write32(bytes.data(), 104, v2State.lifetimeMinutes);
+  write32(bytes.data(), 108, 1);  // sequence, must be non-zero-ish and match what validateState allows
+
+  pokemon::PokemonState decoded{};
+  decoded.bagCounts.fill(0xAA);  // prove the decoder actually zeroes these, not just leaves them alone
+  decoded.battleProgress = 0xAAAA;
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V2, decoded));
+  CHECK(decoded.partyRecordIds[0] == 3);
+  CHECK(decoded.lifetimeMinutes == 500);
+  for (const uint8_t slot : decoded.bagCounts) CHECK(slot == 0);
+  CHECK(decoded.battleProgress == 0);
+}
+
+void battleProgressReservedBitsAreRejected() {
+  pokemon::PokemonState state{};
+  state.battleProgress = static_cast<uint16_t>(pokemon::POKEMON_GYM_PROGRESS_MASK + 1U);  // first reserved bit set
+  pokemon::StateBytes output{};
+  CHECK(!pokemon::encodeState(state, output));
 }
 
 void legacyStateDecodesItsPendingEventIntoTheQueue() {
@@ -150,14 +185,15 @@ void snapshotHeaderUsesCanonical24ByteLayout() {
   CHECK(readHeader16(bytes, 4) == pokemon::POKEMON_SNAPSHOT_VERSION);
   CHECK(readHeader16(bytes, 6) == 24);
   CHECK(readHeader32(bytes, 8) == 0x01020304U);
-  CHECK(readHeader16(bytes, 12) == 116);
+  CHECK(readHeader16(bytes, 12) == pokemon::POKEMON_STATE_BYTES);
   CHECK(readHeader16(bytes, 14) == 48);
   CHECK(readHeader32(bytes, 16) == 3);
-  CHECK(readHeader32(bytes, 20) == 260);
-  CHECK(pokemon::snapshotFileBytes(header) == 288);
+  CHECK(readHeader32(bytes, 20) == pokemon::POKEMON_STATE_BYTES + 3U * 48U);
+  CHECK(pokemon::snapshotFileBytes(header) == 24U + pokemon::POKEMON_STATE_BYTES + 3U * 48U + 4U);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V1) == 96);
-  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION) == 116);
-  CHECK(pokemon::snapshotStateBytes(3) == 0);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V2) == 116);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION) == pokemon::POKEMON_STATE_BYTES);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION + 1U) == 0);
 
   pokemon::SnapshotHeader decoded{};
   CHECK(pokemon::decodeSnapshotHeader(bytes, decoded) == pokemon::HeaderDecodeResult::Ready);
@@ -167,7 +203,7 @@ void snapshotHeaderUsesCanonical24ByteLayout() {
 void unknownSnapshotVersionIsUnsupportedWithoutMutation() {
   pokemon::HeaderBytes bytes{};
   CHECK(pokemon::encodeSnapshotHeader({pokemon::POKEMON_SNAPSHOT_VERSION, 1, 0}, bytes));
-  bytes[4] = 3;
+  bytes[4] = static_cast<uint8_t>(pokemon::POKEMON_SNAPSHOT_VERSION + 1U);  // a version nothing has ever shipped
   pokemon::SnapshotHeader output{pokemon::POKEMON_SNAPSHOT_VERSION, 77, 88};
   const pokemon::SnapshotHeader before = output;
 
@@ -183,9 +219,9 @@ void malformedSupportedHeaderIsCorruptWithoutMutation() {
     if (variant == 0) bytes[0] = 'X';
     if (variant == 1) writeHeader32(bytes, 8, 0);
     if (variant == 2) bytes[6] = 23;
-    if (variant == 3) bytes[12] = 115;
+    if (variant == 3) bytes[12] = static_cast<uint8_t>(pokemon::POKEMON_STATE_BYTES - 1U);
     if (variant == 4) bytes[14] = 47;
-    if (variant == 5) writeHeader32(bytes, 20, 259);
+    if (variant == 5) writeHeader32(bytes, 20, pokemon::POKEMON_STATE_BYTES + 3U * 48U - 1U);
     pokemon::SnapshotHeader output{pokemon::POKEMON_SNAPSHOT_VERSION, 77, 88};
     const pokemon::SnapshotHeader before = output;
 
@@ -220,7 +256,9 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonical116ByteLayout();
+  stateCodecUsesTheCanonicalV3Layout();
+  v2StateDecodesWithZeroedBagAndBattleProgress();
+  battleProgressReservedBitsAreRejected();
   legacyStateDecodesItsPendingEventIntoTheQueue();
   invalidStateDoesNotMutateEncodedOutput();
   invalidStateBytesDoNotMutateDecodedOutput();

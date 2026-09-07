@@ -113,6 +113,10 @@ DashboardNotice noticeForEvent(const PendingEvent* event) {
       return DashboardNotice::ItemFound;
     case PendingEventKind::Evolution:
       return DashboardNotice::WhatsThis;
+    case PendingEventKind::MoveLearn:
+      // Reuses the same notice as Evolution for now; a dedicated icon is a
+      // GĐ 7 (UI) concern, not a storage-layer one.
+      return DashboardNotice::WhatsThis;
     case PendingEventKind::None:
       return DashboardNotice::None;
   }
