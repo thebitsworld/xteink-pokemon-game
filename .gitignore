@@ -52,3 +52,6 @@ dist-publish/
 /CMakeLists.txt
 /dependencies.lock
 /sdkconfig.*
+
+# PokeAPI response cache for scripts/fetch_pokemon_battle_data.py
+/scripts/.pokeapi-cache/

@@ -6,7 +6,7 @@ Ghi chú ngữ cảnh cho Claude ở phiên làm việc sau (hoặc trên máy k
 
 Đây là fork của **CrossInk** (firmware ESP32-C3 cho máy đọc sách e-ink Xteink X3/X4), được mở rộng thêm **module game Pokémon** — Pokémon lên cấp dựa trên thời gian đọc sách thật (không phải cày game thuần túy). Xem [docs/pokemon-game.md](docs/pokemon-game.md) (tài liệu người dùng) và [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) (tài liệu kỹ thuật chi tiết — **đọc file này trước** để hiểu cơ chế game).
 
-## Việc đã làm trong phiên này (2026-09-04)
+## Bối cảnh đã khảo sát (phiên 2026-09-04)
 
 1. **Đọc sâu toàn bộ module Pokémon** (`lib/Pokemon/*`, `src/pokemon/*`, `src/activities/pokemon/*`) và giải thích chi tiết cơ chế: đo thời gian đọc chống gian lận (`PokemonTracker`), vòng lặp XP/encounter/item/evolution (`PokemonGame.cpp::applyCreditedMinutes`), lưu trữ double-buffer + CRC (`PokemonStore`). Toàn bộ đã chép lại vào [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md).
 2. **Phát hiện quan trọng về gameplay**: `bookProgressPercent` (dùng để gate độ hiếm/level wild encounter) là % tiến độ của **cuốn sách đang đọc hiện tại**, không phải tổng thời gian/trang đã đọc lũy kế → đọc nhiều sách ngắn đạt % cao nhanh hơn, cho encounter tốt hơn với cùng lượng thời gian đọc thật so với đọc một cuốn dài. Đây có thể là điểm cần cân bằng lại nếu muốn sửa.
@@ -24,28 +24,30 @@ Ghi chú ngữ cảnh cho Claude ở phiên làm việc sau (hoặc trên máy k
    - **Flash mới là nút thắt thật sự**: chỉ còn ~230KB trống trước khi `scripts/check_firmware_size.py` (post-build check trong `platformio.ini`) fail build.
    - Module Pokémon hiện tại chỉ tốn ~43KB flash (vì artwork nằm trên SD card, không đóng gói vào firmware).
 5. **Đổi git remote `origin`** từ `https://github.com/padge01/xteink-pokemon-game.git` sang `https://github.com/thebitsworld/xteink-pokemon-game.git` theo yêu cầu người dùng. Đã `git fetch origin` thành công (repo tồn tại, kết nối được) nhưng **chưa kiểm tra remote mới có khác gì so với code hiện tại (branch `main` local vẫn đang track cấu hình cũ, chưa merge/rebase gì)**.
-6. **Tạo file tài liệu kỹ thuật mới**: [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) + thêm link vào [docs/development/README.md](docs/development/README.md). **Chưa commit** — đang là working tree changes.
+6. **Tạo file tài liệu kỹ thuật**: [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) — đã commit (`aaec0c59` trên `main`).
 
-## Trạng thái working tree hiện tại
+## Trạng thái git
 
-Chạy `git status` để xem chính xác, nhưng tính đến cuối phiên có các thay đổi CHƯA COMMIT:
-- `docs/development/pokemon-mechanics.md` (file mới)
-- `docs/development/README.md` (thêm 1 dòng link)
-- `.pio/` có build artifacts từ `pio run -e pokemon-x3` / `-e default` (thường đã bị `.gitignore`, kiểm tra lại nếu cần)
-- `freeink-sdk/` submodule đã được init (trước đó trống) — không phải thay đổi cần commit, chỉ là submodule đã checkout đúng commit ghi trong `.gitmodules`.
+- `main` có commit `aaec0c59` (tài liệu cơ chế + CLAUDE.md) — **chưa push** vì máy này chưa có credential GitHub nào hoạt động (chưa cài `gh`, SSH key `~/.ssh/id_ed25519` chưa đăng ký với GitHub, không có credential helper HTTPS).
+- Remote `origin` đã đổi sang `https://github.com/thebitsworld/xteink-pokemon-game.git`. Đã `git fetch` được, nhưng **chưa đối chiếu xem remote có khác gì so với local**.
+- Đang làm việc trên nhánh `feat/pokemon-battle-system` (tách từ `main`).
+- Chạy `git status` để biết chính xác cái gì chưa commit.
 
-**Chưa commit gì trong phiên này** — người dùng chưa yêu cầu commit.
+## Việc đang dở: hệ thống chiến đấu Pokémon
 
-## Việc đang dở / hướng tiếp theo (do người dùng gợi mở, chưa chốt)
+Đang triển khai trên nhánh **`feat/pokemon-battle-system`**. Kế hoạch đầy đủ, ràng buộc kỹ thuật, quyết định thiết kế kèm lý do, và danh sách task chia theo giai đoạn đều nằm ở:
 
-Người dùng muốn tìm hiểu khả năng **mở rộng game Pokémon với cơ chế kiểu Pokémon Red gốc** (hệ thống trận đấu turn-based). Đã phân tích và khuyến nghị:
+👉 **[docs/development/pokemon-battle-roadmap.md](docs/development/pokemon-battle-roadmap.md)** — đọc file này trước khi viết code.
 
-- **Bản đồ họa/animation đầy đủ kiểu Red gốc: rủi ro cao** — dễ vượt quá ~230KB dung lượng flash còn lại.
-- **Bản text-based (menu FIGHT/ITEM/PKMN/RUN + log text, không animation) khả thi hơn nhiều** — tái dùng `EpdFont`/`GfxRenderer`/`ButtonNavigator` đã có sẵn trong UI reader và `PokemonActivity` hiện tại. Ước lượng chi phí thêm ~20-40KB flash, lọt trong dư địa hiện có.
-- **Chưa viết bất kỳ dòng code battle system nào** — mới chỉ dừng ở phân tích/ước lượng dung lượng. Nếu tiếp tục, bước hợp lý tiếp theo là:
-  1. Thiết kế struct dữ liệu move/type-chart (theo phong cách `PokemonTypes.h`/`PokemonSpecies.h` hiện có).
-  2. Prototype một bản tối giản (ví dụ 20-30 chiêu, type chart rút gọn) rồi **build thử ngay để đo dung lượng thật** (dùng đúng quy trình đã làm ở bước 4 trên) thay vì đoán mò trước khi đầu tư viết đầy đủ.
-  3. Cẩn thận với chuỗi i18n đa ngôn ngữ cho tên chiêu/log trận đấu — dễ phình dung lượng nếu dịch nhiều thứ tiếng ngay từ đầu.
+Phạm vi: học chiêu theo level (dữ liệu Red thật), vật phẩm + TM/HM rơi khi đọc sách, chiến đấu turn-based đầy đủ status effect, bắt Pokémon bằng 4 loại bóng, 8 gym + Elite Four theo thứ tự, màn hình huy hiệu.
+
+**Tiến độ**: GĐ 0 (dữ liệu nguồn) đã xong — đã fetch dữ liệu Gen 1 thật từ PokeAPI vào `scripts/data/pokemon-{stats,moves,learnsets,tmhm}.csv` (151 loài / 165 chiêu / 989 learnset / 3037 dòng TM-HM) cộng `pokemon-gyms.csv` viết tay. Còn GĐ 1-8 (generator → engine → lưu trữ → service → UI → hoàn thiện).
+
+**Bốn ràng buộc dễ gây hỏng nhất** (chi tiết trong roadmap):
+1. Flash chỉ còn ~230KB — build đo lại sau mỗi giai đoạn.
+2. `PokemonState` chỉ được append **sau byte 115** (`PokemonStore.cpp:265` hardcode offset 108 cho `sequence`).
+3. **Không** nới `PokemonRecord` 48 byte — dữ liệu chiến đấu để ở file phụ tái tạo được.
+4. Tên chiêu/vật phẩm **không** đi qua i18n (bảng offset nhân 28 ngôn ngữ + `strip_unused` không quét `$BUILD_DIR`).
 
 ## Cách build nhanh (đã verify hoạt động trong phiên này)
 

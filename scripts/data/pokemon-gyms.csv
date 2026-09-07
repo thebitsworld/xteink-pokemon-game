@@ -1,0 +1,16 @@
+# Pokemon Red gym leaders and Elite Four. Teams trimmed to three members:
+# every battle turn costs a full e-ink panel refresh, so the five-Pokemon teams
+# of the original would make these fights drag on the device.
+"order","leader","badge","type","team"
+"1","Brock","Boulder Badge","Rock","74:12;95:14"
+"2","Misty","Cascade Badge","Water","120:18;121:21"
+"3","Lt. Surge","Thunder Badge","Electric","100:21;25:18;26:24"
+"4","Erika","Rainbow Badge","Grass","114:24;71:29;45:29"
+"5","Koga","Soul Badge","Poison","109:37;89:39;110:43"
+"6","Sabrina","Marsh Badge","Psychic","122:37;64:38;65:43"
+"7","Blaine","Volcano Badge","Fire","77:40;58:42;59:47"
+"8","Giovanni","Earth Badge","Ground","31:44;34:45;112:50"
+"9","Lorelei","","Ice","87:54;91:56;131:54"
+"10","Bruno","","Fighting","95:53;107:55;68:56"
+"11","Agatha","","Ghost","42:55;94:56;24:56"
+"12","Lance","","Dragon","130:58;142:60;149:62"

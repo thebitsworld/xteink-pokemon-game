@@ -13,5 +13,6 @@ It is written for software developers who may be new to embedded development.
 - [Architecture Overview](./architecture.md)
 - [Testing and Debugging](./testing-debugging.md)
 - [Pokémon Module Mechanics](./pokemon-mechanics.md)
+- [Pokémon Battle Roadmap](./pokemon-battle-roadmap.md)
 
 If you are new, start with [Getting Started](./getting-started.md).

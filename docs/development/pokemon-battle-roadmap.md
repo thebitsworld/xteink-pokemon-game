@@ -1,0 +1,175 @@
+---
+title: Pokémon Battle Roadmap
+parent: Development
+nav_order: 5
+---
+
+# Pokémon Battle System — Roadmap
+
+Tài liệu bàn giao cho việc mở rộng module Pokémon thành một "Pokémon Red thu nhỏ": học chiêu theo level, vật phẩm/TM/HM, chiến đấu turn-based, bắt Pokémon bằng bóng, 8 gym + Elite Four, huy hiệu.
+
+Nhánh làm việc: **`feat/pokemon-battle-system`**. Đọc [pokemon-mechanics.md](./pokemon-mechanics.md) trước để hiểu cơ chế game hiện tại.
+
+Ai tiếp nhận công việc này: đọc mục **Ràng buộc bất di bất dịch** trước tiên — đó là những thứ đã được khảo sát code kỹ và vi phạm sẽ gây hỏng save của người dùng hoặc vỡ build.
+
+---
+
+## Ràng buộc bất di bất dịch
+
+Năm điều dưới đây rút ra từ việc đọc code thật, không phải suy đoán. Vi phạm bất kỳ điều nào đều gây hậu quả nghiêm trọng và khó phát hiện.
+
+**1. Ngân sách flash chỉ còn ~230KB.**
+`pokemon-x3` hiện chiếm **96.2%** OTA partition (6,303,483 / 6,553,600 byte, còn **235,968 byte**). `scripts/check_firmware_size.py` fail build khi vượt. Toàn bộ thiết kế phải bám ngân sách này; build đo lại sau mỗi giai đoạn.
+
+**2. `PokemonState` chỉ được mọc thêm SAU byte 115.**
+`src/pokemon/PokemonStore.cpp:265` có `write32(stateBytes.data() + 108, nextSequence)` — offset viết cứng, trùng lặp với codec. Nếu layout mới đẩy `sequence` khỏi offset 108 thì dòng này ghi đè lên field khác *sau khi* `encodeState()` đã validate → hỏng save âm thầm. Giữ nguyên toàn bộ layout 0..115, field mới bắt đầu từ 116.
+
+**3. KHÔNG nới `PokemonRecord` (48 byte).**
+`RecordBytes` là `std::array<uint8_t,48>` — kích thước nướng vào *kiểu*, dùng trong 6 vòng lặp stream; `decodeSnapshotHeader()` hardcode "record phải đúng 48 byte" ở 2 chỗ (`PokemonStoreCodec.cpp:100,102`); vòng copy-forward khi commit chép record dạng byte thô nên không tự nới được; `decodeRecord()` còn kiểm `bytes[47] != 0` bằng số viết cứng.
+→ Dữ liệu chiến đấu (4 chiêu, PP, HP, status) nằm ở **file phụ** `/.crosspoint/pokemon-battle.bin`, không nhét vào record.
+
+**4. Tên chiêu/vật phẩm KHÔNG đi qua i18n.**
+Mỗi key i18n tốn `28 ngôn ngữ × 2 byte` bảng offset dù chỉ có tiếng Anh → ~250 key sẽ tốn ~14KB offset + ~4KB text. Tệ hơn: `scripts/gen_i18n.py` chạy `strip_unused=True` và **chỉ quét `src/` + `lib/`**, không quét header sinh trong `$BUILD_DIR` → key chỉ được tham chiếu từ bảng dữ liệu sinh tự động sẽ bị **xóa khỏi firmware**.
+→ Theo tiền lệ sẵn có: tên 151 loài là chuỗi C thô trong header sinh tự động. Tên chiêu/vật phẩm làm y hệt. Chỉ ~20 chuỗi UI mới dùng i18n.
+→ Blob tiếng Anh có trần cứng **32,767 byte** (offset 15 bit, `gen_i18n.py` raise `ValueError` khi vượt).
+
+**5. KHÔNG sửa `scripts/data/pokemon-kanto-v2.csv`.**
+`test/pokemon_types/PokemonSpeciesGeneratorTest.py` ghim SHA-256 của nội dung file này (`EXPECTED_METADATA_SHA256`). Cần thêm dữ liệu thì tạo CSV mới, không đụng file cũ.
+Ngoài ra test đó assert `CPPPATH` sau khi chạy generator có **đúng 1 phần tử** → mọi generator mới phải xuất ra **cùng** thư mục `$BUILD_DIR/generated/pokemon`.
+
+---
+
+## Quyết định thiết kế đã chốt
+
+Ghi lại kèm lý do, để người tiếp nhận không phải tranh luận lại:
+
+| Quyết định | Lý do |
+|---|---|
+| HP/PP/status **giữ nguyên giữa các trận** | Người dùng chọn, để giống Red thật |
+| Status effect làm **đầy đủ ngay từ đầu** (ngủ/tê/độc/bỏng/băng/rối loạn) | Người dùng chọn; đồ chữa status mới có ý nghĩa |
+| **Đọc sách hồi HP/PP dần**, đầy máu thì xóa status | Chống ngõ cụt: hết Potion + cả Party kiệt sức = kẹt vĩnh viễn. Cũng đúng tinh thần thiết bị đọc sách |
+| Dữ liệu chiến đấu ở **file phụ**, không nới record | Xem ràng buộc 3. File phụ **tái tạo được 100%** (chiêu suy từ learnset theo level, HP/PP đầy) → hỏng file = dựng lại, không bao giờ mất Pokémon |
+| Dùng **base stat thật** của 151 loài | Không có stat riêng thì mọi Pokémon cùng level đánh y hệt nhau, type matchup thành yếu tố duy nhất. Chỉ tốn ~755 byte |
+| Gym team rút còn **2-3 con** (bản gốc tới 5) | Mỗi lượt đánh = 1 lần refresh e-ink toàn màn (~1 lần lật trang sách). Đội 5 con làm trận đấu lê thê |
+| Huy hiệu **chỉ là thành tựu trưng bày** | Người dùng chọn; giữ rủi ro cân bằng thấp nhất, không phải đụng `PokemonGame.cpp` |
+| Gym mở khóa **tuyến tính**, đủ 8 huy hiệu mới mở Elite Four | Tạo đường tiến triển — thứ game hiện đang thiếu |
+| Thua **không bị phạt** | Rào cản tự nhiên là level Pokémon, mà level chỉ lên bằng đọc sách thật |
+
+---
+
+## Trạng thái hiện tại
+
+### GĐ 0 — Dữ liệu nguồn ✅ XONG
+
+`scripts/fetch_pokemon_battle_data.py` lấy dữ liệu Gen 1 (Red/Blue) thật từ PokeAPI, cache response xuống `scripts/.pokeapi-cache/` (đã gitignore) nên chạy lại rất nhanh.
+
+| File | Số dòng | Cột |
+|---|---|---|
+| `scripts/data/pokemon-stats.csv` | 151 | `id,name,hp,attack,defense,special,speed` |
+| `scripts/data/pokemon-moves.csv` | 165 | `id,name,type,power,accuracy,pp,damage_class,ailment,ailment_chance` |
+| `scripts/data/pokemon-learnsets.csv` | 989 | `species_id,level,move_id` |
+| `scripts/data/pokemon-tmhm.csv` | 3037 | `species_id,move_id` |
+| `scripts/data/pokemon-gyms.csv` | 12 | `order,leader,badge,type,team` (viết tay — PokeAPI không có dữ liệu gym) |
+
+Lưu ý: PokeAPI chặn User-Agent mặc định của `urllib` (403) — script đã set header riêng.
+Gen 1 chỉ có một chỉ số "Special"; script dùng `special-attack` của PokeAPI làm giá trị tương ứng.
+
+---
+
+## Các giai đoạn còn lại
+
+Mỗi giai đoạn là một điểm dừng tự nhiên: build được, test được, commit được.
+
+### GĐ 1 — Bảng vật phẩm + 5 generator C++
+
+- [ ] Viết `scripts/data/pokemon-items.csv`. Không gian id đề xuất: `1..6` **phải** trùng `EvolutionItem` hiện có (Moon/Fire/Thunder/Water/Leaf Stone, Link Cable) để pending event cũ vẫn hợp lệ; `7..10` bóng (Poké/Great/Ultra/Master); `11..17` hồi máu + Revive; `18..23` chữa status; `24..28` Rare Candy + hồi PP; `30..79` TM01-50; `80..84` HM01-05. Cột: `id,name,category,value,drop_weight`. Trọng số: đồ rẻ cao (Potion ~100), đồ xịn thấp (Master Ball 1).
+- [ ] Lấy ánh xạ TM/HM → move id từ PokeAPI (`/machine/`, lọc `version_group == red-blue`) thay vì gõ tay 55 dòng — mở rộng `fetch_pokemon_battle_data.py`.
+- [ ] 5 cặp generator theo nguyên mẫu `scripts/generate_pokemon_v2_species{,_build}.py`: moves, stats, learnsets+tmhm, items, gyms. Giữ đúng khuôn: `PROVENANCE`/`HEADERS` hằng số, `load_*()` validate gắt, `generate()` thuần trả text, `main()` có `--input/--output/--check`; build hook `runpy.run_path()` + ghi-khi-đổi + `env.Append(CPPPATH=...)` **cùng một thư mục**.
+- [ ] **`uint16_t` cho offset learnset** — 989 cặp vượt xa tiền lệ `uint8_t evolutionOffset`; đặt `static_assert` phù hợp cho từng bảng.
+- [ ] Đăng ký `pre:` script trong **cả hai** env `[env:pokemon-x3]` và `[env:pokemon-simulator-X3]` của `platformio.ini`.
+- [ ] Test kiểu `PokemonSpeciesGeneratorTest.py`: ghim hash dữ liệu, kiểm offset/count khớp, không move id lơ lửng.
+
+### GĐ 2 — Engine chiến đấu thuần
+
+- [ ] `lib/Pokemon/PokemonMoves.h/.cpp`: tra cứu chiêu, bảng khắc chế type 18×18, tra learnset theo (species, level), kiểm tra tương thích TM/HM.
+- [ ] `lib/Pokemon/PokemonBattle.h/.cpp`: `BattleState` (HP/level/moves/PP/status hai bên), công thức damage (level + power + base stat + STAB + khắc chế + random), 6 status với luật riêng, công thức bắt (`SpeciesData.captureRate` đã có sẵn × hệ số bóng × HP còn lại × status), AI đối thủ.
+- [ ] **Engine trả enum `BattleLogEvent`, tuyệt đối không chứa chuỗi text** — UI tự dịch. Giữ đúng ranh giới logic/UI hiện có.
+- [ ] Dùng lại `RandomSource`/`randomBelow` của `PokemonGame.cpp` để test được với RNG giả lập.
+- [ ] Test native theo mẫu `test/pokemon_game/PokemonGameTest.cpp`: damage, từng status, công thức bắt theo 4 loại bóng, learnset.
+
+### GĐ 3 — Lưu trữ
+
+- [ ] `PokemonState` v3: append `bagCounts[N]` (uint8, stack ≤99) và `uint16_t battleProgress` (8 bit gym + 4 bit Elite Four) **sau byte 115**. `itemCounts[6]` cũ giữ nguyên offset 54..65.
+- [ ] `snapshotStateBytes()` + `decodeState()` thêm nhánh v2 (field mới = 0). Migration chạy tự động vì commit luôn ghi version hiện tại.
+- [ ] `validateState()` ràng buộc `battleProgress` — **phải thỏa mãn với state v2 zero-extend**, nếu không save cũ thành không đọc được.
+- [ ] `PendingEventKind::MoveLearn`: dùng lại đúng 10 byte sẵn có (`recordId` = Pokémon, trường `speciesId` chứa moveId, `level` = level học) → chỉ thêm case vào `validatePendingEvent()`, không đổi kích thước.
+- [ ] `src/pokemon/PokemonBattleStore.h/.cpp`: file phụ 16 byte/entry (`recordId(4) + moves[4] + pp[4] + currentHp(2) + status(1) + statusTurns(1)`) + CRC32. Tạo lazy; CRC sai hoặc thiếu entry → **dựng lại từ learnset, HP/PP đầy**, không bao giờ chặn người chơi.
+- [ ] Test migration native theo mẫu `test/pokemon_store/PokemonStoreTest.cpp` (xem test `legacySnapshotMigratesToV2...` làm mẫu).
+
+### GĐ 4 — Service + rơi đồ  ⟵ mốc đo dung lượng đầu tiên
+
+- [ ] `PokemonService`: API túi đồ (thêm/bớt/đọc), đọc/ghi chiêu qua battle store, đọc/ghi tiến trình gym. Mẫu sẵn có: `renamePokemon()`/`setEvolutionPrompts()` cho Replace-một-record, `movePartyMember()` cho state-only.
+- [ ] Hồi phục khi đọc trong `PokemonService::creditMinutes()` — nơi duy nhất có sẵn cả lối gọi game lẫn quyền truy cập file phụ. `PokemonGame.cpp` **không** bị đụng ở đây.
+- [ ] Mở rộng `createItem()` trong `PokemonGame.cpp` từ 6 đá tiến hóa sang bảng ~80 vật phẩm có trọng số. Đây là thay đổi **duy nhất** chạm vào `PokemonGame.cpp`.
+- [ ] **`pio run -e pokemon-x3`** → so với baseline 6,303,483 B. Đủ data+engine+storage+service mà chưa có UI, nên biết được phần "nền" tốn bao nhiêu trước khi đầu tư viết UI.
+
+### GĐ 5 — UI: Battle + bắt bằng bóng
+
+- [ ] Thêm `Screen::Battle`, `BattleMoves`, `BattleBag`, `BattleBalls`.
+- [ ] Nối vào nhánh Encounter của `Screen::Event` (`PokemonActivity.cpp:434-448`): "Catch" mở màn Battle thay vì bắt ngay; ném bóng thành công mới gọi `service_.resolveEncounter(Catch, ...)`. "Pass" giữ nguyên.
+- [ ] Vẽ tự do trong `renderFocused()`. Dùng `GfxRenderer::wrappedText()` (đã có sẵn, UTF-8-safe, hiện chưa dùng trong file này) cho log; `fillRect`/`drawRect` cho thanh HP; `drawPokemonSpeciesArt` cho ảnh tĩnh.
+
+### GĐ 6 — UI: Gym List + Badges
+
+- [ ] Thêm `Screen::GymList`, `Screen::Badges` + 2 mục vào `Screen::Menu`.
+- [ ] Hiển thị trạng thái từng gym: đã thắng / đang mở / còn khóa; Elite Four khóa tới khi đủ 8 huy hiệu.
+
+### GĐ 7 — UI: 4 chiêu ở Summary + học/thay chiêu
+
+- [ ] Khối 4 chiêu (tên + PP) trong `renderFocused()` nhánh Summary, pitch 26px. Portrait còn ~350px trống; **landscape chật hơn nhiều** (chỉ ~11 dòng tổng, khối tiến hóa đã tới y≈253) nên cần rút gọn.
+- [ ] Giữ Summary **chỉ đọc** (`logicalCount()` vẫn trả 0) để không đổi ngữ nghĩa input hiện tại.
+- [ ] Luồng resolve `PendingEventKind::MoveLearn`: học chiêu mới khi lên level, chọn chiêu bỏ nếu đã đủ 4; dùng TM/HM dạy chiêu.
+
+### GĐ 8 — Hoàn thiện
+
+- [ ] ~20 chuỗi i18n, **chỉ thêm vào `lib/I18n/translations/english.yaml`** rồi chạy `python3 scripts/gen_i18n.py lib/I18n/translations lib/I18n`.
+- [ ] `./bin/clang-format-fix` (CI dùng clang-format 21).
+- [ ] Chạy đủ mục Verification dưới đây.
+
+---
+
+## Cạm bẫy khi sửa `PokemonActivity.cpp`
+
+Thêm **một** giá trị vào `enum class Screen` phải cập nhật **~15 điểm**, nhiều chỗ là chuỗi `if` mà compiler không nhắc:
+
+- `isListScreen()` (`:163`) — **mặc định mọi screen mới bị coi là list screen**; màn Battle phải được loại ra.
+- `logicalCount()` (`:167`) — trả 0 thì `loop()` thoát sớm (`:551`) và màn hình **mất hoàn toàn điều hướng lên/xuống**.
+- `Screen::Menu` là list 7 dòng hardcode ở **3 nơi phải sửa đồng bộ**: count (`:178`), dispatch theo index (`:301-323`), nhãn (`:603-615`).
+- `goBack()` (`:488`) có `default:` nhảy thẳng về Menu → sub-screen phải khai báo case riêng.
+- Còn lại: `activate()`, `buildRows()`, `listTop()`, `selectedRecordId()`, `renderFocused()`, `renderRowArt()`, `renderHeaderAndHints()`, và **2 chuỗi `artRows` trùng lặp** ở `:717` và `:915`.
+- `FreeInkApp<24,8>` giới hạn 24 interaction / 8 handler; hiện dùng 1 handler + tối đa 10 row. `interactionOverflowed()` chưa được kiểm ở đâu cả.
+- Mỗi `render()` là xóa toàn màn + `FAST_REFRESH` toàn panel + N lần mở SD đọc BMP (**art không hề được cache**).
+
+---
+
+## Cách build và test
+
+```sh
+export PATH="$HOME/.platformio/penv/bin:$PATH"   # pio KHÔNG có trong PATH mặc định
+cd /home/vutq/project/xteink-pokemon-game
+git submodule update --init --recursive          # chỉ cần nếu freeink-sdk trống
+
+pio run -e pokemon-x3            # firmware X3/X4 có Pokémon — số flash ở cuối log
+pio run -e pokemon-simulator-X3 -t run_simulator # chạy thử trên máy tính
+python3 scripts/fetch_pokemon_battle_data.py     # làm mới CSV (có cache, nhanh)
+```
+
+## Verification
+
+1. `pio run -e pokemon-x3` — build pass, `check_firmware_size.py` không fail; so delta với baseline **6,303,483 B**.
+2. Test native cho engine: damage, khắc chế type, từng status, công thức bắt theo 4 loại bóng, học chiêu khi lên level.
+3. Simulator: gặp wild → Catch mở battle → đánh → ném bóng → bắt được → Summary hiện đúng 4 chiêu; nhặt item/TM khi đọc; dùng TM dạy chiêu; Gym 1 mở còn 2-8 khóa; thắng gym 1 → huy hiệu hiện ở màn Badges; đủ 8 huy hiệu → Elite Four mở.
+4. **Migration**: chạy với `pokemon-a.bin` v2 có sẵn → load bình thường, túi đồ rỗng, `battleProgress = 0`, không mất Pokémon; commit đầu tiên ghi ra v3.
+5. **Tái tạo file phụ**: xóa `pokemon-battle.bin` giữa chừng → vào lại trận, chiêu được dựng lại từ learnset, HP/PP đầy, không crash.
+6. **Chống ngõ cụt**: đánh cho Pokémon bị thương + dính status → đọc sách một lúc → HP/PP hồi dần, status được xóa.
+7. Test trên X3 thật khi ổn định, theo checklist trong [pokemon-game.md](../pokemon-game.md) — đặc biệt tốc độ refresh e-ink mỗi lượt đánh và heap chật của X3, hai thứ simulator không kiểm chứng được.
