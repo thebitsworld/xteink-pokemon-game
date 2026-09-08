@@ -806,6 +806,107 @@ TEST(PokemonService, PeekBattleMovesNeverPersistsWhenNoEntryExistsYet) {
   EXPECT_EQ(fromPeek.currentHp, 1U);  // once a real entry exists, peek returns it verbatim
 }
 
+TEST(PokemonService, UseConsumableHealsWithMedicineAndRejectsAtFullHp) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu, currentHp starts at maxHp (18) once synthesized
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.currentHp = 5;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  EXPECT_EQ(service.useConsumable(1, 11), pokemon::UseConsumableOutcome::Applied);  // Potion, +20 HP
+  const pokemon::BattleRecordEntry* healed = battleStore.findEntry(1);
+  ASSERT_NE(healed, nullptr);
+  EXPECT_EQ(healed->currentHp, 18U);  // capped at maxHp, not 25
+
+  EXPECT_EQ(service.useConsumable(1, 11), pokemon::UseConsumableOutcome::NotApplicable);  // already full HP
+}
+
+TEST(PokemonService, UseConsumableCuresOnlyTheMatchingStatusWithStatusCureItems) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.status = pokemon::Ailment::Paralysis;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  EXPECT_EQ(service.useConsumable(1, 18), pokemon::UseConsumableOutcome::NotApplicable);  // Antidote cures Poison only
+  EXPECT_EQ(service.useConsumable(1, 22), pokemon::UseConsumableOutcome::Applied);        // Paralyze Heal
+  const pokemon::BattleRecordEntry* cured = battleStore.findEntry(1);
+  ASSERT_NE(cured, nullptr);
+  EXPECT_EQ(cured->status, pokemon::Ailment::None);
+}
+
+TEST(PokemonService, UseConsumableFullRestoreHealsAndCuresAnyStatus) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.currentHp = 3;
+  entry.status = pokemon::Ailment::Burn;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  EXPECT_EQ(service.useConsumable(1, 17), pokemon::UseConsumableOutcome::Applied);  // Full Restore
+  const pokemon::BattleRecordEntry* restored = battleStore.findEntry(1);
+  ASSERT_NE(restored, nullptr);
+  EXPECT_EQ(restored->currentHp, 18U);
+  EXPECT_EQ(restored->status, pokemon::Ailment::None);
+}
+
+TEST(PokemonService, UseConsumablePPRestoreTopsUpEveryKnownMoveSlot) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // synthesizes moves [84, 45, 0, 0] at full PP [30, 40]
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.pp[0] = 5;
+  entry.pp[1] = 40;  // already full - Ether shouldn't touch it
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  EXPECT_EQ(service.useConsumable(1, 25), pokemon::UseConsumableOutcome::Applied);  // Ether, +10 PP
+  const pokemon::BattleRecordEntry* restored = battleStore.findEntry(1);
+  ASSERT_NE(restored, nullptr);
+  EXPECT_EQ(restored->pp[0], 15U);
+  EXPECT_EQ(restored->pp[1], 40U);
+
+  EXPECT_EQ(service.useConsumable(1, 26), pokemon::UseConsumableOutcome::Applied);        // Max Ether tops slot 0 off
+  EXPECT_EQ(service.useConsumable(1, 26), pokemon::UseConsumableOutcome::NotApplicable);  // both slots now full
+}
+
+TEST(PokemonService, UseConsumableRareCandyAddsOneLevelAndRejectsAtLevel100) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu, level 5
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.useConsumable(1, 24), pokemon::UseConsumableOutcome::Applied);  // Rare Candy
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(pokemon::levelForXp(leader.totalXp), 6U);
+
+  leader.totalXp = pokemon::xpRequired(100);
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+  EXPECT_EQ(service.useConsumable(1, 24), pokemon::UseConsumableOutcome::NotApplicable);  // already level 100
+}
+
 TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   Storage.clear();
   pokemon::PokemonStore store;

@@ -36,6 +36,9 @@ class PokemonActivity final : public Activity {
     Pc,
     PcOrder,
     Bag,
+    BagEvolution,
+    BagMedicine,
+    BagMachine,
     ItemTarget,
     Pokedex,
     PokedexDetail,
@@ -48,6 +51,15 @@ class PokemonActivity final : public Activity {
     ResetFirst,
     ResetFinal,
     Message,
+  };
+
+  // Which Bag category ItemTarget was entered from - determines both what
+  // activate() does with the selection and which screen goBack() returns
+  // to (Bag itself is just the 3-way category picker, not a target list).
+  enum class BagCategory : uint8_t {
+    Evolution,
+    Medicine,
+    Machine,
   };
 
   static constexpr uint8_t ROW_CAPACITY = 10;
@@ -105,9 +117,10 @@ class PokemonActivity final : public Activity {
   uint32_t focusedRecordId_ = 0;
   pokemon::PokemonPromptContext nicknamePrompt_{};
   pokemon::EvolutionItem selectedItem_ = pokemon::EvolutionItem::None;
-  bool bagSelectionIsMachine_ = false;
+  BagCategory bagCategory_ = BagCategory::Evolution;
   uint8_t selectedMachineItemId_ = 0;
   uint8_t selectedMachineMoveId_ = 0;
+  uint8_t selectedMedicineItemId_ = 0;
   char message_[96]{};
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};

@@ -321,6 +321,67 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
   return TeachMoveOutcome::MovesetFull;
 }
 
+UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, const uint8_t itemId) {
+  const ItemData* item = itemData(itemId);
+  if (item == nullptr) return UseConsumableOutcome::Failed;
+
+  PokemonRecord record{};
+  if (readRecord(recordId, record) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
+  const uint8_t level = levelForXp(record.totalXp);
+
+  if (item->category == ItemCategory::Candy) {
+    if (level >= 100) return UseConsumableOutcome::NotApplicable;
+    PokemonState state{};
+    if (loadReadyState(state) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
+    const uint8_t nextLevel = static_cast<uint8_t>(level + 1U);
+    record.totalXp = xpRequired(nextLevel);
+    queueMoveLearnIfNeeded(state, record, level, nextLevel);
+    const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
+    if (!store_.commit(state, mutation)) {
+      LOG_ERR("PokemonService", "Failed to use Rare Candy");
+      return UseConsumableOutcome::Failed;
+    }
+    return UseConsumableOutcome::Applied;
+  }
+
+  const BaseStats* stats = baseStatsFor(record.speciesId);
+  if (stats == nullptr) return UseConsumableOutcome::Failed;
+  BattleRecordEntry entry{};
+  if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
+  const uint16_t maxHp = battleMaxHp(stats->hp, level);
+
+  bool changed = false;
+  if (item->category == ItemCategory::Medicine && entry.currentHp < maxHp) {
+    const uint32_t healed = static_cast<uint32_t>(entry.currentHp) + item->effectValue;
+    entry.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healed));
+    changed = true;
+  }
+  if ((item->category == ItemCategory::Medicine || item->category == ItemCategory::StatusCure) &&
+      item->curesAilment != Ailment::None && entry.status != Ailment::None &&
+      (item->curesAilment == Ailment::All || item->curesAilment == entry.status)) {
+    entry.status = Ailment::None;
+    entry.statusTurns = 0;
+    changed = true;
+  }
+  if (item->category == ItemCategory::PPRestore) {
+    for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+      if (entry.moves[slot] == 0) continue;
+      const MoveData* move = moveData(entry.moves[slot]);
+      const uint8_t maxPp = move == nullptr ? 0 : move->pp;
+      if (entry.pp[slot] >= maxPp) continue;
+      entry.pp[slot] =
+          static_cast<uint8_t>(std::min<uint32_t>(maxPp, static_cast<uint32_t>(entry.pp[slot]) + item->effectValue));
+      changed = true;
+    }
+  }
+  if (!changed) return UseConsumableOutcome::NotApplicable;
+  if (!battleStore_.upsertEntry(entry)) {
+    LOG_ERR("PokemonService", "Failed to use consumable item");
+    return UseConsumableOutcome::Failed;
+  }
+  return UseConsumableOutcome::Applied;
+}
+
 ServiceStatus PokemonService::setEvolutionPrompts(const uint32_t recordId, const bool enabled) {
   PokemonState state{};
   const ServiceStatus stateStatus = loadReadyState(state);

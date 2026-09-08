@@ -18,6 +18,12 @@ enum class TeachMoveOutcome : uint8_t {
   Failed,
 };
 
+enum class UseConsumableOutcome : uint8_t {
+  Applied,
+  NotApplicable,
+  Failed,
+};
+
 enum class ServiceStatus : uint8_t {
   Ok,
   Empty,
@@ -112,6 +118,23 @@ class PokemonService {
   // MoveLearn, a TM use is player-initiated outside any pending-event
   // queue, so there is no slot-choice prompt wired up for it in GĐ 7.
   TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId);
+
+  // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
+  // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine
+  // items go through useEvolutionItem/teachMove/attemptBattleCatch
+  // instead) on recordId. Medicine heals HP by effectValue and cures
+  // curesAilment if set; StatusCure only cures; PPRestore restores
+  // effectValue PP to every known move slot (Gen1's Ether/Elixir split by
+  // single-vs-all move isn't modeled - both simply top up every slot, a
+  // deliberate simplification); Candy adds one level's worth of XP and
+  // may itself queue a MoveLearn event exactly like reading credit does,
+  // but does NOT check for evolution (that only runs inside
+  // creditMinutes() - a Candy-earned evolution is caught on the very next
+  // reading credit instead of duplicating that private check here).
+  // Returns NotApplicable when the item would have no effect (already at
+  // full HP/PP, no matching status, already level 100) without consuming
+  // anything - the caller is responsible for consumeBagItem() on Applied.
+  UseConsumableOutcome useConsumable(uint32_t recordId, uint8_t itemId);
 
   // Thin wrappers around the pure engine (PokemonBattle.h) using this
   // service's own RandomSource, so the UI layer never touches RNG directly -

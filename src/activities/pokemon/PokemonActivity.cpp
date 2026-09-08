@@ -109,29 +109,35 @@ const char* itemName(const pokemon::EvolutionItem item) {
   }
 }
 
-// The Bag screen lists the 6 evolution stones (fixed positions, unchanged
-// since GĐ 1) followed by every TM/HM (Machine category) the player has
-// picked up - potions/status cures/candy/balls have no dedicated "use"
-// flow yet (balls are only ever consumed via BattleBalls) and are out of
-// scope for GĐ 7, which only asks for TM/HM teaching. Ids are not
-// contiguous by data-file convention, so this walks the table rather than
-// assuming a fixed range.
-uint8_t machineItemIdAt(const size_t index) {
+// The Bag is split into 3 categories, each its own screen: Evolution (the
+// 6 stones + Link Cable, fixed positions unchanged since GĐ 1), Medicine
+// (heal/status-cure/PP-restore/candy items - GĐ 9), and Machine (TM/HM,
+// GĐ 7). Ball items have no Bag row at all - they are only ever consumed
+// via BattleBalls. Ids are not contiguous by category in the data file, so
+// these walk the table by predicate rather than assuming a fixed range.
+bool isMachineCategory(const pokemon::ItemCategory category) { return category == pokemon::ItemCategory::Machine; }
+
+bool isMedicineCategory(const pokemon::ItemCategory category) {
+  return category == pokemon::ItemCategory::Medicine || category == pokemon::ItemCategory::StatusCure ||
+         category == pokemon::ItemCategory::PPRestore || category == pokemon::ItemCategory::Candy;
+}
+
+uint8_t bagItemIdAt(const size_t index, bool (*matches)(pokemon::ItemCategory)) {
   size_t count = 0;
   for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
     const pokemon::ItemData* data = pokemon::itemData(id);
-    if (data == nullptr || data->category != pokemon::ItemCategory::Machine) continue;
+    if (data == nullptr || !matches(data->category)) continue;
     if (count == index) return id;
     ++count;
   }
   return 0;
 }
 
-size_t machineItemCount() {
+size_t bagItemCount(bool (*matches)(pokemon::ItemCategory)) {
   size_t count = 0;
   for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
     const pokemon::ItemData* data = pokemon::itemData(id);
-    if (data != nullptr && data->category == pokemon::ItemCategory::Machine) ++count;
+    if (data != nullptr && matches(data->category)) ++count;
   }
   return count;
 }
@@ -291,7 +297,13 @@ int PokemonActivity::logicalCount() const {
     case Screen::PcOrder:
       return 3;
     case Screen::Bag:
-      return static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT + machineItemCount());
+      return 3;
+    case Screen::BagEvolution:
+      return pokemon::EVOLUTION_ITEM_COUNT;
+    case Screen::BagMedicine:
+      return static_cast<int>(bagItemCount(isMedicineCategory));
+    case Screen::BagMachine:
+      return static_cast<int>(bagItemCount(isMachineCategory));
     case Screen::ItemTarget:
       return snapshot_.partyCount;
     case Screen::Pokedex:
@@ -699,39 +711,71 @@ void PokemonActivity::activate() {
       setScreen(Screen::Pc);
       return;
     case Screen::Bag:
-      if (selected_ < static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT)) {
-        bagSelectionIsMachine_ = false;
-        selectedItem_ = static_cast<pokemon::EvolutionItem>(selected_ + 1);
-        if (snapshot_.state.itemCounts[selected_] == 0) {
-          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
-          return;
-        }
-      } else {
-        const uint8_t itemId = machineItemIdAt(static_cast<size_t>(selected_ - pokemon::EVOLUTION_ITEM_COUNT));
-        const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
-        if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
-          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
-          return;
-        }
-        const pokemon::ItemData* data = pokemon::itemData(itemId);
-        bagSelectionIsMachine_ = true;
-        selectedMachineItemId_ = itemId;
-        selectedMachineMoveId_ = data == nullptr ? 0 : data->teachesMoveId;
+      setScreen(selected_ == 0 ? Screen::BagEvolution : selected_ == 1 ? Screen::BagMedicine : Screen::BagMachine);
+      return;
+    case Screen::BagEvolution:
+      bagCategory_ = BagCategory::Evolution;
+      selectedItem_ = static_cast<pokemon::EvolutionItem>(selected_ + 1);
+      if (snapshot_.state.itemCounts[selected_] == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagEvolution);
+        return;
       }
       setScreen(Screen::ItemTarget);
       return;
+    case Screen::BagMedicine: {
+      bagCategory_ = BagCategory::Medicine;
+      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), isMedicineCategory);
+      const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+      if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMedicine);
+        return;
+      }
+      selectedMedicineItemId_ = itemId;
+      setScreen(Screen::ItemTarget);
+      return;
+    }
+    case Screen::BagMachine: {
+      bagCategory_ = BagCategory::Machine;
+      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), isMachineCategory);
+      const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+      if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMachine);
+        return;
+      }
+      const pokemon::ItemData* data = pokemon::itemData(itemId);
+      selectedMachineItemId_ = itemId;
+      selectedMachineMoveId_ = data == nullptr ? 0 : data->teachesMoveId;
+      setScreen(Screen::ItemTarget);
+      return;
+    }
     case Screen::ItemTarget: {
       const uint32_t recordId = selectedRecordId();
-      if (bagSelectionIsMachine_) {
+      const Screen bagScreen = bagCategory_ == BagCategory::Evolution  ? Screen::BagEvolution
+                               : bagCategory_ == BagCategory::Medicine ? Screen::BagMedicine
+                                                                       : Screen::BagMachine;
+      if (bagCategory_ == BagCategory::Machine) {
         const pokemon::TeachMoveOutcome outcome = service_.teachMove(recordId, selectedMachineMoveId_);
         if (outcome == pokemon::TeachMoveOutcome::AlreadyKnown) {
-          showMessage(tr(STR_POKEMON_ALREADY_KNOWS_MOVE), Screen::Bag);
+          showMessage(tr(STR_POKEMON_ALREADY_KNOWS_MOVE), bagScreen);
         } else if (outcome == pokemon::TeachMoveOutcome::MovesetFull) {
-          showMessage(tr(STR_POKEMON_MOVESET_FULL), Screen::Bag);
+          showMessage(tr(STR_POKEMON_MOVESET_FULL), bagScreen);
         } else if (outcome != pokemon::TeachMoveOutcome::Learned) {
-          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
         } else if (service_.consumeBagItem(selectedMachineItemId_) != pokemon::ServiceStatus::Ok) {
-          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
+        } else if (refreshSnapshot()) {
+          setScreen(Screen::Party);
+        }
+        return;
+      }
+      if (bagCategory_ == BagCategory::Medicine) {
+        const pokemon::UseConsumableOutcome outcome = service_.useConsumable(recordId, selectedMedicineItemId_);
+        if (outcome == pokemon::UseConsumableOutcome::NotApplicable) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), bagScreen);
+        } else if (outcome != pokemon::UseConsumableOutcome::Applied) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
+        } else if (service_.consumeBagItem(selectedMedicineItemId_) != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
         } else if (refreshSnapshot()) {
           setScreen(Screen::Party);
         }
@@ -739,9 +783,9 @@ void PokemonActivity::activate() {
       }
       const auto status = service_.useEvolutionItem(recordId, selectedItem_);
       if (status == pokemon::ServiceStatus::NotApplicable)
-        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), bagScreen);
       else if (status != pokemon::ServiceStatus::Ok)
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
       else {
         if (!refreshSnapshot()) return;
         setScreen(Screen::Party);
@@ -938,6 +982,13 @@ void PokemonActivity::goBack() {
       setScreen(Screen::Pc);
       return;
     case Screen::ItemTarget:
+      setScreen(bagCategory_ == BagCategory::Evolution  ? Screen::BagEvolution
+                : bagCategory_ == BagCategory::Medicine ? Screen::BagMedicine
+                                                        : Screen::BagMachine);
+      return;
+    case Screen::BagEvolution:
+    case Screen::BagMedicine:
+    case Screen::BagMachine:
       setScreen(Screen::Bag);
       return;
     case Screen::Battle:
@@ -1112,20 +1163,29 @@ void PokemonActivity::buildRows() {
                    : index == 1 ? tr(STR_POKEMON_NUMBER)
                                 : tr(STR_POKEMON_ALPHABETICAL));
         break;
-      case Screen::Bag: {
+      case Screen::Bag:
+        row(local, index == 0   ? tr(STR_POKEMON_BAG_EVOLUTION)
+                   : index == 1 ? tr(STR_POKEMON_BAG_MEDICINE)
+                                : tr(STR_POKEMON_BAG_MACHINES));
+        break;
+      case Screen::BagEvolution: {
+        const auto item = static_cast<pokemon::EvolutionItem>(index + 1);
         char count[16];
-        if (index < static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT)) {
-          const auto item = static_cast<pokemon::EvolutionItem>(index + 1);
-          snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[index]);
-          row(local, itemName(item), count);
-        } else {
-          const uint8_t itemId = machineItemIdAt(static_cast<size_t>(index - pokemon::EVOLUTION_ITEM_COUNT));
-          const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
-          const pokemon::ItemData* data = pokemon::itemData(itemId);
-          snprintf(count, sizeof(count), "× %u",
-                   bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
-          row(local, data == nullptr ? "?" : data->name, count);
-        }
+        snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[index]);
+        row(local, itemName(item), count);
+        break;
+      }
+      case Screen::BagMedicine:
+      case Screen::BagMachine: {
+        const bool machine = screen_ == Screen::BagMachine;
+        const uint8_t itemId =
+            bagItemIdAt(static_cast<size_t>(index), machine ? isMachineCategory : isMedicineCategory);
+        const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+        const pokemon::ItemData* data = pokemon::itemData(itemId);
+        char count[16];
+        snprintf(count, sizeof(count), "× %u",
+                 bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
+        row(local, data == nullptr ? "?" : data->name, count);
         break;
       }
       case Screen::Pokedex: {
@@ -1219,7 +1279,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   buildRows();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
-                       screen_ == Screen::Pc || screen_ == Screen::Bag || screen_ == Screen::ItemTarget ||
+                       screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex;
   int top = listTop();
   rowHeight_ = 64;
@@ -1488,7 +1548,7 @@ void PokemonActivity::renderBattleHud() {
 
 void PokemonActivity::renderRowArt() {
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
-                       screen_ == Screen::Pc || screen_ == Screen::Bag || screen_ == Screen::ItemTarget ||
+                       screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex;
   if (!artRows) return;
   const int start = pageStart();
@@ -1506,9 +1566,9 @@ void PokemonActivity::renderRowArt() {
              pokemon::isSpeciesMarked(snapshot_.state.seenSpecies, static_cast<uint16_t>(start + local + 1))) {
       speciesId = static_cast<uint16_t>(start + local + 1);
     }
-    if (screen_ == Screen::Bag && start + local < static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT)) {
+    if (screen_ == Screen::BagEvolution) {
       // No icon assets exist for TM/HM/potions/etc - only the 6 evolution
-      // stones (the original Bag rows, GĐ 1) have art to draw here.
+      // stones (BagEvolution's rows) have art to draw here.
       constexpr int itemSize = 32;
       pokemon::drawPokemonItemArt(renderer, static_cast<pokemon::EvolutionItem>(start + local + 1), false,
                                   Rect{listBounds_.x + 5 + pokemon::pokemonCenteredOffset(80, itemSize),
@@ -1538,6 +1598,12 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_PC_BOX);
   else if (screen_ == Screen::Bag)
     title = tr(STR_POKEMON_BAG);
+  else if (screen_ == Screen::BagEvolution)
+    title = tr(STR_POKEMON_BAG_EVOLUTION);
+  else if (screen_ == Screen::BagMedicine)
+    title = tr(STR_POKEMON_BAG_MEDICINE);
+  else if (screen_ == Screen::BagMachine)
+    title = tr(STR_POKEMON_BAG_MACHINES);
   else if (screen_ == Screen::Pokedex)
     title = tr(STR_POKEDEX);
   else if (screen_ == Screen::Summary || screen_ == Screen::Actions)
