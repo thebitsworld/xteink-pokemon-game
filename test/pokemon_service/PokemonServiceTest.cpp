@@ -632,6 +632,180 @@ TEST(PokemonService, AttemptBattleCatchDelegatesToTheEngineWithItsOwnRandomSourc
   EXPECT_TRUE(service.attemptBattleCatch(wild, pokemon::BallKind::Poke));
 }
 
+// Fills Pikachu's (recordId 1) battle entry with all 4 level-1..16 moves and
+// parks its XP one reading-minute short of level 26 (bypassing creditMinutes
+// for the climb itself, so none of this setup can trigger a MoveLearn queue
+// or an unrelated encounter/item event) - shared by every test below that
+// then credits exactly 1 minute to cross into level 26, where Pikachu's
+// learnset has its next move and its moveset is already full. Crediting
+// only 1 minute (instead of the whole level 16->26 gap) also keeps
+// state.readingMinuteRemainder far under the 15/60-minute encounter/item
+// check windows, so the MoveLearn event is guaranteed to be the only thing
+// landing in the (capacity-3) pending-event queue.
+void seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(pokemon::PokemonStore& store,
+                                                       pokemon::PokemonBattleStore& battleStore) {
+  pokemon::BattleRecordEntry entry{};
+  entry.recordId = 1;
+  entry.moves = {84, 45, 86, 98};
+  entry.pp = {30, 40, 20, 20};
+  ASSERT_TRUE(battleStore.upsertEntry(entry));
+
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  leader.totalXp = pokemon::xpRequired(26) - 1U;
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  const pokemon::RecordMutation mutation{1, leader, pokemon::RecordMutationKind::Replace};
+  ASSERT_TRUE(store.commit(state, mutation));
+}
+
+TEST(PokemonService, CreditingMinutesAutoLearnsIntoAFreeSlotWithoutQueuingAnEvent) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu (species 25), level 5
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(entry.moves[2], 0U);  // only 2 moves known yet - room to grow
+
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  leader.totalXp = pokemon::xpRequired(9) - 1U;  // one reading-minute short of level 9
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+
+  ASSERT_TRUE(service.creditMinutes(1, 10));
+
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(pokemon::pendingEventFront(state), nullptr);  // there was room, so no MoveLearn prompt
+
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->moves[2], 86U);  // move Pikachu learns at level 9, auto-filled into the free slot
+  EXPECT_GT(updated->pp[2], 0U);
+}
+
+TEST(PokemonService, CreditingMinutesQueuesAMoveLearnEventWhenTheMovesetIsFull) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(store, battleStore);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  ASSERT_TRUE(service.creditMinutes(1, 10));
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  const pokemon::PendingEvent* pending = pokemon::pendingEventFront(state);
+  ASSERT_NE(pending, nullptr);
+  EXPECT_EQ(pending->kind, pokemon::PendingEventKind::MoveLearn);
+  EXPECT_EQ(pending->recordId, 1U);
+  EXPECT_EQ(pending->speciesId, 129U);  // move id Pikachu learns at level 26 (reused field - see PendingEventKind)
+  EXPECT_EQ(pending->level, 26U);
+
+  const pokemon::BattleRecordEntry* unchanged = battleStore.findEntry(1);
+  ASSERT_NE(unchanged, nullptr);
+  EXPECT_EQ(unchanged->moves[0], 84U);  // moveset untouched until the UI resolves the choice
+}
+
+TEST(PokemonService, ResolveMoveLearnReplacesTheChosenSlotAndDequeuesTheEvent) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(store, battleStore);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+  ASSERT_TRUE(service.creditMinutes(1, 10));
+
+  ASSERT_EQ(service.resolveMoveLearn(1), pokemon::ServiceStatus::Ok);  // replace slot 1
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(pokemon::pendingEventFront(state), nullptr);
+
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->moves[0], 84U);   // other slots untouched
+  EXPECT_EQ(updated->moves[1], 129U);  // the newly-learned move
+  EXPECT_EQ(updated->moves[2], 86U);
+}
+
+TEST(PokemonService, ResolveMoveLearnWithANegativeSlotSkipsLearningButStillDequeues) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(store, battleStore);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+  ASSERT_TRUE(service.creditMinutes(1, 10));
+
+  ASSERT_EQ(service.resolveMoveLearn(-1), pokemon::ServiceStatus::Ok);
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(pokemon::pendingEventFront(state), nullptr);
+
+  const pokemon::BattleRecordEntry* unchanged = battleStore.findEntry(1);
+  ASSERT_NE(unchanged, nullptr);
+  const std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> expectedMoves{84, 45, 86, 98};
+  EXPECT_EQ(unchanged->moves, expectedMoves);
+}
+
+TEST(PokemonService, ResolveMoveLearnIsNotApplicableWithoutAPendingMoveLearnEvent) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.resolveMoveLearn(0), pokemon::ServiceStatus::NotApplicable);
+}
+
+TEST(PokemonService, TeachMoveLearnsIntoAFreeSlotThenReportsAlreadyKnownOrMovesetFull) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.teachMove(1, 84), pokemon::TeachMoveOutcome::AlreadyKnown);
+
+  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // TM01 -> Mega Punch into slot 2
+  const pokemon::BattleRecordEntry* afterFirst = battleStore.findEntry(1);
+  ASSERT_NE(afterFirst, nullptr);
+  EXPECT_EQ(afterFirst->moves[2], 5U);
+  EXPECT_GT(afterFirst->pp[2], 0U);
+
+  ASSERT_EQ(service.teachMove(1, 13), pokemon::TeachMoveOutcome::Learned);  // TM02 fills the last slot
+  EXPECT_EQ(service.teachMove(1, 14), pokemon::TeachMoveOutcome::MovesetFull);  // TM03, no room left
+}
+
+TEST(PokemonService, PeekBattleMovesNeverPersistsWhenNoEntryExistsYet) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonRecord record{};
+  ASSERT_TRUE(store.readRecord(1, record));
+  const pokemon::BattleRecordEntry peeked = service.peekBattleMoves(record);
+  EXPECT_EQ(peeked.moves[0], 84U);
+  EXPECT_EQ(peeked.moves[1], 45U);
+  EXPECT_EQ(battleStore.findEntry(1), nullptr);  // read-only: peeking never writes to the battle store
+
+  pokemon::BattleRecordEntry modified = peeked;
+  modified.currentHp = 1;
+  ASSERT_EQ(service.saveBattleEntry(modified), pokemon::ServiceStatus::Ok);
+
+  const pokemon::BattleRecordEntry fromPeek = service.peekBattleMoves(record);
+  EXPECT_EQ(fromPeek.currentHp, 1U);  // once a real entry exists, peek returns it verbatim
+}
+
 TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   Storage.clear();
   pokemon::PokemonStore store;

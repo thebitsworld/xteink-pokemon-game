@@ -436,6 +436,18 @@ bool acknowledgeItem(PokemonState& state, const PokemonRecord& leader) {
   return true;
 }
 
+bool acknowledgeMoveLearn(PokemonState& state, const PokemonRecord& record) {
+  const PendingEvent* pending = pendingEventFront(state);
+  if (!validateState(state) || !validateRecord(record) || pending == nullptr ||
+      pending->kind != PendingEventKind::MoveLearn || pending->recordId != record.recordId) {
+    return false;
+  }
+  PokemonState candidate = state;
+  if (!popPendingEvent(candidate)) return false;
+  state = candidate;
+  return true;
+}
+
 bool setEvolutionPrompts(PokemonState& state, PokemonRecord& record, const bool enabled, RecordMutation& mutation) {
   if (!validateState(state) || !validateRecord(record) || mutation.kind != RecordMutationKind::None) {
     return false;

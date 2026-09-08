@@ -11,6 +11,13 @@
 
 namespace pokemon {
 
+enum class TeachMoveOutcome : uint8_t {
+  Learned,
+  AlreadyKnown,
+  MovesetFull,
+  Failed,
+};
+
 enum class ServiceStatus : uint8_t {
   Ok,
   Empty,
@@ -61,6 +68,11 @@ class PokemonService {
   ServiceStatus resolveEncounter(EncounterChoice choice, uint32_t& caughtRecordId);
   ServiceStatus acknowledgeItem();
   ServiceStatus resolveEvolution(EvolutionChoice choice);
+  // Resolves the front MoveLearn event (PendingEventKind::MoveLearn):
+  // replaceSlot in [0, BATTLE_MOVE_SLOTS) teaches the move into that slot,
+  // overwriting whatever was there; any other value (e.g. -1) skips
+  // learning it. Either way, the pending event is dequeued.
+  ServiceStatus resolveMoveLearn(int replaceSlot);
   ServiceStatus setEvolutionPrompts(uint32_t recordId, bool enabled);
   ServiceStatus useEvolutionItem(uint32_t recordId, EvolutionItem item);
   ServiceStatus reset();
@@ -86,6 +98,21 @@ class PokemonService {
   ServiceStatus loadBattleEntry(uint32_t recordId, BattleRecordEntry& output);
   ServiceStatus saveBattleEntry(const BattleRecordEntry& entry);
 
+  // Read-only lookup of a Pokemon's currently known moveset for display
+  // (Summary screen): returns the persisted battle-store entry if one
+  // exists, else what it WOULD synthesize to from the record's current
+  // level/learnset - unlike loadBattleEntry, this never creates or
+  // persists anything, so merely viewing a Pokemon never writes to SD.
+  BattleRecordEntry peekBattleMoves(const PokemonRecord& record) const;
+
+  // Teaches moveId to recordId via TM/HM. Learns straight into an empty
+  // move slot when there is one; if the moveset is already full (and
+  // doesn't already know the move), the caller must free a slot first
+  // (e.g. via a level-up MoveLearn choice) - unlike PendingEventKind's
+  // MoveLearn, a TM use is player-initiated outside any pending-event
+  // queue, so there is no slot-choice prompt wired up for it in GĐ 7.
+  TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId);
+
   // Thin wrappers around the pure engine (PokemonBattle.h) using this
   // service's own RandomSource, so the UI layer never touches RNG directly -
   // consistent with how every PokemonGame.cpp rule is only ever invoked
@@ -98,6 +125,14 @@ class PokemonService {
   ServiceStatus loadReadyState(PokemonState& output);
   BattleRecordEntry synthesizeBattleEntry(const PokemonRecord& record) const;
   void healPartyOnRead(const PokemonState& state, uint16_t minutes);
+  // Checks the leader's learnset for any move newly available between
+  // previousLevel (exclusive) and currentLevel (inclusive): auto-fills an
+  // empty move slot if there's room, or queues a MoveLearn event for the UI
+  // to resolve if the moveset is already full. A Pokemon with no battle
+  // entry yet is skipped - its first battle synthesizes an up-to-date
+  // moveset for its current level already, so there is nothing to catch up.
+  void queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader, uint8_t previousLevel,
+                              uint8_t currentLevel);
   static bool creditFromTracker(void* context, uint16_t minutes, uint8_t bookProgressPercent);
 
   PokemonStore& store_;

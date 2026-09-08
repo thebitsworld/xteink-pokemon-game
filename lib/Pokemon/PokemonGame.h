@@ -72,6 +72,11 @@ CreditResult applyCreditedMinutes(PokemonState& state, PokemonRecord& leader, ui
                                   uint8_t bookProgressPercent, OwnedEvolutionNeeds ownedEvolutionNeeds,
                                   const RandomSource& random);
 bool acknowledgeItem(PokemonState& state, const PokemonRecord& leader);
+// Dequeues a MoveLearn event once the UI has resolved it (learned into a
+// slot, or skipped) - the slot mutation itself lives in the battle store
+// (PokemonService), out of reach of this pure, storage-agnostic layer, so
+// this only ever pops the queue entry.
+bool acknowledgeMoveLearn(PokemonState& state, const PokemonRecord& record);
 bool setEvolutionPrompts(PokemonState& state, PokemonRecord& record, bool enabled, RecordMutation& mutation);
 bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, EncounterChoice choice, const char* nickname,
                       RecordMutation& mutation);

@@ -109,6 +109,33 @@ const char* itemName(const pokemon::EvolutionItem item) {
   }
 }
 
+// The Bag screen lists the 6 evolution stones (fixed positions, unchanged
+// since GĐ 1) followed by every TM/HM (Machine category) the player has
+// picked up - potions/status cures/candy/balls have no dedicated "use"
+// flow yet (balls are only ever consumed via BattleBalls) and are out of
+// scope for GĐ 7, which only asks for TM/HM teaching. Ids are not
+// contiguous by data-file convention, so this walks the table rather than
+// assuming a fixed range.
+uint8_t machineItemIdAt(const size_t index) {
+  size_t count = 0;
+  for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
+    const pokemon::ItemData* data = pokemon::itemData(id);
+    if (data == nullptr || data->category != pokemon::ItemCategory::Machine) continue;
+    if (count == index) return id;
+    ++count;
+  }
+  return 0;
+}
+
+size_t machineItemCount() {
+  size_t count = 0;
+  for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
+    const pokemon::ItemData* data = pokemon::itemData(id);
+    if (data != nullptr && data->category == pokemon::ItemCategory::Machine) ++count;
+  }
+  return count;
+}
+
 // Short status-abbreviation tags (PSN/PAR/...), intentionally not
 // localized - like move and item names (GĐ 1 decision), these read the same
 // in every official Pokémon localization, so translating them would spend
@@ -264,14 +291,17 @@ int PokemonActivity::logicalCount() const {
     case Screen::PcOrder:
       return 3;
     case Screen::Bag:
-      return pokemon::EVOLUTION_ITEM_COUNT;
+      return static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT + machineItemCount());
     case Screen::ItemTarget:
       return snapshot_.partyCount;
     case Screen::Pokedex:
       return pokemon::KANTO_SPECIES_COUNT;
     case Screen::Event: {
       const pokemon::PendingEvent* pending = pokemon::pendingEventFront(snapshot_.state);
-      return pending != nullptr && pending->kind == pokemon::PendingEventKind::Item ? 1 : 2;
+      if (pending == nullptr) return 2;
+      if (pending->kind == pokemon::PendingEventKind::Item) return 1;
+      if (pending->kind == pokemon::PendingEventKind::MoveLearn) return pokemon::BATTLE_MOVE_SLOTS + 1;
+      return 2;
     }
     case Screen::Battle:
       return gymChallengeIndex_ != 0 ? 2 : 3;  // trainer battles have no BALL option
@@ -668,14 +698,45 @@ void PokemonActivity::activate() {
       setScreen(Screen::Pc);
       return;
     case Screen::Bag:
-      selectedItem_ = static_cast<pokemon::EvolutionItem>(selected_ + 1);
-      if (snapshot_.state.itemCounts[selected_] == 0)
-        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
-      else
-        setScreen(Screen::ItemTarget);
+      if (selected_ < static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT)) {
+        bagSelectionIsMachine_ = false;
+        selectedItem_ = static_cast<pokemon::EvolutionItem>(selected_ + 1);
+        if (snapshot_.state.itemCounts[selected_] == 0) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
+          return;
+        }
+      } else {
+        const uint8_t itemId = machineItemIdAt(static_cast<size_t>(selected_ - pokemon::EVOLUTION_ITEM_COUNT));
+        const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+        if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
+          return;
+        }
+        const pokemon::ItemData* data = pokemon::itemData(itemId);
+        bagSelectionIsMachine_ = true;
+        selectedMachineItemId_ = itemId;
+        selectedMachineMoveId_ = data == nullptr ? 0 : data->teachesMoveId;
+      }
+      setScreen(Screen::ItemTarget);
       return;
     case Screen::ItemTarget: {
-      const auto status = service_.useEvolutionItem(selectedRecordId(), selectedItem_);
+      const uint32_t recordId = selectedRecordId();
+      if (bagSelectionIsMachine_) {
+        const pokemon::TeachMoveOutcome outcome = service_.teachMove(recordId, selectedMachineMoveId_);
+        if (outcome == pokemon::TeachMoveOutcome::AlreadyKnown) {
+          showMessage(tr(STR_POKEMON_ALREADY_KNOWS_MOVE), Screen::Bag);
+        } else if (outcome == pokemon::TeachMoveOutcome::MovesetFull) {
+          showMessage(tr(STR_POKEMON_MOVESET_FULL), Screen::Bag);
+        } else if (outcome != pokemon::TeachMoveOutcome::Learned) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+        } else if (service_.consumeBagItem(selectedMachineItemId_) != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+        } else if (refreshSnapshot()) {
+          setScreen(Screen::Party);
+        }
+        return;
+      }
+      const auto status = service_.useEvolutionItem(recordId, selectedItem_);
       if (status == pokemon::ServiceStatus::NotApplicable)
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
       else if (status != pokemon::ServiceStatus::Ok)
@@ -725,6 +786,17 @@ void PokemonActivity::activate() {
       } else if (pending.kind == pokemon::PendingEventKind::Evolution) {
         const auto choice = selected_ == 0 ? pokemon::EvolutionChoice::Evolve : pokemon::EvolutionChoice::Cancel;
         if (service_.resolveEvolution(choice) != pokemon::ServiceStatus::Ok)
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
+        else {
+          if (!refreshSnapshot()) return;
+          setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+        }
+      } else if (pending.kind == pokemon::PendingEventKind::MoveLearn) {
+        // selected_ < BATTLE_MOVE_SLOTS picks which existing move to
+        // overwrite; the last row (index BATTLE_MOVE_SLOTS) skips learning
+        // it. Either way the pending event is dequeued.
+        const int replaceSlot = selected_ < static_cast<int>(pokemon::BATTLE_MOVE_SLOTS) ? selected_ : -1;
+        if (service_.resolveMoveLearn(replaceSlot) != pokemon::ServiceStatus::Ok)
           showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
         else {
           if (!refreshSnapshot()) return;
@@ -1040,10 +1112,20 @@ void PokemonActivity::buildRows() {
                                 : tr(STR_POKEMON_ALPHABETICAL));
         break;
       case Screen::Bag: {
-        const auto item = static_cast<pokemon::EvolutionItem>(index + 1);
         char count[16];
-        snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[index]);
-        row(local, itemName(item), count);
+        if (index < static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT)) {
+          const auto item = static_cast<pokemon::EvolutionItem>(index + 1);
+          snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[index]);
+          row(local, itemName(item), count);
+        } else {
+          const uint8_t itemId = machineItemIdAt(static_cast<size_t>(index - pokemon::EVOLUTION_ITEM_COUNT));
+          const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+          const pokemon::ItemData* data = pokemon::itemData(itemId);
+          snprintf(count, sizeof(count), "× %u", bagIndex < snapshot_.state.bagCounts.size()
+                                                     ? snapshot_.state.bagCounts[bagIndex]
+                                                     : 0);
+          row(local, data == nullptr ? "?" : data->name, count);
+        }
         break;
       }
       case Screen::Pokedex: {
@@ -1061,6 +1143,20 @@ void PokemonActivity::buildRows() {
           row(local, index == 0 ? tr(STR_POKEMON_CATCH) : tr(STR_POKEMON_PASS));
         } else if (pending != nullptr && pending->kind == pokemon::PendingEventKind::Evolution) {
           row(local, index == 0 ? tr(STR_POKEMON_EVOLVE) : tr(STR_POKEMON_CANCEL));
+        } else if (pending != nullptr && pending->kind == pokemon::PendingEventKind::MoveLearn) {
+          if (index >= static_cast<int>(pokemon::BATTLE_MOVE_SLOTS)) {
+            row(local, tr(STR_POKEMON_CANCEL));
+            break;
+          }
+          pokemon::PokemonRecord record{};
+          const pokemon::BattleRecordEntry entry =
+              service_.readRecord(pending->recordId, record) == pokemon::ServiceStatus::Ok
+                  ? service_.peekBattleMoves(record)
+                  : pokemon::BattleRecordEntry{};
+          const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
+          char value[16];
+          snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index], move == nullptr ? 0 : move->pp);
+          row(local, move == nullptr ? "-" : move->name, value);
         } else
           row(local, tr(STR_OK));
         break;
@@ -1289,6 +1385,29 @@ void PokemonActivity::renderFocused() {
     }
     const bool prompts = (record.flags & pokemon::recordFlag(pokemon::RecordFlag::EvolutionPromptsDisabled)) == 0;
     drawField(y, tr(STR_POKEMON_EVOLUTION_PROMPTS_FIELD), prompts ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
+    y += 26;
+    // 2 moves per line (not 1) - landscape's vertical budget is tight
+    // enough already (see the roadmap's GĐ 7 note) that a 4-line block
+    // here would run past the button hints.
+    const pokemon::BattleRecordEntry moves = service_.peekBattleMoves(record);
+    const int moveColumnX = textX + (valueRight - textX) / 2 + 10;
+    for (size_t slot = 0; slot < pokemon::BATTLE_MOVE_SLOTS; slot += 2) {
+      char left[40] = "-";
+      char right[40] = "-";
+      if (moves.moves[slot] != 0) {
+        const pokemon::MoveData* move = pokemon::moveData(moves.moves[slot]);
+        snprintf(left, sizeof(left), "%s %u/%u", move == nullptr ? "?" : move->name, moves.pp[slot],
+                 move == nullptr ? 0 : move->pp);
+      }
+      renderer.drawText(UI_10_FONT_ID, textX, y, left);
+      if (moves.moves[slot + 1] != 0) {
+        const pokemon::MoveData* move = pokemon::moveData(moves.moves[slot + 1]);
+        snprintf(right, sizeof(right), "%s %u/%u", move == nullptr ? "?" : move->name, moves.pp[slot + 1],
+                 move == nullptr ? 0 : move->pp);
+        renderer.drawText(UI_10_FONT_ID, moveColumnX, y, right);
+      }
+      y += 26;
+    }
     return;
   }
   if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
@@ -1318,6 +1437,16 @@ void PokemonActivity::renderFocused() {
     pokemon::drawPokemonSpeciesArt(renderer, record.speciesId, true,
                                    Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 8, 120, 90});
     snprintf(line, sizeof(line), tr(STR_POKEMON_EVOLVING), speciesName(record.speciesId));
+    centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
+  } else if (pending.kind == pokemon::PendingEventKind::MoveLearn) {
+    pokemon::PokemonRecord record{};
+    if (service_.readRecord(pending.recordId, record) != pokemon::ServiceStatus::Ok) return;
+    pokemon::drawPokemonSpeciesArt(renderer, record.speciesId, true,
+                                   Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 8, 120, 90});
+    const pokemon::MoveData* newMove = pokemon::moveData(pending.speciesId);
+    snprintf(line, sizeof(line), tr(STR_POKEMON_WANTS_TO_LEARN),
+             record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
+             newMove == nullptr ? "?" : newMove->name);
     centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
   }
 }
@@ -1374,7 +1503,9 @@ void PokemonActivity::renderRowArt() {
              pokemon::isSpeciesMarked(snapshot_.state.seenSpecies, static_cast<uint16_t>(start + local + 1))) {
       speciesId = static_cast<uint16_t>(start + local + 1);
     }
-    if (screen_ == Screen::Bag) {
+    if (screen_ == Screen::Bag && start + local < static_cast<int>(pokemon::EVOLUTION_ITEM_COUNT)) {
+      // No icon assets exist for TM/HM/potions/etc - only the 6 evolution
+      // stones (the original Bag rows, GĐ 1) have art to draw here.
       constexpr int itemSize = 32;
       pokemon::drawPokemonItemArt(renderer, static_cast<pokemon::EvolutionItem>(start + local + 1), false,
                                   Rect{listBounds_.x + 5 + pokemon::pokemonCenteredOffset(80, itemSize),

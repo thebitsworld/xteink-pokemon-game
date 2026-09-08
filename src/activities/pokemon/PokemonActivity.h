@@ -105,6 +105,9 @@ class PokemonActivity final : public Activity {
   uint32_t focusedRecordId_ = 0;
   pokemon::PokemonPromptContext nicknamePrompt_{};
   pokemon::EvolutionItem selectedItem_ = pokemon::EvolutionItem::None;
+  bool bagSelectionIsMachine_ = false;
+  uint8_t selectedMachineItemId_ = 0;
+  uint8_t selectedMachineMoveId_ = 0;
   char message_[96]{};
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};

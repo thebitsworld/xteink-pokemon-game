@@ -270,6 +270,57 @@ ServiceStatus PokemonService::resolveEvolution(const EvolutionChoice choice) {
   return ServiceStatus::Ok;
 }
 
+ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  const PendingEvent* pending = pendingEventFront(state);
+  if (pending == nullptr || pending->kind != PendingEventKind::MoveLearn) return ServiceStatus::NotApplicable;
+  const PendingEvent event = *pending;
+  PokemonRecord record{};
+  if (!store_.readRecord(event.recordId, record)) return ServiceStatus::StorageError;
+
+  if (replaceSlot >= 0 && replaceSlot < static_cast<int>(BATTLE_MOVE_SLOTS)) {
+    BattleRecordEntry entry{};
+    if (loadBattleEntry(event.recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+    const MoveData* move = moveData(event.speciesId);
+    entry.moves[replaceSlot] = event.speciesId;
+    entry.pp[replaceSlot] = move == nullptr ? 0 : move->pp;
+    if (!battleStore_.upsertEntry(entry)) {
+      LOG_ERR("PokemonService", "Failed to save learned move");
+      return ServiceStatus::StorageError;
+    }
+  }
+
+  if (!pokemon::acknowledgeMoveLearn(state, record)) return ServiceStatus::NotApplicable;
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to acknowledge move learn");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_t moveId) {
+  BattleRecordEntry entry{};
+  if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return TeachMoveOutcome::Failed;
+
+  for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+    if (entry.moves[slot] == moveId) return TeachMoveOutcome::AlreadyKnown;
+  }
+  for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+    if (entry.moves[slot] != 0) continue;
+    const MoveData* move = moveData(moveId);
+    entry.moves[slot] = moveId;
+    entry.pp[slot] = move == nullptr ? 0 : move->pp;
+    if (!battleStore_.upsertEntry(entry)) {
+      LOG_ERR("PokemonService", "Failed to teach move");
+      return TeachMoveOutcome::Failed;
+    }
+    return TeachMoveOutcome::Learned;
+  }
+  return TeachMoveOutcome::MovesetFull;
+}
+
 ServiceStatus PokemonService::setEvolutionPrompts(const uint32_t recordId, const bool enabled) {
   PokemonState state{};
   const ServiceStatus stateStatus = loadReadyState(state);
@@ -353,6 +404,13 @@ BattleRecordEntry PokemonService::synthesizeBattleEntry(const PokemonRecord& rec
   return entry;
 }
 
+BattleRecordEntry PokemonService::peekBattleMoves(const PokemonRecord& record) const {
+  if (const BattleRecordEntry* existing = battleStore_.findEntry(record.recordId); existing != nullptr) {
+    return *existing;
+  }
+  return synthesizeBattleEntry(record);
+}
+
 ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRecordEntry& output) {
   PokemonRecord record{};
   const ServiceStatus readStatus = readRecord(recordId, record);
@@ -422,6 +480,44 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
     // reading-credit commit that already succeeded.
     battleStore_.upsertEntry(healed);
   }
+}
+
+void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader,
+                                            const uint8_t previousLevel, const uint8_t currentLevel) {
+  if (currentLevel <= previousLevel) return;
+  const BattleRecordEntry* existing = battleStore_.findEntry(leader.recordId);
+  if (existing == nullptr) return;
+
+  BattleRecordEntry entry = *existing;
+  bool changed = false;
+  for (const LearnsetEntry& learn : learnsetFor(leader.speciesId)) {
+    if (learn.level <= previousLevel || learn.level > currentLevel) continue;
+    bool known = false;
+    for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+      if (entry.moves[slot] == learn.moveId) {
+        known = true;
+        break;
+      }
+    }
+    if (known) continue;
+
+    bool placed = false;
+    for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+      if (entry.moves[slot] != 0) continue;
+      const MoveData* move = moveData(learn.moveId);
+      entry.moves[slot] = learn.moveId;
+      entry.pp[slot] = move == nullptr ? 0 : move->pp;
+      changed = true;
+      placed = true;
+      break;
+    }
+    if (!placed) {
+      const PendingEvent event{leader.recordId, learn.moveId,  learn.level,
+                               Gender::Unknown,  EvolutionItem::None, PendingEventKind::MoveLearn};
+      enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one
+    }
+  }
+  if (changed) battleStore_.upsertEntry(entry);
 }
 
 BattleTurnResult PokemonService::resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent,
@@ -512,6 +608,7 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
     mutation.record = leader;
     mutation.kind = RecordMutationKind::Replace;
   }
+  queueMoveLearnIfNeeded(state, leader, result.previousLevel, result.currentLevel);
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to commit credited reading");
     return false;
