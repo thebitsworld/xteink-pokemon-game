@@ -302,3 +302,22 @@ Cả 4 vấn đề người dùng báo cáo (xem lịch sử) đã sửa, theo �
 **Kết quả chung**: 19/19 suite native pass. Flash `pokemon-x3` (clean rebuild): **6,340,863 B (96.8%, còn 198,592 B ≈ 194KB)** — +4,882 B so với GĐ11 (nhảy lớn hơn thường lệ vì dữ liệu moveset gym thật + logic AI + 2 luồng UI mới).
 
 **Bug phát hiện ngay sau khi commit, qua chơi thử thật** (commit `f2187062`): "Forget" ở màn Moveset chỉ đặt `moves[slot] = 0` tại đúng ô được chọn, để lại "lỗ hổng" nếu ô đó không phải ô cuối cùng còn dùng — `validateBattleRecordEntry` yêu cầu chiêu phải xếp liền từ đầu mảng (như `PokemonState::partyRecordIds`), nên `upsertEntry()` từ chối ghi trừ khi forget đúng ô cuối (chỉ đúng 25% trường hợp, im lặng thất bại 75% còn lại — chỉ có `LOG_ERR`, không có message lỗi lên UI vì trả `StorageError` giống các lỗi lưu trữ khác). Đã sửa: dồn (shift) toàn bộ chiêu sau ô bị xóa lên 1 vị trí. **Bài học**: mọi nhánh mới trong service cần test đơn vị riêng ngay khi viết — GĐ12 ban đầu thiếu hẳn test cho `forgetMove()`, chỉ dựa vào smoke-test build/khởi động giả lập (không phát hiện được bug hành vi vì đó không phải lỗi biên dịch/crash) nên bug lọt qua tới tận khi người dùng bấm thử thật. Đã bổ sung 2 test cho `forgetMove()` (forget ô giữa dồn đúng mảng; từ chối xóa chiêu cuối cùng).
+
+---
+
+## GĐ 13 — Đổi Pokémon trong trận (party switch) — CHƯA LÀM, người dùng yêu cầu ghi lại để làm sau
+
+Người dùng phản hồi sau khi xác nhận màn Moveset ổn: gym battle và bắt Pokémon hoang dã hiện **chỉ cho đúng 1 Pokémon (luôn là Pokémon đầu party) ra đánh** — hết HP là thua ngay, bất kể party còn Pokémon khác đủ máu. Không hợp lý. Chỉ nên thua khi **toàn bộ party hết HP**, hoặc player chủ động **RUN** (bỏ trận).
+
+**Hiện trạng đã khảo sát (chưa sửa code)**:
+- `PokemonActivity::setupBattlePlayer()` (`:456`) và `savePlayerBattleEntry()` (`:524`) đều **hardcode `snapshot_.party[0]`** — không có khái niệm "đang dùng Pokémon nào trong party để đánh" ở đâu cả.
+- Khi `stepBattle()` trả `BattleOutcome::OpponentWon` (`battlePlayer_.currentHp == 0`), `activate()`'s `Screen::BattleMoves` case gọi thẳng `finishBattleAfterPlayerFainted()` (wild) / `finishGymChallenge(false)` (gym) — **kết thúc trận ngay lập tức**, không kiểm tra party còn Pokémon nào sống không.
+- `Screen::Battle` hiện chỉ có FIGHT/BALL/RUN (wild) hoặc FIGHT/RUN (gym, GĐ6) — chưa có lựa chọn đổi Pokémon nào.
+
+**Việc cần làm (gợi ý, chưa chốt thiết kế chi tiết)**:
+1. Thêm member theo dõi "đang dùng slot nào trong party" (vd `battlePartySlot_`) thay cho hardcode `party[0]` ở `setupBattlePlayer()`/`savePlayerBattleEntry()`.
+2. Thêm hành động đổi Pokémon vào `Screen::Battle` (vd thêm dòng "Switch") → màn mới `Screen::BattleSwitch` liệt kê các Pokémon trong party còn HP>0 (trừ Pokémon đang đánh) để chọn — cần đọc HP từng thành viên qua `service_.peekBattleMoves()`/`loadBattleEntry()`.
+3. Khi Pokémon hiện tại gục (`OpponentWon`): **không kết thúc trận ngay** — kiểm tra còn Pokémon nào trong party HP>0 không; còn thì **bắt buộc** vào `Screen::BattleSwitch` (không cho hủy, giống game gốc khi Pokémon gục giữa trận); hết thì mới thật sự thua như hiện tại.
+4. "RUN" giữ nguyên là cách duy nhất để chủ động bỏ trận trước khi hết Pokémon.
+5. Cần quyết định: đổi Pokémon giữa trận có tốn lượt không (game gốc: đổi Pokémon tốn 1 lượt, đối thủ được đánh miễn phí) — cân nhắc mô phỏng đúng luật này hay đơn giản hóa (đổi miễn phí, không mất lượt) tùy độ phức tạp muốn đầu tư.
+6. Với gym battle: đổi Pokémon chỉ thay `battlePlayer_`, không ảnh hưởng `battleOpponent_`/tiến trình đội hình gym (`gymChallengeTeamProgress_`) — 2 khái niệm độc lập nhau.
