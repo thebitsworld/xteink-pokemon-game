@@ -933,6 +933,53 @@ TEST(PokemonService, LearnMoveIntoSlotOverwritesUnconditionallyAtFullPp) {
   EXPECT_EQ(service.learnMoveIntoSlot(1, 2, 0), pokemon::ServiceStatus::Invalid);
 }
 
+TEST(PokemonService, ForgetMoveRepacksTheRemainingMovesInsteadOfLeavingAGap) {
+  // Regression test: forgetting anything but the LAST known slot used to
+  // leave moves[slot] == 0 with a non-zero move still sitting after it,
+  // which validateBattleRecordEntry rejects (moves must stay packed at the
+  // front, like PokemonState::partyRecordIds) - upsertEntry then silently
+  // failed on every attempt except forgetting the last slot.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.moves = {84, 45, 98, 5};
+  entry.pp = {30, 40, 20, 20};
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_EQ(service.forgetMove(1, 1), pokemon::ServiceStatus::Ok);  // forget the 2nd of 4 - a middle slot
+  const pokemon::BattleRecordEntry* afterForget = battleStore.findEntry(1);
+  ASSERT_NE(afterForget, nullptr);
+  const std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> expectedMoves{84, 98, 5, 0};
+  EXPECT_EQ(afterForget->moves, expectedMoves);
+  EXPECT_EQ(afterForget->pp[3], 0U);
+
+  EXPECT_EQ(service.forgetMove(1, 3), pokemon::ServiceStatus::NotApplicable);  // slot 3 is already empty now
+}
+
+TEST(PokemonService, ForgetMoveRefusesToClearAPokemonsLastRemainingMove) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.moves = {84, 0, 0, 0};
+  entry.pp = {30, 0, 0, 0};
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  EXPECT_EQ(service.forgetMove(1, 0), pokemon::ServiceStatus::NotApplicable);
+  const pokemon::BattleRecordEntry* unchanged = battleStore.findEntry(1);
+  ASSERT_NE(unchanged, nullptr);
+  EXPECT_EQ(unchanged->moves[0], 84U);
+}
+
 TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   Storage.clear();
   pokemon::PokemonStore store;

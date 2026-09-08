@@ -363,8 +363,17 @@ ServiceStatus PokemonService::forgetMove(const uint32_t recordId, const uint8_t 
   }
   if (knownCount <= 1) return ServiceStatus::NotApplicable;  // never leave a Pokemon with 0 moves
 
-  entry.moves[slot] = 0;
-  entry.pp[slot] = 0;
+  // validateBattleRecordEntry requires moves packed at the front (no gaps,
+  // like PokemonState::partyRecordIds) - shift everything after the
+  // cleared slot left instead of leaving a hole, or upsertEntry always
+  // rejects the write.
+  for (size_t i = slot; i + 1 < BATTLE_MOVE_SLOTS; ++i) {
+    entry.moves[i] = entry.moves[i + 1];
+    entry.pp[i] = entry.pp[i + 1];
+  }
+  entry.moves[BATTLE_MOVE_SLOTS - 1] = 0;
+  entry.pp[BATTLE_MOVE_SLOTS - 1] = 0;
+
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to forget move");
     return ServiceStatus::StorageError;
