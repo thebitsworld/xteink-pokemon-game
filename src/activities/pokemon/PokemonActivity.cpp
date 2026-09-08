@@ -537,7 +537,7 @@ bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
   setupBattleOpponent(pending.speciesId, pending.level);
   gymChallengeIndex_ = 0;
   forcedBattleSwitch_ = false;
-  battleLog_[0] = '\0';
+  snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
   setScreen(Screen::Battle);
   return true;
 }
@@ -551,7 +551,13 @@ bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
   gymChallengeIndex_ = gymIndex;
   gymChallengeTeamProgress_ = 0;
   forcedBattleSwitch_ = false;
-  battleLog_[0] = '\0';
+  const pokemon::GymData* gym = pokemon::gymData(gymIndex);
+  char sentOut[96];
+  snprintf(sentOut, sizeof(sentOut), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
+           speciesName(battleOpponent_.speciesId));
+  char go[64];
+  snprintf(go, sizeof(go), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
+  snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", sentOut, go);
   setScreen(Screen::Battle);
   return true;
 }
@@ -629,6 +635,9 @@ void PokemonActivity::advanceGymOpponentOrFinish() {
   if (gymChallengeTeamProgress_ < team.size()) {
     const auto& next = team[gymChallengeTeamProgress_];
     setupBattleOpponent(next.speciesId, next.level, next.moves);
+    const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
+    snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
+             speciesName(battleOpponent_.speciesId));
     setScreen(Screen::Battle);
     return;
   }
@@ -1804,36 +1813,100 @@ void PokemonActivity::renderFocused() {
   }
 }
 
+// Pokemon Red's battlefield reads as a diagonal: the opponent's name/level/HP
+// box sits top-left with its sprite floating top-right, the player's sprite
+// sits bottom-left with its own name/level/HP box bottom-right, and a bordered
+// message box holds the turn-by-turn log above the FIGHT/BALL/SWITCH/RUN menu
+// (already a bottom-anchored list - see buildList()'s bottomAnchored branch).
+// Only the player's box shows numeric HP, matching Red (the opponent's exact
+// HP was never shown, only the bar).
 void PokemonActivity::renderBattleHud() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
   const int width = renderer.getScreenWidth();
-  const int barWidth = width - 56;
-  constexpr int barHeight = 14;
+  constexpr int spriteW = 120;  // fixed hero-art asset size; GfxRenderer never upscales bitmaps
+  constexpr int spriteH = 90;
+  constexpr int sideMargin = 24;
+  constexpr int panelHeight = 76;
+  constexpr int spriteGap = 20;
+  constexpr int barHeight = 12;
 
-  const auto drawSide = [&](const pokemon::BattleCombatant& combatant, const int y, const bool isPlayer) {
-    char line[64];
-    snprintf(line, sizeof(line), "%s  %s%u", speciesName(combatant.speciesId), tr(STR_POKEMON_LEVEL), combatant.level);
-    renderer.drawText(UI_10_FONT_ID, 28, y, line, true, EpdFontFamily::BOLD);
-    renderer.drawRect(28, y + 20, barWidth, barHeight, true);
+  const int hudTop = contentTop;
+  const int hudBottom = listBounds_.y - 12;
+
+  const auto drawPanel = [&](const pokemon::BattleCombatant& combatant, const int panelX, const int panelY,
+                             const int panelW, const bool showNumericHp) {
+    renderer.drawRoundedRect(panelX, panelY, panelW, panelHeight, 2, 6, true);
+    char nameLine[48];
+    snprintf(nameLine, sizeof(nameLine), "%s", speciesName(combatant.speciesId));
+    const int nameY = panelY + 8;
+    renderer.drawText(UI_10_FONT_ID, panelX + 10, nameY, nameLine, true, EpdFontFamily::BOLD);
+    char levelLine[16];
+    snprintf(levelLine, sizeof(levelLine), "%s%u", tr(STR_POKEMON_LEVEL), combatant.level);
+    renderer.drawText(UI_10_FONT_ID,
+                      panelX + panelW - 10 - renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR),
+                      nameY, levelLine);
+
+    const int barY = nameY + 22;
+    const char* hpLabel = "HP";
+    renderer.drawText(UI_10_FONT_ID, panelX + 10, barY - 1, hpLabel, true, EpdFontFamily::BOLD);
+    const int barX = panelX + 10 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
+    const int barW = panelX + panelW - 10 - barX;
+    renderer.drawRect(barX, barY, barW, barHeight, true);
     const uint16_t maxHp = std::max<uint16_t>(1, combatant.maxHp);
-    const int filled = combatant.maxHp == 0 ? 0 : (barWidth - 2) * combatant.currentHp / maxHp;
-    if (filled > 0) renderer.fillRect(29, y + 21, filled, barHeight - 2, true);
-    char hpText[32];
-    snprintf(hpText, sizeof(hpText), "%u/%u", combatant.currentHp, combatant.maxHp);
-    renderer.drawText(UI_10_FONT_ID, 28, y + 20 + barHeight + 4, hpText);
+    const int filled = combatant.maxHp == 0 ? 0 : (barW - 2) * combatant.currentHp / maxHp;
+    if (filled > 0) renderer.fillRect(barX + 1, barY + 1, filled, barHeight - 2, true);
+
+    const int statusY = barY + barHeight + 6;
     if (combatant.status != pokemon::Ailment::None) {
-      const char* status = statusAbbrev(combatant.status);
-      renderer.drawText(UI_10_FONT_ID, width - 28 - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
-                        y + 20 + barHeight + 4, status, true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, panelX + 10, statusY, statusAbbrev(combatant.status), true, EpdFontFamily::BOLD);
     }
-    pokemon::drawPokemonSpeciesArt(renderer, combatant.speciesId, true,
-                                   Rect{isPlayer ? 28 : width - 148, y + 50, 120, 90});
+    if (showNumericHp) {
+      char hpText[16];
+      snprintf(hpText, sizeof(hpText), "%u/%u", combatant.currentHp, combatant.maxHp);
+      renderer.drawText(UI_10_FONT_ID,
+                        panelX + panelW - 10 - renderer.getTextWidth(UI_10_FONT_ID, hpText, EpdFontFamily::REGULAR),
+                        statusY, hpText);
+    }
   };
 
-  drawSide(battleOpponent_, contentTop, false);
-  drawSide(battlePlayer_, contentTop + 160, true);
-  if (battleLog_[0] != '\0') centered(renderer, UI_10_FONT_ID, contentTop + 330, battleLog_);
+  const int opponentSpriteX = width - sideMargin - spriteW;
+  const int opponentSpriteY = hudTop;
+  const int opponentPanelX = sideMargin;
+  const int opponentPanelW = opponentSpriteX - 16 - opponentPanelX;
+  drawPanel(battleOpponent_, opponentPanelX, hudTop, opponentPanelW, false);
+  pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
+                                 Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
+
+  const int playerSpriteX = sideMargin;
+  const int playerSpriteY = opponentSpriteY + spriteH + spriteGap;
+  const int playerPanelW = opponentPanelW;
+  const int playerPanelX = width - sideMargin - playerPanelW;
+  drawPanel(battlePlayer_, playerPanelX, playerSpriteY, playerPanelW, true);
+  pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
+                                 Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
+
+  const int messageY = playerSpriteY + spriteH + spriteGap;
+  const int messageH = hudBottom - messageY;
+  if (messageH < 40) return;  // shouldn't happen at any supported panel size, but never draw a negative-size box
+  const int messageX = sideMargin;
+  const int messageW = width - 2 * sideMargin;
+  renderer.drawRoundedRect(messageX, messageY, messageW, messageH, 2, 8, true);
+  if (battleLog_[0] == '\0') return;
+  const int textX = messageX + 16;
+  const int textMaxWidth = messageW - 32;
+  const char* newline = strchr(battleLog_, '\n');
+  if (newline == nullptr) {
+    renderer.drawText(UI_10_FONT_ID, textX, messageY + 18,
+                      renderer.truncatedText(UI_10_FONT_ID, battleLog_, textMaxWidth).c_str());
+  } else {
+    char first[96];
+    snprintf(first, sizeof(first), "%.*s", static_cast<int>(newline - battleLog_), battleLog_);
+    renderer.drawText(UI_10_FONT_ID, textX, messageY + 18,
+                      renderer.truncatedText(UI_10_FONT_ID, first, textMaxWidth).c_str());
+    renderer.drawText(UI_10_FONT_ID, textX, messageY + 18 + 26,
+                      renderer.truncatedText(UI_10_FONT_ID, newline + 1, textMaxWidth).c_str());
+  }
 }
 
 void PokemonActivity::renderRowArt() {
