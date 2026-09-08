@@ -1853,7 +1853,7 @@ void PokemonActivity::renderBattleHud() {
   constexpr int spriteW = 120;  // fixed hero-art asset size; GfxRenderer never upscales bitmaps
   constexpr int spriteH = 90;
   constexpr int sideMargin = 24;
-  constexpr int panelHeight = 50;
+  constexpr int panelHeight = 72;
   constexpr int spriteGap = 20;
   constexpr int barHeight = 12;
   constexpr int dotSize = 12;
@@ -1863,26 +1863,28 @@ void PokemonActivity::renderBattleHud() {
   const int hudTop = contentTop;
   const int hudBottom = listBounds_.y - 12;
 
-  // Compact box: just the HP bar, "cur/max" text, and level - no name (the
-  // sprite right next to it already identifies the Pokemon, and the dot row
-  // above already shows how many are left on that side).
-  const auto drawPanel = [&](const pokemon::BattleCombatant& combatant, const int panelX, const int panelY,
-                             const int panelW) {
+  // Compact box: name/nickname + level on top, then the HP bar, then
+  // "cur/max" text and status below.
+  const auto drawPanel = [&](const pokemon::BattleCombatant& combatant, const char* nameText, const int panelX,
+                             const int panelY, const int panelW) {
     renderer.drawRoundedRect(panelX, panelY, panelW, panelHeight, 2, 6, true);
     char levelLine[16];
     snprintf(levelLine, sizeof(levelLine), "%s%u", tr(STR_POKEMON_LEVEL), combatant.level);
     const int levelW = renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR);
 
-    const int barY = panelY + 8;
+    const int nameY = panelY + 6;
+    renderer.drawText(UI_10_FONT_ID, panelX + 8, nameY, nameText, true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, panelX + panelW - 8 - levelW, nameY, levelLine);
+
+    const int barY = nameY + 22;
     const char* hpLabel = "HP";
     renderer.drawText(UI_10_FONT_ID, panelX + 8, barY - 1, hpLabel, true, EpdFontFamily::BOLD);
     const int barX = panelX + 8 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
-    const int barW = panelX + panelW - 8 - levelW - 8 - barX;
+    const int barW = panelX + panelW - 8 - barX;
     renderer.drawRect(barX, barY, barW, barHeight, true);
     const uint16_t maxHp = std::max<uint16_t>(1, combatant.maxHp);
     const int filled = combatant.maxHp == 0 ? 0 : (barW - 2) * combatant.currentHp / maxHp;
     if (filled > 0) renderer.fillRect(barX + 1, barY + 1, filled, barHeight - 2, true);
-    renderer.drawText(UI_10_FONT_ID, panelX + panelW - 8 - levelW, barY - 1, levelLine);
 
     const int row2Y = barY + barHeight + 6;
     char hpText[16];
@@ -1946,25 +1948,35 @@ void PokemonActivity::renderBattleHud() {
     if (alive) playerAliveMask |= (1U << i);
   }
 
+  // Each zone's height is whichever is taller: the fixed-size sprite, or the
+  // dot row + HP panel stacked above it - the panel can outgrow the sprite
+  // once it carries a name line again, so this can't assume the sprite wins.
+  const int zoneContentHeight = std::max(spriteH, dotRowHeight + panelHeight);
+
   const int opponentSpriteX = width - sideMargin - spriteW;
   const int opponentSpriteY = hudTop;
   const int opponentPanelX = sideMargin;
   const int opponentPanelW = opponentSpriteX - 16 - opponentPanelX;
   drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + opponentPanelW);
-  drawPanel(battleOpponent_, opponentPanelX, hudTop + dotRowHeight, opponentPanelW);
+  drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight,
+            opponentPanelW);
   pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
                                  Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
 
   const int playerSpriteX = sideMargin;
-  const int playerSpriteY = opponentSpriteY + spriteH + spriteGap;
+  const int playerZoneTop = hudTop + zoneContentHeight + spriteGap;
+  const int playerSpriteY = playerZoneTop;
   const int playerPanelW = opponentPanelW;
   const int playerPanelX = width - sideMargin - playerPanelW;
-  drawDots(snapshot_.partyCount, playerAliveMask, playerSpriteY, playerPanelX + playerPanelW);
-  drawPanel(battlePlayer_, playerPanelX, playerSpriteY + dotRowHeight, playerPanelW);
+  drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + playerPanelW);
+  const bool playerHasRecord = battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount;
+  const char* playerNickname = playerHasRecord ? snapshot_.party[battlePartySlot_].nickname.data() : "";
+  const char* playerName = playerNickname[0] == '\0' ? speciesName(battlePlayer_.speciesId) : playerNickname;
+  drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight, playerPanelW);
   pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
                                  Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
 
-  const int messageY = playerSpriteY + spriteH + spriteGap;
+  const int messageY = playerZoneTop + zoneContentHeight + spriteGap;
   const int messageH = hudBottom - messageY;
   if (messageH < 40) return;  // shouldn't happen at any supported panel size, but never draw a negative-size box
   const int messageX = sideMargin;
