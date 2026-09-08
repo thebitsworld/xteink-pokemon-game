@@ -41,7 +41,9 @@ Ghi chú ngữ cảnh cho Claude ở phiên làm việc sau (hoặc trên máy k
 
 Phạm vi: học chiêu theo level (dữ liệu Red thật), vật phẩm + TM/HM rơi khi đọc sách, chiến đấu turn-based đầy đủ status effect, bắt Pokémon bằng 4 loại bóng, 8 gym + Elite Four theo thứ tự, màn hình huy hiệu.
 
-**Tiến độ**: **Toàn bộ 8 giai đoạn của roadmap chiến đấu đã xong local** (commit `b4d21f31`, `eff18d13`, `f1ff1bd2`, `da111328`, `18a0eeca`, `a989d161`, `2f420118`, `5f496ad6`, `ddef31b0` trên `feat/pokemon-battle-system`). **Push đang do người dùng tự làm thủ công** — máy này không có credential GitHub hoạt động (xem "Trạng thái git" bên dưới), đừng tự ý thử push nữa trừ khi được yêu cầu lại.
+**Tiến độ**: **Toàn bộ 8 giai đoạn của roadmap chiến đấu đã xong**, cộng thêm **GĐ9 ngoài roadmap gốc** (commit `b4d21f31`, `eff18d13`, `f1ff1bd2`, `da111328`, `18a0eeca`, `a989d161`, `2f420118`, `5f496ad6`, `ddef31b0`, `62fd5028`, `194601a0` trên `feat/pokemon-battle-system`). **Push đang do người dùng tự làm thủ công** — máy này không có credential GitHub hoạt động (xem "Trạng thái git" bên dưới), đừng tự ý thử push nữa trừ khi được yêu cầu lại.
+
+**GĐ9 (Bag phân loại category, commit `194601a0`, ngoài roadmap gốc — người dùng yêu cầu sau khi chơi thử simulator)**: `Screen::Bag` giờ là màn chọn category (Evolution/Medicine/TM-HM) thay vì gộp chung. `Screen::BagMedicine` mới + `PokemonService::useConsumable()` — **tính năng hoàn toàn mới**: trước đây Potion/status-cure/PP-restore/Candy không dùng được, chỉ có đá tiến hóa và TM. Giản lược có chủ đích: PPRestore hồi mọi ô chiêu (không phân biệt Ether/Elixir vì data không có field phân biệt); Candy tăng cấp nhưng không tự check tiến hóa (bắt được ở lần đọc sách kế tiếp). Flash **6,333,993 B/96.6%, còn 205,456 B**, +1,488 B. 19/19 test pass, thêm 5 test cho useConsumable. Chi tiết đầy đủ ở mục "GĐ 9" cuối roadmap.
 
 **Việc còn lại không phải code** — 2 mục Verification chỉ con người/thiết bị thật mới làm được (xem roadmap mục GĐ8 để biết chi tiết):
 1. Chơi thử tương tác trên simulator có GUI thật (gặp wild→battle→bắt→xem Summary 4 chiêu→dùng TM→đánh gym→Badges→Elite Four) — máy build này không có màn hình/input ảo.

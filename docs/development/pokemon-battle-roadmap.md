@@ -230,3 +230,23 @@ python3 scripts/fetch_pokemon_battle_data.py     # làm mới CSV (có cache, nh
 5. **Tái tạo file phụ**: xóa `pokemon-battle.bin` giữa chừng → vào lại trận, chiêu được dựng lại từ learnset, HP/PP đầy, không crash.
 6. **Chống ngõ cụt**: đánh cho Pokémon bị thương + dính status → đọc sách một lúc → HP/PP hồi dần, status được xóa.
 7. Test trên X3 thật khi ổn định, theo checklist trong [pokemon-game.md](../pokemon-game.md) — đặc biệt tốc độ refresh e-ink mỗi lượt đánh và heap chật của X3, hai thứ simulator không kiểm chứng được.
+
+---
+
+## GĐ 9 — Bag phân loại theo category (ngoài roadmap gốc, theo yêu cầu người dùng sau khi GĐ0-8 hoàn thành) ✅ XONG (commit `194601a0`)
+
+Roadmap 8 giai đoạn gốc đã xong hoàn toàn (xem GĐ8 ở trên). Người dùng chơi thử simulator xong, yêu cầu thêm: túi đồ (Bag) phải phân theo 3 category — "đồ hồi máu và status thông thường" (tự đặt tên), "đồ tiến hóa" (đá + Link Cable), "TM/HM".
+
+- [x] `Screen::Bag` đổi nghĩa: từ màn danh sách item (GĐ7 để lại, gộp đá+TM/HM) thành màn **chọn category** (3 dòng: Evolution/Medicine/TM-HM).
+- [x] `Screen::BagEvolution` (6 đá + Link Cable) và `Screen::BagMachine` (55 TM/HM) — logic y hệt GĐ1/GĐ7, chỉ tách thành màn riêng khỏi Bag.
+- [x] `Screen::BagMedicine` (mới) — gộp 4 category dữ liệu `Medicine`/`StatusCure`/`PPRestore`/`Candy` làm một, đặt tên hiển thị **"Medicine"** theo đúng quy ước "bag pocket" của game Pokémon gốc (người dùng yêu cầu tự nghĩ tên phù hợp).
+- [x] `PokemonService::useConsumable(recordId, itemId)` (mới) — **tính năng hoàn toàn mới**, trước GĐ9 không có bất kỳ luồng "dùng" nào cho Potion/status-cure/PP-restore/Candy (chỉ đá tiến hóa và TM có nút bấm được):
+  - Medicine: hồi `effectValue` HP (cap ở maxHp) + chữa status nếu `curesAilment` khớp status hiện tại (hoặc `Ailment::All` như Full Restore chữa mọi status).
+  - StatusCure: chỉ chữa status, không đụng HP.
+  - PPRestore: **giản lược có chủ đích** — hồi `effectValue` PP cho **mọi** ô chiêu đang biết, không phân biệt Ether (bản gốc: hồi 1 chiêu tự chọn) với Elixir (bản gốc: hồi cả 4 chiêu) — dữ liệu `pokemon-items.csv` hiện không có field nào phân biệt hai loại này (Ether/Max Ether và Elixir/Max Elixir có `effectValue` giống hệt cặp tương ứng), nên phân biệt sẽ cần thêm dữ liệu mới hoặc suy đoán qua tên item — không đáng công sức so với lợi ích ở tính năng phụ này.
+  - Candy: +1 cấp qua đúng công thức `xpRequired()`, tái dùng `queueMoveLearnIfNeeded()` (GĐ7) để không bỏ sót việc học chiêu mới khi tăng cấp bằng Candy — **nhưng không kiểm tra tiến hóa**: luật đó (`queueEvolutionAfterLevelGain`) nằm trong anonymous namespace riêng của `PokemonGame.cpp`, chỉ được gọi từ `applyCreditedMinutes()`; thay vì export thêm một hàm public chỉ để dùng một lần ở đây, tiến hóa do Candy gây ra sẽ được bắt ở lần đọc sách credit tiếp theo (rất sớm sau đó trong thực tế chơi game) thay vì trùng lặp luật ở 2 chỗ.
+- [x] `bagItemIdAt()`/`bagItemCount()` (PokemonActivity.cpp) tổng quát hóa `machineItemIdAt()`/`machineItemCount()` của GĐ7 bằng con trỏ hàm predicate (`bool (*matches)(ItemCategory)`), dùng chung cho cả Medicine lẫn Machine thay vì hai vòng lặp gần như giống hệt nhau.
+- [x] `ItemTarget` đổi từ dispatch theo bool `bagSelectionIsMachine_` (GĐ7) sang enum 3 giá trị `BagCategory` (Evolution/Medicine/Machine); `goBack()` từ `ItemTarget` hay từ 3 màn Bag con giờ quay đúng về màn category vừa vào (`BagEvolution`/`BagMedicine`/`BagMachine`), không còn luôn nhảy về `Bag`.
+- [x] 3 key i18n mới: `STR_POKEMON_BAG_EVOLUTION`/`MEDICINE`/`MACHINES`.
+- [x] Test: 5 test mới trong `PokemonServiceTest.cpp` (hồi HP + cap ở maxHp, status-cure khớp/không khớp ailment, Full Restore chữa mọi status, PP restore áp dụng cho mọi ô, Rare Candy +1 cấp và `NotApplicable` ở level 100). 19/19 suite native pass.
+- [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,333,993 B (96.6%, còn 205,456 B ≈ 200KB)** — tăng **+1,488 B** so với mốc cuối roadmap GĐ8 (6,332,505 B).
