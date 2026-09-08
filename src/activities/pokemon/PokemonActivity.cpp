@@ -1853,8 +1853,11 @@ void PokemonActivity::renderBattleHud() {
   constexpr int spriteW = 120;  // fixed hero-art asset size; GfxRenderer never upscales bitmaps
   constexpr int spriteH = 90;
   constexpr int sideMargin = 24;
-  constexpr int panelHeight = 72;
-  constexpr int spriteGap = 20;
+  constexpr int panelWidth = 220;  // narrower than the old full-width box
+  constexpr int panelHeight = 92;  // and taller, so it reads less like a thin bar
+  constexpr int spriteGapMin = 16;
+  constexpr int messageGap = 12;
+  constexpr int messageHeight = 90;  // fixed and smaller, freeing height for the battlefield above it
   constexpr int barHeight = 12;
   constexpr int dotSize = 12;
   constexpr int dotGap = 6;
@@ -1863,38 +1866,40 @@ void PokemonActivity::renderBattleHud() {
   const int hudTop = contentTop;
   const int hudBottom = listBounds_.y - 12;
 
-  // Compact box: name/nickname + level on top, then the HP bar, then
-  // "cur/max" text and status below.
+  // Compact box: name/nickname + level on top; below that, the HP bar with
+  // its "cur/max" text right after it (and status past that) vertically
+  // centered in the remaining box height.
   const auto drawPanel = [&](const pokemon::BattleCombatant& combatant, const char* nameText, const int panelX,
-                             const int panelY, const int panelW) {
-    renderer.drawRoundedRect(panelX, panelY, panelW, panelHeight, 2, 6, true);
+                             const int panelY) {
+    renderer.drawRoundedRect(panelX, panelY, panelWidth, panelHeight, 2, 6, true);
     char levelLine[16];
     snprintf(levelLine, sizeof(levelLine), "%s%u", tr(STR_POKEMON_LEVEL), combatant.level);
     const int levelW = renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR);
 
-    const int nameY = panelY + 6;
+    const int nameY = panelY + 8;
     renderer.drawText(UI_10_FONT_ID, panelX + 8, nameY, nameText, true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, panelX + panelW - 8 - levelW, nameY, levelLine);
+    renderer.drawText(UI_10_FONT_ID, panelX + panelWidth - 8 - levelW, nameY, levelLine);
 
-    const int barY = nameY + 22;
-    const char* hpLabel = "HP";
-    renderer.drawText(UI_10_FONT_ID, panelX + 8, barY - 1, hpLabel, true, EpdFontFamily::BOLD);
-    const int barX = panelX + 8 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
-    const int barW = panelX + panelW - 8 - barX;
-    renderer.drawRect(barX, barY, barW, barHeight, true);
-    const uint16_t maxHp = std::max<uint16_t>(1, combatant.maxHp);
-    const int filled = combatant.maxHp == 0 ? 0 : (barW - 2) * combatant.currentHp / maxHp;
-    if (filled > 0) renderer.fillRect(barX + 1, barY + 1, filled, barHeight - 2, true);
-
-    const int row2Y = barY + barHeight + 6;
     char hpText[16];
     snprintf(hpText, sizeof(hpText), "%u/%u", combatant.currentHp, combatant.maxHp);
-    renderer.drawText(UI_10_FONT_ID, panelX + 8, row2Y, hpText);
-    if (combatant.status != pokemon::Ailment::None) {
-      const char* status = statusAbbrev(combatant.status);
-      renderer.drawText(UI_10_FONT_ID,
-                        panelX + panelW - 8 - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD), row2Y,
-                        status, true, EpdFontFamily::BOLD);
+    const int hpTextW = renderer.getTextWidth(UI_10_FONT_ID, hpText);
+    const char* status = combatant.status == pokemon::Ailment::None ? nullptr : statusAbbrev(combatant.status);
+    const int statusW = status == nullptr ? 0 : renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD);
+
+    // Vertically center the HP row in the space below the name line.
+    const int nameRowBottom = nameY + 20;
+    const int rowY = nameRowBottom + std::max(0, (panelY + panelHeight - 8 - nameRowBottom - barHeight) / 2);
+    const char* hpLabel = "HP";
+    renderer.drawText(UI_10_FONT_ID, panelX + 8, rowY - 1, hpLabel, true, EpdFontFamily::BOLD);
+    const int barX = panelX + 8 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
+    const int barRight = panelX + panelWidth - 8 - (status == nullptr ? 0 : statusW + 8) - hpTextW - 6;
+    renderer.drawRect(barX, rowY, barRight - barX, barHeight, true);
+    const uint16_t maxHp = std::max<uint16_t>(1, combatant.maxHp);
+    const int filled = combatant.maxHp == 0 ? 0 : (barRight - barX - 2) * combatant.currentHp / maxHp;
+    if (filled > 0) renderer.fillRect(barX + 1, rowY + 1, filled, barHeight - 2, true);
+    renderer.drawText(UI_10_FONT_ID, barRight + 6, rowY - 1, hpText);
+    if (status != nullptr) {
+      renderer.drawText(UI_10_FONT_ID, panelX + panelWidth - 8 - statusW, rowY - 1, status, true, EpdFontFamily::BOLD);
     }
   };
 
@@ -1953,35 +1958,37 @@ void PokemonActivity::renderBattleHud() {
   // once it carries a name line again, so this can't assume the sprite wins.
   const int zoneContentHeight = std::max(spriteH, dotRowHeight + panelHeight);
 
+  // The message box is now a fixed height pinned to the bottom instead of
+  // soaking up whatever was left over, so the gap between the two zones
+  // absorbs the freed space instead - keeping the battlefield (sprites + HP
+  // boxes) the biggest thing on screen rather than a mostly-empty text box.
+  const int messageY = hudBottom - messageHeight;
+  const int zoneGap = std::max(spriteGapMin, messageY - messageGap - hudTop - 2 * zoneContentHeight);
+
   const int opponentSpriteX = width - sideMargin - spriteW;
   const int opponentSpriteY = hudTop;
   const int opponentPanelX = sideMargin;
-  const int opponentPanelW = opponentSpriteX - 16 - opponentPanelX;
-  drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + opponentPanelW);
-  drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight,
-            opponentPanelW);
+  drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + panelWidth);
+  drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight);
   pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
                                  Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
 
   const int playerSpriteX = sideMargin;
-  const int playerZoneTop = hudTop + zoneContentHeight + spriteGap;
+  const int playerZoneTop = hudTop + zoneContentHeight + zoneGap;
   const int playerSpriteY = playerZoneTop;
-  const int playerPanelW = opponentPanelW;
-  const int playerPanelX = width - sideMargin - playerPanelW;
-  drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + playerPanelW);
+  const int playerPanelX = width - sideMargin - panelWidth;
+  drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + panelWidth);
   const bool playerHasRecord = battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount;
   const char* playerNickname = playerHasRecord ? snapshot_.party[battlePartySlot_].nickname.data() : "";
   const char* playerName = playerNickname[0] == '\0' ? speciesName(battlePlayer_.speciesId) : playerNickname;
-  drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight, playerPanelW);
+  drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight);
   pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
                                  Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
 
-  const int messageY = playerZoneTop + zoneContentHeight + spriteGap;
-  const int messageH = hudBottom - messageY;
-  if (messageH < 40) return;  // shouldn't happen at any supported panel size, but never draw a negative-size box
+  if (messageY < hudTop) return;  // shouldn't happen at any supported screen size, but never draw a negative-size box
   const int messageX = sideMargin;
   const int messageW = width - 2 * sideMargin;
-  renderer.drawRoundedRect(messageX, messageY, messageW, messageH, 2, 8, true);
+  renderer.drawRoundedRect(messageX, messageY, messageW, messageHeight, 2, 8, true);
   if (battleLog_[0] == '\0') return;
   const int textX = messageX + 16;
   const int textMaxWidth = messageW - 32;
