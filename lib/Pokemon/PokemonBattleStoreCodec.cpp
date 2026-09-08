@@ -184,7 +184,8 @@ bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreSt
   if (count > POKEMON_BATTLE_MAX_ENTRIES) return false;
 
   const uint32_t expectedCrc = read32(data, payloadSize);
-  const uint32_t actualCrc = finishBattleStoreCrc32(updateBattleStoreCrc32(BATTLE_STORE_CRC32_INITIAL, data, payloadSize));
+  const uint32_t actualCrc =
+      finishBattleStoreCrc32(updateBattleStoreCrc32(BATTLE_STORE_CRC32_INITIAL, data, payloadSize));
   if (expectedCrc != actualCrc) return false;
 
   BattleStoreState candidate{};

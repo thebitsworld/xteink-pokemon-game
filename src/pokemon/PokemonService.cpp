@@ -512,8 +512,8 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
       break;
     }
     if (!placed) {
-      const PendingEvent event{leader.recordId, learn.moveId,  learn.level,
-                               Gender::Unknown,  EvolutionItem::None, PendingEventKind::MoveLearn};
+      const PendingEvent event{leader.recordId, learn.moveId,        learn.level,
+                               Gender::Unknown, EvolutionItem::None, PendingEventKind::MoveLearn};
       enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one
     }
   }

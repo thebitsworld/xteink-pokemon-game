@@ -284,8 +284,8 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
-  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, candidateItemIds, candidateWeights,
-                                             candidateCount);
+  uint32_t totalWeight =
+      buildItemCandidates(state, ownedEvolutionNeeds, true, candidateItemIds, candidateWeights, candidateCount);
   if (candidateCount == 0) {
     totalWeight =
         buildItemCandidates(state, ownedEvolutionNeeds, false, candidateItemIds, candidateWeights, candidateCount);

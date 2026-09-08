@@ -179,11 +179,11 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
     case pokemon::BattleLogEvent::ConfusionSelfHit:
     case pokemon::BattleLogEvent::StatusCured:
     case pokemon::BattleLogEvent::StatusDamage: {
-      const char* suffix = action.event == pokemon::BattleLogEvent::StatusPreventedMove ? tr(STR_POKEMON_STATUS_PREVENTED)
-                          : action.event == pokemon::BattleLogEvent::ConfusionSelfHit
-                              ? tr(STR_POKEMON_CONFUSION_HURT_SELF)
-                          : action.event == pokemon::BattleLogEvent::StatusCured ? tr(STR_POKEMON_STATUS_CURED)
-                                                                                 : tr(STR_POKEMON_STATUS_DAMAGE);
+      const char* suffix =
+          action.event == pokemon::BattleLogEvent::StatusPreventedMove ? tr(STR_POKEMON_STATUS_PREVENTED)
+          : action.event == pokemon::BattleLogEvent::ConfusionSelfHit  ? tr(STR_POKEMON_CONFUSION_HURT_SELF)
+          : action.event == pokemon::BattleLogEvent::StatusCured       ? tr(STR_POKEMON_STATUS_CURED)
+                                                                       : tr(STR_POKEMON_STATUS_DAMAGE);
       snprintf(buffer, size, "%s %s", name, suffix);
       return;
     }
@@ -194,12 +194,12 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
   char used[64];
   snprintf(used, sizeof(used), tr(STR_POKEMON_USED_MOVE), name, move == nullptr ? "?" : move->name);
   const char* suffix = action.event == pokemon::BattleLogEvent::MoveMissed           ? tr(STR_POKEMON_MOVE_MISSED)
-                      : action.event == pokemon::BattleLogEvent::MoveNoEffect        ? tr(STR_POKEMON_NO_EFFECT)
-                      : action.event == pokemon::BattleLogEvent::MoveSuperEffective   ? tr(STR_POKEMON_SUPER_EFFECTIVE)
-                      : action.event == pokemon::BattleLogEvent::MoveNotVeryEffective
-                          ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
-                      : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
-                                                                                 : "";
+                       : action.event == pokemon::BattleLogEvent::MoveNoEffect       ? tr(STR_POKEMON_NO_EFFECT)
+                       : action.event == pokemon::BattleLogEvent::MoveSuperEffective ? tr(STR_POKEMON_SUPER_EFFECTIVE)
+                       : action.event == pokemon::BattleLogEvent::MoveNotVeryEffective
+                           ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
+                       : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
+                                                                                  : "";
   if (suffix[0] == '\0') {
     snprintf(buffer, size, "%s", used);
   } else {
@@ -562,7 +562,8 @@ void PokemonActivity::buildBattleLog(const pokemon::BattleTurnResult& result) {
   char playerLine[80] = "";
   char opponentLine[80] = "";
   if (result.player.acted) formatBattleActionLine(playerLine, sizeof(playerLine), battlePlayer_, result.player);
-  if (result.opponent.acted) formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+  if (result.opponent.acted)
+    formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
   if (playerLine[0] != '\0' && opponentLine[0] != '\0') {
     snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", playerLine, opponentLine);
   } else if (playerLine[0] != '\0') {
@@ -1121,9 +1122,8 @@ void PokemonActivity::buildRows() {
           const uint8_t itemId = machineItemIdAt(static_cast<size_t>(index - pokemon::EVOLUTION_ITEM_COUNT));
           const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
           const pokemon::ItemData* data = pokemon::itemData(itemId);
-          snprintf(count, sizeof(count), "× %u", bagIndex < snapshot_.state.bagCounts.size()
-                                                     ? snapshot_.state.bagCounts[bagIndex]
-                                                     : 0);
+          snprintf(count, sizeof(count), "× %u",
+                   bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
           row(local, data == nullptr ? "?" : data->name, count);
         }
         break;
@@ -1161,9 +1161,9 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_OK));
         break;
       case Screen::Battle:
-        row(local, index == 0                                   ? tr(STR_POKEMON_FIGHT)
+        row(local, index == 0                                ? tr(STR_POKEMON_FIGHT)
                    : (gymChallengeIndex_ == 0 && index == 1) ? tr(STR_POKEMON_BALL)
-                                                                  : tr(STR_POKEMON_RUN));
+                                                             : tr(STR_POKEMON_RUN));
         break;
       case Screen::BattleMoves: {
         const uint8_t moveId = battlePlayer_.moves[index].moveId;
@@ -1175,7 +1175,8 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::BattleBalls: {
-        const pokemon::ItemData* item = pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + index));
+        const pokemon::ItemData* item =
+            pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + index));
         char value[16];
         snprintf(value, sizeof(value), "× %u", snapshot_.state.bagCounts[index]);
         row(local, item == nullptr ? "?" : item->name, value);
@@ -1192,16 +1193,18 @@ void PokemonActivity::buildRows() {
         }
         const pokemon::GymProgress progress = pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex);
         const char* value = progress == pokemon::GymProgress::Defeated ? tr(STR_POKEMON_GYM_DEFEATED)
-                            : progress == pokemon::GymProgress::Locked  ? tr(STR_POKEMON_GYM_LOCKED)
-                                                                         : nullptr;
+                            : progress == pokemon::GymProgress::Locked ? tr(STR_POKEMON_GYM_LOCKED)
+                                                                       : nullptr;
         row(local, label, value);
         break;
       }
       case Screen::Badges: {
         const auto gymIndex = static_cast<uint8_t>(index + 1);
         const pokemon::GymData* gym = pokemon::gymData(gymIndex);
-        const bool earned = pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) == pokemon::GymProgress::Defeated;
-        row(local, gym == nullptr ? "?" : gym->badgeName, earned ? tr(STR_POKEMON_GYM_DEFEATED) : tr(STR_POKEMON_GYM_LOCKED));
+        const bool earned =
+            pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) == pokemon::GymProgress::Defeated;
+        row(local, gym == nullptr ? "?" : gym->badgeName,
+            earned ? tr(STR_POKEMON_GYM_DEFEATED) : tr(STR_POKEMON_GYM_LOCKED));
         break;
       }
       case Screen::Summary:
@@ -1221,7 +1224,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   int top = listTop();
   rowHeight_ = 64;
   const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::Battle || screen_ == Screen::BattleMoves ||
-                             screen_ == Screen::BattleBalls;
+                              screen_ == Screen::BattleBalls;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
   screen.setContentMargin(

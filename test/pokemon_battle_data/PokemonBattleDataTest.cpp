@@ -113,8 +113,11 @@ void itemsPinTheFirstSixIdsToTheExistingEvolutionItemOrder() {
   CHECK(pokemon::itemData(0) == nullptr);
   CHECK(pokemon::itemData(pokemon::ITEM_COUNT + 1) == nullptr);
 
-  struct { uint8_t id; const char* name; } stones[] = {
-      {1, "Moon Stone"}, {2, "Fire Stone"}, {3, "Thunder Stone"},
+  struct {
+    uint8_t id;
+    const char* name;
+  } stones[] = {
+      {1, "Moon Stone"},  {2, "Fire Stone"}, {3, "Thunder Stone"},
       {4, "Water Stone"}, {5, "Leaf Stone"}, {6, "Link Cable"},
   };
   for (const auto& stone : stones) {

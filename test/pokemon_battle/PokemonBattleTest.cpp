@@ -41,7 +41,8 @@ const RandomSource MAX_RANDOM{nullptr, alwaysMax};
 // 77 Poison Powder (Poison/Status/0pow/75acc/Poison, ailment_chance=0 meaning
 // "always" per the PokeAPI convention this engine special-cases).
 
-BattleCombatant makeCombatant(const uint16_t speciesId, const uint8_t level, const std::initializer_list<uint8_t> moveIds) {
+BattleCombatant makeCombatant(const uint16_t speciesId, const uint8_t level,
+                              const std::initializer_list<uint8_t> moveIds) {
   BattleCombatant combatant{};
   combatant.speciesId = speciesId;
   combatant.level = level;
@@ -59,7 +60,7 @@ BattleCombatant makeCombatant(const uint16_t speciesId, const uint8_t level, con
 }
 
 void statFormulasScaleWithLevel() {
-  CHECK(pokemon::battleMaxHp(45, 5) > 10);   // at least the level/base floor terms
+  CHECK(pokemon::battleMaxHp(45, 5) > 10);  // at least the level/base floor terms
   CHECK(pokemon::battleMaxHp(45, 50) > pokemon::battleMaxHp(45, 5));
   CHECK(pokemon::battleWorkingStat(49, 50) > pokemon::battleWorkingStat(49, 5));
 }

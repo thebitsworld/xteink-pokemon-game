@@ -512,7 +512,7 @@ void saturatedItemsDoNotRejectReadingCredit() {
   CHECK(state.encounterMisses == 1);
   CHECK(sequence.index == 2);
   for (const uint16_t count : state.itemCounts) CHECK(count == UINT16_MAX);  // stones themselves stay untouched
-  CHECK(state.bagCounts[0] == 1);  // bagCounts[0] = item id 7 (Poke Ball)
+  CHECK(state.bagCounts[0] == 1);                                            // bagCounts[0] = item id 7 (Poke Ball)
 
   state = stateWithLeader(leader);
   state.itemCounts[2] = UINT16_MAX;

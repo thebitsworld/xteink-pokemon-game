@@ -780,7 +780,7 @@ TEST(PokemonService, TeachMoveLearnsIntoAFreeSlotThenReportsAlreadyKnownOrMovese
   EXPECT_EQ(afterFirst->moves[2], 5U);
   EXPECT_GT(afterFirst->pp[2], 0U);
 
-  ASSERT_EQ(service.teachMove(1, 13), pokemon::TeachMoveOutcome::Learned);  // TM02 fills the last slot
+  ASSERT_EQ(service.teachMove(1, 13), pokemon::TeachMoveOutcome::Learned);      // TM02 fills the last slot
   EXPECT_EQ(service.teachMove(1, 14), pokemon::TeachMoveOutcome::MovesetFull);  // TM03, no room left
 }
 

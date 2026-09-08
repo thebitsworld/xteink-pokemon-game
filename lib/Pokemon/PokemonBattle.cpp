@@ -78,7 +78,8 @@ bool statusPreventsAction(BattleCombatant& combatant, const RandomSource& random
       }
       if (rollPercentChance(random, CONFUSION_SELF_HIT_CHANCE_PERCENT)) {
         const uint16_t selfDamage = clampToUint16(std::max<uint32_t>(1U, combatant.maxHp / 8U));
-        combatant.currentHp = combatant.currentHp > selfDamage ? static_cast<uint16_t>(combatant.currentHp - selfDamage) : 0;
+        combatant.currentHp =
+            combatant.currentHp > selfDamage ? static_cast<uint16_t>(combatant.currentHp - selfDamage) : 0;
         event = BattleLogEvent::ConfusionSelfHit;
         return true;
       }
@@ -106,7 +107,8 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
   const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
   const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
   const BaseStats* defenderStats = baseStatsFor(defender.speciesId);
-  if (attackerSpecies == nullptr || defenderSpecies == nullptr || attackerStats == nullptr || defenderStats == nullptr) {
+  if (attackerSpecies == nullptr || defenderSpecies == nullptr || attackerStats == nullptr ||
+      defenderStats == nullptr) {
     return 0;
   }
 
@@ -184,10 +186,10 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     const uint16_t damage = computeDamage(attacker, defender, *move, random);
     defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
     const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
-    const uint16_t effectivenessPercent = defenderSpecies == nullptr
-                                              ? 100
-                                              : typeEffectivenessPercent(move->type, defenderSpecies->primaryType,
-                                                                         defenderSpecies->secondaryType);
+    const uint16_t effectivenessPercent =
+        defenderSpecies == nullptr
+            ? 100
+            : typeEffectivenessPercent(move->type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
     result.event = effectivenessEvent(effectivenessPercent);
     if (damage == 0 && effectivenessPercent != 0) result.event = BattleLogEvent::MoveHit;
   }

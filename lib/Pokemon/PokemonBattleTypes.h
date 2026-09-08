@@ -65,7 +65,7 @@ struct MoveListRef {
 };
 
 enum class ItemCategory : uint8_t {
-  Stone = 0,       // ids 1-6, pinned to match EvolutionItem exactly
+  Stone = 0,  // ids 1-6, pinned to match EvolutionItem exactly
   Ball = 1,
   Medicine = 2,
   StatusCure = 3,

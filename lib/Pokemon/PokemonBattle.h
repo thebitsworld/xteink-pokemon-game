@@ -48,11 +48,11 @@ enum class BattleLogEvent : uint8_t {
   MoveSuperEffective,
   MoveNotVeryEffective,
   MoveHadNoPp,
-  StatusPreventedMove,   // asleep, frozen, fully paralyzed
+  StatusPreventedMove,  // asleep, frozen, fully paralyzed
   ConfusionSelfHit,
   InflictedStatus,
-  StatusCured,           // woke up / thawed / snapped out of confusion
-  StatusDamage,          // poison/burn tick
+  StatusCured,   // woke up / thawed / snapped out of confusion
+  StatusDamage,  // poison/burn tick
   Fainted,
 };
 

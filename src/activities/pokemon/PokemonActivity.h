@@ -112,7 +112,7 @@ class PokemonActivity final : public Activity {
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};
   char battleLog_[160]{};
-  uint8_t gymChallengeIndex_ = 0;       // 0 = not fighting a gym/Elite Four right now
+  uint8_t gymChallengeIndex_ = 0;         // 0 = not fighting a gym/Elite Four right now
   uint8_t gymChallengeTeamProgress_ = 0;  // index of the opponent team member currently out
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};
   std::array<std::array<char, 56>, ROW_CAPACITY> labels_{};
