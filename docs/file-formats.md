@@ -31,10 +31,11 @@ ID being learned (1-165) and level holds the level it was learned at.
 
 A file's live battle state (which 4 moves a Party member currently knows,
 each move's remaining PP, current HP, and any status ailment) is **not**
-stored here. It lives in the separate, fully-reconstructible
-`/.crosspoint/pokemon-battle.bin` (see below) so that corruption there can
-never cost a Pokémon, only reset it to full HP/PP with its learnset-derived
-moves.
+stored here. It lives in the separate `/.crosspoint/pokemon-battle-{a,b}.bin`
+(see below), itself double-buffered like this file — a Pokémon's moveset can
+be changed by the player (TM/HM, the Moveset screen) independently of its
+level, so it is no longer purely reconstructible and gets the same
+crash-safety as the main save.
 
 ### Version 2
 
@@ -123,24 +124,60 @@ is already present. Back up both files before updates or resets. Choosing
 starter selection; it does not alter books, reading positions, or CrossInk
 reading statistics.
 
-## `/.crosspoint/pokemon-battle.bin`
+## `/.crosspoint/pokemon-battle-{a,b}.bin`
 
 Holds each Party member's *live* battle state: which of its up-to-4 moves it
 currently knows, each move's remaining PP, its current HP, and any status
-ailment. Introduced alongside save format version 3 above. Unlike
-`pokemon-{a,b}.bin`, this file is fully reconstructible from data already in
-the main save (a record's species and level determine its learnset-derived
-moves and max HP), so it does not use double-buffering, a header, or a
-sequence number — a single file with a trailing whole-file CRC-32 is enough.
-On any read failure (missing file, wrong size, bad CRC, or a semantically
-invalid entry) every Party member is simply treated as "unknown" and rebuilt
-on demand with full HP/PP and no status; this never blocks play and never
-loses a Pokémon, only its in-progress battle condition.
+ailment. Introduced alongside save format version 3 above.
+
+### Version 2 (double-buffered)
+
+A Pokémon's actual moveset can diverge from what would be reconstructed
+purely from its level (TM/HM teaching, and the Moveset screen's active
+learn/forget), so unlike when this file was introduced, it is no longer a
+pure cache of the main save: losing it can silently revert a real player
+choice, not just reset HP/PP to full. It is therefore double-buffered the
+same way as `pokemon-{a,b}.bin` — alternating between `pokemon-battle-a.bin`
+and `pokemon-battle-b.bin`, a write always lands on the currently-inactive
+file and is read back and verified before the active pointer flips, so an
+interrupted write never touches the still-valid other copy.
 
 At most one entry per Party slot (6 maximum); PC-boxed Pokémon are not
 battling and carry no entry. Entries are packed at the front in ascending
 record-ID order, matching the "no gaps" convention `PokemonState`'s own
-arrays use. All integers are little-endian; the file is:
+arrays use — true of both versions below, not just this one.
+
+All integers are little-endian; each file is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Magic `PKBT` |
+| 4 | 1 | Format version (`1`) |
+| 5 | 1 | Entry count (`0`-`6`) |
+| 6 | 4 | Non-zero sequence number |
+| 10 | `entryCount * 16` | Entries in ascending record-ID order (below) |
+| 10 + `entryCount * 16` | 4 | Standard CRC-32 over the header and entries above |
+
+Startup reads both files, decodes whichever validates (correct magic/version,
+CRC-32, and a semantically valid state), and uses the one with the higher
+sequence number if both are valid. If neither validates — a fresh install,
+or both slots somehow lost — every Party member is simply treated as
+"unknown" and rebuilt on demand with full HP/PP, no status, and its
+learnset-derived moveset; this never blocks play, but is now a last-resort
+fallback rather than the everyday path it was under version 1.
+
+### Version 1 (single file, superseded)
+
+The original, pre-migration format: a single `pokemon-battle.bin`, entries
+back to back plus a trailing whole-file CRC-32, no header or sequence number.
+Considered safe at the time because the whole file was fully reconstructible
+from the main save. On first load after upgrading, if neither
+`pokemon-battle-a.bin` nor `pokemon-battle-b.bin` exists yet, a pre-existing
+`pokemon-battle.bin` is decoded with this legacy layout and immediately
+written out as `pokemon-battle-a.bin` (sequence `1`) under the version 2
+format above; the legacy file itself is left untouched afterward as a
+recovery copy, the same way `pokemon-{a,b}.bin`'s own legacy-filename
+migration works. Its layout was:
 
 | Offset | Size | Field |
 | ---: | ---: | --- |

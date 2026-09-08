@@ -158,25 +158,65 @@ bool validateBattleStoreState(const BattleStoreState& state) {
   return true;
 }
 
-bool encodeBattleStoreFile(const BattleStoreState& state, BattleStoreFileBytes& output, size_t& outputSize) {
-  if (!validateBattleStoreState(state)) return false;
+bool encodeBattleStoreFile(const BattleStoreState& state, const uint32_t sequence, BattleStoreFileBytes& output,
+                           size_t& outputSize) {
+  if (sequence == 0 || !validateBattleStoreState(state)) return false;
   const size_t count = battleEntryCount(state);
   BattleStoreFileBytes candidate{};
-  uint32_t crc = BATTLE_STORE_CRC32_INITIAL;
+  candidate[0] = 'P';
+  candidate[1] = 'K';
+  candidate[2] = 'B';
+  candidate[3] = 'T';
+  candidate[4] = POKEMON_BATTLE_STORE_VERSION;
+  candidate[5] = static_cast<uint8_t>(count);
+  write32(candidate.data(), 6, sequence);
+
+  uint32_t crc = updateBattleStoreCrc32(BATTLE_STORE_CRC32_INITIAL, candidate.data(), POKEMON_BATTLE_HEADER_BYTES);
+  size_t offset = POKEMON_BATTLE_HEADER_BYTES;
   for (size_t index = 0; index < count; ++index) {
     BattleEntryBytes entryBytes{};
     if (!encodeBattleRecordEntry(state.entries[index], entryBytes)) return false;
-    std::memcpy(candidate.data() + index * POKEMON_BATTLE_ENTRY_BYTES, entryBytes.data(), entryBytes.size());
+    std::memcpy(candidate.data() + offset, entryBytes.data(), entryBytes.size());
     crc = updateBattleStoreCrc32(crc, entryBytes.data(), entryBytes.size());
+    offset += POKEMON_BATTLE_ENTRY_BYTES;
   }
-  const size_t crcOffset = count * POKEMON_BATTLE_ENTRY_BYTES;
-  write32(candidate.data(), crcOffset, finishBattleStoreCrc32(crc));
+  write32(candidate.data(), offset, finishBattleStoreCrc32(crc));
   output = candidate;
-  outputSize = crcOffset + POKEMON_BATTLE_FILE_CRC_BYTES;
+  outputSize = offset + POKEMON_BATTLE_FILE_CRC_BYTES;
   return true;
 }
 
-bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreState& output) {
+bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreState& output, uint32_t& sequence) {
+  if (data == nullptr || size < POKEMON_BATTLE_HEADER_BYTES + POKEMON_BATTLE_FILE_CRC_BYTES) return false;
+  if (data[0] != 'P' || data[1] != 'K' || data[2] != 'B' || data[3] != 'T') return false;
+  if (data[4] != POKEMON_BATTLE_STORE_VERSION) return false;
+  const uint8_t count = data[5];
+  if (count > POKEMON_BATTLE_MAX_ENTRIES) return false;
+  const uint32_t candidateSequence = read32(data, 6);
+  if (candidateSequence == 0) return false;  // 0 is reserved for "no valid slot written yet"
+
+  const size_t payloadSize = POKEMON_BATTLE_HEADER_BYTES + static_cast<size_t>(count) * POKEMON_BATTLE_ENTRY_BYTES;
+  if (size != payloadSize + POKEMON_BATTLE_FILE_CRC_BYTES) return false;
+
+  const uint32_t expectedCrc = read32(data, payloadSize);
+  const uint32_t actualCrc =
+      finishBattleStoreCrc32(updateBattleStoreCrc32(BATTLE_STORE_CRC32_INITIAL, data, payloadSize));
+  if (expectedCrc != actualCrc) return false;
+
+  BattleStoreState candidate{};
+  for (size_t index = 0; index < count; ++index) {
+    BattleEntryBytes entryBytes{};
+    std::memcpy(entryBytes.data(), data + POKEMON_BATTLE_HEADER_BYTES + index * POKEMON_BATTLE_ENTRY_BYTES,
+                entryBytes.size());
+    if (!decodeBattleRecordEntry(entryBytes, candidate.entries[index])) return false;
+  }
+  if (!validateBattleStoreState(candidate)) return false;
+  output = candidate;
+  sequence = candidateSequence;
+  return true;
+}
+
+bool decodeLegacyBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreState& output) {
   if (data == nullptr || size < POKEMON_BATTLE_FILE_CRC_BYTES) return false;
   const size_t payloadSize = size - POKEMON_BATTLE_FILE_CRC_BYTES;
   if (payloadSize % POKEMON_BATTLE_ENTRY_BYTES != 0) return false;

@@ -12,18 +12,35 @@ namespace pokemon {
 constexpr size_t POKEMON_BATTLE_ENTRY_BYTES = 16;
 constexpr size_t POKEMON_BATTLE_MAX_ENTRIES = 6;  // one per Party slot; PC-boxed Pokemon carry no live battle state
 constexpr size_t POKEMON_BATTLE_FILE_CRC_BYTES = 4;
-constexpr size_t POKEMON_BATTLE_FILE_MAX_BYTES =
+// Header: magic "PKBT" (4) + version (1) + entryCount (1) + sequence (4). A
+// Pokemon's actual moveset can now diverge from what defaultMovesetForLevel()
+// would synthesize (TM/HM teaching, the Moveset screen's learn/forget) - it
+// is no longer purely a cache of the main save, so this file is protected
+// the same way as pokemon-{a,b}.bin: two alternating files plus a sequence
+// number, never overwriting the currently-active slot in place.
+constexpr size_t POKEMON_BATTLE_HEADER_BYTES = 10;
+constexpr uint8_t POKEMON_BATTLE_STORE_VERSION = 1;
+constexpr size_t POKEMON_BATTLE_FILE_MAX_BYTES = POKEMON_BATTLE_HEADER_BYTES +
+                                                 POKEMON_BATTLE_MAX_ENTRIES * POKEMON_BATTLE_ENTRY_BYTES +
+                                                 POKEMON_BATTLE_FILE_CRC_BYTES;
+// The legacy single-file format (no header, no double-buffering) this
+// replaces: just entries back to back plus a trailing CRC32. Kept only so a
+// pre-existing pokemon-battle.bin can be migrated once into the new format.
+constexpr size_t POKEMON_BATTLE_LEGACY_FILE_MAX_BYTES =
     POKEMON_BATTLE_MAX_ENTRIES * POKEMON_BATTLE_ENTRY_BYTES + POKEMON_BATTLE_FILE_CRC_BYTES;
 
 using BattleEntryBytes = std::array<uint8_t, POKEMON_BATTLE_ENTRY_BYTES>;
 using BattleStoreFileBytes = std::array<uint8_t, POKEMON_BATTLE_FILE_MAX_BYTES>;
+using BattleStoreLegacyFileBytes = std::array<uint8_t, POKEMON_BATTLE_LEGACY_FILE_MAX_BYTES>;
 
 // A Party member's live battle state: which of its 4 moves it currently
 // knows and how much PP each has left, its current HP, and any ailment.
 // This is intentionally the *only* place PP/HP/status persist - unlike
-// PokemonRecord (the 48-byte record in the main save), this data is fully
-// reconstructible from the record's level and species learnset, so it lives
-// in a small side file that never needs the main store's double-buffering.
+// PokemonRecord (the 48-byte record in the main save), it lives in a small
+// side file rather than growing the record. HP/PP/status alone would be
+// reconstructible from the record's level and species learnset, but the
+// moveset is not (see PokemonBattleStore.h), so this file is still
+// double-buffered like the main save.
 struct BattleRecordEntry {
   uint32_t recordId = 0;  // 0 = unused slot, same "no gaps, zero at the end" convention as PokemonState::partyRecordIds
   std::array<uint8_t, BATTLE_MOVE_SLOTS> moves{};
@@ -65,20 +82,27 @@ uint32_t updateBattleStoreCrc32(uint32_t crc, const uint8_t* data, size_t size);
 constexpr uint32_t finishBattleStoreCrc32(const uint32_t crc) { return crc ^ 0xFFFFFFFFU; }
 constexpr uint32_t BATTLE_STORE_CRC32_INITIAL = 0xFFFFFFFFU;
 
-// Encodes `state` into `output`/`outputSize`: entries back to back (only the
-// non-zero-recordId ones, i.e. battleEntryCount(state) of them), then a
-// trailing CRC32 over everything written before it. Fails if the state does
-// not pass validateBattleStoreState.
-bool encodeBattleStoreFile(const BattleStoreState& state, BattleStoreFileBytes& output, size_t& outputSize);
+// Encodes `state` into `output`/`outputSize`: a header (magic, version,
+// entryCount, `sequence`), then entries back to back (only the non-zero-
+// recordId ones), then a trailing CRC32 over the header+entries written
+// before it. Fails if `sequence` is 0 (reserved for "no valid slot yet") or
+// the state does not pass validateBattleStoreState.
+bool encodeBattleStoreFile(const BattleStoreState& state, uint32_t sequence, BattleStoreFileBytes& output,
+                           size_t& outputSize);
 
 // Decodes and fully verifies a battle-store file of exactly `size` bytes:
-// size must be entryCount*16+4 for some 0 <= entryCount <=
-// POKEMON_BATTLE_MAX_ENTRIES, the CRC32 must match, and the decoded state
-// must pass validateBattleStoreState (ascending, no duplicate recordId,
-// every entry individually valid). Returns false for anything else,
-// including a plain garbled/truncated file - the caller's response is to
-// treat every entry as "unknown, rebuild from the learnset," never to
-// surface an error to the player.
-bool decodeBattleStoreFile(const uint8_t* data, size_t size, BattleStoreState& output);
+// the magic/version must match, entryCount must be <=
+// POKEMON_BATTLE_MAX_ENTRIES with `size` matching it exactly, the CRC32 must
+// match, and the decoded state must pass validateBattleStoreState
+// (ascending, no duplicate recordId, every entry individually valid).
+// Returns false for anything else, including a plain garbled/truncated
+// file. `sequence` (output) lets the caller pick the newer of the two
+// alternating files the same way PokemonStore does for the main save.
+bool decodeBattleStoreFile(const uint8_t* data, size_t size, BattleStoreState& output, uint32_t& sequence);
+
+// Legacy pre-double-buffering format: no header, just entries+CRC32. Used
+// only to migrate a pre-existing single pokemon-battle.bin into the new
+// alternating-file format on first load after an update.
+bool decodeLegacyBattleStoreFile(const uint8_t* data, size_t size, BattleStoreState& output);
 
 }  // namespace pokemon

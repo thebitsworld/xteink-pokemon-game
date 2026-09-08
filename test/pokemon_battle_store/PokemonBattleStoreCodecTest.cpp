@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstring>
 
 #include "PokemonBattleStoreCodec.h"
 
@@ -129,42 +130,87 @@ void upsertFailsPastCapacityForAnUnseenRecordId() {
   CHECK(pokemon::findBattleEntry(state, 3)->currentHp == 9);
 }
 
-void fileRoundTripsAndDetectsCorruption() {
+void fileRoundTripsCarriesSequenceAndDetectsCorruption() {
   BattleStoreState state{};
   CHECK(pokemon::upsertBattleEntry(state, makeEntry(5)));
   CHECK(pokemon::upsertBattleEntry(state, makeEntry(12)));
 
   pokemon::BattleStoreFileBytes bytes{};
   size_t size = 0;
-  CHECK(pokemon::encodeBattleStoreFile(state, bytes, size));
-  CHECK(size == 2 * pokemon::POKEMON_BATTLE_ENTRY_BYTES + pokemon::POKEMON_BATTLE_FILE_CRC_BYTES);
+  CHECK(pokemon::encodeBattleStoreFile(state, 7, bytes, size));
+  CHECK(size == pokemon::POKEMON_BATTLE_HEADER_BYTES + 2 * pokemon::POKEMON_BATTLE_ENTRY_BYTES +
+                    pokemon::POKEMON_BATTLE_FILE_CRC_BYTES);
+  CHECK(bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 'B' && bytes[3] == 'T');
+  CHECK(bytes[4] == pokemon::POKEMON_BATTLE_STORE_VERSION);
+  CHECK(bytes[5] == 2);  // entryCount
 
   BattleStoreState decoded{};
-  CHECK(pokemon::decodeBattleStoreFile(bytes.data(), size, decoded));
+  uint32_t sequence = 0;
+  CHECK(pokemon::decodeBattleStoreFile(bytes.data(), size, decoded, sequence));
   CHECK(decoded == state);
+  CHECK(sequence == 7);
 
-  // Flip a byte inside the first entry: CRC must catch it.
+  // Flip a byte inside the header: CRC must catch it.
   pokemon::BattleStoreFileBytes corrupted = bytes;
-  corrupted[0] ^= 0xFFU;
+  corrupted[5] ^= 0xFFU;
   BattleStoreState corruptOutput{};
-  CHECK(!pokemon::decodeBattleStoreFile(corrupted.data(), size, corruptOutput));
+  uint32_t corruptSequence = 0;
+  CHECK(!pokemon::decodeBattleStoreFile(corrupted.data(), size, corruptOutput, corruptSequence));
 
-  // A size that isn't entryCount*16+4 is rejected outright.
-  CHECK(!pokemon::decodeBattleStoreFile(bytes.data(), size - 1, decoded));
-  CHECK(!pokemon::decodeBattleStoreFile(bytes.data(), 0, decoded));
+  // A sequence of 0 is reserved ("no valid slot written yet") and rejected.
+  pokemon::BattleStoreFileBytes zeroSequence{};
+  size_t zeroSequenceSize = 0;
+  CHECK(!pokemon::encodeBattleStoreFile(state, 0, zeroSequence, zeroSequenceSize));
+
+  // A size that doesn't match header+entryCount*16+4 is rejected outright.
+  CHECK(!pokemon::decodeBattleStoreFile(bytes.data(), size - 1, decoded, sequence));
+  CHECK(!pokemon::decodeBattleStoreFile(bytes.data(), 0, decoded, sequence));
+
+  // A different, unrecognized version byte is rejected too.
+  pokemon::BattleStoreFileBytes badVersion = bytes;
+  badVersion[4] = pokemon::POKEMON_BATTLE_STORE_VERSION + 1;
+  CHECK(!pokemon::decodeBattleStoreFile(badVersion.data(), size, decoded, sequence));
 }
 
-void emptyStateEncodesToJustTheCrc() {
+void emptyStateEncodesToJustTheHeaderAndCrc() {
   BattleStoreState state{};
   pokemon::BattleStoreFileBytes bytes{};
   size_t size = 0;
-  CHECK(pokemon::encodeBattleStoreFile(state, bytes, size));
-  CHECK(size == pokemon::POKEMON_BATTLE_FILE_CRC_BYTES);
+  CHECK(pokemon::encodeBattleStoreFile(state, 1, bytes, size));
+  CHECK(size == pokemon::POKEMON_BATTLE_HEADER_BYTES + pokemon::POKEMON_BATTLE_FILE_CRC_BYTES);
 
   BattleStoreState decoded{};
+  uint32_t sequence = 0;
   decoded.entries[0] = makeEntry(1);  // prove decode actually clears this, not just leaves it
-  CHECK(pokemon::decodeBattleStoreFile(bytes.data(), size, decoded));
+  CHECK(pokemon::decodeBattleStoreFile(bytes.data(), size, decoded, sequence));
   CHECK(pokemon::battleEntryCount(decoded) == 0);
+  CHECK(sequence == 1);
+}
+
+void legacyHeaderlessFileStillDecodesForMigration() {
+  BattleStoreState state{};
+  CHECK(pokemon::upsertBattleEntry(state, makeEntry(9)));
+
+  // The pre-double-buffering format: just entries back to back + CRC32,
+  // no magic/version/sequence header. Hand-roll it the way the old
+  // encodeBattleStoreFile used to, since only decode needs to survive.
+  pokemon::BattleEntryBytes entryBytes{};
+  CHECK(pokemon::encodeBattleRecordEntry(state.entries[0], entryBytes));
+  pokemon::BattleStoreLegacyFileBytes legacyBytes{};
+  std::memcpy(legacyBytes.data(), entryBytes.data(), entryBytes.size());
+  const uint32_t crc = pokemon::finishBattleStoreCrc32(
+      pokemon::updateBattleStoreCrc32(pokemon::BATTLE_STORE_CRC32_INITIAL, entryBytes.data(), entryBytes.size()));
+  for (size_t i = 0; i < 4; ++i) legacyBytes[entryBytes.size() + i] = static_cast<uint8_t>(crc >> (8 * i));
+  const size_t legacySize = entryBytes.size() + pokemon::POKEMON_BATTLE_FILE_CRC_BYTES;
+
+  BattleStoreState decoded{};
+  CHECK(pokemon::decodeLegacyBattleStoreFile(legacyBytes.data(), legacySize, decoded));
+  CHECK(decoded == state);
+
+  // A byte flip is still caught the same way.
+  legacyBytes[0] ^= 0xFFU;
+  BattleStoreState corruptOutput{};
+  CHECK(!pokemon::decodeLegacyBattleStoreFile(legacyBytes.data(), legacySize, corruptOutput));
 }
 
 }  // namespace
@@ -175,7 +221,8 @@ int main() {
   invalidStatusByteFailsToDecode();
   upsertKeepsAscendingOrderAndReplacesInPlace();
   upsertFailsPastCapacityForAnUnseenRecordId();
-  fileRoundTripsAndDetectsCorruption();
-  emptyStateEncodesToJustTheCrc();
+  fileRoundTripsCarriesSequenceAndDetectsCorruption();
+  emptyStateEncodesToJustTheHeaderAndCrc();
+  legacyHeaderlessFileStillDecodesForMigration();
   return failures == 0 ? 0 : 1;
 }
