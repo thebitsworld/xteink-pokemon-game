@@ -358,11 +358,14 @@ int PokemonActivity::logicalCount() const {
       return 2;
     }
     case Screen::Battle:
-      return gymChallengeIndex_ != 0 ? 2 : 3;  // trainer battles have no BALL option
+      // FIGHT+SWITCH+RUN for a trainer battle (no BALL option); FIGHT+BALL+SWITCH+RUN for a wild encounter.
+      return gymChallengeIndex_ != 0 ? 3 : 4;
     case Screen::BattleMoves:
       return battlePlayerMoveCount();
     case Screen::BattleBalls:
       return 4;
+    case Screen::BattleSwitch:
+      return static_cast<int>(usablePartySlotCount());
     case Screen::GymList:
       return pokemon::GYM_COUNT;
     case Screen::Badges:
@@ -453,16 +456,44 @@ int PokemonActivity::battlePlayerMoveCount() const {
   return count;
 }
 
-bool PokemonActivity::setupBattlePlayer() {
-  if (snapshot_.partyCount == 0) return false;
-  const pokemon::PokemonRecord& leader = snapshot_.party[0];
-  pokemon::BattleRecordEntry entry{};
-  if (service_.loadBattleEntry(leader.recordId, entry) != pokemon::ServiceStatus::Ok) return false;
+int PokemonActivity::firstUsablePartySlot() const {
+  for (int slot = 0; slot < snapshot_.partyCount; ++slot) {
+    if (service_.peekBattleMoves(snapshot_.party[slot]).currentHp > 0) return slot;
+  }
+  return -1;
+}
 
+size_t PokemonActivity::usablePartySlotCount() const {
+  size_t count = 0;
+  for (int slot = 0; slot < snapshot_.partyCount; ++slot) {
+    if (slot == battlePartySlot_) continue;
+    if (service_.peekBattleMoves(snapshot_.party[slot]).currentHp > 0) ++count;
+  }
+  return count;
+}
+
+int PokemonActivity::usablePartySlotAt(const size_t index) const {
+  size_t count = 0;
+  for (int slot = 0; slot < snapshot_.partyCount; ++slot) {
+    if (slot == battlePartySlot_) continue;
+    if (service_.peekBattleMoves(snapshot_.party[slot]).currentHp == 0) continue;
+    if (count == index) return slot;
+    ++count;
+  }
+  return -1;
+}
+
+bool PokemonActivity::setupBattlePlayer(const int slot) {
+  if (slot < 0 || slot >= snapshot_.partyCount) return false;
+  const pokemon::PokemonRecord& fighter = snapshot_.party[slot];
+  pokemon::BattleRecordEntry entry{};
+  if (service_.loadBattleEntry(fighter.recordId, entry) != pokemon::ServiceStatus::Ok) return false;
+
+  battlePartySlot_ = slot;
   battlePlayer_ = pokemon::BattleCombatant{};
-  battlePlayer_.speciesId = leader.speciesId;
-  battlePlayer_.level = pokemon::levelForXp(leader.totalXp);
-  const pokemon::BaseStats* playerStats = pokemon::baseStatsFor(leader.speciesId);
+  battlePlayer_.speciesId = fighter.speciesId;
+  battlePlayer_.level = pokemon::levelForXp(fighter.totalXp);
+  const pokemon::BaseStats* playerStats = pokemon::baseStatsFor(fighter.speciesId);
   battlePlayer_.maxHp = playerStats == nullptr ? 1 : pokemon::battleMaxHp(playerStats->hp, battlePlayer_.level);
   battlePlayer_.currentHp = std::min<uint16_t>(entry.currentHp, battlePlayer_.maxHp);
   battlePlayer_.status = entry.status;
@@ -501,9 +532,11 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
 }
 
 bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
-  if (!setupBattlePlayer()) return false;
+  const int slot = firstUsablePartySlot();
+  if (slot < 0 || !setupBattlePlayer(slot)) return false;
   setupBattleOpponent(pending.speciesId, pending.level);
   gymChallengeIndex_ = 0;
+  forcedBattleSwitch_ = false;
   battleLog_[0] = '\0';
   setScreen(Screen::Battle);
   return true;
@@ -512,19 +545,21 @@ bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
 bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
   const auto team = pokemon::gymTeamFor(gymIndex);
   if (team.empty()) return false;
-  if (!setupBattlePlayer()) return false;
+  const int slot = firstUsablePartySlot();
+  if (slot < 0 || !setupBattlePlayer(slot)) return false;
   setupBattleOpponent(team[0].speciesId, team[0].level, team[0].moves);
   gymChallengeIndex_ = gymIndex;
   gymChallengeTeamProgress_ = 0;
+  forcedBattleSwitch_ = false;
   battleLog_[0] = '\0';
   setScreen(Screen::Battle);
   return true;
 }
 
 void PokemonActivity::savePlayerBattleEntry() {
-  if (snapshot_.partyCount == 0) return;
+  if (battlePartySlot_ < 0 || battlePartySlot_ >= snapshot_.partyCount) return;
   pokemon::BattleRecordEntry entry{};
-  entry.recordId = snapshot_.party[0].recordId;
+  entry.recordId = snapshot_.party[battlePartySlot_].recordId;
   for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
     entry.moves[i] = battlePlayer_.moves[i].moveId;
     entry.pp[i] = battlePlayer_.moves[i].currentPp;
@@ -921,7 +956,11 @@ void PokemonActivity::activate() {
         if (selected_ == 0) {
           // "Catch" now opens a battle instead of resolving instantly - the
           // wild Pokemon must be fought and/or thrown a ball at.
-          if (!enterBattle(pending)) showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
+          if (firstUsablePartySlot() < 0) {
+            showMessage(tr(STR_POKEMON_NO_USABLE_POKEMON), Screen::Event);
+          } else if (!enterBattle(pending)) {
+            showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
+          }
           return;
         }
         uint32_t caught = 0;
@@ -960,21 +999,35 @@ void PokemonActivity::activate() {
       }
       return;
     }
-    case Screen::Battle:
+    case Screen::Battle: {
+      const bool isGym = gymChallengeIndex_ != 0;
       if (selected_ == 0) {
         if (battlePlayerMoveCount() == 0) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
           return;
         }
         setScreen(Screen::BattleMoves);
-      } else if (gymChallengeIndex_ == 0 && selected_ == 1) {
-        // Trainer battles (gym/Elite Four) have no BALL option - their
-        // logicalCount() is 2, so selected_ == 1 there is already RUN.
-        setScreen(Screen::BattleBalls);
-      } else {
-        resolveBattleAsPass();
+        return;
       }
+      if (!isGym && selected_ == 1) {
+        // Trainer battles (gym/Elite Four) have no BALL option - their
+        // logicalCount() is 3 (FIGHT/SWITCH/RUN), so selected_ == 1 there
+        // is already SWITCH, handled by the shared branch below.
+        setScreen(Screen::BattleBalls);
+        return;
+      }
+      if (selected_ == (isGym ? 1 : 2)) {
+        if (usablePartySlotCount() == 0) {
+          showMessage(tr(STR_POKEMON_NO_OTHER_USABLE), Screen::Battle);
+          return;
+        }
+        forcedBattleSwitch_ = false;
+        setScreen(Screen::BattleSwitch);
+        return;
+      }
+      resolveBattleAsPass();  // RUN - always the last option either way
       return;
+    }
     case Screen::BattleMoves: {
       if (selected_ < 0 || selected_ >= battlePlayerMoveCount()) return;
       if (battlePlayer_.moves[selected_].currentPp == 0) {
@@ -988,10 +1041,30 @@ void PokemonActivity::activate() {
       if (result.outcome == pokemon::BattleOutcome::PlayerWon) {
         finishBattleAfterWildFainted();
       } else if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
-        finishBattleAfterPlayerFainted();
+        // Only truly a loss once nothing left in the party can fight -
+        // otherwise force a switch instead of ending the battle (GĐ13).
+        if (usablePartySlotCount() > 0) {
+          forcedBattleSwitch_ = true;
+          setScreen(Screen::BattleSwitch);
+        } else {
+          finishBattleAfterPlayerFainted();
+        }
       } else {
         setScreen(Screen::Battle);
       }
+      return;
+    }
+    case Screen::BattleSwitch: {
+      const int slot = usablePartySlotAt(static_cast<size_t>(selected_));
+      if (slot < 0) return;
+      savePlayerBattleEntry();
+      if (!setupBattlePlayer(slot)) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Battle);
+        return;
+      }
+      forcedBattleSwitch_ = false;
+      snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
+      setScreen(Screen::Battle);
       return;
     }
     case Screen::BattleBalls: {
@@ -1036,7 +1109,11 @@ void PokemonActivity::activate() {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::GymList);
         return;
       }
-      if (!enterGymBattle(gymIndex)) showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::GymList);
+      if (firstUsablePartySlot() < 0) {
+        showMessage(tr(STR_POKEMON_NO_USABLE_POKEMON), Screen::GymList);
+      } else if (!enterGymBattle(gymIndex)) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::GymList);
+      }
       return;
     }
     case Screen::Badges:
@@ -1118,6 +1195,11 @@ void PokemonActivity::goBack() {
     case Screen::BattleMoves:
     case Screen::BattleBalls:
       setScreen(Screen::Battle);
+      return;
+    case Screen::BattleSwitch:
+      // A forced switch (the active Pokemon just fainted) can't be
+      // cancelled - Back is simply ignored until a replacement is chosen.
+      if (!forcedBattleSwitch_) setScreen(Screen::Battle);
       return;
     case Screen::PokedexDetail:
       setScreen(Screen::Pokedex, static_cast<int>(pokedexSpecies_ - 1U));
@@ -1408,11 +1490,21 @@ void PokemonActivity::buildRows() {
         } else
           row(local, tr(STR_OK));
         break;
-      case Screen::Battle:
-        row(local, index == 0                                ? tr(STR_POKEMON_FIGHT)
-                   : (gymChallengeIndex_ == 0 && index == 1) ? tr(STR_POKEMON_BALL)
-                                                             : tr(STR_POKEMON_RUN));
+      case Screen::Battle: {
+        const bool isGym = gymChallengeIndex_ != 0;
+        const char* label;
+        if (index == 0) {
+          label = tr(STR_POKEMON_FIGHT);
+        } else if (!isGym && index == 1) {
+          label = tr(STR_POKEMON_BALL);
+        } else if (index == (isGym ? 1 : 2)) {
+          label = tr(STR_POKEMON_SWITCH);
+        } else {
+          label = tr(STR_POKEMON_RUN);
+        }
+        row(local, label);
         break;
+      }
       case Screen::BattleMoves: {
         const uint8_t moveId = battlePlayer_.moves[index].moveId;
         const pokemon::MoveData* move = pokemon::moveData(moveId);
@@ -1420,6 +1512,16 @@ void PokemonActivity::buildRows() {
         snprintf(value, sizeof(value), "PP %u/%u", battlePlayer_.moves[index].currentPp,
                  move == nullptr ? 0 : move->pp);
         row(local, move == nullptr ? "?" : move->name, value);
+        break;
+      }
+      case Screen::BattleSwitch: {
+        const int slot = usablePartySlotAt(static_cast<size_t>(index));
+        if (slot < 0) break;
+        const pokemon::PokemonRecord& record = snapshot_.party[slot];
+        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+        char value[24];
+        snprintf(value, sizeof(value), "HP %u", entry.currentHp);
+        row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), value);
         break;
       }
       case Screen::BattleBalls: {
@@ -1798,6 +1900,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_SUMMARY);
   else if (screen_ == Screen::Moveset || screen_ == Screen::MovesetPick || screen_ == Screen::TmReplaceSlot)
     title = tr(STR_POKEMON_MOVES);
+  else if (screen_ == Screen::BattleSwitch)
+    title = tr(STR_POKEMON_SWITCH);
   else if (screen_ == Screen::GymList)
     title = tr(STR_POKEMON_GYM_BATTLE);
   else if (screen_ == Screen::Badges)

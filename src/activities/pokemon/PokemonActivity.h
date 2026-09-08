@@ -50,6 +50,7 @@ class PokemonActivity final : public Activity {
     Battle,
     BattleMoves,
     BattleBalls,
+    BattleSwitch,
     GymList,
     Badges,
     ResetFirst,
@@ -83,7 +84,7 @@ class PokemonActivity final : public Activity {
   void renderFocused();
   void renderRowArt();
   void renderHeaderAndHints();
-  bool setupBattlePlayer();
+  bool setupBattlePlayer(int slot);
   void setupBattleOpponent(uint16_t speciesId, uint8_t level, std::span<const uint8_t> fixedMoves = {});
   bool enterBattle(const pokemon::PendingEvent& pending);
   bool enterGymBattle(uint8_t gymIndex);
@@ -96,6 +97,14 @@ class PokemonActivity final : public Activity {
   void buildBattleLog(const pokemon::BattleTurnResult& result);
   void renderBattleHud();
   int battlePlayerMoveCount() const;
+  // GĐ 13: which party members can currently fight (BattleRecordEntry's
+  // currentHp > 0, via the read-only peekBattleMoves - no battle-store
+  // writes just from checking). firstUsablePartySlot() picks who starts a
+  // fresh battle; the usablePartySlot* pair excludes battlePartySlot_
+  // itself, for the mid-battle switch picker.
+  int firstUsablePartySlot() const;
+  size_t usablePartySlotCount() const;
+  int usablePartySlotAt(size_t index) const;
   int logicalCount() const;
   int listTop() const;
   int rowsPerPage() const;
@@ -132,6 +141,8 @@ class PokemonActivity final : public Activity {
   char battleLog_[160]{};
   uint8_t gymChallengeIndex_ = 0;         // 0 = not fighting a gym/Elite Four right now
   uint8_t gymChallengeTeamProgress_ = 0;  // index of the opponent team member currently out
+  int battlePartySlot_ = 0;               // which snapshot_.party[] slot is currently battlePlayer_
+  bool forcedBattleSwitch_ = false;       // true while the active Pokemon just fainted - Back can't cancel out
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};
   std::array<std::array<char, 56>, ROW_CAPACITY> labels_{};
   std::array<std::array<char, 32>, ROW_CAPACITY> values_{};
