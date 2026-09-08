@@ -1032,12 +1032,26 @@ void PokemonActivity::loop() {
   }
   const int count = logicalCount();
   if (count <= 0) return;
+  const int perPage = rowsPerPage();
   const auto move = [this, count](const int next) {
     selected_ = next;
     requestUpdate();
   };
-  navigator_.onNext([this, count, &move] { move(ButtonNavigator::nextIndex(selected_, count)); });
-  navigator_.onPrevious([this, count, &move] { move(ButtonNavigator::previousIndex(selected_, count)); });
+  // The side buttons (Up/Down) jump a full page at a time; the front
+  // buttons (Left/Right) step one row - fewer presses to get through long
+  // lists (Bag, Pokedex, PC box...), easier on the buttons. nextPageIndex/
+  // previousPageIndex already fall back to a single step when everything
+  // fits on one page, so this is safe on short lists too.
+  navigator_.onPressAndContinuous({MappedInputManager::Button::Right},
+                                  [this, count, &move] { move(ButtonNavigator::nextIndex(selected_, count)); });
+  navigator_.onPressAndContinuous({MappedInputManager::Button::Left},
+                                  [this, count, &move] { move(ButtonNavigator::previousIndex(selected_, count)); });
+  navigator_.onPressAndContinuous({MappedInputManager::Button::Down}, [this, count, perPage, &move] {
+    move(ButtonNavigator::nextPageIndex(selected_, count, perPage));
+  });
+  navigator_.onPressAndContinuous({MappedInputManager::Button::Up}, [this, count, perPage, &move] {
+    move(ButtonNavigator::previousPageIndex(selected_, count, perPage));
+  });
 }
 
 void PokemonActivity::screenBuilder(UiApp::ScreenType& screen, void* user) {
@@ -1185,7 +1199,16 @@ void PokemonActivity::buildRows() {
         char count[16];
         snprintf(count, sizeof(count), "× %u",
                  bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
-        row(local, data == nullptr ? "?" : data->name, count);
+        char label[56];
+        if (machine && data != nullptr) {
+          // TM/HM names alone ("TM01") don't say what they teach - show the
+          // move name too so browsing the list doesn't require a lookup.
+          const pokemon::MoveData* move = pokemon::moveData(data->teachesMoveId);
+          snprintf(label, sizeof(label), "%s - %s", data->name, move == nullptr ? "?" : move->name);
+        } else {
+          snprintf(label, sizeof(label), "%s", data == nullptr ? "?" : data->name);
+        }
+        row(local, label, count);
         break;
       }
       case Screen::Pokedex: {
