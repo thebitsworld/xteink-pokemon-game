@@ -258,3 +258,15 @@ Roadmap 8 giai đoạn gốc đã xong hoàn toàn (xem GĐ8 ở trên). Ngườ
 - [x] Không cần sửa hint bar (`renderHeaderAndHints()`): `mapLabels()` chỉ hiện nhãn cho 4 nút phía trước (Back/Confirm/Left/Right — xem `MappedInputManager::mapLabels`), hành vi Left/Right không đổi nên nhãn "Up"/"Down" hiện tại (gán cho Left/Right theo quy ước cũ của màn hình danh sách dọc) vẫn mô tả đúng.
 - [x] Chỉ sửa `PokemonActivity.cpp` — không đụng `PokemonService`/`PokemonGame`/bất kỳ file lưu trữ nào, đây thuần là thay đổi UI/input.
 - [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,334,665 B (96.7%, còn 204,784 B ≈ 200KB)** — tăng **+672 B** so với GĐ9.
+
+## GĐ 11 — Màn hình quản lý moveset (ngoài roadmap gốc, theo phản hồi người dùng) ✅ XONG (commit `a554d92f`)
+
+Người dùng phản hồi: Pokémon đủ 4 chiêu không có cách nào chủ động học thêm/thay chiêu — luồng MoveLearn tự động (GĐ7) chỉ xuất hiện đúng lúc lên cấp và moveset đầy, không có nơi nào để chủ động vào xem/đổi.
+
+- [x] `CollectionAction::Moveset` (mới) thêm vào `pokemon::collectionActions()`, luôn xuất hiện (party lẫn PC), ngay sau "Summary" — đặt tên khác `CollectionAction::Move` (di chuyển vị trí trong party, đã có từ trước) để tránh nhầm lẫn; nhãn UI dùng `STR_POKEMON_MOVES` ("Moves") khác `STR_POKEMON_MOVE` ("Move") đã có.
+- [x] `Screen::Moveset` (mới) — liệt kê 4 ô chiêu hiện tại (tên + PP) qua `service_.peekBattleMoves()` (đọc thuần, giống Summary). Chọn 1 ô mở `Screen::MovesetPick`.
+- [x] `Screen::MovesetPick` (mới) — liệt kê mọi chiêu trong `learnsetFor(speciesId)` ở cấp hiện tại trở xuống mà Pokémon **chưa biết** (lọc trùng 4 ô đang có). Chọn 1 chiêu học đè vào đúng ô đã chọn ở màn trước, qua `PokemonService::learnMoveIntoSlot()` (mới, ghi đè không điều kiện — vì list đã lọc sẵn AlreadyKnown). Nếu không còn chiêu nào để học ở cấp hiện tại → thông báo `STR_POKEMON_NO_MOVES_TO_LEARN`, không vào màn rỗng.
+- [x] `learnableMoveIdAt()`/`learnableMoveCount()` (PokemonActivity.cpp, thuần) gọi thẳng `pokemon::learnsetFor()` — dữ liệu learnset là bảng tĩnh không qua storage, không cần thêm API service chỉ để đọc, giống cách `moveData()`/`speciesData()` đã được gọi trực tiếp từ UI ở nhiều chỗ khác trong file.
+- [x] **Khác biệt rõ với 2 luồng học chiêu đã có**: TM/HM (GĐ9) không có picker chọn-ô-thay khi đầy (chỉ báo lỗi); MoveLearn tự động (GĐ7) có picker nhưng chỉ xuất hiện đúng lúc lên cấp. Màn Moveset mới cho chủ động vào **bất cứ lúc nào**, chọn **bất cứ ô nào** để thay bằng bất cứ chiêu nào đã unlock theo cấp — đúng tính năng người dùng cần, không phải mở rộng 2 luồng cũ.
+- [x] Test: cập nhật `collectionActionsExcludeOperationsThatCannotSucceed` (thứ tự/số lượng action đổi vì thêm Moveset); 1 test mới cho `learnMoveIntoSlot`. 19/19 suite native pass.
+- [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,335,981 B (96.7%, còn 203,472 B ≈ 199KB)** — tăng **+1,316 B** so với GĐ10.
