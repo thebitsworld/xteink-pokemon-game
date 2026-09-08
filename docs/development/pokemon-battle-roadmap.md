@@ -366,7 +366,7 @@ Người dùng chê thẳng: "màn hình battle xấu quá... tốt nhất là g
 - [x] 1 key i18n mới: `STR_POKEMON_SENT_OUT: "%s sent out %s!"`.
 - [x] Chỉ sửa `PokemonActivity.cpp` + `english.yaml` — không đụng `PokemonService`/`PokemonBattle`/storage/test native (file UI này vốn không nằm trong test suite native, chỉ verify qua build thật + smoke test giả lập, như các GĐ UI trước).
 - [x] Build `pokemon-simulator-X3` sạch (`rm -rf .pio/build/pokemon-simulator-X3` trước khi build vì có sửa `english.yaml` — đúng gotcha đã ghi từ GĐ5), smoke test 12s không lỗi/crash. 19/19 suite native pass (không đổi vì không chạm code có test). **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,345,083 B (96.8%, còn 194,368 B ≈ 190KB)** — +1,010 B so với GĐ15.
-- [ ] **Chưa xác nhận bằng mắt** — môi trường build này không có cách tự động lái giả lập/chụp màn hình để so hình trực quan với Red thật; người dùng cần tự chạy giả lập và xác nhận bố cục có đúng ý hay cần chỉnh thêm (khoảng cách, kích thước hộp, vị trí art...).
+- [x] **Đã xác nhận bằng mắt** — người dùng tự chạy giả lập, phản hồi qua 2 vòng chỉnh (giữ tên/nickname; khung HP hẹp/cao hơn + bar căn giữa + hộp log thu nhỏ, xem mục GĐ17), sau đó xác nhận "đẹp rồi".
 
 ---
 
@@ -386,7 +386,7 @@ Người dùng chơi thử màn Battle mới (GĐ16), yêu cầu thêm 3 việc:
 - [x] **`Screen::Summary`**: thêm 1 dòng "HP" + bar + "hiện tại/tối đa" ngay dưới dòng Number/Level/Gender, dùng chung style field căn phải đã có sẵn cho Type/Exp/Met.
 - [x] Cả 3 chỗ dùng chung `service_.peekBattleMoves()` + `pokemon::battleMaxHp(baseStatsFor(...)->hp, levelForXp(...))` để tính HP tối đa — không có field `maxHp` lưu sẵn trong `BattleRecordEntry`, phải tính lại từ base stat + level mỗi lần, đúng cách các màn khác (BattleSwitch, `usablePartySlotAt()`) đã làm từ GĐ13.
 - [x] Chỉ sửa `PokemonActivity.cpp/.h`. 19/19 suite native pass (không đổi — file UI này không nằm trong test suite native). Build `pokemon-simulator-X3` sạch + smoke test 12s không lỗi. **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,346,113 B (96.8%, còn 193,344 B ≈ 189KB)** — +1,030 B so với GĐ16.
-- [ ] **Chưa xác nhận bằng mắt** — như GĐ16, cần người dùng tự chạy giả lập kiểm tra bố cục thật (đặc biệt: khoảng cách chấm tròn có đủ rõ để đếm, dòng Party 96px có tràn màn hình trên các cấu hình theme khác nhau không).
+- [x] **Đã xác nhận bằng mắt** — người dùng chạy giả lập, qua 2 vòng chỉnh (xem 2 mục "Sửa" ngay dưới) rồi xác nhận "đẹp rồi. tạm thời dừng ở đây".
 
 **Sửa ngay sau khi chơi thử (commit `9b12bae6`)**: khung HP thu nhỏ ban đầu bỏ hẳn tên loài (lý do "sprite đã đủ nhận diện") — người dùng phản hồi ngay là sai ý, khung HP vẫn cần hiện tên/nickname. Thêm lại dòng tên+Level ở trên cùng (Level dời từ hàng thanh HP lên đây), `panelHeight` 50→72. Player ưu tiên nickname thật (`snapshot_.party[battlePartySlot_].nickname`) trước khi fallback `speciesName()`, đúng convention dùng ở Party row/Summary. **Bug đi kèm phát hiện khi sửa**: `panelHeight` tăng khiến dots+panel (92) giờ cao hơn sprite (90) — code cũ giả định sprite luôn cao nhất mỗi bên (đúng lúc panelHeight=50) nên tính `messageY`/`playerZoneTop` thẳng từ `spriteH`, không còn đúng nữa. Sửa bằng `zoneContentHeight = max(spriteH, dotRowHeight + panelHeight)` dùng chung, không giả định bên nào cao hơn. Flash **6,346,205 B (96.8%, còn 193,248 B)** — +92 B so với bản trước.
 
