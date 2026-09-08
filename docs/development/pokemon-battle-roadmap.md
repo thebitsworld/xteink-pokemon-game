@@ -250,3 +250,11 @@ Roadmap 8 giai đoạn gốc đã xong hoàn toàn (xem GĐ8 ở trên). Ngườ
 - [x] 3 key i18n mới: `STR_POKEMON_BAG_EVOLUTION`/`MEDICINE`/`MACHINES`.
 - [x] Test: 5 test mới trong `PokemonServiceTest.cpp` (hồi HP + cap ở maxHp, status-cure khớp/không khớp ailment, Full Restore chữa mọi status, PP restore áp dụng cho mọi ô, Rare Candy +1 cấp và `NotApplicable` ở level 100). 19/19 suite native pass.
 - [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,333,993 B (96.6%, còn 205,456 B ≈ 200KB)** — tăng **+1,488 B** so với mốc cuối roadmap GĐ8 (6,332,505 B).
+
+## GĐ 10 — Tên chiêu trên TM/HM + nút bên nhảy trang (ngoài roadmap gốc, theo yêu cầu người dùng) ✅ XONG (commit `060d272f`)
+
+- [x] Dòng TM/HM trong `Screen::BagMachine` giờ hiện `"<tên item> - <tên chiêu>"` (vd `"TM01 - Mega Punch"`) thay vì chỉ tên item — đỡ phải tra cứu ngoài khi duyệt. Category Medicine không đổi vì tên item đã tự giải thích đủ.
+- [x] Tách hành vi 4 nút trong `PokemonActivity::loop()`: 2 nút bên hông máy (`Button::Up`/`Down`, theo `docs/controls.md`) giờ **nhảy nguyên 1 trang** (`rowsPerPage()` dòng) mỗi lần bấm/giữ; 2 nút phía trước (`Button::Left`/`Right`) vẫn **duyệt từng dòng** như cũ (trước GĐ10, `ButtonNavigator::onNext`/`onPrevious` coi cả 4 nút này tương đương nhau — đều duyệt từng dòng). Dùng thẳng `ButtonNavigator::nextPageIndex`/`previousPageIndex` (đã có sẵn từ trước, `FileBrowserActivity` cũng dùng) — 2 hàm này tự rơi về bước từng dòng khi danh sách vừa đủ 1 trang, nên áp dụng an toàn cho **mọi** màn hình danh sách trong `PokemonActivity`, không chỉ Bag.
+- [x] Không cần sửa hint bar (`renderHeaderAndHints()`): `mapLabels()` chỉ hiện nhãn cho 4 nút phía trước (Back/Confirm/Left/Right — xem `MappedInputManager::mapLabels`), hành vi Left/Right không đổi nên nhãn "Up"/"Down" hiện tại (gán cho Left/Right theo quy ước cũ của màn hình danh sách dọc) vẫn mô tả đúng.
+- [x] Chỉ sửa `PokemonActivity.cpp` — không đụng `PokemonService`/`PokemonGame`/bất kỳ file lưu trữ nào, đây thuần là thay đổi UI/input.
+- [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,334,665 B (96.7%, còn 204,784 B ≈ 200KB)** — tăng **+672 B** so với GĐ9.
