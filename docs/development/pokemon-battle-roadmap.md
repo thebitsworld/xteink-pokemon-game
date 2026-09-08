@@ -367,3 +367,23 @@ Người dùng chê thẳng: "màn hình battle xấu quá... tốt nhất là g
 - [x] Chỉ sửa `PokemonActivity.cpp` + `english.yaml` — không đụng `PokemonService`/`PokemonBattle`/storage/test native (file UI này vốn không nằm trong test suite native, chỉ verify qua build thật + smoke test giả lập, như các GĐ UI trước).
 - [x] Build `pokemon-simulator-X3` sạch (`rm -rf .pio/build/pokemon-simulator-X3` trước khi build vì có sửa `english.yaml` — đúng gotcha đã ghi từ GĐ5), smoke test 12s không lỗi/crash. 19/19 suite native pass (không đổi vì không chạm code có test). **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,345,083 B (96.8%, còn 194,368 B ≈ 190KB)** — +1,010 B so với GĐ15.
 - [ ] **Chưa xác nhận bằng mắt** — môi trường build này không có cách tự động lái giả lập/chụp màn hình để so hình trực quan với Red thật; người dùng cần tự chạy giả lập và xác nhận bố cục có đúng ý hay cần chỉnh thêm (khoảng cách, kích thước hộp, vị trí art...).
+
+---
+
+## GĐ 17 — Chấm tròn còn sống trong Battle + HP bar cho Party/Summary (ngoài roadmap gốc, theo phản hồi người dùng sau khi xem thử GĐ16) ✅ XONG (commit `470120d1`)
+
+Người dùng chơi thử màn Battle mới (GĐ16), yêu cầu thêm 3 việc:
+
+1. **Battle**: hiện số Pokémon còn sống mỗi bên bằng chấm tròn (chấm đặc = còn sống, chấm nhỏ đè dấu X = đã bị hạ) + **thu nhỏ khung HP**.
+2. **Screen::Party**: bổ sung HP bar + HP text + status vào từng dòng để biết Pokémon nào cần dùng item hồi phục.
+3. **Screen::Summary**: bổ sung HP bar + HP text.
+
+- [x] **Khung HP thu nhỏ**: `panelHeight` 76→50, bỏ hẳn dòng tên loài (sprite bên cạnh đã đủ nhận diện) — chỉ còn 2 dòng: "HP" + bar + Level (hàng 1), "hiện tại/tối đa" + status nếu có (hàng 2). Bỏ luôn phân biệt "chỉ player mới hiện số HP" của GĐ16 — giờ cả hai bên đều hiện số theo đúng yêu cầu người dùng.
+- [x] **Hàng chấm tròn** phía trên mỗi khung HP: GfxRenderer không có API vẽ hình tròn riêng — dùng `fillRoundedRect`/`drawRoundedRect` với `cornerRadius = size/2` (bo tròn hết cỡ một ô vuông = hình tròn). Chấm đặc (`fillRoundedRect` đen) = còn đánh được; chấm rỗng (`drawRoundedRect` viền) + 2 đường chéo (`drawLine`) tạo dấu X = đã gục.
+  - Đối thủ: đấu gym tính theo `gymTeamFor(gymChallengeIndex_)` + `gymChallengeTeamProgress_` (thành viên có index nhỏ hơn progress = đã hạ; đúng index = đang đánh, sống hay không theo `battleOpponent_.currentHp`; lớn hơn = chưa tung ra, mặc định còn sống); gặp hoang dã chỉ 1 chấm.
+  - Player: tính theo `snapshot_.partyCount`, đọc HP qua `battlePlayer_.currentHp` cho Pokémon đang đánh (tránh đọc lại từ store có thể chưa đồng bộ) và `service_.peekBattleMoves()` (đọc thuần, không ghi SD — đúng pattern `usablePartySlotAt()` từ GĐ13) cho các Pokémon còn lại trong party.
+- [x] **`Screen::Party`**: dòng cao hơn (64→96px) **chỉ riêng màn này** qua `rowHeightForScreen()` (mới, dùng chung cho cả `buildList()` lẫn `rowsPerPage()` — trước đó 2 nơi hardcode `64` độc lập nhau). Xác nhận qua đọc thẳng `FreeInkUIGfxRenderer::text()`: label/value của list widget luôn **căn giữa theo chiều cao dòng** (`y = rect.y + (rect.height - lineHeight) / 2`) — nghĩa là dòng cao hơn chỉ đẩy khối chữ đã có xuống giữa, chừa khoảng trống đều ở trên **và dưới**; vẽ HP bar ở dải dưới cùng, canh theo khoảng cách cố định từ **mép dưới dòng** (không phải từ đỉnh) nên an toàn với mọi chiều cao dòng thật, không cần biết chính xác line-height của font. `renderPartyRowHealth()` (mới, gọi từ `renderRowArt()`) vẽ bar + "hiện tại/tối đa" + status abbrev.
+- [x] **`Screen::Summary`**: thêm 1 dòng "HP" + bar + "hiện tại/tối đa" ngay dưới dòng Number/Level/Gender, dùng chung style field căn phải đã có sẵn cho Type/Exp/Met.
+- [x] Cả 3 chỗ dùng chung `service_.peekBattleMoves()` + `pokemon::battleMaxHp(baseStatsFor(...)->hp, levelForXp(...))` để tính HP tối đa — không có field `maxHp` lưu sẵn trong `BattleRecordEntry`, phải tính lại từ base stat + level mỗi lần, đúng cách các màn khác (BattleSwitch, `usablePartySlotAt()`) đã làm từ GĐ13.
+- [x] Chỉ sửa `PokemonActivity.cpp/.h`. 19/19 suite native pass (không đổi — file UI này không nằm trong test suite native). Build `pokemon-simulator-X3` sạch + smoke test 12s không lỗi. **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,346,113 B (96.8%, còn 193,344 B ≈ 189KB)** — +1,030 B so với GĐ16.
+- [ ] **Chưa xác nhận bằng mắt** — như GĐ16, cần người dùng tự chạy giả lập kiểm tra bố cục thật (đặc biệt: khoảng cách chấm tròn có đủ rõ để đếm, dòng Party 96px có tràn màn hình trên các cấu hình theme khác nhau không).
