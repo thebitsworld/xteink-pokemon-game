@@ -148,10 +148,19 @@ Mỗi giai đoạn là một điểm dừng tự nhiên: build được, test đ
 
 **Phát hiện quan trọng (rủi ro cho mọi giai đoạn sau còn sửa i18n)**: sau khi xóa 1 key giữa danh sách trong `english.yaml` (dịch chuyển toàn bộ `StrId` enum phía sau), chạy lại `pio run` báo "up to date" trong 3.2s mà **không rebuild `I18nStrings.o`** — SCons không phát hiện thay đổi qua build hook generator (`gen_i18n.py` chạy như `pre:` script, không nằm trong dependency graph mà SCons theo dõi). Xác nhận qua `stat -c "%Y %n"`: object cũ hơn source mới generate ra. Nguy cơ: link nhầm object cũ với enum layout mới → tra sai chuỗi ở runtime, **sai lặng lẽ, không có lỗi build nào báo**. **Bắt buộc**: sau mỗi lần sửa file trong `lib/I18n/translations/*.yaml`, chạy `rm -rf .pio/build/<env>` để force rebuild sạch trước khi tin tưởng số liệu flash hay hành vi runtime.
 
-### GĐ 6 — UI: Gym List + Badges
+### GĐ 6 — UI: Gym List + Badges ✅ XONG (commit `2f420118`) — gym battle thật, không chỉ hiển thị
 
-- [ ] Thêm `Screen::GymList`, `Screen::Badges` + 2 mục vào `Screen::Menu`.
-- [ ] Hiển thị trạng thái từng gym: đã thắng / đang mở / còn khóa; Elite Four khóa tới khi đủ 8 huy hiệu.
+- [x] Thêm `Screen::GymList` (12 dòng: 8 gym + 4 Elite Four), `Screen::Badges` (8 dòng huy hiệu gym) + 2 mục vào `Screen::Menu` ("GYM BATTLE", "BADGES", đẩy toggle home-screen và Reset xuống index 7/8).
+- [x] Hiển thị trạng thái từng dòng: Defeated / Locked / trống (có thể thách đấu ngay); Elite Four khóa tới khi đủ 8 huy hiệu — logic mở khóa tuyến tính đọc qua `pokemon::gymProgressFor(battleProgress, gymIndex)` (mới, `PokemonBattleTypes.h`/`PokemonGymData.cpp`), dùng chung với `PokemonService::markGymDefeated()` để luật chỉ tồn tại một chỗ (`markGymDefeated` được refactor lại để gọi hàm này thay vì tính lại bit mask).
+- [x] **Vượt phạm vi checklist gốc (chỉ ghi "hiển thị trạng thái") vì nếu không thì màn hình vô dụng**: chọn 1 gym đang mở sẽ thực sự vào trận — tái sử dụng nguyên `Screen::Battle`/`BattleMoves`/`BattleBalls` của GĐ5, không tạo màn hình chiến đấu riêng. Khác biệt so với gặp hoang dã, theo dõi bằng `gymChallengeIndex_`/`gymChallengeTeamProgress_`:
+  - Không có nút BALL (`logicalCount()` trả 2 thay vì 3 khi đang đấu gym) — không bắt được Pokémon của trainer.
+  - Đối thủ gục không kết thúc trận: `advanceGymOpponentOrFinish()` tung tiếp thành viên kế trong đội 2-3 con; hạ hết đội mới gọi `service_.markGymDefeated()` + hiện thông báo huy hiệu (`STR_POKEMON_BADGE_EARNED` có huy hiệu / `STR_POKEMON_TRAINER_DEFEATED` cho Elite Four không huy hiệu).
+  - Thua (`finishGymChallenge(false)`) hoặc bỏ chạy/Back (`resolveBattleAsPass()` rẽ nhánh khi `gymChallengeIndex_ != 0`) đều không đụng `battleProgress` — không giống gặp hoang dã, gym battle không có `PendingEvent` nên không cần "Pass" qua service, chỉ đơn giản rời trận.
+- [x] Tách `setupBattlePlayer()`/`setupBattleOpponent()` từ `enterBattle()` cũ (GĐ5) để `enterGymBattle()` dùng lại nguyên vẹn thay vì chép code khởi tạo `BattleCombatant`.
+- [x] 8 key i18n mới: `STR_POKEMON_GYM_BATTLE`/`BADGES` (menu+tiêu đề), `STR_POKEMON_GYM_LOCKED`/`DEFEATED` (trạng thái dòng), `STR_POKEMON_ELITE_FOUR` (tiền tố nhãn dòng E4), `STR_POKEMON_BADGE_EARNED`/`TRAINER_DEFEATED` (thắng), `STR_POKEMON_GYM_CHALLENGE_LOST` (thua).
+- [x] `test/pokemon_service/CMakeLists.txt` cần bổ sung generator `pokemon-gyms.csv` + `PokemonGymData.cpp` (link error tương tự GĐ5's learnsets fix — `PokemonServiceTest` giờ kéo theo `gymProgressFor`/`gymData` qua `markGymDefeated`).
+- [x] Test: 19/19 suite native pass (không có test UI riêng cho `PokemonActivity.cpp` — file này không nằm trong test suite native, chỉ verify qua build thật + smoke chạy simulator ngắn không crash khi khởi động).
+- [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,329,615 B (96.6%, còn 209,840 B ≈ 205KB)** — tăng **+2,816 B** so với GĐ5 (6,326,799 B), rất nhỏ vì tái dùng dữ liệu gym đã sinh sẵn từ GĐ1 (trước đó chưa ai gọi tới, bị linker loại bỏ) và hạ tầng list/i18n có sẵn.
 
 ### GĐ 7 — UI: 4 chiêu ở Summary + học/thay chiêu
 
