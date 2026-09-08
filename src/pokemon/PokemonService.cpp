@@ -353,20 +353,7 @@ BattleRecordEntry PokemonService::synthesizeBattleEntry(const PokemonRecord& rec
   const uint8_t level = levelForXp(record.totalXp);
   const BaseStats* stats = baseStatsFor(record.speciesId);
   entry.currentHp = stats == nullptr ? 1 : battleMaxHp(stats->hp, level);
-
-  // Pick up to BATTLE_MOVE_SLOTS moves: the learnset is stored ascending by
-  // level, so walking it backwards yields the most-recently-learned moves
-  // at or below the current level first, matching how the real games pick
-  // a newly-caught/leveled Pokemon's active moveset.
-  const std::span<const LearnsetEntry> learnset = learnsetFor(record.speciesId);
-  size_t filled = 0;
-  for (size_t index = learnset.size(); index-- > 0 && filled < BATTLE_MOVE_SLOTS;) {
-    if (learnset[index].level > level) continue;
-    entry.moves[filled] = learnset[index].moveId;
-    const MoveData* move = moveData(learnset[index].moveId);
-    entry.pp[filled] = move == nullptr ? 0 : move->pp;
-    ++filled;
-  }
+  defaultMovesetForLevel(record.speciesId, level, entry.moves, entry.pp);
   entry.status = Ailment::None;
   entry.statusTurns = 0;
   return entry;
@@ -441,6 +428,15 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
     // reading-credit commit that already succeeded.
     battleStore_.upsertEntry(healed);
   }
+}
+
+BattleTurnResult PokemonService::resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent,
+                                                    const uint8_t playerMoveSlot) {
+  return stepBattle(player, opponent, playerMoveSlot, random_);
+}
+
+bool PokemonService::attemptBattleCatch(const BattleCombatant& wild, const BallKind ball) {
+  return attemptCatch(wild, ball, random_);
 }
 
 ServiceStatus PokemonService::reset() {

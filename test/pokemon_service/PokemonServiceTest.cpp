@@ -585,6 +585,53 @@ TEST(PokemonService, ReadingCreditLeavesAPartyMemberWithNoBattleEntryAlone) {
   EXPECT_EQ(battleStore.findEntry(1), nullptr);
 }
 
+TEST(PokemonService, ResolveBattleTurnDelegatesToTheEngineWithItsOwnRandomSource) {
+  // A thin-wrapper test: the engine itself (stepBattle) is covered
+  // extensively in PokemonBattleTest; this only confirms the service plumbs
+  // its own RandomSource through instead of, say, a null one.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleCombatant player{};
+  player.speciesId = 25;  // Pikachu
+  player.level = 20;
+  player.currentHp = player.maxHp = 100;
+  player.moves[0] = pokemon::BattleMoveSlot{33, 35};  // Tackle
+
+  pokemon::BattleCombatant opponent{};
+  opponent.speciesId = 4;  // Charmander
+  opponent.level = 5;
+  opponent.currentHp = opponent.maxHp = 100;
+  opponent.moves[0] = pokemon::BattleMoveSlot{33, 35};
+
+  const pokemon::BattleTurnResult result = service.resolveBattleTurn(player, opponent, 0);
+  EXPECT_NE(result.outcome, pokemon::BattleOutcome::OpponentWon);
+  // Pikachu (level 20) is faster and far stronger than a level-5 Charmander,
+  // so with a deterministic zero-roll RNG the turn must land and do damage.
+  EXPECT_LT(opponent.currentHp, opponent.maxHp);
+}
+
+TEST(PokemonService, AttemptBattleCatchDelegatesToTheEngineWithItsOwnRandomSource) {
+  // Bulbasaur (SpeciesData::captureRate == 45) at full HP with a Poke Ball
+  // has catchValue == 15/255 (see PokemonBattleTest for the exact math);
+  // zeroRandom rolls 0, which is < 15, so this must succeed.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleCombatant wild{};
+  wild.speciesId = 1;
+  wild.level = 20;
+  wild.currentHp = wild.maxHp = pokemon::battleMaxHp(45, 20);
+
+  EXPECT_TRUE(service.attemptBattleCatch(wild, pokemon::BallKind::Poke));
+}
+
 TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   Storage.clear();
   pokemon::PokemonStore store;

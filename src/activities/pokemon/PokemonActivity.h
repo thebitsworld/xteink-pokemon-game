@@ -40,6 +40,9 @@ class PokemonActivity final : public Activity {
     Pokedex,
     PokedexDetail,
     Event,
+    Battle,
+    BattleMoves,
+    BattleBalls,
     ResetFirst,
     ResetFinal,
     Message,
@@ -62,6 +65,14 @@ class PokemonActivity final : public Activity {
   void renderFocused();
   void renderRowArt();
   void renderHeaderAndHints();
+  bool enterBattle(const pokemon::PendingEvent& pending);
+  void savePlayerBattleEntry();
+  void resolveBattleAsPass();
+  void finishBattleAfterWildFainted();
+  void finishBattleAfterPlayerFainted();
+  void buildBattleLog(const pokemon::BattleTurnResult& result);
+  void renderBattleHud();
+  int battlePlayerMoveCount() const;
   int logicalCount() const;
   int listTop() const;
   int rowsPerPage() const;
@@ -88,6 +99,9 @@ class PokemonActivity final : public Activity {
   pokemon::PokemonPromptContext nicknamePrompt_{};
   pokemon::EvolutionItem selectedItem_ = pokemon::EvolutionItem::None;
   char message_[96]{};
+  pokemon::BattleCombatant battlePlayer_{};
+  pokemon::BattleCombatant battleOpponent_{};
+  char battleLog_[160]{};
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};
   std::array<std::array<char, 56>, ROW_CAPACITY> labels_{};
   std::array<std::array<char, 32>, ROW_CAPACITY> values_{};

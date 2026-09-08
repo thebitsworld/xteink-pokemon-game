@@ -98,8 +98,85 @@ const char* itemName(const pokemon::EvolutionItem item) {
       return tr(STR_POKEMON_LEAF_STONE);
     case pokemon::EvolutionItem::LinkCable:
       return tr(STR_POKEMON_LINK_CABLE);
-    default:
+    default: {
+      // GĐ 4 widened PendingEventKind::Item to hold any of the 83 items, not
+      // just the original 6 evolution stones - those extra ids have no
+      // i18n string (move/item names are intentionally not localized, see
+      // the roadmap) and instead come straight from the generated data.
+      const pokemon::ItemData* data = pokemon::itemData(static_cast<uint8_t>(item));
+      return data == nullptr ? "" : data->name;
+    }
+  }
+}
+
+// Short status-abbreviation tags (PSN/PAR/...), intentionally not
+// localized - like move and item names (GĐ 1 decision), these read the same
+// in every official Pokémon localization, so translating them would spend
+// i18n budget without actually helping a non-English player.
+const char* statusAbbrev(const pokemon::Ailment status) {
+  switch (status) {
+    case pokemon::Ailment::Paralysis:
+      return "PAR";
+    case pokemon::Ailment::Sleep:
+      return "SLP";
+    case pokemon::Ailment::Freeze:
+      return "FRZ";
+    case pokemon::Ailment::Burn:
+      return "BRN";
+    case pokemon::Ailment::Poison:
+      return "PSN";
+    case pokemon::Ailment::Confusion:
+      return "CNF";
+    case pokemon::Ailment::None:
+    case pokemon::Ailment::All:
       return "";
+  }
+  return "";
+}
+
+// Builds one side's battle-log line for the turn just resolved. Status-only
+// events (couldn't move, confusion self-hit, cured, status damage, fainted)
+// skip the "used MOVE!" framing since no move was actually executed.
+void formatBattleActionLine(char* buffer, const size_t size, const pokemon::BattleCombatant& actor,
+                            const pokemon::BattleActionResult& action) {
+  const char* name = speciesName(actor.speciesId);
+  switch (action.event) {
+    case pokemon::BattleLogEvent::None:
+    case pokemon::BattleLogEvent::MoveHadNoPp:
+      buffer[0] = '\0';
+      return;
+    case pokemon::BattleLogEvent::Fainted:
+      snprintf(buffer, size, tr(STR_POKEMON_FAINTED), name);
+      return;
+    case pokemon::BattleLogEvent::StatusPreventedMove:
+    case pokemon::BattleLogEvent::ConfusionSelfHit:
+    case pokemon::BattleLogEvent::StatusCured:
+    case pokemon::BattleLogEvent::StatusDamage: {
+      const char* suffix = action.event == pokemon::BattleLogEvent::StatusPreventedMove ? tr(STR_POKEMON_STATUS_PREVENTED)
+                          : action.event == pokemon::BattleLogEvent::ConfusionSelfHit
+                              ? tr(STR_POKEMON_CONFUSION_HURT_SELF)
+                          : action.event == pokemon::BattleLogEvent::StatusCured ? tr(STR_POKEMON_STATUS_CURED)
+                                                                                 : tr(STR_POKEMON_STATUS_DAMAGE);
+      snprintf(buffer, size, "%s %s", name, suffix);
+      return;
+    }
+    default:
+      break;
+  }
+  const pokemon::MoveData* move = pokemon::moveData(actor.moves[action.moveSlot].moveId);
+  char used[64];
+  snprintf(used, sizeof(used), tr(STR_POKEMON_USED_MOVE), name, move == nullptr ? "?" : move->name);
+  const char* suffix = action.event == pokemon::BattleLogEvent::MoveMissed           ? tr(STR_POKEMON_MOVE_MISSED)
+                      : action.event == pokemon::BattleLogEvent::MoveNoEffect        ? tr(STR_POKEMON_NO_EFFECT)
+                      : action.event == pokemon::BattleLogEvent::MoveSuperEffective   ? tr(STR_POKEMON_SUPER_EFFECTIVE)
+                      : action.event == pokemon::BattleLogEvent::MoveNotVeryEffective
+                          ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
+                      : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
+                                                                                 : "";
+  if (suffix[0] == '\0') {
+    snprintf(buffer, size, "%s", used);
+  } else {
+    snprintf(buffer, size, "%s %s", used, suffix);
   }
 }
 
@@ -196,6 +273,12 @@ int PokemonActivity::logicalCount() const {
       const pokemon::PendingEvent* pending = pokemon::pendingEventFront(snapshot_.state);
       return pending != nullptr && pending->kind == pokemon::PendingEventKind::Item ? 1 : 2;
     }
+    case Screen::Battle:
+      return 3;
+    case Screen::BattleMoves:
+      return battlePlayerMoveCount();
+    case Screen::BattleBalls:
+      return 4;
     case Screen::Summary:
     case Screen::PokedexDetail:
     case Screen::Message:
@@ -274,6 +357,112 @@ void PokemonActivity::openNickname(const uint32_t recordId, const bool starter, 
       showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
     }
   });
+}
+
+int PokemonActivity::battlePlayerMoveCount() const {
+  int count = 0;
+  while (count < static_cast<int>(pokemon::BATTLE_MOVE_SLOTS) && battlePlayer_.moves[count].moveId != 0) ++count;
+  return count;
+}
+
+bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
+  if (snapshot_.partyCount == 0) return false;
+  const pokemon::PokemonRecord& leader = snapshot_.party[0];
+  pokemon::BattleRecordEntry entry{};
+  if (service_.loadBattleEntry(leader.recordId, entry) != pokemon::ServiceStatus::Ok) return false;
+
+  battlePlayer_ = pokemon::BattleCombatant{};
+  battlePlayer_.speciesId = leader.speciesId;
+  battlePlayer_.level = pokemon::levelForXp(leader.totalXp);
+  const pokemon::BaseStats* playerStats = pokemon::baseStatsFor(leader.speciesId);
+  battlePlayer_.maxHp = playerStats == nullptr ? 1 : pokemon::battleMaxHp(playerStats->hp, battlePlayer_.level);
+  battlePlayer_.currentHp = std::min<uint16_t>(entry.currentHp, battlePlayer_.maxHp);
+  battlePlayer_.status = entry.status;
+  battlePlayer_.statusTurns = entry.statusTurns;
+  for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+    battlePlayer_.moves[i] = pokemon::BattleMoveSlot{entry.moves[i], entry.pp[i]};
+  }
+
+  battleOpponent_ = pokemon::BattleCombatant{};
+  battleOpponent_.speciesId = pending.speciesId;
+  battleOpponent_.level = pending.level;
+  const pokemon::BaseStats* wildStats = pokemon::baseStatsFor(pending.speciesId);
+  battleOpponent_.maxHp = wildStats == nullptr ? 1 : pokemon::battleMaxHp(wildStats->hp, pending.level);
+  battleOpponent_.currentHp = battleOpponent_.maxHp;
+  std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> moveIds{};
+  std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> pp{};
+  pokemon::defaultMovesetForLevel(pending.speciesId, pending.level, moveIds, pp);
+  for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+    battleOpponent_.moves[i] = pokemon::BattleMoveSlot{moveIds[i], pp[i]};
+  }
+
+  battleLog_[0] = '\0';
+  setScreen(Screen::Battle);
+  return true;
+}
+
+void PokemonActivity::savePlayerBattleEntry() {
+  if (snapshot_.partyCount == 0) return;
+  pokemon::BattleRecordEntry entry{};
+  entry.recordId = snapshot_.party[0].recordId;
+  for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+    entry.moves[i] = battlePlayer_.moves[i].moveId;
+    entry.pp[i] = battlePlayer_.moves[i].currentPp;
+  }
+  entry.currentHp = battlePlayer_.currentHp;
+  entry.status = battlePlayer_.status;
+  entry.statusTurns = battlePlayer_.statusTurns;
+  // Best-effort: the in-memory battle state already reflects reality either
+  // way, and a rare SD write failure here shouldn't block the player from
+  // continuing the fight or leaving it.
+  service_.saveBattleEntry(entry);
+}
+
+void PokemonActivity::resolveBattleAsPass() {
+  savePlayerBattleEntry();
+  uint32_t caught = 0;
+  if (service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught) != pokemon::ServiceStatus::Ok) {
+    showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
+    return;
+  }
+  if (!refreshSnapshot()) return;
+  setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+}
+
+void PokemonActivity::finishBattleAfterWildFainted() {
+  const uint16_t opponentSpecies = battleOpponent_.speciesId;
+  uint32_t caught = 0;
+  // The wild Pokemon fainted from the fight - nothing left to catch. Pass
+  // clears the pending encounter without creating a record, same as always.
+  service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught);
+  if (!refreshSnapshot()) return;
+  char line[96];
+  snprintf(line, sizeof(line), tr(STR_POKEMON_FAINTED), speciesName(opponentSpecies));
+  showMessage(line, pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+}
+
+void PokemonActivity::finishBattleAfterPlayerFainted() {
+  const uint16_t playerSpecies = battlePlayer_.speciesId;
+  uint32_t caught = 0;
+  service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught);
+  if (!refreshSnapshot()) return;
+  char line[96];
+  snprintf(line, sizeof(line), tr(STR_POKEMON_YOUR_POKEMON_FAINTED), speciesName(playerSpecies));
+  showMessage(line, pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+}
+
+void PokemonActivity::buildBattleLog(const pokemon::BattleTurnResult& result) {
+  char playerLine[80] = "";
+  char opponentLine[80] = "";
+  if (result.player.acted) formatBattleActionLine(playerLine, sizeof(playerLine), battlePlayer_, result.player);
+  if (result.opponent.acted) formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+  if (playerLine[0] != '\0' && opponentLine[0] != '\0') {
+    snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", playerLine, opponentLine);
+  } else if (playerLine[0] != '\0') {
+    snprintf(battleLog_, sizeof(battleLog_), "%s", playerLine);
+  } else {
+    snprintf(battleLog_, sizeof(battleLog_), "%s", opponentLine);
+  }
 }
 
 void PokemonActivity::activate() {
@@ -432,20 +621,19 @@ void PokemonActivity::activate() {
       }
       const pokemon::PendingEvent pending = *active;
       if (pending.kind == pokemon::PendingEventKind::Encounter) {
+        if (selected_ == 0) {
+          // "Catch" now opens a battle instead of resolving instantly - the
+          // wild Pokemon must be fought and/or thrown a ball at.
+          if (!enterBattle(pending)) showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
+          return;
+        }
         uint32_t caught = 0;
-        const auto choice = selected_ == 0 ? pokemon::EncounterChoice::Catch : pokemon::EncounterChoice::Pass;
-        if (service_.resolveEncounter(choice, caught) != pokemon::ServiceStatus::Ok) {
+        if (service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught) != pokemon::ServiceStatus::Ok) {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
           return;
         }
         if (!refreshSnapshot()) return;
-        if (caught != 0) {
-          nicknamePrompt_ = pokemon::PokemonPromptContext::forCaught(pending.speciesId, caught);
-          snprintf(message_, sizeof(message_), tr(STR_POKEMON_NICKNAME_QUESTION), speciesName(pending.speciesId));
-          setScreen(Screen::NicknameQuestion);
-        } else {
-          setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
-        }
+        setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
       } else if (pending.kind == pokemon::PendingEventKind::Item) {
         if (service_.acknowledgeItem() != pokemon::ServiceStatus::Ok)
           showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
@@ -462,6 +650,74 @@ void PokemonActivity::activate() {
           setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
         }
       }
+      return;
+    }
+    case Screen::Battle:
+      if (selected_ == 0) {
+        if (battlePlayerMoveCount() == 0) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
+          return;
+        }
+        setScreen(Screen::BattleMoves);
+      } else if (selected_ == 1) {
+        setScreen(Screen::BattleBalls);
+      } else {
+        resolveBattleAsPass();
+      }
+      return;
+    case Screen::BattleMoves: {
+      if (selected_ < 0 || selected_ >= battlePlayerMoveCount()) return;
+      if (battlePlayer_.moves[selected_].currentPp == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleMoves);
+        return;
+      }
+      const pokemon::BattleTurnResult result =
+          service_.resolveBattleTurn(battlePlayer_, battleOpponent_, static_cast<uint8_t>(selected_));
+      savePlayerBattleEntry();
+      buildBattleLog(result);
+      if (result.outcome == pokemon::BattleOutcome::PlayerWon) {
+        finishBattleAfterWildFainted();
+      } else if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
+        finishBattleAfterPlayerFainted();
+      } else {
+        setScreen(Screen::Battle);
+      }
+      return;
+    }
+    case Screen::BattleBalls: {
+      if (selected_ < 0 || selected_ >= 4) return;
+      const auto ballItemIndex = static_cast<size_t>(selected_);
+      if (snapshot_.state.bagCounts[ballItemIndex] == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBalls);
+        return;
+      }
+      const auto ball = static_cast<pokemon::BallKind>(selected_);
+      const bool caught = service_.attemptBattleCatch(battleOpponent_, ball);
+      const auto itemId = static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1U + ballItemIndex);
+      if (service_.consumeBagItem(itemId) != pokemon::ServiceStatus::Ok) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Battle);
+        return;
+      }
+      savePlayerBattleEntry();
+      if (!refreshSnapshot()) return;
+      if (!caught) {
+        char line[96];
+        snprintf(line, sizeof(line), tr(STR_POKEMON_BROKE_FREE), speciesName(battleOpponent_.speciesId));
+        snprintf(battleLog_, sizeof(battleLog_), "%s", line);
+        setScreen(Screen::Battle);
+        return;
+      }
+      const uint16_t caughtSpecies = battleOpponent_.speciesId;
+      uint32_t caughtRecordId = 0;
+      if (service_.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId) != pokemon::ServiceStatus::Ok ||
+          caughtRecordId == 0) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
+        return;
+      }
+      if (!refreshSnapshot()) return;
+      nicknamePrompt_ = pokemon::PokemonPromptContext::forCaught(caughtSpecies, caughtRecordId);
+      snprintf(message_, sizeof(message_), tr(STR_POKEMON_NICKNAME_QUESTION), speciesName(caughtSpecies));
+      setScreen(Screen::NicknameQuestion);
       return;
     }
     case Screen::ResetFirst:
@@ -516,6 +772,15 @@ void PokemonActivity::goBack() {
       return;
     case Screen::ItemTarget:
       setScreen(Screen::Bag);
+      return;
+    case Screen::Battle:
+      // Back out of a battle the same way RUN does - never leaves the
+      // player stuck mid-fight with no way to exit via hardware Back.
+      resolveBattleAsPass();
+      return;
+    case Screen::BattleMoves:
+    case Screen::BattleBalls:
+      setScreen(Screen::Battle);
       return;
     case Screen::PokedexDetail:
       setScreen(Screen::Pokedex, static_cast<int>(pokedexSpecies_ - 1U));
@@ -703,6 +968,25 @@ void PokemonActivity::buildRows() {
         } else
           row(local, tr(STR_OK));
         break;
+      case Screen::Battle:
+        row(local, index == 0 ? tr(STR_POKEMON_FIGHT) : index == 1 ? tr(STR_POKEMON_BALL) : tr(STR_POKEMON_RUN));
+        break;
+      case Screen::BattleMoves: {
+        const uint8_t moveId = battlePlayer_.moves[index].moveId;
+        const pokemon::MoveData* move = pokemon::moveData(moveId);
+        char value[16];
+        snprintf(value, sizeof(value), "PP %u/%u", battlePlayer_.moves[index].currentPp,
+                 move == nullptr ? 0 : move->pp);
+        row(local, move == nullptr ? "?" : move->name, value);
+        break;
+      }
+      case Screen::BattleBalls: {
+        const pokemon::ItemData* item = pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + index));
+        char value[16];
+        snprintf(value, sizeof(value), "× %u", snapshot_.state.bagCounts[index]);
+        row(local, item == nullptr ? "?" : item->name, value);
+        break;
+      }
       case Screen::Summary:
       case Screen::PokedexDetail:
       case Screen::Message:
@@ -719,8 +1003,9 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
                        screen_ == Screen::Pokedex;
   int top = listTop();
   rowHeight_ = 64;
-  if (screen_ == Screen::Event)
-    top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
+  const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::Battle || screen_ == Screen::BattleMoves ||
+                             screen_ == Screen::BattleBalls;
+  if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
   screen.setContentMargin(
       fui::Insets{static_cast<int16_t>(listBounds_.y), 8,
@@ -885,6 +1170,10 @@ void PokemonActivity::renderFocused() {
     drawField(y, tr(STR_POKEMON_EVOLUTION_PROMPTS_FIELD), prompts ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
     return;
   }
+  if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
+    renderBattleHud();
+    return;
+  }
   if (screen_ != Screen::Event) return;
   const pokemon::PendingEvent* active = pokemon::pendingEventFront(snapshot_.state);
   if (active == nullptr) return;
@@ -910,6 +1199,38 @@ void PokemonActivity::renderFocused() {
     snprintf(line, sizeof(line), tr(STR_POKEMON_EVOLVING), speciesName(record.speciesId));
     centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
   }
+}
+
+void PokemonActivity::renderBattleHud() {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
+  const int width = renderer.getScreenWidth();
+  const int barWidth = width - 56;
+  constexpr int barHeight = 14;
+
+  const auto drawSide = [&](const pokemon::BattleCombatant& combatant, const int y, const bool isPlayer) {
+    char line[64];
+    snprintf(line, sizeof(line), "%s  %s%u", speciesName(combatant.speciesId), tr(STR_POKEMON_LEVEL), combatant.level);
+    renderer.drawText(UI_10_FONT_ID, 28, y, line, true, EpdFontFamily::BOLD);
+    renderer.drawRect(28, y + 20, barWidth, barHeight, true);
+    const uint16_t maxHp = std::max<uint16_t>(1, combatant.maxHp);
+    const int filled = combatant.maxHp == 0 ? 0 : (barWidth - 2) * combatant.currentHp / maxHp;
+    if (filled > 0) renderer.fillRect(29, y + 21, filled, barHeight - 2, true);
+    char hpText[32];
+    snprintf(hpText, sizeof(hpText), "%u/%u", combatant.currentHp, combatant.maxHp);
+    renderer.drawText(UI_10_FONT_ID, 28, y + 20 + barHeight + 4, hpText);
+    if (combatant.status != pokemon::Ailment::None) {
+      const char* status = statusAbbrev(combatant.status);
+      renderer.drawText(UI_10_FONT_ID, width - 28 - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
+                        y + 20 + barHeight + 4, status, true, EpdFontFamily::BOLD);
+    }
+    pokemon::drawPokemonSpeciesArt(renderer, combatant.speciesId, true,
+                                   Rect{isPlayer ? 28 : width - 148, y + 50, 120, 90});
+  };
+
+  drawSide(battleOpponent_, contentTop, false);
+  drawSide(battlePlayer_, contentTop + 160, true);
+  if (battleLog_[0] != '\0') centered(renderer, UI_10_FONT_ID, contentTop + 330, battleLog_);
 }
 
 void PokemonActivity::renderRowArt() {

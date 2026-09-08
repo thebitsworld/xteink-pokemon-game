@@ -77,6 +77,17 @@ struct BattleTurnResult {
 uint16_t battleMaxHp(uint8_t baseHp, uint8_t level);
 uint16_t battleWorkingStat(uint8_t baseStat, uint8_t level);
 
+// Picks up to BATTLE_MOVE_SLOTS moves for `speciesId` at `level`: the
+// learnset is stored ascending by level, so walking it backwards yields the
+// most-recently-learned moves at or below the current level first, matching
+// how the real games pick a newly-caught/leveled Pokemon's active moveset.
+// Used both to synthesize a Party member's first-ever battle entry
+// (PokemonService) and to build a fresh wild encounter's moveset (never
+// persisted - a wild Pokemon has no battle-store entry to begin with).
+// Unfilled trailing slots are left at 0/0 (empty).
+void defaultMovesetForLevel(uint16_t speciesId, uint8_t level, std::array<uint8_t, BATTLE_MOVE_SLOTS>& moveIds,
+                            std::array<uint8_t, BATTLE_MOVE_SLOTS>& pp);
+
 // Resolves one simultaneous turn: faster combatant (by working Speed, ties
 // favor the player) acts first; if that action faints the other side, the
 // slower side never gets to act. `playerMoveSlot` must reference a

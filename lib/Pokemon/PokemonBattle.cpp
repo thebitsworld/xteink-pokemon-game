@@ -224,6 +224,22 @@ uint16_t battleWorkingStat(const uint8_t baseStat, const uint8_t level) {
   return static_cast<uint16_t>((2U * baseStat * level) / 100U + 5U);
 }
 
+void defaultMovesetForLevel(const uint16_t speciesId, const uint8_t level,
+                            std::array<uint8_t, BATTLE_MOVE_SLOTS>& moveIds,
+                            std::array<uint8_t, BATTLE_MOVE_SLOTS>& pp) {
+  moveIds.fill(0);
+  pp.fill(0);
+  const std::span<const LearnsetEntry> learnset = learnsetFor(speciesId);
+  size_t filled = 0;
+  for (size_t index = learnset.size(); index-- > 0 && filled < BATTLE_MOVE_SLOTS;) {
+    if (learnset[index].level > level) continue;
+    moveIds[filled] = learnset[index].moveId;
+    const MoveData* move = moveData(learnset[index].moveId);
+    pp[filled] = move == nullptr ? 0 : move->pp;
+    ++filled;
+  }
+}
+
 BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, const uint8_t playerMoveSlot,
                             const RandomSource& random) {
   BattleTurnResult result{};

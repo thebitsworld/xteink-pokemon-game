@@ -86,6 +86,13 @@ class PokemonService {
   ServiceStatus loadBattleEntry(uint32_t recordId, BattleRecordEntry& output);
   ServiceStatus saveBattleEntry(const BattleRecordEntry& entry);
 
+  // Thin wrappers around the pure engine (PokemonBattle.h) using this
+  // service's own RandomSource, so the UI layer never touches RNG directly -
+  // consistent with how every PokemonGame.cpp rule is only ever invoked
+  // through a PokemonService method.
+  BattleTurnResult resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot);
+  bool attemptBattleCatch(const BattleCombatant& wild, BallKind ball);
+
  private:
   ServiceStatus prepareStore();
   ServiceStatus loadReadyState(PokemonState& output);
