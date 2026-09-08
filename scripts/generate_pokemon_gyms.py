@@ -9,11 +9,16 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-PROVENANCE = "# Hand-authored: Pokemon Red gym leaders and Elite Four, teams trimmed to 2-3 Pokemon (each battle turn is a full e-ink refresh)"
+PROVENANCE = (
+    "# Hand-authored from Bulbapedia's Pokemon Red/Blue trainer data: gym leaders and Elite Four, "
+    "teams trimmed to 2-3 Pokemon (each battle turn is a full e-ink refresh), movesets kept verbatim"
+)
 HEADERS = ("order", "leader", "badge", "type", "team")
 GYM_COUNT = 12
 MAX_TEAM_SIZE = 3
+MOVE_SLOTS = 4
 SPECIES_COUNT = 151
+MOVE_COUNT = 165
 TYPES = {
     "Normal", "Fire", "Water", "Electric", "Grass", "Ice", "Fighting", "Poison", "Ground",
     "Flying", "Psychic", "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy",
@@ -28,6 +33,7 @@ class DataError(RuntimeError):
 class TeamMember:
     species_id: int
     level: int
+    moves: tuple[int, ...]  # 1-4 real move ids, matching Bulbapedia's Red/Blue trainer data
 
 
 @dataclass(frozen=True)
@@ -43,16 +49,21 @@ def parse_team(value: str, order: int) -> tuple[TeamMember, ...]:
     members: list[TeamMember] = []
     for encoded in value.split(";"):
         fields = encoded.split(":")
-        if len(fields) != 2:
-            raise DataError(f"gym {order}: invalid team member {encoded!r}")
+        if len(fields) != 3:
+            raise DataError(f"gym {order}: invalid team member {encoded!r} (want species:level:moves)")
         try:
             species_id = int(fields[0])
             level = int(fields[1])
+            moves = tuple(int(move) for move in fields[2].split("-"))
         except ValueError as error:
             raise DataError(f"gym {order}: non-numeric team member") from error
         if not 1 <= species_id <= SPECIES_COUNT or not 1 <= level <= 100:
             raise DataError(f"gym {order}: team member out of range")
-        members.append(TeamMember(species_id, level))
+        if not 1 <= len(moves) <= MOVE_SLOTS or any(not 1 <= move <= MOVE_COUNT for move in moves):
+            raise DataError(f"gym {order}: team member {species_id} has an invalid moveset {moves!r}")
+        if len(set(moves)) != len(moves):
+            raise DataError(f"gym {order}: team member {species_id} has a duplicate move in {moves!r}")
+        members.append(TeamMember(species_id, level, moves))
     if not 1 <= len(members) <= MAX_TEAM_SIZE:
         raise DataError(f"gym {order}: team must have 1-{MAX_TEAM_SIZE} members")
     return tuple(members)
@@ -99,7 +110,11 @@ def generate(gyms: list[Gym]) -> str:
     lines.extend(("", "static const GymTeamMember GYM_TEAM_MEMBERS[] = {"))
     for gym in gyms:
         for member in gym.team:
-            lines.append(f"    GymTeamMember{{{member.species_id}, {member.level}}},")
+            padded_moves = member.moves + (0,) * (MOVE_SLOTS - len(member.moves))
+            moves_literal = ", ".join(str(move) for move in padded_moves)
+            lines.append(
+                f"    GymTeamMember{{{member.species_id}, {member.level}, {{{{{moves_literal}}}}}}},"
+            )
     lines.extend(("};", "", "static const GymData GYMS[] = {"))
     offset = 0
     for gym in gyms:

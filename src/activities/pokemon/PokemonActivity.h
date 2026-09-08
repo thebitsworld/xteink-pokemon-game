@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <span>
 
 #include "activities/Activity.h"
 #include "components/themes/BaseTheme.h"
@@ -35,6 +36,7 @@ class PokemonActivity final : public Activity {
     Move,
     Moveset,
     MovesetPick,
+    TmReplaceSlot,
     Pc,
     PcOrder,
     Bag,
@@ -82,7 +84,7 @@ class PokemonActivity final : public Activity {
   void renderRowArt();
   void renderHeaderAndHints();
   bool setupBattlePlayer();
-  void setupBattleOpponent(uint16_t speciesId, uint8_t level);
+  void setupBattleOpponent(uint16_t speciesId, uint8_t level, std::span<const uint8_t> fixedMoves = {});
   bool enterBattle(const pokemon::PendingEvent& pending);
   bool enterGymBattle(uint8_t gymIndex);
   void savePlayerBattleEntry();

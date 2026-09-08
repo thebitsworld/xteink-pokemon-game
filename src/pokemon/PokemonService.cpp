@@ -300,25 +300,39 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
   return ServiceStatus::Ok;
 }
 
-TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_t moveId) {
+TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_t moveId, const int replaceSlot) {
   BattleRecordEntry entry{};
   if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return TeachMoveOutcome::Failed;
-
   for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
     if (entry.moves[slot] == moveId) return TeachMoveOutcome::AlreadyKnown;
   }
+
+  // Only checked once we know the move isn't already known - a Pokemon
+  // that already learned a move some other way (level-up, MoveLearn) is
+  // never blocked by TM/HM incompatibility for a move it already has.
+  PokemonRecord record{};
+  if (readRecord(recordId, record) != ServiceStatus::Ok) return TeachMoveOutcome::Failed;
+  if (!canLearnViaMachine(record.speciesId, moveId)) return TeachMoveOutcome::Incompatible;
+
+  int targetSlot = -1;
   for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
-    if (entry.moves[slot] != 0) continue;
-    const MoveData* move = moveData(moveId);
-    entry.moves[slot] = moveId;
-    entry.pp[slot] = move == nullptr ? 0 : move->pp;
-    if (!battleStore_.upsertEntry(entry)) {
-      LOG_ERR("PokemonService", "Failed to teach move");
-      return TeachMoveOutcome::Failed;
+    if (entry.moves[slot] == 0) {
+      targetSlot = static_cast<int>(slot);
+      break;
     }
-    return TeachMoveOutcome::Learned;
   }
-  return TeachMoveOutcome::MovesetFull;
+  if (targetSlot < 0) {
+    if (replaceSlot < 0 || replaceSlot >= static_cast<int>(BATTLE_MOVE_SLOTS)) return TeachMoveOutcome::MovesetFull;
+    targetSlot = replaceSlot;
+  }
+  const MoveData* move = moveData(moveId);
+  entry.moves[targetSlot] = moveId;
+  entry.pp[targetSlot] = move == nullptr ? 0 : move->pp;
+  if (!battleStore_.upsertEntry(entry)) {
+    LOG_ERR("PokemonService", "Failed to teach move");
+    return TeachMoveOutcome::Failed;
+  }
+  return TeachMoveOutcome::Learned;
 }
 
 ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const uint8_t slot, const uint8_t moveId) {
@@ -332,6 +346,27 @@ ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const u
   entry.pp[slot] = move->pp;
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to update moveset");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::forgetMove(const uint32_t recordId, const uint8_t slot) {
+  if (slot >= BATTLE_MOVE_SLOTS) return ServiceStatus::Invalid;
+
+  BattleRecordEntry entry{};
+  if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+  if (entry.moves[slot] == 0) return ServiceStatus::NotApplicable;
+  size_t knownCount = 0;
+  for (const uint8_t moveId : entry.moves) {
+    if (moveId != 0) ++knownCount;
+  }
+  if (knownCount <= 1) return ServiceStatus::NotApplicable;  // never leave a Pokemon with 0 moves
+
+  entry.moves[slot] = 0;
+  entry.pp[slot] = 0;
+  if (!battleStore_.upsertEntry(entry)) {
+    LOG_ERR("PokemonService", "Failed to forget move");
     return ServiceStatus::StorageError;
   }
   return ServiceStatus::Ok;

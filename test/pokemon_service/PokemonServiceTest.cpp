@@ -765,7 +765,7 @@ TEST(PokemonService, ResolveMoveLearnIsNotApplicableWithoutAPendingMoveLearnEven
   EXPECT_EQ(service.resolveMoveLearn(0), pokemon::ServiceStatus::NotApplicable);
 }
 
-TEST(PokemonService, TeachMoveLearnsIntoAFreeSlotThenReportsAlreadyKnownOrMovesetFull) {
+TEST(PokemonService, TeachMoveChecksCompatibilityThenFreeSlotThenAllowsAReplaceSlotRetry) {
   Storage.clear();
   pokemon::PokemonStore store;
   pokemon::PokemonBattleStore battleStore;
@@ -773,15 +773,23 @@ TEST(PokemonService, TeachMoveLearnsIntoAFreeSlotThenReportsAlreadyKnownOrMovese
   pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.teachMove(1, 84), pokemon::TeachMoveOutcome::AlreadyKnown);
+  // Pound (1) is not in Pikachu's real TM/HM compatibility list (GĐ12).
+  EXPECT_EQ(service.teachMove(1, 1), pokemon::TeachMoveOutcome::Incompatible);
 
-  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // TM01 -> Mega Punch into slot 2
+  // 5 (Mega Punch/TM01), 6 (Pay Day/TM06), 25 (Mega Kick/TM09) are all in
+  // Pikachu's real compatibility list (scripts/data/pokemon-tmhm.csv).
+  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // fills slot 2
   const pokemon::BattleRecordEntry* afterFirst = battleStore.findEntry(1);
   ASSERT_NE(afterFirst, nullptr);
   EXPECT_EQ(afterFirst->moves[2], 5U);
   EXPECT_GT(afterFirst->pp[2], 0U);
 
-  ASSERT_EQ(service.teachMove(1, 13), pokemon::TeachMoveOutcome::Learned);      // TM02 fills the last slot
-  EXPECT_EQ(service.teachMove(1, 14), pokemon::TeachMoveOutcome::MovesetFull);  // TM03, no room left
+  ASSERT_EQ(service.teachMove(1, 6), pokemon::TeachMoveOutcome::Learned);       // fills the last slot
+  EXPECT_EQ(service.teachMove(1, 25), pokemon::TeachMoveOutcome::MovesetFull);  // no room left, no slot picked
+  ASSERT_EQ(service.teachMove(1, 25, 1), pokemon::TeachMoveOutcome::Learned);   // retry, replacing slot 1
+  const pokemon::BattleRecordEntry* afterReplace = battleStore.findEntry(1);
+  ASSERT_NE(afterReplace, nullptr);
+  EXPECT_EQ(afterReplace->moves[1], 25U);
 }
 
 TEST(PokemonService, PeekBattleMovesNeverPersistsWhenNoEntryExistsYet) {

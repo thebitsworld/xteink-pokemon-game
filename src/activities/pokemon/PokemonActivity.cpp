@@ -328,8 +328,12 @@ int PokemonActivity::logicalCount() const {
       pokemon::PokemonRecord record{};
       if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return 0;
       const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
-      return static_cast<int>(learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry));
+      // +1 for the trailing "Forget" row - always offered regardless of
+      // whether there's anything new to learn (GĐ12).
+      return static_cast<int>(learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry)) + 1;
     }
+    case Screen::TmReplaceSlot:
+      return pokemon::BATTLE_MOVE_SLOTS + 1;
     case Screen::Pc:
       return static_cast<int>(snapshot_.ownedCount - snapshot_.partyCount);
     case Screen::PcOrder:
@@ -469,13 +473,25 @@ bool PokemonActivity::setupBattlePlayer() {
   return true;
 }
 
-void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_t level) {
+void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_t level,
+                                          const std::span<const uint8_t> fixedMoves) {
   battleOpponent_ = pokemon::BattleCombatant{};
   battleOpponent_.speciesId = speciesId;
   battleOpponent_.level = level;
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(speciesId);
   battleOpponent_.maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, level);
   battleOpponent_.currentHp = battleOpponent_.maxHp;
+  if (!fixedMoves.empty()) {
+    // Gym/Elite Four trainer - real Pokemon Red teams never derive their
+    // moves from the learnset-by-level table, so this comes straight from
+    // GymTeamMember::moves (GĐ12) instead of defaultMovesetForLevel().
+    for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+      const uint8_t moveId = i < fixedMoves.size() ? fixedMoves[i] : 0;
+      const pokemon::MoveData* move = pokemon::moveData(moveId);
+      battleOpponent_.moves[i] = pokemon::BattleMoveSlot{moveId, move == nullptr ? 0 : move->pp};
+    }
+    return;
+  }
   std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> moveIds{};
   std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> pp{};
   pokemon::defaultMovesetForLevel(speciesId, level, moveIds, pp);
@@ -497,7 +513,7 @@ bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
   const auto team = pokemon::gymTeamFor(gymIndex);
   if (team.empty()) return false;
   if (!setupBattlePlayer()) return false;
-  setupBattleOpponent(team[0].speciesId, team[0].level);
+  setupBattleOpponent(team[0].speciesId, team[0].level, team[0].moves);
   gymChallengeIndex_ = gymIndex;
   gymChallengeTeamProgress_ = 0;
   battleLog_[0] = '\0';
@@ -576,7 +592,8 @@ void PokemonActivity::advanceGymOpponentOrFinish() {
   const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
   ++gymChallengeTeamProgress_;
   if (gymChallengeTeamProgress_ < team.size()) {
-    setupBattleOpponent(team[gymChallengeTeamProgress_].speciesId, team[gymChallengeTeamProgress_].level);
+    const auto& next = team[gymChallengeTeamProgress_];
+    setupBattleOpponent(next.speciesId, next.level, next.moves);
     setScreen(Screen::Battle);
     return;
   }
@@ -747,22 +764,25 @@ void PokemonActivity::activate() {
       }
       return;
     }
-    case Screen::Moveset: {
-      pokemon::PokemonRecord record{};
-      if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return;
-      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
-      if (learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry) == 0) {
-        showMessage(tr(STR_POKEMON_NO_MOVES_TO_LEARN), Screen::Moveset);
-        return;
-      }
+    case Screen::Moveset:
       movesetSlot_ = static_cast<uint8_t>(selected_);
       setScreen(Screen::MovesetPick);
       return;
-    }
     case Screen::MovesetPick: {
       pokemon::PokemonRecord record{};
       if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return;
       const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+      const size_t learnable = learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry);
+      if (static_cast<size_t>(selected_) >= learnable) {
+        // Trailing "Forget" row - clears the slot instead of learning
+        // anything (GĐ12; refuses to clear a Pokemon's last move).
+        if (service_.forgetMove(focusedRecordId_, movesetSlot_) != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Moveset);
+          return;
+        }
+        setScreen(Screen::Moveset);
+        return;
+      }
       const uint8_t moveId = learnableMoveIdAt(record.speciesId, pokemon::levelForXp(record.totalXp), entry,
                                                static_cast<size_t>(selected_));
       if (moveId == 0) return;
@@ -824,8 +844,13 @@ void PokemonActivity::activate() {
         const pokemon::TeachMoveOutcome outcome = service_.teachMove(recordId, selectedMachineMoveId_);
         if (outcome == pokemon::TeachMoveOutcome::AlreadyKnown) {
           showMessage(tr(STR_POKEMON_ALREADY_KNOWS_MOVE), bagScreen);
+        } else if (outcome == pokemon::TeachMoveOutcome::Incompatible) {
+          showMessage(tr(STR_POKEMON_CANNOT_LEARN_MACHINE), bagScreen);
         } else if (outcome == pokemon::TeachMoveOutcome::MovesetFull) {
-          showMessage(tr(STR_POKEMON_MOVESET_FULL), bagScreen);
+          // Full moveset no longer just blocks the TM - let the player
+          // choose which of the 4 current moves to overwrite (GĐ12).
+          focusedRecordId_ = recordId;
+          setScreen(Screen::TmReplaceSlot);
         } else if (outcome != pokemon::TeachMoveOutcome::Learned) {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
         } else if (service_.consumeBagItem(selectedMachineItemId_) != pokemon::ServiceStatus::Ok) {
@@ -857,6 +882,24 @@ void PokemonActivity::activate() {
         if (!refreshSnapshot()) return;
         setScreen(Screen::Party);
       }
+      return;
+    }
+    case Screen::TmReplaceSlot: {
+      if (selected_ >= static_cast<int>(pokemon::BATTLE_MOVE_SLOTS)) {
+        setScreen(Screen::BagMachine);
+        return;
+      }
+      const pokemon::TeachMoveOutcome outcome = service_.teachMove(focusedRecordId_, selectedMachineMoveId_, selected_);
+      if (outcome != pokemon::TeachMoveOutcome::Learned) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMachine);
+        return;
+      }
+      if (service_.consumeBagItem(selectedMachineItemId_) != pokemon::ServiceStatus::Ok) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMachine);
+        return;
+      }
+      if (!refreshSnapshot()) return;
+      setScreen(Screen::Party);
       return;
     }
     case Screen::Pokedex:
@@ -1050,6 +1093,9 @@ void PokemonActivity::goBack() {
       return;
     case Screen::MovesetPick:
       setScreen(Screen::Moveset);
+      return;
+    case Screen::TmReplaceSlot:
+      setScreen(Screen::BagMachine);
       return;
     case Screen::PcOrder:
       setScreen(Screen::Pc);
@@ -1245,10 +1291,31 @@ void PokemonActivity::buildRows() {
         pokemon::PokemonRecord record{};
         if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) break;
         const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+        const size_t learnable = learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry);
+        if (static_cast<size_t>(index) >= learnable) {
+          row(local, tr(STR_POKEMON_FORGET));
+          break;
+        }
         const uint8_t moveId =
             learnableMoveIdAt(record.speciesId, pokemon::levelForXp(record.totalXp), entry, static_cast<size_t>(index));
         const pokemon::MoveData* move = pokemon::moveData(moveId);
         row(local, move == nullptr ? "?" : move->name);
+        break;
+      }
+      case Screen::TmReplaceSlot: {
+        if (index >= static_cast<int>(pokemon::BATTLE_MOVE_SLOTS)) {
+          row(local, tr(STR_POKEMON_CANCEL));
+          break;
+        }
+        pokemon::PokemonRecord record{};
+        const pokemon::BattleRecordEntry entry =
+            service_.readRecord(focusedRecordId_, record) == pokemon::ServiceStatus::Ok
+                ? service_.peekBattleMoves(record)
+                : pokemon::BattleRecordEntry{};
+        const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
+        char value[16];
+        snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index], move == nullptr ? 0 : move->pp);
+        row(local, move == nullptr ? "-" : move->name, value);
         break;
       }
       case Screen::Pc: {
@@ -1729,7 +1796,7 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEDEX);
   else if (screen_ == Screen::Summary || screen_ == Screen::Actions)
     title = tr(STR_POKEMON_SUMMARY);
-  else if (screen_ == Screen::Moveset || screen_ == Screen::MovesetPick)
+  else if (screen_ == Screen::Moveset || screen_ == Screen::MovesetPick || screen_ == Screen::TmReplaceSlot)
     title = tr(STR_POKEMON_MOVES);
   else if (screen_ == Screen::GymList)
     title = tr(STR_POKEMON_GYM_BATTLE);

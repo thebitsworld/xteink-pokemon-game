@@ -169,7 +169,10 @@ void gymsAreOrderedAndEliteFourCarriesNoBadge() {
   CHECK(brockTeam.size() == 2);
   if (brockTeam.size() == 2) {
     CHECK(brockTeam[0].speciesId == 74 && brockTeam[0].level == 12);
+    CHECK(brockTeam[0].moves[0] == 33 && brockTeam[0].moves[1] == 111);  // Geodude: Tackle, Defense Curl
     CHECK(brockTeam[1].speciesId == 95 && brockTeam[1].level == 14);
+    CHECK(brockTeam[1].moves[0] == 33 && brockTeam[1].moves[1] == 103 &&
+          brockTeam[1].moves[2] == 117);  // Onix: Tackle, Screech, Bide
   }
 
   for (uint8_t gymIndex = 1; gymIndex <= 8; ++gymIndex) {
@@ -189,6 +192,12 @@ void gymsAreOrderedAndEliteFourCarriesNoBadge() {
     for (const pokemon::GymTeamMember& member : team) {
       CHECK(member.speciesId >= 1 && member.speciesId <= pokemon::KANTO_SPECIES_COUNT);
       CHECK(member.level >= 1 && member.level <= 100);
+      // Every trainer Pokemon has a real, fixed moveset (GĐ12) - never
+      // derived from the learnset-by-level table like a wild encounter.
+      CHECK(member.moves[0] != 0);
+      for (const uint8_t moveId : member.moves) {
+        CHECK(moveId <= pokemon::MOVE_COUNT);
+      }
     }
   }
 }

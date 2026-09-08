@@ -258,26 +258,51 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
   if (opponent.status == Ailment::Paralysis) opponentSpeed /= 2U;
   const bool playerFirst = playerSpeed >= opponentSpeed;
 
-  // A crude but serviceable AI: prefer the first move slot with PP whose
-  // type is super effective against the player, else the first slot with PP.
+  // A crude but serviceable AI: mostly prefers whichever usable move(s) are
+  // most effective against the player (ties broken randomly instead of
+  // always the lowest slot index), but 1 in 4 turns picks among ALL usable
+  // moves instead - without this a Pokemon with several strong options
+  // would throw the exact same move every single turn, which is exactly
+  // the "opponent always uses one move" complaint this was written to fix.
   const auto chooseOpponentMove = [&]() -> uint8_t {
     const SpeciesData* playerSpecies = speciesData(player.speciesId);
-    int bestSlot = -1;
+    std::array<uint8_t, BATTLE_MOVE_SLOTS> usable{};
+    uint8_t usableCount = 0;
     uint16_t bestEffectiveness = 0;
     for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
       const BattleMoveSlot& slot = opponent.moves[index];
       if (slot.moveId == 0 || slot.currentPp == 0) continue;
-      if (bestSlot < 0) bestSlot = index;
+      usable[usableCount++] = index;
       const MoveData* move = moveData(slot.moveId);
       if (move == nullptr || playerSpecies == nullptr) continue;
       const uint16_t effectiveness =
           typeEffectivenessPercent(move->type, playerSpecies->primaryType, playerSpecies->secondaryType);
-      if (effectiveness > bestEffectiveness) {
-        bestEffectiveness = effectiveness;
-        bestSlot = index;
-      }
+      if (effectiveness > bestEffectiveness) bestEffectiveness = effectiveness;
     }
-    return bestSlot < 0 ? BATTLE_MOVE_SLOTS : static_cast<uint8_t>(bestSlot);
+    if (usableCount == 0) return BATTLE_MOVE_SLOTS;  // no PP left anywhere - Struggle-equivalent fallback
+
+    uint32_t wildcardRoll = 0;
+    const bool considerAnyUsable = rollBelow(random, 4U, wildcardRoll) && wildcardRoll == 0;
+    std::array<uint8_t, BATTLE_MOVE_SLOTS> candidates{};
+    uint8_t candidateCount = 0;
+    for (uint8_t i = 0; i < usableCount; ++i) {
+      const uint8_t index = usable[i];
+      if (considerAnyUsable) {
+        candidates[candidateCount++] = index;
+        continue;
+      }
+      const MoveData* move = moveData(opponent.moves[index].moveId);
+      const uint16_t effectiveness =
+          move == nullptr || playerSpecies == nullptr
+              ? 0
+              : typeEffectivenessPercent(move->type, playerSpecies->primaryType, playerSpecies->secondaryType);
+      if (effectiveness == bestEffectiveness) candidates[candidateCount++] = index;
+    }
+    if (candidateCount == 0) return usable[0];
+
+    uint32_t pick = 0;
+    if (!rollBelow(random, candidateCount, pick) || pick >= candidateCount) pick = 0;
+    return candidates[pick];
   };
 
   const auto runSide = [&](BattleCombatant& attacker, BattleCombatant& defender, const uint8_t moveSlot) {

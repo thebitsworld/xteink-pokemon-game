@@ -9,6 +9,7 @@
 namespace pokemon {
 
 constexpr uint8_t BATTLE_MOVE_SLOTS = 4;
+static_assert(BATTLE_MOVE_SLOTS == GYM_MOVE_SLOTS, "GymTeamMember::moves must match BATTLE_MOVE_SLOTS");
 
 struct BattleMoveSlot {
   uint8_t moveId = 0;  // 0 = empty slot

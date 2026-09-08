@@ -14,7 +14,8 @@ namespace pokemon {
 enum class TeachMoveOutcome : uint8_t {
   Learned,
   AlreadyKnown,
-  MovesetFull,
+  Incompatible,  // this species can't learn moveId via TM/HM at all (canLearnViaMachine == false)
+  MovesetFull,   // caller must retry with a replaceSlot in [0, BATTLE_MOVE_SLOTS)
   Failed,
 };
 
@@ -111,13 +112,15 @@ class PokemonService {
   // persists anything, so merely viewing a Pokemon never writes to SD.
   BattleRecordEntry peekBattleMoves(const PokemonRecord& record) const;
 
-  // Teaches moveId to recordId via TM/HM. Learns straight into an empty
-  // move slot when there is one; if the moveset is already full (and
-  // doesn't already know the move), the caller must free a slot first
-  // (e.g. via a level-up MoveLearn choice) - unlike PendingEventKind's
-  // MoveLearn, a TM use is player-initiated outside any pending-event
-  // queue, so there is no slot-choice prompt wired up for it in GĐ 7.
-  TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId);
+  // Teaches moveId to recordId via TM/HM. Checks canLearnViaMachine() first
+  // (GĐ12 - a species can only learn the TMs/HMs real Pokemon Red allows,
+  // not every move in the game). Learns straight into an empty move slot
+  // when there is one; if the moveset is already full (and doesn't already
+  // know the move), returns MovesetFull without changing anything - the
+  // caller must then ask the player which slot to overwrite and retry with
+  // replaceSlot in [0, BATTLE_MOVE_SLOTS) (GĐ12; mirrors resolveMoveLearn's
+  // two-call shape).
+  TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId, int replaceSlot = -1);
 
   // Player-driven moveset management (Party > Actions > Moves): overwrites
   // one move slot with moveId unconditionally, at full PP. The caller (the
@@ -127,6 +130,11 @@ class PokemonService {
   // resolveMoveLearn there is no AlreadyKnown/MovesetFull check here, since
   // the UI's own move-picker list already excludes both cases by construction.
   ServiceStatus learnMoveIntoSlot(uint32_t recordId, uint8_t slot, uint8_t moveId);
+
+  // Clears one move slot to empty (GĐ12 - the Moveset screen's "Forget").
+  // Refuses to clear a Pokemon's last remaining move (NotApplicable) - a
+  // Pokemon always has at least one move in the real games too.
+  ServiceStatus forgetMove(uint32_t recordId, uint8_t slot);
 
   // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
   // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine

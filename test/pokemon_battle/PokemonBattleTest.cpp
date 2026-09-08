@@ -123,6 +123,25 @@ void poisonAndBurnTickAtEndOfTurn() {
   CHECK(player.currentHp < hpBefore);
 }
 
+void aiVariesItsMoveChoiceAcrossRandomSeedsInsteadOfAlwaysTheSameSlot() {
+  // GĐ12: a Gym Leader's Pokemon with several equally-effective moves
+  // (Tackle and Scratch are both Normal/40 power - identical effectiveness
+  // against a Fire-type target) must not always throw the same one turn
+  // after turn just because it happens to sit in the lowest slot index.
+  bool sawTackle = false;
+  bool sawScratch = false;
+  for (uint32_t seed = 0; seed < 12 && !(sawTackle && sawScratch); ++seed) {
+    BattleCombatant player = makeCombatant(4, 50, {45});        // Charmander, Growl: harmless filler, never KOs
+    BattleCombatant opponent = makeCombatant(4, 50, {33, 10});  // Tackle + Scratch, tied effectiveness
+    const RandomSource seeded{&seed, fixedRoll};
+    pokemon::stepBattle(player, opponent, 0, seeded);
+    if (opponent.moves[0].currentPp < pokemon::moveData(33)->pp) sawTackle = true;
+    if (opponent.moves[1].currentPp < pokemon::moveData(10)->pp) sawScratch = true;
+  }
+  CHECK(sawTackle);
+  CHECK(sawScratch);
+}
+
 void faintingEndsTheBattleImmediatelyWithoutARetaliation() {
   BattleCombatant strong = makeCombatant(1, 100, {33});
   BattleCombatant weak = makeCombatant(4, 2, {33});
@@ -183,6 +202,7 @@ int main() {
   statusMoveWithZeroAilmentChanceAlwaysAppliesItsAilment();
   paralysisCanPreventAnActionAndSpeedIsHalved();
   poisonAndBurnTickAtEndOfTurn();
+  aiVariesItsMoveChoiceAcrossRandomSeedsInsteadOfAlwaysTheSameSlot();
   faintingEndsTheBattleImmediatelyWithoutARetaliation();
   alreadyFaintedCombatantsShortCircuitToAnOutcome();
   masterBallAlwaysCatchesRegardlessOfRandomness();

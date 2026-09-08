@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -11,6 +12,10 @@ constexpr uint8_t MOVE_COUNT = 165;
 constexpr uint8_t ITEM_COUNT = 83;
 constexpr uint8_t GYM_COUNT = 12;  // 8 gyms + 4 Elite Four, in challenge order
 constexpr uint8_t MAX_GYM_TEAM_SIZE = 3;
+// Mirrors PokemonBattle.h's BATTLE_MOVE_SLOTS (this header can't include
+// that one - PokemonBattle.h includes this header, not the reverse). Kept
+// in sync via the static_assert alongside BATTLE_MOVE_SLOTS's definition.
+constexpr uint8_t GYM_MOVE_SLOTS = 4;
 
 enum class MoveCategory : uint8_t {
   Physical = 0,
@@ -87,6 +92,12 @@ struct ItemData {
 struct GymTeamMember {
   uint16_t speciesId;
   uint8_t level;
+  // Fixed moveset matching the real Pokemon Red trainer data (0 = empty
+  // slot) - unlike a wild encounter or a player's own Pokemon, a trainer's
+  // Pokemon in the real games never had its moves derived from the
+  // learnset-by-level table, so this is authored explicitly per member
+  // rather than computed via defaultMovesetForLevel().
+  std::array<uint8_t, GYM_MOVE_SLOTS> moves{};
 };
 
 struct GymData {
