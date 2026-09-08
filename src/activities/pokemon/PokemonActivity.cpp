@@ -387,11 +387,16 @@ int PokemonActivity::listTop() const {
   return top;
 }
 
+// Party rows get extra height to fit an HP bar/text strip below the usual
+// icon+name+level line (see renderPartyRowHealth()) - every other list rides
+// the standard row height.
+int PokemonActivity::rowHeightForScreen() const { return screen_ == Screen::Party ? 96 : 64; }
+
 int PokemonActivity::rowsPerPage() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  constexpr int rowHeight = 64;
   const int bottomReserve = metrics.buttonHintsHeight + 8;
-  return pokemon::pokemonRowsPerPage(renderer.getScreenHeight(), listTop(), bottomReserve, rowHeight, ROW_CAPACITY);
+  return pokemon::pokemonRowsPerPage(renderer.getScreenHeight(), listTop(), bottomReserve, rowHeightForScreen(),
+                                     ROW_CAPACITY);
 }
 
 int PokemonActivity::pageStart() const { return pokemon::pokemonPageStart(selected_, rowsPerPage()); }
@@ -1581,7 +1586,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex;
   int top = listTop();
-  rowHeight_ = 64;
+  rowHeight_ = rowHeightForScreen();
   const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::Battle || screen_ == Screen::BattleMoves ||
                               screen_ == Screen::BattleBalls;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
@@ -1701,6 +1706,26 @@ void PokemonActivity::renderFocused() {
       const int width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, pokemon::pokemonRightAlignedX(valueRight, width), fieldY, value);
     };
+    {
+      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+      const pokemon::BaseStats* baseStats = pokemon::baseStatsFor(record.speciesId);
+      const uint16_t maxHp =
+          baseStats == nullptr ? 1 : pokemon::battleMaxHp(baseStats->hp, pokemon::levelForXp(record.totalXp));
+      renderer.drawText(UI_10_FONT_ID, textX, y, "HP", true, EpdFontFamily::BOLD);
+      char hpText[16];
+      snprintf(hpText, sizeof(hpText), "%u/%u", entry.currentHp, maxHp);
+      const int hpTextW = renderer.getTextWidth(UI_10_FONT_ID, hpText);
+      renderer.drawText(UI_10_FONT_ID, valueRight - hpTextW, y, hpText);
+      const int barX = textX + renderer.getTextWidth(UI_10_FONT_ID, "HP", EpdFontFamily::BOLD) + 8;
+      const int barRight = valueRight - hpTextW - 10;
+      constexpr int barH = 10;
+      if (barRight > barX) {
+        renderer.drawRect(barX, y + 2, barRight - barX, barH, true);
+        const int filled = maxHp == 0 ? 0 : (barRight - barX - 2) * std::min<uint16_t>(entry.currentHp, maxHp) / maxHp;
+        if (filled > 0) renderer.fillRect(barX + 1, y + 3, filled, barH - 2, true);
+      }
+    }
+    y += 26;
     char types[48]{};
     if (species->secondaryType == pokemon::PokemonType::None) {
       snprintf(types, sizeof(types), "%s", typeName(species->primaryType));
@@ -1813,13 +1838,14 @@ void PokemonActivity::renderFocused() {
   }
 }
 
-// Pokemon Red's battlefield reads as a diagonal: the opponent's name/level/HP
+// Pokemon Red's battlefield reads as a diagonal: the opponent's compact HP
 // box sits top-left with its sprite floating top-right, the player's sprite
-// sits bottom-left with its own name/level/HP box bottom-right, and a bordered
+// sits bottom-left with its own compact HP box bottom-right, and a bordered
 // message box holds the turn-by-turn log above the FIGHT/BALL/SWITCH/RUN menu
 // (already a bottom-anchored list - see buildList()'s bottomAnchored branch).
-// Only the player's box shows numeric HP, matching Red (the opponent's exact
-// HP was never shown, only the bar).
+// A row of dots above each box (filled = still able to battle, crossed-out
+// circle = fainted) shows how many Pokemon remain on each side, mirroring
+// Red's row of Poke Balls above a trainer's HP box.
 void PokemonActivity::renderBattleHud() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
@@ -1827,54 +1853,105 @@ void PokemonActivity::renderBattleHud() {
   constexpr int spriteW = 120;  // fixed hero-art asset size; GfxRenderer never upscales bitmaps
   constexpr int spriteH = 90;
   constexpr int sideMargin = 24;
-  constexpr int panelHeight = 76;
+  constexpr int panelHeight = 50;
   constexpr int spriteGap = 20;
   constexpr int barHeight = 12;
+  constexpr int dotSize = 12;
+  constexpr int dotGap = 6;
+  constexpr int dotRowHeight = dotSize + 8;
 
   const int hudTop = contentTop;
   const int hudBottom = listBounds_.y - 12;
 
+  // Compact box: just the HP bar, "cur/max" text, and level - no name (the
+  // sprite right next to it already identifies the Pokemon, and the dot row
+  // above already shows how many are left on that side).
   const auto drawPanel = [&](const pokemon::BattleCombatant& combatant, const int panelX, const int panelY,
-                             const int panelW, const bool showNumericHp) {
+                             const int panelW) {
     renderer.drawRoundedRect(panelX, panelY, panelW, panelHeight, 2, 6, true);
-    char nameLine[48];
-    snprintf(nameLine, sizeof(nameLine), "%s", speciesName(combatant.speciesId));
-    const int nameY = panelY + 8;
-    renderer.drawText(UI_10_FONT_ID, panelX + 10, nameY, nameLine, true, EpdFontFamily::BOLD);
     char levelLine[16];
     snprintf(levelLine, sizeof(levelLine), "%s%u", tr(STR_POKEMON_LEVEL), combatant.level);
-    renderer.drawText(UI_10_FONT_ID,
-                      panelX + panelW - 10 - renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR),
-                      nameY, levelLine);
+    const int levelW = renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR);
 
-    const int barY = nameY + 22;
+    const int barY = panelY + 8;
     const char* hpLabel = "HP";
-    renderer.drawText(UI_10_FONT_ID, panelX + 10, barY - 1, hpLabel, true, EpdFontFamily::BOLD);
-    const int barX = panelX + 10 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
-    const int barW = panelX + panelW - 10 - barX;
+    renderer.drawText(UI_10_FONT_ID, panelX + 8, barY - 1, hpLabel, true, EpdFontFamily::BOLD);
+    const int barX = panelX + 8 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
+    const int barW = panelX + panelW - 8 - levelW - 8 - barX;
     renderer.drawRect(barX, barY, barW, barHeight, true);
     const uint16_t maxHp = std::max<uint16_t>(1, combatant.maxHp);
     const int filled = combatant.maxHp == 0 ? 0 : (barW - 2) * combatant.currentHp / maxHp;
     if (filled > 0) renderer.fillRect(barX + 1, barY + 1, filled, barHeight - 2, true);
+    renderer.drawText(UI_10_FONT_ID, panelX + panelW - 8 - levelW, barY - 1, levelLine);
 
-    const int statusY = barY + barHeight + 6;
+    const int row2Y = barY + barHeight + 6;
+    char hpText[16];
+    snprintf(hpText, sizeof(hpText), "%u/%u", combatant.currentHp, combatant.maxHp);
+    renderer.drawText(UI_10_FONT_ID, panelX + 8, row2Y, hpText);
     if (combatant.status != pokemon::Ailment::None) {
-      renderer.drawText(UI_10_FONT_ID, panelX + 10, statusY, statusAbbrev(combatant.status), true, EpdFontFamily::BOLD);
-    }
-    if (showNumericHp) {
-      char hpText[16];
-      snprintf(hpText, sizeof(hpText), "%u/%u", combatant.currentHp, combatant.maxHp);
+      const char* status = statusAbbrev(combatant.status);
       renderer.drawText(UI_10_FONT_ID,
-                        panelX + panelW - 10 - renderer.getTextWidth(UI_10_FONT_ID, hpText, EpdFontFamily::REGULAR),
-                        statusY, hpText);
+                        panelX + panelW - 8 - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD), row2Y,
+                        status, true, EpdFontFamily::BOLD);
     }
   };
+
+  // aliveMask bit i = 1 when party/team member i can still battle. rightEdge
+  // is the row's right edge (dots grow leftward) since both dot rows sit
+  // above their side's box, and both boxes are right-of-center in this
+  // layout (opponent panel is the exception - see the call site below).
+  const auto drawDots = [&](const int count, const uint32_t aliveMask, const int rowY, const int rightEdge) {
+    if (count <= 0) return;
+    const int totalW = count * dotSize + (count - 1) * dotGap;
+    int x = rightEdge - totalW;
+    for (int i = 0; i < count; ++i) {
+      const bool alive = ((aliveMask >> i) & 1U) != 0;
+      if (alive) {
+        renderer.fillRoundedRect(x, rowY, dotSize, dotSize, dotSize / 2, Color::Black);
+      } else {
+        renderer.drawRoundedRect(x, rowY, dotSize, dotSize, 1, dotSize / 2, true);
+        renderer.drawLine(x + 2, rowY + 2, x + dotSize - 2, rowY + dotSize - 2, 1, true);
+        renderer.drawLine(x + 2, rowY + dotSize - 2, x + dotSize - 2, rowY + 2, 1, true);
+      }
+      x += dotSize + dotGap;
+    }
+  };
+
+  int opponentCount = 1;
+  uint32_t opponentAliveMask = battleOpponent_.currentHp > 0 ? 1U : 0U;
+  if (gymChallengeIndex_ != 0) {
+    const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+    opponentCount = static_cast<int>(team.size());
+    opponentAliveMask = 0;
+    for (int i = 0; i < opponentCount; ++i) {
+      bool alive;
+      if (i < static_cast<int>(gymChallengeTeamProgress_)) {
+        alive = false;  // already defeated
+      } else if (i == static_cast<int>(gymChallengeTeamProgress_)) {
+        alive = battleOpponent_.currentHp > 0;  // currently on the field
+      } else {
+        alive = true;  // not sent out yet
+      }
+      if (alive) opponentAliveMask |= (1U << i);
+    }
+  }
+  uint32_t playerAliveMask = 0;
+  for (int i = 0; i < snapshot_.partyCount; ++i) {
+    bool alive;
+    if (i == battlePartySlot_) {
+      alive = battlePlayer_.currentHp > 0;  // the live combatant, not the (possibly stale) stored entry
+    } else {
+      alive = service_.peekBattleMoves(snapshot_.party[i]).currentHp > 0;
+    }
+    if (alive) playerAliveMask |= (1U << i);
+  }
 
   const int opponentSpriteX = width - sideMargin - spriteW;
   const int opponentSpriteY = hudTop;
   const int opponentPanelX = sideMargin;
   const int opponentPanelW = opponentSpriteX - 16 - opponentPanelX;
-  drawPanel(battleOpponent_, opponentPanelX, hudTop, opponentPanelW, false);
+  drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + opponentPanelW);
+  drawPanel(battleOpponent_, opponentPanelX, hudTop + dotRowHeight, opponentPanelW);
   pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
                                  Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
 
@@ -1882,7 +1959,8 @@ void PokemonActivity::renderBattleHud() {
   const int playerSpriteY = opponentSpriteY + spriteH + spriteGap;
   const int playerPanelW = opponentPanelW;
   const int playerPanelX = width - sideMargin - playerPanelW;
-  drawPanel(battlePlayer_, playerPanelX, playerSpriteY, playerPanelW, true);
+  drawDots(snapshot_.partyCount, playerAliveMask, playerSpriteY, playerPanelX + playerPanelW);
+  drawPanel(battlePlayer_, playerPanelX, playerSpriteY + dotRowHeight, playerPanelW);
   pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
                                  Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
 
@@ -1944,6 +2022,41 @@ void PokemonActivity::renderRowArt() {
       // as a tiny 40x30 mark on the X3 panel.
       pokemon::drawPokemonSpeciesArt(renderer, speciesId, true, Rect{listBounds_.x + 5, rowY + 2, 80, 60});
     }
+    if (screen_ == Screen::Party && start + local < snapshot_.partyCount) {
+      renderPartyRowHealth(rowY, snapshot_.party[start + local]);
+    }
+  }
+}
+
+// Drawn in the taller Party row's bottom strip (see rowHeightForScreen()),
+// below the list widget's own centered icon/name/level text - so a fixed
+// offset from the row's bottom edge stays clear of that text regardless of
+// its exact line height. peekBattleMoves() is read-only (never creates or
+// writes a battle-store entry), matching every other read-only HP peek in
+// this file (BattleSwitch rows, Summary, usablePartySlotAt()).
+void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record) {
+  const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+  const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
+  const uint16_t maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp));
+
+  constexpr int barH = 8;
+  const int barY = rowY + rowHeight_ - 22;
+  const int barX = listBounds_.x + 5;
+  constexpr int barW = 96;
+  renderer.drawRect(barX, barY, barW, barH, true);
+  const int filled = maxHp == 0 ? 0 : (barW - 2) * std::min<uint16_t>(entry.currentHp, maxHp) / maxHp;
+  if (filled > 0) renderer.fillRect(barX + 1, barY + 1, filled, barH - 2, true);
+
+  char hpText[16];
+  snprintf(hpText, sizeof(hpText), "%u/%u", entry.currentHp, maxHp);
+  renderer.drawText(UI_10_FONT_ID, barX + barW + 8, barY - 3, hpText);
+
+  if (entry.status != pokemon::Ailment::None) {
+    const char* status = statusAbbrev(entry.status);
+    renderer.drawText(
+        UI_10_FONT_ID,
+        listBounds_.x + listBounds_.width - 8 - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
+        barY - 3, status, true, EpdFontFamily::BOLD);
   }
 }
 

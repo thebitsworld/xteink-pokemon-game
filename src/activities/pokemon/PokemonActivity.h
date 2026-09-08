@@ -107,8 +107,10 @@ class PokemonActivity final : public Activity {
   int usablePartySlotAt(size_t index) const;
   int logicalCount() const;
   int listTop() const;
+  int rowHeightForScreen() const;
   int rowsPerPage() const;
   int pageStart() const;
+  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record);
   bool isListScreen() const;
   uint32_t selectedRecordId() const;
   static void screenBuilder(UiApp::ScreenType& screen, void* user);
