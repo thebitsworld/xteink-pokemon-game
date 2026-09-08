@@ -318,3 +318,19 @@ Trước đây gym battle và bắt Pokémon hoang dã chỉ cho đúng Pokémon
 - [x] 4 key i18n mới: `STR_POKEMON_SWITCH`, `STR_POKEMON_NO_OTHER_USABLE`, `STR_POKEMON_NO_USABLE_POKEMON`, `STR_POKEMON_GO`.
 - [x] Chỉ sửa `PokemonActivity.cpp/.h` — không đụng `PokemonService`/`PokemonBattle`/storage.
 - [x] 19/19 suite native pass (không đổi service/engine nên không cần test mới ở tầng đó). Flash `pokemon-x3` (clean rebuild): **6,342,451 B (96.8%, còn 196,992 B ≈ 192KB)** — +1,556 B so với bản vá `forgetMove` trước đó.
+
+---
+
+## GĐ 14 — Khôi phục đội hình đầy đủ cho gym leader/Elite Four (ngoài roadmap gốc, theo yêu cầu người dùng) ✅ XONG (commit `9d433ad0`, `05b623ed`)
+
+Sau khi xem danh sách đội hình gym/Elite Four hiện tại (yêu cầu trước đó), người dùng yêu cầu bỏ quyết định GĐ12 "rút gọn còn 2-3 con/đội vì chi phí refresh e-ink" và **giữ đúng đội hình thật của Pokémon Red**, chấp nhận trận đấu dài hơn (Giovanni/Lorelei/Bruno/Agatha/Lance đều có 5 con thật).
+
+- [x] Rà lại toàn bộ 12 đội gym/Elite Four so với dữ liệu Bulbapedia đã lấy ở GĐ12 (đủ trong ngữ cảnh phiên, không cần fetch lại) — viết lại hoàn toàn `scripts/data/pokemon-gyms.csv` với đội hình đầy đủ: Koga 4 con, Sabrina 4, Blaine 4, Giovanni 5, Lorelei 5, Bruno 5, Agatha 5, Lance 5 (Brock/Misty vốn đã đủ 2, Surge/Erika vốn đã đủ 3 — không đổi).
+- [x] Mọi species id và move id được xác nhận bằng `grep`/script Python đọc thẳng `pokemon-kanto-v2.csv`/`pokemon-moves.csv`, không dùng trí nhớ — kể cả các species trước đây bị cắt (Rhyhorn, Dugtrio, Venomoth, Rapidash, Slowbro, Jynx, Hitmonchan, Haunter, Dragonair thứ hai).
+- [x] `MAX_GYM_TEAM_SIZE` (`PokemonBattleTypes.h`) 3→5, cùng `MAX_TEAM_SIZE` trong `generate_pokemon_gyms.py` và câu `PROVENANCE` (phải khớp dòng đầu CSV).
+- [x] Xác nhận `parse_team()` không có ràng buộc "không được trùng species giữa các thành viên" (chỉ chặn trùng chiêu trong cùng 1 thành viên) — nên các cặp trùng loài thật của game gốc (2× Koffing/Koga, 2× Onix/Giovanni, 2× Dragonair/Lance, 2× Gengar/Agatha) không cần sửa code để parse được.
+- [x] Xác nhận không cần sửa UI: `enterGymBattle()`/`advanceGymOpponentOrFinish()` đã lặp động theo `team.size()`, không có chỗ nào giả định cố định 2-3 thành viên.
+- [x] **Bug phát hiện khi đối chiếu lại dữ liệu (không phải do người dùng báo)**: đội Bruno có 1 thành viên gán species id 107 (Hitmonchan) nhưng lại mang moveset thật của Hitmonlee (Jump Kick/Focus Energy/Hi Jump Kick/Mega Kick) — lỗi nhầm species id khi viết CSV ở GĐ12 (hai loài Hitmon tên rất giống nhau). Sửa riêng thành commit `9d433ad0` (107→106) trước khi gộp vào bản viết lại toàn bộ CSV, giờ cả Hitmonlee (106) và Hitmonchan (107) đều xuất hiện đúng là 2 thành viên riêng với moveset thật của từng con.
+- [x] Test: thêm 5 `CHECK` trong `PokemonBattleDataTest.cpp` khẳng định `gymTeamFor(8..12).size() == 5` (Giovanni/Lorelei/Bruno/Agatha/Lance).
+- [x] Cập nhật bảng "Quyết định thiết kế" — gạch quyết định GĐ12 cũ, ghi rõ đã đảo ngược ở GĐ14.
+- [x] 19/19 suite native pass. Build `pokemon-simulator-X3` sạch + smoke test không lỗi. **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,342,555 B (96.8%, còn 196,896 B ≈ 192KB)** — +104 B so với GĐ13 (chỉ tăng kích thước mảng cố định `GymTeamMember[5]` và dữ liệu team thêm vào, không thêm logic mới).
