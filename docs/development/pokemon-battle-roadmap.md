@@ -134,11 +134,19 @@ Mỗi giai đoạn là một điểm dừng tự nhiên: build được, test đ
 
 **Chưa chạy được simulator để test runtime thật** — máy build thiếu `libsdl2-dev`, không cài được do `sudo` cần xác thực tương tác (không có trong môi trường phi tương tác). Firmware `pokemon-x3` build sạch + 19/19 test pass là bằng chứng duy nhất có được ở giai đoạn này; **chưa có UI nên chưa có gì khác biệt để thấy khi chạy trên thiết bị thật** — GĐ4 chỉ là lớp nền, cần GĐ5+ mới "chơi được".
 
-### GĐ 5 — UI: Battle + bắt bằng bóng
+### GĐ 5 — UI: Battle + bắt bằng bóng ✅ XONG (commit `a989d161`)
 
-- [ ] Thêm `Screen::Battle`, `BattleMoves`, `BattleBag`, `BattleBalls`.
-- [ ] Nối vào nhánh Encounter của `Screen::Event` (`PokemonActivity.cpp:434-448`): "Catch" mở màn Battle thay vì bắt ngay; ném bóng thành công mới gọi `service_.resolveEncounter(Catch, ...)`. "Pass" giữ nguyên.
-- [ ] Vẽ tự do trong `renderFocused()`. Dùng `GfxRenderer::wrappedText()` (đã có sẵn, UTF-8-safe, hiện chưa dùng trong file này) cho log; `fillRect`/`drawRect` cho thanh HP; `drawPokemonSpeciesArt` cho ảnh tĩnh.
+- [x] Thêm `Screen::Battle`, `BattleMoves`, `BattleBalls` — **3 màn, không phải 4 như dự kiến ban đầu**: bỏ `BattleBag` vì engine chưa (và không có kế hoạch) hỗ trợ dùng item hồi phục giữa trận — chỉ có FIGHT (moves) và BALL (catch) là hành động thật.
+- [x] Nối vào nhánh Encounter của `Screen::Event`: "Catch" mở `enterBattle()` thay vì bắt ngay; ném bóng thành công tái sử dụng nguyên `resolveEncounter(Catch, ...)` + luồng đặt nickname sẵn có; thất bại → "broke free", quay lại Battle. "Pass"/RUN đều gọi `resolveBattleAsPass()`.
+- [x] Vẽ tự do trong `renderBattleHud()` (gọi từ `renderFocused()`): tên+level+HP bar (`fillRect`/`drawRect`) hai bên, status abbreviation, `drawPokemonSpeciesArt`, và `battleLog_` (build bởi `buildBattleLog()` từ `BattleTurnResult`).
+- [x] `PokemonService` thêm `resolveBattleTurn()`/`attemptBattleCatch()` bọc `pokemon::stepBattle()`/`attemptCatch()` bằng `random_` riêng — UI không bao giờ chạm `RandomSource` trực tiếp, giữ đúng nguyên tắc kiến trúc cũ.
+- [x] `PokemonBattle` tách `defaultMovesetForLevel()` dùng chung giữa `PokemonService::synthesizeBattleEntry()` (đã có từ GĐ4) và `PokemonActivity::enterBattle()` (mới) — tránh lặp lại logic quét learnset.
+- [x] **Sửa 1 bug tồn tại từ GĐ4** (phát hiện khi đọc lại `itemName()`): hàm chỉ xử lý 6 `EvolutionItem`, item id 7-83 (mở rộng bởi `PendingEventKind::Item` ở GĐ4) hiện tên rỗng. Fallback sang `pokemon::itemData(...)->name`.
+- [x] 17 key i18n mới cho log trận đấu (không phải ~20 như ước lượng ban đầu — không cần `STR_POKEMON_NO_PP`, message đó dùng `showMessage` với chuỗi có sẵn khác).
+- [x] Test: 19/19 suite native pass; `PokemonServiceTest` 27/27 (thêm 2 test cho 2 wrapper method mới); `test/pokemon_battle/CMakeLists.txt` cần bổ sung `PokemonLearnsets.generated.h` + `PokemonLearnsets.cpp` (link error vì `defaultMovesetForLevel` mới kéo theo dependency này).
+- [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,326,799 B (96.5%, còn 212,656 B ≈ 208KB)** — tăng **+12,178 B** so với GĐ4 (6,314,621 B), cho toàn bộ UI Battle + 17 key i18n.
+
+**Phát hiện quan trọng (rủi ro cho mọi giai đoạn sau còn sửa i18n)**: sau khi xóa 1 key giữa danh sách trong `english.yaml` (dịch chuyển toàn bộ `StrId` enum phía sau), chạy lại `pio run` báo "up to date" trong 3.2s mà **không rebuild `I18nStrings.o`** — SCons không phát hiện thay đổi qua build hook generator (`gen_i18n.py` chạy như `pre:` script, không nằm trong dependency graph mà SCons theo dõi). Xác nhận qua `stat -c "%Y %n"`: object cũ hơn source mới generate ra. Nguy cơ: link nhầm object cũ với enum layout mới → tra sai chuỗi ở runtime, **sai lặng lẽ, không có lỗi build nào báo**. **Bắt buộc**: sau mỗi lần sửa file trong `lib/I18n/translations/*.yaml`, chạy `rm -rf .pio/build/<env>` để force rebuild sạch trước khi tin tưởng số liệu flash hay hành vi runtime.
 
 ### GĐ 6 — UI: Gym List + Badges
 
