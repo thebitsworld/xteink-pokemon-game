@@ -305,19 +305,16 @@ Cả 4 vấn đề người dùng báo cáo (xem lịch sử) đã sửa, theo �
 
 ---
 
-## GĐ 13 — Đổi Pokémon trong trận (party switch) — CHƯA LÀM, người dùng yêu cầu ghi lại để làm sau
+## GĐ 13 — Đổi Pokémon trong trận (party switch) ✅ XONG (commit `950d72ce`)
 
-Người dùng phản hồi sau khi xác nhận màn Moveset ổn: gym battle và bắt Pokémon hoang dã hiện **chỉ cho đúng 1 Pokémon (luôn là Pokémon đầu party) ra đánh** — hết HP là thua ngay, bất kể party còn Pokémon khác đủ máu. Không hợp lý. Chỉ nên thua khi **toàn bộ party hết HP**, hoặc player chủ động **RUN** (bỏ trận).
+Trước đây gym battle và bắt Pokémon hoang dã chỉ cho đúng Pokémon đầu party ra đánh — hết HP là thua ngay dù party còn Pokémon khác đủ máu. Giờ chỉ thua khi **toàn bộ party hết HP**, hoặc player chủ động **RUN**.
 
-**Hiện trạng đã khảo sát (chưa sửa code)**:
-- `PokemonActivity::setupBattlePlayer()` (`:456`) và `savePlayerBattleEntry()` (`:524`) đều **hardcode `snapshot_.party[0]`** — không có khái niệm "đang dùng Pokémon nào trong party để đánh" ở đâu cả.
-- Khi `stepBattle()` trả `BattleOutcome::OpponentWon` (`battlePlayer_.currentHp == 0`), `activate()`'s `Screen::BattleMoves` case gọi thẳng `finishBattleAfterPlayerFainted()` (wild) / `finishGymChallenge(false)` (gym) — **kết thúc trận ngay lập tức**, không kiểm tra party còn Pokémon nào sống không.
-- `Screen::Battle` hiện chỉ có FIGHT/BALL/RUN (wild) hoặc FIGHT/RUN (gym, GĐ6) — chưa có lựa chọn đổi Pokémon nào.
-
-**Việc cần làm (gợi ý, chưa chốt thiết kế chi tiết)**:
-1. Thêm member theo dõi "đang dùng slot nào trong party" (vd `battlePartySlot_`) thay cho hardcode `party[0]` ở `setupBattlePlayer()`/`savePlayerBattleEntry()`.
-2. Thêm hành động đổi Pokémon vào `Screen::Battle` (vd thêm dòng "Switch") → màn mới `Screen::BattleSwitch` liệt kê các Pokémon trong party còn HP>0 (trừ Pokémon đang đánh) để chọn — cần đọc HP từng thành viên qua `service_.peekBattleMoves()`/`loadBattleEntry()`.
-3. Khi Pokémon hiện tại gục (`OpponentWon`): **không kết thúc trận ngay** — kiểm tra còn Pokémon nào trong party HP>0 không; còn thì **bắt buộc** vào `Screen::BattleSwitch` (không cho hủy, giống game gốc khi Pokémon gục giữa trận); hết thì mới thật sự thua như hiện tại.
-4. "RUN" giữ nguyên là cách duy nhất để chủ động bỏ trận trước khi hết Pokémon.
-5. Cần quyết định: đổi Pokémon giữa trận có tốn lượt không (game gốc: đổi Pokémon tốn 1 lượt, đối thủ được đánh miễn phí) — cân nhắc mô phỏng đúng luật này hay đơn giản hóa (đổi miễn phí, không mất lượt) tùy độ phức tạp muốn đầu tư.
-6. Với gym battle: đổi Pokémon chỉ thay `battlePlayer_`, không ảnh hưởng `battleOpponent_`/tiến trình đội hình gym (`gymChallengeTeamProgress_`) — 2 khái niệm độc lập nhau.
+- [x] `battlePartySlot_` (mới) thay cho hardcode `snapshot_.party[0]` ở `setupBattlePlayer()`/`savePlayerBattleEntry()` — `setupBattlePlayer()` nhận tham số `slot` tường minh.
+- [x] `enterBattle()`/`enterGymBattle()` gọi `firstUsablePartySlot()` (mới) để bắt đầu trận với Pokémon **đầu tiên còn HP>0** thay vì luôn giả định `party[0]` sống — hết Pokémon đủ máu thì hiện `STR_POKEMON_NO_USABLE_POKEMON`, không cho vào trận.
+- [x] `Screen::Battle` thêm "Switch" (FIGHT/BALL/SWITCH/RUN cho wild, FIGHT/SWITCH/RUN cho gym) → `Screen::BattleSwitch` (mới) liệt kê party còn HP>0 (trừ Pokémon đang đánh).
+- [x] Khi Pokémon đang đánh gục (`OpponentWon`): **không kết thúc trận ngay** — còn Pokémon khác đủ máu thì bắt buộc vào `Screen::BattleSwitch` (`forcedBattleSwitch_`, Back bị chặn không cho hủy — giống game gốc); hết mới thật sự thua như cũ.
+- [x] `usablePartySlotCount()`/`usablePartySlotAt()` (mới) dùng `service_.peekBattleMoves()` (đọc thuần, không ghi SD) để kiểm tra HP từng thành viên.
+- [x] **Giản lược có chủ đích**: đổi Pokémon **không tốn lượt** (không cho đối thủ đánh miễn phí như game gốc) — `stepBattle()` không có khái niệm "switch action", thêm cơ chế lượt-chiếm-dụng riêng sẽ phải sửa engine (đã ổn định, có test riêng) chỉ để mô phỏng đúng luật này; đổi lấy sự đơn giản, vẫn giải quyết đúng vấn đề chính (thua sai điều kiện).
+- [x] 4 key i18n mới: `STR_POKEMON_SWITCH`, `STR_POKEMON_NO_OTHER_USABLE`, `STR_POKEMON_NO_USABLE_POKEMON`, `STR_POKEMON_GO`.
+- [x] Chỉ sửa `PokemonActivity.cpp/.h` — không đụng `PokemonService`/`PokemonBattle`/storage.
+- [x] 19/19 suite native pass (không đổi service/engine nên không cần test mới ở tầng đó). Flash `pokemon-x3` (clean rebuild): **6,342,451 B (96.8%, còn 196,992 B ≈ 192KB)** — +1,556 B so với bản vá `forgetMove` trước đó.
