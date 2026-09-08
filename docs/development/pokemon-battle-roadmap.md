@@ -271,28 +271,32 @@ Người dùng phản hồi: Pokémon đủ 4 chiêu không có cách nào chủ
 - [x] Test: cập nhật `collectionActionsExcludeOperationsThatCannotSucceed` (thứ tự/số lượng action đổi vì thêm Moveset); 1 test mới cho `learnMoveIntoSlot`. 19/19 suite native pass.
 - [x] **`pio run -e pokemon-x3`** (clean rebuild): Flash **6,335,981 B (96.7%, còn 203,472 B ≈ 199KB)** — tăng **+1,316 B** so với GĐ10.
 
-## GĐ 12 — Còn tồn đọng, CHƯA LÀM (người dùng báo cáo sau khi chơi thử GĐ11, dừng phiên tại đây)
+## GĐ 12 — Sửa 4 vấn đề sau playtest GĐ11 ✅ XONG (commit `5b9d24d2`)
 
-Bốn vấn đề dưới đây là **việc cần làm tiếp ở phiên sau**, đã khảo sát code để xác định nguyên nhân/vị trí sửa nhưng **chưa động vào code** — chỉ ghi lại để không mất ngữ cảnh.
+Cả 4 vấn đề người dùng báo cáo (xem lịch sử) đã sửa, theo đúng thứ tự đề xuất ở cuối phiên trước (3 → 2 → 1 → 4):
 
-### 1. Màn Moveset (GĐ11) không cho "xóa" chiêu → học TM/HM vẫn báo đầy
+### 1. Đội hình gym leader dùng moveset thật của Pokémon Red
 
-- Hiện trạng: `Screen::Moveset`/`MovesetPick` (GĐ11) chỉ cho thay 1 ô bằng **chiêu khác trong learnset** — không có lựa chọn "quên chiêu, để trống ô". Luồng dạy TM/HM (`PokemonService::teachMove()`, GĐ9) khi 4 ô đã đầy thì chỉ trả về `MovesetFull` và **chặn hẳn**, không có picker chọn-ô-thay (đã ghi rõ là giản lược có chủ đích ở GĐ9, nhưng giờ người dùng xác nhận đây là điểm bị vướng thật khi chơi).
-- Hướng sửa gợi ý: cho `PokemonService::teachMove()` nhận thêm tham số `replaceSlot` (giống hệt `resolveMoveLearn(replaceSlot)` của GĐ7), và khi trả `MovesetFull` thì UI hiện lại đúng picker 4-ô-hiện-tại (tái dùng cơ chế đã có ở `Screen::Event`'s MoveLearn branch) thay vì chỉ báo lỗi. Cân nhắc thêm luôn: màn `Screen::Moveset` cũng nên có 1 lựa chọn "Forget" (xóa hẳn, không học gì) độc lập với việc thay bằng chiêu learnset khác.
+- `GymTeamMember` (`PokemonBattleTypes.h`) thêm trường `moves` (`std::array<uint8_t, GYM_MOVE_SLOTS>`, hằng số mới đồng bộ với `BATTLE_MOVE_SLOTS` qua `static_assert` vì 2 header không include lẫn nhau được).
+- Lấy dữ liệu thật qua **WebFetch trực tiếp từng trang Bulbapedia** (Pewter/Cerulean/Vermilion/Celadon/Fuchsia/Saffron/Cinnabar/Viridian Gym + Lorelei/Bruno/Agatha/Lance) — không suy đoán từ trí nhớ. `pokemon-gyms.csv` đổi format team member từ `species:level` sang `species:level:move1-move2-move3-move4`; `generate_pokemon_gyms.py` parse/validate (id hợp lệ, không trùng chiêu)/emit thêm.
+- Nhân tiện sửa 5 chỗ **level sai** phát hiện khi đối chiếu Bulbapedia (dữ liệu species/level cũ phần lớn đã đúng, chỉ Elite Four lệch nhẹ): Cloyster 56→53, Lapras 54→56, Bruno's Machamp 56→58, Agatha's Golbat 55→56, Agatha's Arbok 56→58.
+- `PokemonActivity::setupBattleOpponent()` thêm tham số `std::span<const uint8_t> fixedMoves = {}` — gym/Elite Four truyền `team[x].moves` thẳng vào thay vì gọi `defaultMovesetForLevel()`; gặp hoang dã không đổi (fixedMoves rỗng → path cũ).
+- Test: `PokemonBattleDataTest.cpp` xác nhận Brock's team đúng chiêu thật + mọi gym Pokémon phải có ít nhất 1 chiêu khác 0.
 
-### 2. TM/HM đang dạy được cho MỌI Pokémon — chưa lọc theo hệ như Pokémon Red thật
+### 2. TM/HM giờ lọc đúng theo hệ Pokémon Red thật
 
-- **Nguyên nhân xác định rõ**: hàm `pokemon::canLearnViaMachine(speciesId, moveId)` (khai báo `lib/Pokemon/PokemonBattleTypes.h:107`, cài đặt thật + có test riêng trong `PokemonLearnsets.cpp`/`PokemonBattleDataTest.cpp` — dữ liệu tương thích TM/HM theo hệ **đã tồn tại sẵn và đúng**, sinh từ `pokemon-tmhm.csv`) **chưa hề được gọi** ở bất cứ đâu trong `PokemonService::teachMove()` — đây là lỗi tích hợp thiếu sót (đã có data, có hàm kiểm tra, nhưng quên nối vào), không phải thiếu dữ liệu.
-- Hướng sửa: thêm check `if (!pokemon::canLearnViaMachine(record.speciesId, moveId)) return TeachMoveOutcome::Incompatible;` (thêm enum value mới) ở đầu `teachMove()` — cần đọc `PokemonRecord` trước (hiện `teachMove()` chỉ nhận `recordId`+`moveId`, cần thêm bước `readRecord` để lấy `speciesId`). UI cần thêm message mới cho outcome này (vd "Pokémon này không học được chiêu qua TM/HM đó").
+- **Nguyên nhân đã xác định từ phiên trước**: `pokemon::canLearnViaMachine()` đã có sẵn, đúng, có test riêng, chỉ thiếu bước gọi trong `PokemonService::teachMove()`. Đã nối vào — check `AlreadyKnown` chạy TRƯỚC check tương thích (Pokémon học chiêu đó qua cách khác thì không bị luật TM chặn ngược).
+- `TeachMoveOutcome` thêm `Incompatible`; UI hiện `STR_POKEMON_CANNOT_LEARN_MACHINE` khi gặp.
 
-### 3. Đội hình gym leader (loài/level/moveset) chưa đúng dữ liệu Pokémon Red thật
+### 3. Màn Moveset có "Forget"; TM đầy 4 chiêu không còn chặn hẳn
 
-- **Nguyên nhân xác định rõ**: `scripts/data/pokemon-gyms.csv` là **viết tay** (ghi rõ từ GĐ0: "PokeAPI không có dữ liệu gym Red"), và `struct GymTeamMember` (`PokemonBattleTypes.h:87-90`) **chỉ có `speciesId` + `level`, không có moveset riêng** — nghĩa là mỗi Pokémon của gym leader hiện tại **tự tổng hợp chiêu từ learnset theo level** (qua `defaultMovesetForLevel()`, giống hệt cách một Pokémon hoang dã có chiêu), **không phải moveset thật của Pokémon Red** (vd Onix của Brock trong game gốc biết đúng Tackle/Screech/Bide/Rock Throw, không phải chiêu tự suy ra).
-- Hướng sửa: (a) đối chiếu lại toàn bộ `pokemon-gyms.csv` (8 gym + 4 Elite Four + có thể cả Champion Blue nếu muốn làm tiếp) với dữ liệu Pokémon Red thật (Bulbapedia có bảng đầy đủ); (b) mở rộng `GymTeamMember` để mang theo moveset cố định riêng (vd thêm 4 trường `move1..move4` hoặc một bảng phụ `GYM_TEAM_MOVES` giống cách `GYM_TEAM_MEMBERS` đã tách offset/count) thay vì dựa vào `defaultMovesetForLevel()`; (c) cập nhật `generate_pokemon_gyms.py` + `enterGymBattle()`/`advanceGymOpponentOrFinish()` (`PokemonActivity.cpp`, GĐ6) để dùng moveset cố định mới thay vì gọi `setupBattleOpponent()`'s learnset-derived path.
+- `PokemonService::forgetMove(recordId, slot)` (mới) — xóa hẳn 1 ô, từ chối nếu đó là chiêu cuối cùng còn lại (không bao giờ để Pokémon 0 chiêu). `Screen::MovesetPick` thêm dòng "Forget" cuối danh sách.
+- `teachMove()` thêm tham số `replaceSlot` (mirror `resolveMoveLearn()` của GĐ7) — khi moveset đầy, UI mở `Screen::TmReplaceSlot` (mới, 4 ô hiện tại + Cancel) để chọn ô thay, gọi lại `teachMove(..., replaceSlot)` thay vì chỉ báo lỗi chặn hẳn như GĐ9 để lại.
 
-### 4. AI đối thủ trong trận yếu — Onix của Brock chỉ đánh 1 chiêu lặp lại
+### 4. AI đối thủ bớt máy móc, không lặp lại đúng 1 chiêu
 
-- **Nguyên nhân xác định rõ, liên quan trực tiếp tới mục 3 ở trên**: logic AI thật ở `lib/Pokemon/PokemonBattle.cpp:263-281` (`chooseOpponentMove`, trong `stepBattle()`) là **hoàn toàn xác định (deterministic), không có yếu tố ngẫu nhiên nào** — luôn chọn slot có `typeEffectivenessPercent` cao nhất so với Pokémon của người chơi, tie thì chọn slot đầu tiên có PP; nếu thế trận (Pokémon người chơi, cặp hệ) không đổi giữa các lượt thì AI **sẽ luôn chọn đúng 1 slot y hệt mọi lượt** — đây có thể là nguyên nhân chính của hiện tượng "Onix chỉ đánh 1 chiêu", CHỨ KHÔNG hẳn là bug logic chọn chiêu. Cộng thêm mục 3 (Onix tổng hợp chiêu qua learnset theo level rất có thể **chỉ có 1 chiêu unlock** ở level gym đó — xem `pokemon-learnsets.csv` cho species Onix), khả năng cao Onix **thực sự chỉ có 1 chiêu khả dụng**, không phải AI cố tình lặp lại.
-- Hướng sửa: (a) sửa mục 3 trước (gym Pokémon có moveset cố định ≥2-4 chiêu thật) — nhiều khả năng tự giải quyết luôn phần lớn hiện tượng; (b) cân nhắc thêm chút ngẫu nhiên vào `chooseOpponentMove()` (vd random giữa các slot có hiệu quả ngang nhau, hoặc thỉnh thoảng không chọn chiêu tối ưu nhất) để trận đấu đỡ máy móc/dễ đoán, đúng tinh thần "có random để không đoán trước được" đã ghi trong kế hoạch gốc ở phần Engine chiến đấu nhưng dường như chưa thực sự cài đặt phần random này khi viết `stepBattle()` ở GĐ2.
+- `chooseOpponentMove()` (`PokemonBattle.cpp`) không còn hoàn toàn xác định: 1/4 lượt cân nhắc **mọi** chiêu còn PP (không chỉ chiêu hiệu quả nhất); khi nhiều chiêu hòa điểm hiệu quả, chọn ngẫu nhiên giữa chúng thay vì luôn lấy slot đầu tiên như cũ.
+- Kết hợp với mục 1 (gym Pokémon giờ có ≥2-4 chiêu thật thay vì có thể chỉ 1 chiêu tự tổng hợp) — giải quyết trực tiếp hiện tượng "Onix chỉ đánh 1 chiêu".
+- Test mới: 12 seed ngẫu nhiên khác nhau phải thấy cả 2 chiêu hòa điểm hiệu quả được dùng (không phải luôn cùng 1 slot).
 
-**Việc kế tiếp cho phiên sau**: bắt đầu từ mục 3 (dữ liệu gym + moveset cố định) vì nó ảnh hưởng trực tiếp tới mục 4; sau đó mục 2 (TM compatibility, sửa nhanh, đã biết chính xác chỗ thiếu); rồi mục 1 (Moveset/TM slot-replace UX); mục 4 (AI random) làm sau cùng vì phụ thuộc kết quả mục 3.
+**Kết quả chung**: 19/19 suite native pass. Flash `pokemon-x3` (clean rebuild): **6,340,863 B (96.8%, còn 198,592 B ≈ 194KB)** — +4,882 B so với GĐ11 (nhảy lớn hơn thường lệ vì dữ liệu moveset gym thật + logic AI + 2 luồng UI mới).
