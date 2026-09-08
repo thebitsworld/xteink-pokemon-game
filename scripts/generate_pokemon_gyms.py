@@ -11,11 +11,11 @@ from pathlib import Path
 
 PROVENANCE = (
     "# Hand-authored from Bulbapedia's Pokemon Red/Blue trainer data: gym leaders and Elite Four, "
-    "teams trimmed to 2-3 Pokemon (each battle turn is a full e-ink refresh), movesets kept verbatim"
+    "full real teams (species/level/moveset kept verbatim, including duplicate species)"
 )
 HEADERS = ("order", "leader", "badge", "type", "team")
 GYM_COUNT = 12
-MAX_TEAM_SIZE = 3
+MAX_TEAM_SIZE = 5  # full real teams: Giovanni/Lorelei/Bruno/Agatha/Lance each have 5
 MOVE_SLOTS = 4
 SPECIES_COUNT = 151
 MOVE_COUNT = 165

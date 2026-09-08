@@ -50,7 +50,7 @@ Ghi lại kèm lý do, để người tiếp nhận không phải tranh luận l
 | **Đọc sách hồi HP/PP dần**, đầy máu thì xóa status | Chống ngõ cụt: hết Potion + cả Party kiệt sức = kẹt vĩnh viễn. Cũng đúng tinh thần thiết bị đọc sách |
 | Dữ liệu chiến đấu ở **file phụ**, không nới record | Xem ràng buộc 3. File phụ **tái tạo được 100%** (chiêu suy từ learnset theo level, HP/PP đầy) → hỏng file = dựng lại, không bao giờ mất Pokémon |
 | Dùng **base stat thật** của 151 loài | Không có stat riêng thì mọi Pokémon cùng level đánh y hệt nhau, type matchup thành yếu tố duy nhất. Chỉ tốn ~755 byte |
-| Gym team rút còn **2-3 con** (bản gốc tới 5) | Mỗi lượt đánh = 1 lần refresh e-ink toàn màn (~1 lần lật trang sách). Đội 5 con làm trận đấu lê thê |
+| ~~Gym team rút còn 2-3 con~~ **giữ nguyên đội hình đầy đủ thật** (tới 5 con) — quyết định lại ở GĐ14, đảo ngược lại quyết định ban đầu này | Ban đầu lo ngại mỗi lượt đánh = 1 lần refresh e-ink toàn màn nên cắt bớt; người dùng yêu cầu giữ đúng đội hình gốc, chấp nhận trận đấu dài hơn |
 | Huy hiệu **chỉ là thành tựu trưng bày** | Người dùng chọn; giữ rủi ro cân bằng thấp nhất, không phải đụng `PokemonGame.cpp` |
 | Gym mở khóa **tuyến tính**, đủ 8 huy hiệu mới mở Elite Four | Tạo đường tiến triển — thứ game hiện đang thiếu |
 | Thua **không bị phạt** | Rào cản tự nhiên là level Pokémon, mà level chỉ lên bằng đọc sách thật |

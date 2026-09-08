@@ -186,6 +186,14 @@ void gymsAreOrderedAndEliteFourCarriesNoBadge() {
     if (eliteFour != nullptr) CHECK(eliteFour->badgeName[0] == '\0');
   }
 
+  // GĐ14: full real Pokemon Red teams restored (species duplicates and
+  // all), not the earlier 2-3-member e-ink-refresh trim.
+  CHECK(pokemon::gymTeamFor(8).size() == 5);   // Giovanni
+  CHECK(pokemon::gymTeamFor(9).size() == 5);   // Lorelei
+  CHECK(pokemon::gymTeamFor(10).size() == 5);  // Bruno
+  CHECK(pokemon::gymTeamFor(11).size() == 5);  // Agatha
+  CHECK(pokemon::gymTeamFor(12).size() == 5);  // Lance
+
   for (uint8_t gymIndex = 1; gymIndex <= pokemon::GYM_COUNT; ++gymIndex) {
     const std::span<const pokemon::GymTeamMember> team = pokemon::gymTeamFor(gymIndex);
     CHECK(team.size() >= 1 && team.size() <= pokemon::MAX_GYM_TEAM_SIZE);

@@ -10,8 +10,8 @@ namespace pokemon {
 
 constexpr uint8_t MOVE_COUNT = 165;
 constexpr uint8_t ITEM_COUNT = 83;
-constexpr uint8_t GYM_COUNT = 12;  // 8 gyms + 4 Elite Four, in challenge order
-constexpr uint8_t MAX_GYM_TEAM_SIZE = 3;
+constexpr uint8_t GYM_COUNT = 12;         // 8 gyms + 4 Elite Four, in challenge order
+constexpr uint8_t MAX_GYM_TEAM_SIZE = 5;  // full real Pokemon Red teams (Giovanni/Lorelei/Bruno/Agatha/Lance)
 // Mirrors PokemonBattle.h's BATTLE_MOVE_SLOTS (this header can't include
 // that one - PokemonBattle.h includes this header, not the reverse). Kept
 // in sync via the static_assert alongside BATTLE_MOVE_SLOTS's definition.
