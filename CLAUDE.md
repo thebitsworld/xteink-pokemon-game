@@ -41,7 +41,18 @@ Ghi chú ngữ cảnh cho Claude ở phiên làm việc sau (hoặc trên máy k
 
 Phạm vi: học chiêu theo level (dữ liệu Red thật), vật phẩm + TM/HM rơi khi đọc sách, chiến đấu turn-based đầy đủ status effect, bắt Pokémon bằng 4 loại bóng, 8 gym + Elite Four theo thứ tự, màn hình huy hiệu.
 
-**Tiến độ**: **Toàn bộ 8 giai đoạn của roadmap chiến đấu đã xong**, cộng thêm **GĐ9-11 ngoài roadmap gốc** (commit `b4d21f31`, `eff18d13`, `f1ff1bd2`, `da111328`, `18a0eeca`, `a989d161`, `2f420118`, `5f496ad6`, `ddef31b0`, `62fd5028`, `194601a0`, `7605de43`, `060d272f`, `2fc7af7a`, `a554d92f` trên `feat/pokemon-battle-system`). **Push đang do người dùng tự làm thủ công** — máy này không có credential GitHub hoạt động (xem "Trạng thái git" bên dưới), đừng tự ý thử push nữa trừ khi được yêu cầu lại.
+**Tiến độ**: **Toàn bộ 8 giai đoạn của roadmap chiến đấu đã xong**, cộng thêm **GĐ9-11 ngoài roadmap gốc** (commit `b4d21f31`, `eff18d13`, `f1ff1bd2`, `da111328`, `18a0eeca`, `a989d161`, `2f420118`, `5f496ad6`, `ddef31b0`, `62fd5028`, `194601a0`, `7605de43`, `060d272f`, `2fc7af7a`, `a554d92f`, `c3998aa9` trên `feat/pokemon-battle-system`). **Push đang do người dùng tự làm thủ công** — máy này không có credential GitHub hoạt động (xem "Trạng thái git" bên dưới), đừng tự ý thử push nữa trừ khi được yêu cầu lại.
+
+## ⚠️ Việc cần làm ngay ở phiên sau (GĐ12, CHƯA LÀM — dừng phiên tại đây theo yêu cầu người dùng)
+
+Người dùng chơi thử GĐ11 xong, báo lại 4 vấn đề. Đã khảo sát code xác định rõ nguyên nhân cho cả 4 (xem chi tiết đầy đủ + hướng sửa gợi ý ở mục **"GĐ 12"** cuối [pokemon-battle-roadmap.md](docs/development/pokemon-battle-roadmap.md)) nhưng **chưa sửa code**:
+
+1. **Màn Moveset (GĐ11) không cho xóa chiêu** → dạy TM/HM khi đủ 4 chiêu vẫn báo lỗi chặn hẳn (`teachMove()` trả `MovesetFull`, không có picker chọn-ô-thay như `resolveMoveLearn()` của GĐ7 đã có).
+2. **TM/HM dạy được cho mọi Pokémon, không lọc theo hệ** — nguyên nhân rõ ràng: `pokemon::canLearnViaMachine(speciesId, moveId)` đã có sẵn, đúng, có test (`PokemonLearnsets.cpp`) nhưng **`PokemonService::teachMove()` quên gọi nó** — chỉ cần nối vào là xong.
+3. **Đội hình gym leader (loài/level/moveset) chưa đúng Pokémon Red thật** — `pokemon-gyms.csv` viết tay, `GymTeamMember` chỉ có `speciesId+level`, moveset gym Pokémon hiện tự tổng hợp qua learnset-theo-level (`defaultMovesetForLevel()`) giống hệt Pokémon hoang dã, không phải moveset cố định thật của game gốc.
+4. **AI đối thủ yếu, lặp lại 1 chiêu** (vd Onix của Brock) — `chooseOpponentMove()` (`PokemonBattle.cpp:263`) hoàn toàn xác định (không random), cộng thêm khả năng cao mục 3 khiến Onix chỉ tổng hợp được đúng 1 chiêu ở level đó — nên **ưu tiên sửa mục 3 trước**, có thể tự giải quyết phần lớn mục 4.
+
+**Thứ tự đề xuất**: mục 3 → mục 2 → mục 1 → mục 4.
 
 **GĐ11 (màn quản lý moveset, commit `a554d92f`, ngoài roadmap gốc — người dùng phản hồi không có cách chủ động đổi chiêu khi đã đủ 4)**: `Party > Actions > Moves` (mới, `CollectionAction::Moveset`) mở `Screen::Moveset` (xem 4 ô chiêu) → chọn ô → `Screen::MovesetPick` (mọi chiêu trong learnset chưa biết, ở cấp hiện tại trở xuống) → học đè vào ô đã chọn qua `PokemonService::learnMoveIntoSlot()` (mới). Khác 2 luồng cũ: TM (GĐ9) không cho thay khi đầy, MoveLearn tự động (GĐ7) chỉ hiện đúng lúc lên cấp — Moveset cho chủ động bất cứ lúc nào. Flash **6,335,981 B/96.7%, còn 203,472 B**, +1,316 B.
 
