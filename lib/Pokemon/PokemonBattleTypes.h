@@ -107,6 +107,19 @@ std::span<const LearnsetEntry> learnsetFor(uint16_t speciesId);
 bool canLearnViaMachine(uint16_t speciesId, uint8_t moveId);
 const ItemData* itemData(uint8_t itemId);
 const GymData* gymData(uint8_t gymIndex);
+
+enum class GymProgress : uint8_t {
+  Locked,
+  Available,
+  Defeated,
+};
+
+// Pure read of a battleProgress bitfield (PokemonState::battleProgress):
+// gym N (1-8) requires gyms 1..N-1 already defeated; an Elite Four member
+// (9-GYM_COUNT) requires all 8 gym bits set. Shared by
+// PokemonService::markGymDefeated (the mutating check) and the UI's gym
+// list display (read-only) so the unlock rule lives in exactly one place.
+GymProgress gymProgressFor(uint16_t battleProgress, uint8_t gymIndex);
 std::span<const GymTeamMember> gymTeamFor(uint8_t gymIndex);
 
 }  // namespace pokemon

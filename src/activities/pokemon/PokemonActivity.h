@@ -43,6 +43,8 @@ class PokemonActivity final : public Activity {
     Battle,
     BattleMoves,
     BattleBalls,
+    GymList,
+    Badges,
     ResetFirst,
     ResetFinal,
     Message,
@@ -65,11 +67,16 @@ class PokemonActivity final : public Activity {
   void renderFocused();
   void renderRowArt();
   void renderHeaderAndHints();
+  bool setupBattlePlayer();
+  void setupBattleOpponent(uint16_t speciesId, uint8_t level);
   bool enterBattle(const pokemon::PendingEvent& pending);
+  bool enterGymBattle(uint8_t gymIndex);
   void savePlayerBattleEntry();
   void resolveBattleAsPass();
   void finishBattleAfterWildFainted();
   void finishBattleAfterPlayerFainted();
+  void advanceGymOpponentOrFinish();
+  void finishGymChallenge(bool won);
   void buildBattleLog(const pokemon::BattleTurnResult& result);
   void renderBattleHud();
   int battlePlayerMoveCount() const;
@@ -102,6 +109,8 @@ class PokemonActivity final : public Activity {
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};
   char battleLog_[160]{};
+  uint8_t gymChallengeIndex_ = 0;       // 0 = not fighting a gym/Elite Four right now
+  uint8_t gymChallengeTeamProgress_ = 0;  // index of the opponent team member currently out
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};
   std::array<std::array<char, 56>, ROW_CAPACITY> labels_{};
   std::array<std::array<char, 32>, ROW_CAPACITY> values_{};

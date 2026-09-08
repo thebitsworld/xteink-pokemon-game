@@ -328,17 +328,11 @@ ServiceStatus PokemonService::markGymDefeated(const uint8_t gymIndex) {
   const ServiceStatus stateStatus = loadReadyState(state);
   if (stateStatus != ServiceStatus::Ok) return stateStatus;
 
+  const GymProgress progress = gymProgressFor(state.battleProgress, gymIndex);
+  if (progress == GymProgress::Defeated) return ServiceStatus::Ok;  // idempotent: already recorded
+  if (progress == GymProgress::Locked) return ServiceStatus::NotApplicable;
+
   const uint16_t bit = static_cast<uint16_t>(1U << (gymIndex - 1U));
-  if ((state.battleProgress & bit) != 0) return ServiceStatus::Ok;  // idempotent: already recorded
-
-  if (gymIndex <= 8U) {
-    const uint16_t requiredMask = static_cast<uint16_t>(bit - 1U);  // every earlier gym bit
-    if ((state.battleProgress & requiredMask) != requiredMask) return ServiceStatus::NotApplicable;
-  } else {
-    constexpr uint16_t ALL_GYMS_MASK = 0x00FFU;  // bits 0-7: all 8 gyms
-    if ((state.battleProgress & ALL_GYMS_MASK) != ALL_GYMS_MASK) return ServiceStatus::NotApplicable;
-  }
-
   state.battleProgress = static_cast<uint16_t>(state.battleProgress | bit);
   if (!store_.commit(state)) {
     LOG_ERR("PokemonService", "Failed to record gym victory");

@@ -252,7 +252,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::ResetFinal:
       return screen_ == Screen::Move ? snapshot_.partyCount : 2;
     case Screen::Menu:
-      return 7;
+      return 9;
     case Screen::Party:
       return pokemon::PARTY_SIZE;
     case Screen::Actions: {
@@ -274,11 +274,15 @@ int PokemonActivity::logicalCount() const {
       return pending != nullptr && pending->kind == pokemon::PendingEventKind::Item ? 1 : 2;
     }
     case Screen::Battle:
-      return 3;
+      return gymChallengeIndex_ != 0 ? 2 : 3;  // trainer battles have no BALL option
     case Screen::BattleMoves:
       return battlePlayerMoveCount();
     case Screen::BattleBalls:
       return 4;
+    case Screen::GymList:
+      return pokemon::GYM_COUNT;
+    case Screen::Badges:
+      return 8;  // gym badges only - Elite Four members award no badge
     case Screen::Summary:
     case Screen::PokedexDetail:
     case Screen::Message:
@@ -365,7 +369,7 @@ int PokemonActivity::battlePlayerMoveCount() const {
   return count;
 }
 
-bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
+bool PokemonActivity::setupBattlePlayer() {
   if (snapshot_.partyCount == 0) return false;
   const pokemon::PokemonRecord& leader = snapshot_.party[0];
   pokemon::BattleRecordEntry entry{};
@@ -382,20 +386,40 @@ bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
   for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
     battlePlayer_.moves[i] = pokemon::BattleMoveSlot{entry.moves[i], entry.pp[i]};
   }
+  return true;
+}
 
+void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_t level) {
   battleOpponent_ = pokemon::BattleCombatant{};
-  battleOpponent_.speciesId = pending.speciesId;
-  battleOpponent_.level = pending.level;
-  const pokemon::BaseStats* wildStats = pokemon::baseStatsFor(pending.speciesId);
-  battleOpponent_.maxHp = wildStats == nullptr ? 1 : pokemon::battleMaxHp(wildStats->hp, pending.level);
+  battleOpponent_.speciesId = speciesId;
+  battleOpponent_.level = level;
+  const pokemon::BaseStats* stats = pokemon::baseStatsFor(speciesId);
+  battleOpponent_.maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, level);
   battleOpponent_.currentHp = battleOpponent_.maxHp;
   std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> moveIds{};
   std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> pp{};
-  pokemon::defaultMovesetForLevel(pending.speciesId, pending.level, moveIds, pp);
+  pokemon::defaultMovesetForLevel(speciesId, level, moveIds, pp);
   for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
     battleOpponent_.moves[i] = pokemon::BattleMoveSlot{moveIds[i], pp[i]};
   }
+}
 
+bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
+  if (!setupBattlePlayer()) return false;
+  setupBattleOpponent(pending.speciesId, pending.level);
+  gymChallengeIndex_ = 0;
+  battleLog_[0] = '\0';
+  setScreen(Screen::Battle);
+  return true;
+}
+
+bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
+  const auto team = pokemon::gymTeamFor(gymIndex);
+  if (team.empty()) return false;
+  if (!setupBattlePlayer()) return false;
+  setupBattleOpponent(team[0].speciesId, team[0].level);
+  gymChallengeIndex_ = gymIndex;
+  gymChallengeTeamProgress_ = 0;
   battleLog_[0] = '\0';
   setScreen(Screen::Battle);
   return true;
@@ -420,6 +444,15 @@ void PokemonActivity::savePlayerBattleEntry() {
 
 void PokemonActivity::resolveBattleAsPass() {
   savePlayerBattleEntry();
+  if (gymChallengeIndex_ != 0) {
+    // Forfeiting a gym challenge (RUN, or hardware Back) costs nothing and
+    // records nothing - unlike a wild encounter there is no PendingEvent to
+    // clear, so this just drops the in-progress challenge silently.
+    gymChallengeIndex_ = 0;
+    gymChallengeTeamProgress_ = 0;
+    setScreen(Screen::GymList);
+    return;
+  }
   uint32_t caught = 0;
   if (service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught) != pokemon::ServiceStatus::Ok) {
     showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
@@ -430,6 +463,10 @@ void PokemonActivity::resolveBattleAsPass() {
 }
 
 void PokemonActivity::finishBattleAfterWildFainted() {
+  if (gymChallengeIndex_ != 0) {
+    advanceGymOpponentOrFinish();
+    return;
+  }
   const uint16_t opponentSpecies = battleOpponent_.speciesId;
   uint32_t caught = 0;
   // The wild Pokemon fainted from the fight - nothing left to catch. Pass
@@ -442,6 +479,10 @@ void PokemonActivity::finishBattleAfterWildFainted() {
 }
 
 void PokemonActivity::finishBattleAfterPlayerFainted() {
+  if (gymChallengeIndex_ != 0) {
+    finishGymChallenge(false);
+    return;
+  }
   const uint16_t playerSpecies = battlePlayer_.speciesId;
   uint32_t caught = 0;
   service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught);
@@ -449,6 +490,42 @@ void PokemonActivity::finishBattleAfterPlayerFainted() {
   char line[96];
   snprintf(line, sizeof(line), tr(STR_POKEMON_YOUR_POKEMON_FAINTED), speciesName(playerSpecies));
   showMessage(line, pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+}
+
+void PokemonActivity::advanceGymOpponentOrFinish() {
+  const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+  ++gymChallengeTeamProgress_;
+  if (gymChallengeTeamProgress_ < team.size()) {
+    setupBattleOpponent(team[gymChallengeTeamProgress_].speciesId, team[gymChallengeTeamProgress_].level);
+    setScreen(Screen::Battle);
+    return;
+  }
+  finishGymChallenge(true);
+}
+
+void PokemonActivity::finishGymChallenge(const bool won) {
+  const uint8_t gymIndex = gymChallengeIndex_;
+  gymChallengeIndex_ = 0;
+  gymChallengeTeamProgress_ = 0;
+  if (!won) {
+    if (!refreshSnapshot()) return;
+    showMessage(tr(STR_POKEMON_GYM_CHALLENGE_LOST), Screen::GymList);
+    return;
+  }
+  if (service_.markGymDefeated(gymIndex) != pokemon::ServiceStatus::Ok) {
+    showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::GymList);
+    return;
+  }
+  const pokemon::GymData* gym = pokemon::gymData(gymIndex);
+  const char* leaderName = gym == nullptr ? "?" : gym->leaderName;
+  char line[96];
+  if (gym != nullptr && gym->badgeName[0] != '\0') {
+    snprintf(line, sizeof(line), tr(STR_POKEMON_BADGE_EARNED), leaderName, gym->badgeName);
+  } else {
+    snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_DEFEATED), leaderName);
+  }
+  if (!refreshSnapshot()) return;
+  showMessage(line, Screen::GymList);
 }
 
 void PokemonActivity::buildBattleLog(const pokemon::BattleTurnResult& result) {
@@ -498,7 +575,11 @@ void PokemonActivity::activate() {
         setScreen(Screen::PcOrder, static_cast<int>(pcOrder_));
       else if (selected_ == 4)
         setScreen(Screen::Bag);
-      else if (selected_ == 5) {
+      else if (selected_ == 5)
+        setScreen(Screen::GymList);
+      else if (selected_ == 6)
+        setScreen(Screen::Badges);
+      else if (selected_ == 7) {
         const uint8_t previous = SETTINGS.pokemonHomeScreen;
         SETTINGS.pokemonHomeScreen = previous == 0 ? 1 : 0;
         if (!SETTINGS.saveToFile()) {
@@ -659,7 +740,9 @@ void PokemonActivity::activate() {
           return;
         }
         setScreen(Screen::BattleMoves);
-      } else if (selected_ == 1) {
+      } else if (gymChallengeIndex_ == 0 && selected_ == 1) {
+        // Trainer battles (gym/Elite Four) have no BALL option - their
+        // logicalCount() is 2, so selected_ == 1 there is already RUN.
         setScreen(Screen::BattleBalls);
       } else {
         resolveBattleAsPass();
@@ -720,6 +803,17 @@ void PokemonActivity::activate() {
       setScreen(Screen::NicknameQuestion);
       return;
     }
+    case Screen::GymList: {
+      const auto gymIndex = static_cast<uint8_t>(selected_ + 1);
+      if (pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) != pokemon::GymProgress::Available) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::GymList);
+        return;
+      }
+      if (!enterGymBattle(gymIndex)) showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::GymList);
+      return;
+    }
+    case Screen::Badges:
+      return;  // display-only, nothing to activate
     case Screen::ResetFirst:
       if (selected_ == 0)
         setScreen(Screen::ResetFinal);
@@ -866,7 +960,7 @@ void PokemonActivity::buildRows() {
         row(local, index == 0 ? tr(STR_YES) : tr(STR_NO));
         break;
       case Screen::Menu:
-        if (index == 5) {
+        if (index == 7) {
           row(local, tr(STR_POKEMON_HOME_SCREEN),
               SETTINGS.pokemonHomeScreen != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
         } else {
@@ -875,6 +969,8 @@ void PokemonActivity::buildRows() {
                      : index == 2 ? tr(STR_POKEMON_PC_BOX)
                      : index == 3 ? tr(STR_POKEMON_PC_SORT)
                      : index == 4 ? tr(STR_POKEMON_BAG)
+                     : index == 5 ? tr(STR_POKEMON_GYM_BATTLE)
+                     : index == 6 ? tr(STR_POKEMON_BADGES)
                                   : tr(STR_POKEMON_RESET));
         }
         break;
@@ -969,7 +1065,9 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_OK));
         break;
       case Screen::Battle:
-        row(local, index == 0 ? tr(STR_POKEMON_FIGHT) : index == 1 ? tr(STR_POKEMON_BALL) : tr(STR_POKEMON_RUN));
+        row(local, index == 0                                   ? tr(STR_POKEMON_FIGHT)
+                   : (gymChallengeIndex_ == 0 && index == 1) ? tr(STR_POKEMON_BALL)
+                                                                  : tr(STR_POKEMON_RUN));
         break;
       case Screen::BattleMoves: {
         const uint8_t moveId = battlePlayer_.moves[index].moveId;
@@ -985,6 +1083,29 @@ void PokemonActivity::buildRows() {
         char value[16];
         snprintf(value, sizeof(value), "× %u", snapshot_.state.bagCounts[index]);
         row(local, item == nullptr ? "?" : item->name, value);
+        break;
+      }
+      case Screen::GymList: {
+        const auto gymIndex = static_cast<uint8_t>(index + 1);
+        const pokemon::GymData* gym = pokemon::gymData(gymIndex);
+        char label[40];
+        if (gymIndex <= 8U) {
+          snprintf(label, sizeof(label), "%s", gym == nullptr ? "?" : gym->leaderName);
+        } else {
+          snprintf(label, sizeof(label), "%s - %s", tr(STR_POKEMON_ELITE_FOUR), gym == nullptr ? "?" : gym->leaderName);
+        }
+        const pokemon::GymProgress progress = pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex);
+        const char* value = progress == pokemon::GymProgress::Defeated ? tr(STR_POKEMON_GYM_DEFEATED)
+                            : progress == pokemon::GymProgress::Locked  ? tr(STR_POKEMON_GYM_LOCKED)
+                                                                         : nullptr;
+        row(local, label, value);
+        break;
+      }
+      case Screen::Badges: {
+        const auto gymIndex = static_cast<uint8_t>(index + 1);
+        const pokemon::GymData* gym = pokemon::gymData(gymIndex);
+        const bool earned = pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) == pokemon::GymProgress::Defeated;
+        row(local, gym == nullptr ? "?" : gym->badgeName, earned ? tr(STR_POKEMON_GYM_DEFEATED) : tr(STR_POKEMON_GYM_LOCKED));
         break;
       }
       case Screen::Summary:
@@ -1287,6 +1408,10 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEDEX);
   else if (screen_ == Screen::Summary || screen_ == Screen::Actions)
     title = tr(STR_POKEMON_SUMMARY);
+  else if (screen_ == Screen::GymList)
+    title = tr(STR_POKEMON_GYM_BATTLE);
+  else if (screen_ == Screen::Badges)
+    title = tr(STR_POKEMON_BADGES);
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware())
     TouchHeaderBackButton::draw(renderer, uiTarget_, header, title, false);

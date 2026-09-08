@@ -21,6 +21,18 @@ std::span<const GymTeamMember> gymTeamFor(const uint8_t gymIndex) {
   return {generated::GYM_TEAM_MEMBERS + gym.teamOffset, gym.teamCount};
 }
 
+GymProgress gymProgressFor(const uint16_t battleProgress, const uint8_t gymIndex) {
+  if (gymIndex == 0 || gymIndex > GYM_COUNT) return GymProgress::Locked;
+  const uint16_t bit = static_cast<uint16_t>(1U << (gymIndex - 1U));
+  if ((battleProgress & bit) != 0) return GymProgress::Defeated;
+  if (gymIndex <= 8U) {
+    const uint16_t requiredMask = static_cast<uint16_t>(bit - 1U);  // every earlier gym bit
+    return (battleProgress & requiredMask) == requiredMask ? GymProgress::Available : GymProgress::Locked;
+  }
+  constexpr uint16_t ALL_GYMS_MASK = 0x00FFU;  // bits 0-7: all 8 gyms
+  return (battleProgress & ALL_GYMS_MASK) == ALL_GYMS_MASK ? GymProgress::Available : GymProgress::Locked;
+}
+
 }  // namespace pokemon
 
 #endif

@@ -6,6 +6,7 @@ set(POKEMON_SERVICE_MOVES_HEADER "${POKEMON_SERVICE_GENERATED_DIR}/PokemonMoves.
 set(POKEMON_SERVICE_STATS_HEADER "${POKEMON_SERVICE_GENERATED_DIR}/PokemonStats.generated.h")
 set(POKEMON_SERVICE_LEARNSETS_HEADER "${POKEMON_SERVICE_GENERATED_DIR}/PokemonLearnsets.generated.h")
 set(POKEMON_SERVICE_ITEMS_HEADER "${POKEMON_SERVICE_GENERATED_DIR}/PokemonItems.generated.h")
+set(POKEMON_SERVICE_GYMS_HEADER "${POKEMON_SERVICE_GENERATED_DIR}/PokemonGyms.generated.h")
 
 add_custom_command(
   OUTPUT "${POKEMON_SERVICE_SPECIES_HEADER}"
@@ -74,6 +75,19 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT "${POKEMON_SERVICE_GYMS_HEADER}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${POKEMON_SERVICE_GENERATED_DIR}"
+  COMMAND ${Python3_EXECUTABLE}
+          "${REPO_ROOT}/scripts/generate_pokemon_gyms.py"
+          --input "${REPO_ROOT}/scripts/data/pokemon-gyms.csv"
+          --output "${POKEMON_SERVICE_GYMS_HEADER}"
+  DEPENDS
+    "${REPO_ROOT}/scripts/generate_pokemon_gyms.py"
+    "${REPO_ROOT}/scripts/data/pokemon-gyms.csv"
+  VERBATIM
+)
+
 add_executable(PokemonServiceTest
   PokemonServiceTest.cpp
   "${POKEMON_SERVICE_SPECIES_HEADER}"
@@ -81,6 +95,7 @@ add_executable(PokemonServiceTest
   "${POKEMON_SERVICE_STATS_HEADER}"
   "${POKEMON_SERVICE_LEARNSETS_HEADER}"
   "${POKEMON_SERVICE_ITEMS_HEADER}"
+  "${POKEMON_SERVICE_GYMS_HEADER}"
   ${REPO_ROOT}/lib/Pokemon/PokemonTypes.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonSpecies.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonGame.cpp
@@ -90,6 +105,7 @@ add_executable(PokemonServiceTest
   ${REPO_ROOT}/lib/Pokemon/PokemonBaseStats.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonLearnsets.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonItemData.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonGymData.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonTypeChart.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonBattle.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonBattleStoreCodec.cpp
