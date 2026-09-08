@@ -321,6 +321,22 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
   return TeachMoveOutcome::MovesetFull;
 }
 
+ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const uint8_t slot, const uint8_t moveId) {
+  if (slot >= BATTLE_MOVE_SLOTS) return ServiceStatus::Invalid;
+  const MoveData* move = moveData(moveId);
+  if (move == nullptr) return ServiceStatus::Invalid;
+
+  BattleRecordEntry entry{};
+  if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+  entry.moves[slot] = moveId;
+  entry.pp[slot] = move->pp;
+  if (!battleStore_.upsertEntry(entry)) {
+    LOG_ERR("PokemonService", "Failed to update moveset");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
 UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, const uint8_t itemId) {
   const ItemData* item = itemData(itemId);
   if (item == nullptr) return UseConsumableOutcome::Failed;

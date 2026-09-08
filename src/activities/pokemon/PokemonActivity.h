@@ -33,6 +33,8 @@ class PokemonActivity final : public Activity {
     Summary,
     Actions,
     Move,
+    Moveset,
+    MovesetPick,
     Pc,
     PcOrder,
     Bag,
@@ -121,6 +123,7 @@ class PokemonActivity final : public Activity {
   uint8_t selectedMachineItemId_ = 0;
   uint8_t selectedMachineMoveId_ = 0;
   uint8_t selectedMedicineItemId_ = 0;
+  uint8_t movesetSlot_ = 0;
   char message_[96]{};
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};

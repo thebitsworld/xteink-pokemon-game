@@ -119,6 +119,15 @@ class PokemonService {
   // queue, so there is no slot-choice prompt wired up for it in GĐ 7.
   TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId);
 
+  // Player-driven moveset management (Party > Actions > Moves): overwrites
+  // one move slot with moveId unconditionally, at full PP. The caller (the
+  // Moveset UI) is responsible for only ever offering moves the Pokemon can
+  // actually learn (its own learnset, at or below its current level) and
+  // that aren't already known in another slot - unlike teachMove/
+  // resolveMoveLearn there is no AlreadyKnown/MovesetFull check here, since
+  // the UI's own move-picker list already excludes both cases by construction.
+  ServiceStatus learnMoveIntoSlot(uint32_t recordId, uint8_t slot, uint8_t moveId);
+
   // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
   // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine
   // items go through useEvolutionItem/teachMove/attemptBattleCatch

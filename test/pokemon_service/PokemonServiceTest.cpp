@@ -907,6 +907,24 @@ TEST(PokemonService, UseConsumableRareCandyAddsOneLevelAndRejectsAtLevel100) {
   EXPECT_EQ(service.useConsumable(1, 24), pokemon::UseConsumableOutcome::NotApplicable);  // already level 100
 }
 
+TEST(PokemonService, LearnMoveIntoSlotOverwritesUnconditionallyAtFullPp) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.learnMoveIntoSlot(1, 1, 98), pokemon::ServiceStatus::Ok);  // overwrite slot 1 with Quick Attack
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->moves[0], 84U);  // other slots untouched
+  EXPECT_EQ(updated->moves[1], 98U);
+  EXPECT_GT(updated->pp[1], 0U);
+
+  EXPECT_EQ(service.learnMoveIntoSlot(1, pokemon::BATTLE_MOVE_SLOTS, 5), pokemon::ServiceStatus::Invalid);
+  EXPECT_EQ(service.learnMoveIntoSlot(1, 2, 0), pokemon::ServiceStatus::Invalid);
+}
+
 TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   Storage.clear();
   pokemon::PokemonStore store;

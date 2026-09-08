@@ -142,6 +142,36 @@ size_t bagItemCount(bool (*matches)(pokemon::ItemCategory)) {
   return count;
 }
 
+bool moveIsKnown(const pokemon::BattleRecordEntry& entry, const uint8_t moveId) {
+  for (size_t slot = 0; slot < pokemon::BATTLE_MOVE_SLOTS; ++slot) {
+    if (entry.moves[slot] == moveId) return true;
+  }
+  return false;
+}
+
+// The Moveset screen (Party > Actions > Moves) lets the player freely swap
+// in any move their Pokemon's own learnset has already unlocked at its
+// current level but isn't currently using - not just the one move offered
+// automatically at the moment of leveling up (PendingEventKind::MoveLearn).
+uint8_t learnableMoveIdAt(const uint16_t speciesId, const uint8_t level, const pokemon::BattleRecordEntry& known,
+                          const size_t index) {
+  size_t count = 0;
+  for (const pokemon::LearnsetEntry& entry : pokemon::learnsetFor(speciesId)) {
+    if (entry.level > level || moveIsKnown(known, entry.moveId)) continue;
+    if (count == index) return entry.moveId;
+    ++count;
+  }
+  return 0;
+}
+
+size_t learnableMoveCount(const uint16_t speciesId, const uint8_t level, const pokemon::BattleRecordEntry& known) {
+  size_t count = 0;
+  for (const pokemon::LearnsetEntry& entry : pokemon::learnsetFor(speciesId)) {
+    if (entry.level <= level && !moveIsKnown(known, entry.moveId)) ++count;
+  }
+  return count;
+}
+
 // Short status-abbreviation tags (PSN/PAR/...), intentionally not
 // localized - like move and item names (GĐ 1 decision), these read the same
 // in every official Pokémon localization, so translating them would spend
@@ -291,6 +321,14 @@ int PokemonActivity::logicalCount() const {
     case Screen::Actions: {
       const auto actions = pokemon::collectionActions(actionSource_ == Screen::Party, snapshot_.partyCount);
       return actions.count;
+    }
+    case Screen::Moveset:
+      return pokemon::BATTLE_MOVE_SLOTS;
+    case Screen::MovesetPick: {
+      pokemon::PokemonRecord record{};
+      if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return 0;
+      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+      return static_cast<int>(learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry));
     }
     case Screen::Pc:
       return static_cast<int>(snapshot_.ownedCount - snapshot_.partyCount);
@@ -654,6 +692,9 @@ void PokemonActivity::activate() {
         case pokemon::CollectionAction::Summary:
           setScreen(Screen::Summary);
           return;
+        case pokemon::CollectionAction::Moveset:
+          setScreen(Screen::Moveset);
+          return;
         case pokemon::CollectionAction::Move: {
           int slot = 0;
           while (slot < snapshot_.partyCount && snapshot_.party[slot].recordId != focusedRecordId_) ++slot;
@@ -704,6 +745,32 @@ void PokemonActivity::activate() {
         if (!refreshSnapshot()) return;
         setScreen(Screen::Party);
       }
+      return;
+    }
+    case Screen::Moveset: {
+      pokemon::PokemonRecord record{};
+      if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return;
+      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+      if (learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry) == 0) {
+        showMessage(tr(STR_POKEMON_NO_MOVES_TO_LEARN), Screen::Moveset);
+        return;
+      }
+      movesetSlot_ = static_cast<uint8_t>(selected_);
+      setScreen(Screen::MovesetPick);
+      return;
+    }
+    case Screen::MovesetPick: {
+      pokemon::PokemonRecord record{};
+      if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return;
+      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+      const uint8_t moveId = learnableMoveIdAt(record.speciesId, pokemon::levelForXp(record.totalXp), entry,
+                                               static_cast<size_t>(selected_));
+      if (moveId == 0) return;
+      if (service_.learnMoveIntoSlot(focusedRecordId_, movesetSlot_, moveId) != pokemon::ServiceStatus::Ok) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Moveset);
+        return;
+      }
+      setScreen(Screen::Moveset);
       return;
     }
     case Screen::PcOrder:
@@ -978,6 +1045,12 @@ void PokemonActivity::goBack() {
     case Screen::Move:
       setScreen(Screen::Party);
       return;
+    case Screen::Moveset:
+      setScreen(Screen::Actions);
+      return;
+    case Screen::MovesetPick:
+      setScreen(Screen::Moveset);
+      return;
     case Screen::PcOrder:
       setScreen(Screen::Pc);
       return;
@@ -1134,6 +1207,9 @@ void PokemonActivity::buildRows() {
           case pokemon::CollectionAction::Summary:
             label = tr(STR_POKEMON_SUMMARY);
             break;
+          case pokemon::CollectionAction::Moveset:
+            label = tr(STR_POKEMON_MOVES);
+            break;
           case pokemon::CollectionAction::Move:
             label = tr(STR_POKEMON_MOVE);
             break;
@@ -1151,6 +1227,28 @@ void PokemonActivity::buildRows() {
             break;
         }
         row(local, label);
+        break;
+      }
+      case Screen::Moveset: {
+        pokemon::PokemonRecord record{};
+        const pokemon::BattleRecordEntry entry =
+            service_.readRecord(focusedRecordId_, record) == pokemon::ServiceStatus::Ok
+                ? service_.peekBattleMoves(record)
+                : pokemon::BattleRecordEntry{};
+        const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
+        char value[16];
+        snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index], move == nullptr ? 0 : move->pp);
+        row(local, move == nullptr ? "-" : move->name, value);
+        break;
+      }
+      case Screen::MovesetPick: {
+        pokemon::PokemonRecord record{};
+        if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) break;
+        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+        const uint8_t moveId =
+            learnableMoveIdAt(record.speciesId, pokemon::levelForXp(record.totalXp), entry, static_cast<size_t>(index));
+        const pokemon::MoveData* move = pokemon::moveData(moveId);
+        row(local, move == nullptr ? "?" : move->name);
         break;
       }
       case Screen::Pc: {
@@ -1631,6 +1729,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEDEX);
   else if (screen_ == Screen::Summary || screen_ == Screen::Actions)
     title = tr(STR_POKEMON_SUMMARY);
+  else if (screen_ == Screen::Moveset || screen_ == Screen::MovesetPick)
+    title = tr(STR_POKEMON_MOVES);
   else if (screen_ == Screen::GymList)
     title = tr(STR_POKEMON_GYM_BATTLE);
   else if (screen_ == Screen::Badges)

@@ -44,15 +44,16 @@ enum class EvolutionChoice : uint8_t {
 
 enum class CollectionAction : uint8_t {
   Summary = 0,
-  Move = 1,
-  Deposit = 2,
-  Withdraw = 3,
-  Rename = 4,
-  EvolutionPrompts = 5,
+  Moveset = 1,
+  Move = 2,
+  Deposit = 3,
+  Withdraw = 4,
+  Rename = 5,
+  EvolutionPrompts = 6,
 };
 
 struct CollectionActionSet {
-  std::array<CollectionAction, 5> items{};
+  std::array<CollectionAction, 6> items{};
   uint8_t count = 0;
 };
 

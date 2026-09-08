@@ -574,6 +574,7 @@ CollectionActionSet collectionActions(const bool party, const uint8_t partyCount
   const auto append = [&actions](const CollectionAction action) { actions.items[actions.count++] = action; };
 
   append(CollectionAction::Summary);
+  append(CollectionAction::Moveset);
   if (party) {
     if (partyCount > 1) {
       append(CollectionAction::Move);

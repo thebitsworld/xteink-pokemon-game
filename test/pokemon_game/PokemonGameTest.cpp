@@ -64,31 +64,35 @@ pokemon::PokemonState stateWithLeader(const pokemon::PokemonRecord& leader) {
 
 void collectionActionsExcludeOperationsThatCannotSucceed() {
   const pokemon::CollectionActionSet loneParty = pokemon::collectionActions(true, 1);
-  CHECK(loneParty.count == 3);
+  CHECK(loneParty.count == 4);
   CHECK(loneParty.items[0] == pokemon::CollectionAction::Summary);
-  CHECK(loneParty.items[1] == pokemon::CollectionAction::Rename);
-  CHECK(loneParty.items[2] == pokemon::CollectionAction::EvolutionPrompts);
+  CHECK(loneParty.items[1] == pokemon::CollectionAction::Moveset);
+  CHECK(loneParty.items[2] == pokemon::CollectionAction::Rename);
+  CHECK(loneParty.items[3] == pokemon::CollectionAction::EvolutionPrompts);
 
   const pokemon::CollectionActionSet reorderableParty = pokemon::collectionActions(true, 2);
-  CHECK(reorderableParty.count == 5);
+  CHECK(reorderableParty.count == 6);
   CHECK(reorderableParty.items[0] == pokemon::CollectionAction::Summary);
-  CHECK(reorderableParty.items[1] == pokemon::CollectionAction::Move);
-  CHECK(reorderableParty.items[2] == pokemon::CollectionAction::Deposit);
-  CHECK(reorderableParty.items[3] == pokemon::CollectionAction::Rename);
-  CHECK(reorderableParty.items[4] == pokemon::CollectionAction::EvolutionPrompts);
+  CHECK(reorderableParty.items[1] == pokemon::CollectionAction::Moveset);
+  CHECK(reorderableParty.items[2] == pokemon::CollectionAction::Move);
+  CHECK(reorderableParty.items[3] == pokemon::CollectionAction::Deposit);
+  CHECK(reorderableParty.items[4] == pokemon::CollectionAction::Rename);
+  CHECK(reorderableParty.items[5] == pokemon::CollectionAction::EvolutionPrompts);
 
   const pokemon::CollectionActionSet fullPartyPc = pokemon::collectionActions(false, pokemon::PARTY_SIZE);
-  CHECK(fullPartyPc.count == 3);
+  CHECK(fullPartyPc.count == 4);
   CHECK(fullPartyPc.items[0] == pokemon::CollectionAction::Summary);
-  CHECK(fullPartyPc.items[1] == pokemon::CollectionAction::Rename);
-  CHECK(fullPartyPc.items[2] == pokemon::CollectionAction::EvolutionPrompts);
+  CHECK(fullPartyPc.items[1] == pokemon::CollectionAction::Moveset);
+  CHECK(fullPartyPc.items[2] == pokemon::CollectionAction::Rename);
+  CHECK(fullPartyPc.items[3] == pokemon::CollectionAction::EvolutionPrompts);
 
   const pokemon::CollectionActionSet pcWithRoom = pokemon::collectionActions(false, pokemon::PARTY_SIZE - 1U);
-  CHECK(pcWithRoom.count == 4);
+  CHECK(pcWithRoom.count == 5);
   CHECK(pcWithRoom.items[0] == pokemon::CollectionAction::Summary);
-  CHECK(pcWithRoom.items[1] == pokemon::CollectionAction::Withdraw);
-  CHECK(pcWithRoom.items[2] == pokemon::CollectionAction::Rename);
-  CHECK(pcWithRoom.items[3] == pokemon::CollectionAction::EvolutionPrompts);
+  CHECK(pcWithRoom.items[1] == pokemon::CollectionAction::Moveset);
+  CHECK(pcWithRoom.items[2] == pokemon::CollectionAction::Withdraw);
+  CHECK(pcWithRoom.items[3] == pokemon::CollectionAction::Rename);
+  CHECK(pcWithRoom.items[4] == pokemon::CollectionAction::EvolutionPrompts);
 }
 
 pokemon::Gender validGenderForSpecies(const uint16_t speciesId) {
