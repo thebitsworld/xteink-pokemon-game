@@ -124,7 +124,7 @@ void poisonAndBurnTickAtEndOfTurn() {
 }
 
 void aiVariesItsMoveChoiceAcrossRandomSeedsInsteadOfAlwaysTheSameSlot() {
-  // GĐ12: a Gym Leader's Pokemon with several equally-effective moves
+  // Stage 12: a Gym Leader's Pokemon with several equally-effective moves
   // (Tackle and Scratch are both Normal/40 power - identical effectiveness
   // against a Fire-type target) must not always throw the same one turn
   // after turn just because it happens to sit in the lowest slot index.

@@ -186,7 +186,7 @@ void gymsAreOrderedAndEliteFourCarriesNoBadge() {
     if (eliteFour != nullptr) CHECK(eliteFour->badgeName[0] == '\0');
   }
 
-  // GĐ14: full real Pokemon Red teams restored (species duplicates and
+  // Stage 14: full real Pokemon Red teams restored (species duplicates and
   // all), not the earlier 2-3-member e-ink-refresh trim.
   CHECK(pokemon::gymTeamFor(8).size() == 5);   // Giovanni
   CHECK(pokemon::gymTeamFor(9).size() == 5);   // Lorelei
@@ -200,7 +200,7 @@ void gymsAreOrderedAndEliteFourCarriesNoBadge() {
     for (const pokemon::GymTeamMember& member : team) {
       CHECK(member.speciesId >= 1 && member.speciesId <= pokemon::KANTO_SPECIES_COUNT);
       CHECK(member.level >= 1 && member.level <= 100);
-      // Every trainer Pokemon has a real, fixed moveset (GĐ12) - never
+      // Every trainer Pokemon has a real, fixed moveset (Stage 12) - never
       // derived from the learnset-by-level table like a wild encounter.
       CHECK(member.moves[0] != 0);
       for (const uint8_t moveId : member.moves) {

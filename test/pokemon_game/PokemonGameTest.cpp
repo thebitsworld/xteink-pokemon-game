@@ -64,7 +64,7 @@ pokemon::PokemonState stateWithLeader(const pokemon::PokemonRecord& leader) {
 }
 
 // Ball/medicine/TM-HM/encounter all now check at the same 15-minute cadence,
-// each with its own independent pity counter (GĐ 23) - a test that spans
+// each with its own independent pity counter (Stage 23) - a test that spans
 // enough 15-minute windows for more than one track to reach its own pity can
 // have more than one land in the 3-slot pending queue in the same window, in
 // whichever order those tracks happen to run. Tests that care about one

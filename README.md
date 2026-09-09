@@ -1,6 +1,6 @@
 # Xteink Pokémon Game
 
-This project was inspired by [the reading companion idea built by Joshua Miller](https://github.com/JoshuaMillerCode/crosspoint-reader-companion). It started by bringing CrossInk up to date with the current CrossPoint 1.5 release, then adapted the reading companion idea into a full Pokémon game built around CrossInk's reading sessions and dashboards.
+This project builds on [padge01's original idea](https://github.com/padge01/xteink-pokemon-game) for a reading-powered Pokémon companion, adding a full battle system and many more items to collect. It's based on CrossInk, turning the reading companion concept into a full Pokémon game built around CrossInk's reading sessions and dashboards.
 
 Real page turns train your lead Pokémon, trigger wild encounters and item finds, and let you build a party, battle gyms, and complete a Pokédex — all driven by time spent actually reading.
 
@@ -45,7 +45,7 @@ These are current X3 simulator captures using the artwork included in the full i
 
 - [Download from GitHub Releases](https://github.com/thebitsworld/xteink-pokemon-game/releases)
 
-This build is for the **Xteink X3 only**. Do not install it on an X4, X4 Pro, Sticky, or another device. Back up the SD card before updating.
+This build is tested on **Xteink X3 only**. Some friends reported that it also worked on **Xteink X4** but do it at your own risk. Do not install it on an X4 Pro or another device. Back up the SD card before updating.
 
 1. Download the full-install ZIP to a computer.
 2. Extract the ZIP. Do not copy the ZIP itself to the SD card.
@@ -62,6 +62,7 @@ Building from source? See [Getting Started](docs/development/getting-started.md)
 
 ## Credits
 
+- [padge01](https://github.com/padge01/xteink-pokemon-game): the original idea for a reading-powered Pokémon companion on the Xteink X3, which this project builds on
 - [CrossInk](https://github.com/uxjulia/CrossInk): the reader firmware, reading-session tracking, dashboards, and foundation for this project
 - [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader): the original firmware and upstream 1.5 improvements brought into this CrossInk build
 - [Joshua Miller's CrossPoint Reader Companion](https://github.com/JoshuaMillerCode/crosspoint-reader-companion): the reading companion concept and verified-reading behavior

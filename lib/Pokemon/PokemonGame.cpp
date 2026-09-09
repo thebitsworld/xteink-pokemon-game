@@ -17,7 +17,7 @@ constexpr uint8_t ENCOUNTER_CHECK_MINUTES = 15;
 constexpr uint8_t ENCOUNTER_CHANCE_DENOMINATOR = 5;
 constexpr uint8_t ENCOUNTER_CHANCE_SUCCESSES = 2;
 constexpr uint8_t ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3;
-// Ball, medicine and TM/HM (GĐ 23) all check at the same 15-minute cadence as
+// Ball, medicine and TM/HM (Stage 23) all check at the same 15-minute cadence as
 // the encounter roll itself, each with its own pity counter so a streak of
 // bad luck on one track never touches the others. Ball is a notch more
 // generous (3-in-5) than medicine/TM-HM (2-in-5, same shape as the encounter
@@ -151,7 +151,7 @@ DashboardNotice noticeForEvent(const PendingEvent* event) {
       return DashboardNotice::WhatsThis;
     case PendingEventKind::MoveLearn:
       // Reuses the same notice as Evolution for now; a dedicated icon is a
-      // GĐ 7 (UI) concern, not a storage-layer one.
+      // Stage 7 (UI) concern, not a storage-layer one.
       return DashboardNotice::WhatsThis;
     case PendingEventKind::None:
       return DashboardNotice::None;
@@ -381,7 +381,7 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
     // Nothing an owned Pokemon can actually evolve with right now - widen to
     // any stone that still has room so the player can stock up ahead of a
     // future evolution, but never past Stone: medicine, TM/HM and balls are
-    // separate collection tracks with their own schedules (GĐ 22), and
+    // separate collection tracks with their own schedules (Stage 22), and
     // folding them back in here is exactly what used to starve the ball
     // supply.
     totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, false, isStoneCategory, nullptr, candidateItemIds,
@@ -578,7 +578,7 @@ CreditResult applyCreditedMinutes(PokemonState& state, PokemonRecord& leader, co
     const bool hourlyBoundary = stateCandidate.readingMinuteRemainder == 60;
     if (hourlyBoundary) {
       stateCandidate.readingMinuteRemainder = 0;
-      // Evolution stones are the one track still on an hourly clock (GĐ 22
+      // Evolution stones are the one track still on an hourly clock (Stage 22
       // left this alone on purpose - see processHourlyItem/createItem).
       if (!processHourlyItem(stateCandidate, random, ownedEvolutionNeeds, generatedEvent)) return result;
     }

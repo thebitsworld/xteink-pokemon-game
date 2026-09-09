@@ -17,7 +17,7 @@ struct BattleMoveSlot {
 };
 
 // One side of a fight. HP/PP/status persist across battles (loaded from the
-// side-file store, GĐ 3) but the engine itself never touches storage - it is
+// side-file store, Stage 3) but the engine itself never touches storage - it is
 // a pure function of whatever state the caller hands it.
 //
 // Simplification: unlike the real games, Confusion shares the single

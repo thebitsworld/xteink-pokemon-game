@@ -17,7 +17,7 @@ constexpr size_t POKEMON_STATE_V2_BYTES = 116;
 // v3 appends bagCounts[POKEMON_BAG_SLOT_COUNT] and battleProgress (uint16_t)
 // after the v2 layout; see PokemonState in PokemonTypes.h.
 constexpr size_t POKEMON_STATE_V3_BYTES = POKEMON_STATE_V2_BYTES + POKEMON_BAG_SLOT_COUNT + 2;
-// v4 (GĐ 23) appends ballMisses/medicineMisses/machineMisses (uint8_t each) -
+// v4 (Stage 23) appends ballMisses/medicineMisses/machineMisses (uint8_t each) -
 // pity counters for the three item-drop tracks that gained their own
 // guaranteed-after-N-misses roll (see PokemonGame.cpp) - after the v3 layout.
 constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V3_BYTES + 3;

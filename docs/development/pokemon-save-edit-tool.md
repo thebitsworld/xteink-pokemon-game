@@ -1,84 +1,84 @@
-# Tool chỉnh save file Pokémon (`scripts/dev/edit_pokemon_save.py`)
+# Pokémon save-edit tool (`scripts/dev/edit_pokemon_save.py`)
 
-Công cụ dev-only để xem/chỉnh tay save file Pokémon dưới sandbox SD-card của simulator (`fs_/.crosspoint` mặc định), phục vụ test nhanh (xếp sẵn wild encounter, hồi full HP/PP/status, xóa lịch sử gym, gán item vào túi, set XP...) mà không phải chờ gameplay/RNG thật. Không phải tính năng sản phẩm.
+A dev-only tool for viewing/patching the Pokémon save file under the simulator's SD-card sandbox (`fs_/.crosspoint` by default), for fast testing (queuing a wild encounter, restoring full HP/PP/status, clearing gym history, granting bag items, setting XP...) without waiting on real gameplay/RNG. Not a product feature.
 
-Chỉ hiểu đúng **save format hiện tại của nhánh này** (main save version 3, state 195 byte) — gặp format lạ sẽ từ chối chạy thay vì liều ghi đè có thể hỏng.
+It only understands **this branch's current save format** (main save version 3, 195-byte state) — on an unrecognized format it refuses to run rather than risk an overwrite that could corrupt the save.
 
-**An toàn khi ghi**: mỗi lần ghi luôn vá cả `pokemon-a.bin` lẫn `pokemon-b.bin` (nếu cả hai tồn tại) giống hệt nhau, đúng quy ước double-buffer của chính firmware — nên dù lần boot sau chọn file nào làm "active" cũng đúng. Tự tạo bản `.bak` cho mỗi file trước lần ghi đầu tiên trong phiên chạy, trừ khi truyền `--no-backup`.
+**Write safety**: every write patches both `pokemon-a.bin` and `pokemon-b.bin` identically (if both exist), matching the firmware's own double-buffer convention — so whichever file the next boot picks as "active", the result is correct either way. A `.bak` copy of each file is created automatically before the first write of a run, unless `--no-backup` is passed.
 
-## Chuẩn bị
+## Setup
 
-Đóng simulator trước khi chỉnh save (tránh ghi đè lẫn nhau giữa tool và tiến trình simulator đang chạy). Chạy từ thư mục gốc repo:
+Close the simulator before editing the save (to avoid the tool and a running simulator process overwriting each other). Run from the repo root:
 
 ```sh
-python3 scripts/dev/edit_pokemon_save.py <lệnh> [tham số]
+python3 scripts/dev/edit_pokemon_save.py <command> [args]
 ```
 
-Mặc định tool tự tìm `fs_/.crosspoint/pokemon-{a,b}.bin`. Đổi bằng `--save-dir <path>` nếu cần trỏ tới sandbox khác.
+By default the tool looks for `fs_/.crosspoint/pokemon-{a,b}.bin`. Use `--save-dir <path>` to point at a different sandbox.
 
-## Tùy chọn chung (đặt trước tên lệnh)
+## Global options (placed before the command name)
 
-- `--save-dir SAVE_DIR` — thư mục chứa `pokemon-{a,b}.bin` (mặc định: `<repo>/fs_/.crosspoint`)
-- `--no-backup` — bỏ qua tạo bản `.bak`
-- `--dry-run` — in ra sẽ đổi gì mà không ghi thật
+- `--save-dir SAVE_DIR` — directory containing `pokemon-{a,b}.bin` (default: `<repo>/fs_/.crosspoint`)
+- `--no-backup` — skip creating a `.bak` copy
+- `--dry-run` — print what would change without writing anything
 
-## Các lệnh
+## Commands
 
 ### `dump`
-In toàn bộ party, record, gym progress (badge/lịch sử đánh gym), số lượng item trong túi, pending event. Dùng để xem trạng thái hiện tại trước khi sửa gì đó, hoặc kiểm tra lại sau khi sửa.
+Prints the full party, records, gym progress (badges/gym-battle history), bag item counts, and pending events. Use it to check the current state before making a change, or to verify it afterward.
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py dump
 ```
 
 ### `queue-encounter`
-Xếp sẵn 1 wild-Pokémon pending event để test luồng bắt Pokémon ngay, không cần đọc sách chờ ngưỡng encounter.
+Queues a wild-Pokémon pending event so you can test the catching flow immediately, without reading until the encounter threshold is reached.
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --level 5
 ```
 
-- `--species` — id số hoặc tên loài (vd `16` hoặc `pidgey`)
+- `--species` — numeric id or species name (e.g. `16` or `pidgey`)
 - `--level` — 1-100
-- `--gender` (`female`/`genderless`/`male`) — mặc định tự chọn giá trị hợp lệ theo loài (từ chối nếu gender bạn chỉ định không khớp `gender_rate` của loài, vd Chansey không thể `male`)
-- `--slot` — ô pending-event 0-2, mặc định chọn ô trống đầu tiên (lỗi rõ ràng nếu cả 3 ô đều đầy)
+- `--gender` (`female`/`genderless`/`male`) — defaults to auto-picking a value valid for the species (rejects a gender you specify if it doesn't match the species' `gender_rate`, e.g. Chansey can't be `male`)
+- `--slot` — pending-event slot 0-2, defaults to the first empty slot (a clear error if all 3 slots are full)
 
 ### `reset-battle-store`
-Xóa file phụ lưu HP/PP/moveset/status trận đấu (`pokemon-battle-{a,b}.bin` + file đơn cũ nếu còn) — lần vào trận kế tiếp của mỗi Pokémon sẽ tự dựng lại full HP/PP, hết status.
+Deletes the auxiliary file holding battle HP/PP/moveset/status (`pokemon-battle-{a,b}.bin` plus the older single file if it still exists) — each Pokémon's next battle will rebuild full HP/PP with no status ailment.
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py reset-battle-store
 ```
 
 ### `reset-gym-progress`
-Zero hóa `battleProgress` trong state — xóa sạch lịch sử đánh gym **và** huy hiệu đã có.
+Zeroes out `battleProgress` in the state — wipes both gym-battle history **and** any badges already earned.
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py reset-gym-progress
 ```
 
 ### `set-bag-item`
-Set thẳng số lượng 1 item trong túi đồ (tự nhận diện đá tiến hóa `itemCounts` u16 hay item thường `bagCounts` u8 theo đúng item được chọn).
+Directly sets the count of one bag item (automatically detects whether the selected item is an evolution stone in the u16 `itemCounts` array or a regular item in the u8 `bagCounts` array).
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py set-bag-item --item "poke-ball" --count 10
 ```
 
-- `--item` — id số hoặc tên item
-- `--count` — số lượng muốn set
+- `--item` — numeric id or item name
+- `--count` — the count to set
 
 ### `set-record-xp`
-Set thẳng `totalXp` của 1 Pokémon record (party hoặc PC) theo `record-id` (xem id qua `dump`).
+Directly sets `totalXp` for one Pokémon record (party or PC) by `record-id` (see ids via `dump`).
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py set-record-xp --record-id 1 --xp 5000
 ```
 
-## Ví dụ khác trong `--help`
+## More examples via `--help`
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py --help
-python3 scripts/dev/edit_pokemon_save.py <lệnh> --help
+python3 scripts/dev/edit_pokemon_save.py <command> --help
 ```
 
-Mọi tên species/item đều đọc trực tiếp từ `scripts/data/pokemon-kanto-v2.csv` và `scripts/data/pokemon-items.csv` (không hardcode), nên khi 2 file CSV nguồn đổi thì tool tự cập nhật theo, không cần sửa code tool.
+Every species/item name is read directly from `scripts/data/pokemon-kanto-v2.csv` and `scripts/data/pokemon-items.csv` (never hardcoded), so when either source CSV changes the tool picks it up automatically — no tool code changes needed.

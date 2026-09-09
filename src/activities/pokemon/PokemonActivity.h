@@ -68,7 +68,7 @@ class PokemonActivity final : public Activity {
     Evolution,
     Medicine,
     Machine,
-    // Entered from Screen::BattleBag (GĐ18) rather than the out-of-battle
+    // Entered from Screen::BattleBag (Stage 18) rather than the out-of-battle
     // Screen::Bag - same item-then-target flow through Screen::ItemTarget,
     // but the outcome returns to Screen::Battle (and syncs battlePlayer_ if
     // the target was the active combatant) instead of Screen::Party.
@@ -108,7 +108,7 @@ class PokemonActivity final : public Activity {
   void renderBattleMoveMenu();
   int battleMenuTop() const;
   int battlePlayerMoveCount() const;
-  // GĐ 13: which party members can currently fight (BattleRecordEntry's
+  // Stage 13: which party members can currently fight (BattleRecordEntry's
   // currentHp > 0, via the read-only peekBattleMoves - no battle-store
   // writes just from checking). firstUsablePartySlot() picks who starts a
   // fresh battle; the usablePartySlot* pair excludes battlePartySlot_

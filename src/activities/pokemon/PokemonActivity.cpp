@@ -124,7 +124,7 @@ const char* itemName(const pokemon::EvolutionItem item) {
     case pokemon::EvolutionItem::LinkCable:
       return tr(STR_POKEMON_LINK_CABLE);
     default: {
-      // GĐ 4 widened PendingEventKind::Item to hold any of the 83 items, not
+      // Stage 4 widened PendingEventKind::Item to hold any of the 83 items, not
       // just the original 6 evolution stones - those extra ids have no
       // i18n string (move/item names are intentionally not localized, see
       // the roadmap) and instead come straight from the generated data.
@@ -135,9 +135,9 @@ const char* itemName(const pokemon::EvolutionItem item) {
 }
 
 // The Bag is split into 3 categories, each its own screen: Evolution (the
-// 6 stones + Link Cable, fixed positions unchanged since GĐ 1), Medicine
-// (heal/status-cure/PP-restore/candy items - GĐ 9), and Machine (TM/HM,
-// GĐ 7). Ball items have no Bag row at all - they are only ever consumed
+// 6 stones + Link Cable, fixed positions unchanged since Stage 1), Medicine
+// (heal/status-cure/PP-restore/candy items - Stage 9), and Machine (TM/HM,
+// Stage 7). Ball items have no Bag row at all - they are only ever consumed
 // via BattleBalls. Ids are not contiguous by category in the data file, so
 // these walk the table by predicate rather than assuming a fixed range.
 bool isMachineCategory(const pokemon::ItemCategory category) { return category == pokemon::ItemCategory::Machine; }
@@ -147,7 +147,7 @@ bool isMedicineCategory(const pokemon::ItemCategory category) {
          category == pokemon::ItemCategory::PPRestore || category == pokemon::ItemCategory::Candy;
 }
 
-// Same as isMedicineCategory but without Candy (GĐ18): Candy raises totalXp
+// Same as isMedicineCategory but without Candy (Stage 18): Candy raises totalXp
 // on the main PokemonState, which can change the active battler's max HP -
 // syncing that into the live in-RAM battlePlayer_ mid-fight is out of scope,
 // so Candy stays an out-of-battle-only item.
@@ -156,9 +156,9 @@ bool isBattleUsableCategory(const pokemon::ItemCategory category) {
          category == pokemon::ItemCategory::PPRestore;
 }
 
-// GĐ19 follow-up: every item menu now skips ids the player owns none of
-// ("chỉ hiển thị các item đang sở hữu") - decluttering was requested after
-// GĐ19 added Bag > Balls right next to the other, often-empty categories.
+// Stage 19 follow-up: every item menu now skips ids the player owns none of
+// ("only show items actually owned") - decluttering was requested after
+// Stage 19 added Bag > Balls right next to the other, often-empty categories.
 // bagItemIdAt/bagItemCount take the live bagCounts so they can check
 // ownership alongside category; ownedSlotAt/ownedSlotCount below do the
 // same for the two screens that index a small fixed-size range directly
@@ -263,7 +263,7 @@ size_t learnableMoveCount(const uint16_t speciesId, const uint8_t level, const p
 }
 
 // Short status-abbreviation tags (PSN/PAR/...), intentionally not
-// localized - like move and item names (GĐ 1 decision), these read the same
+// localized - like move and item names (Stage 1 decision), these read the same
 // in every official Pokémon localization, so translating them would spend
 // i18n budget without actually helping a non-English player.
 const char* statusAbbrev(const pokemon::Ailment status) {
@@ -425,7 +425,7 @@ int PokemonActivity::logicalCount() const {
       if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return 0;
       const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
       // +1 for the trailing "Forget" row - always offered regardless of
-      // whether there's anything new to learn (GĐ12).
+      // whether there's anything new to learn (Stage 12).
       return static_cast<int>(learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry)) + 1;
     }
     case Screen::TmReplaceSlot:
@@ -631,7 +631,7 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
   if (!fixedMoves.empty()) {
     // Gym/Elite Four trainer - real Pokemon Red teams never derive their
     // moves from the learnset-by-level table, so this comes straight from
-    // GymTeamMember::moves (GĐ12) instead of defaultMovesetForLevel().
+    // GymTeamMember::moves (Stage 12) instead of defaultMovesetForLevel().
     for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
       const uint8_t moveId = i < fixedMoves.size() ? fixedMoves[i] : 0;
       const pokemon::MoveData* move = pokemon::moveData(moveId);
@@ -940,7 +940,7 @@ void PokemonActivity::activate() {
       const size_t learnable = learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry);
       if (static_cast<size_t>(selected_) >= learnable) {
         // Trailing "Forget" row - clears the slot instead of learning
-        // anything (GĐ12; refuses to clear a Pokemon's last move).
+        // anything (Stage 12; refuses to clear a Pokemon's last move).
         if (service_.forgetMove(focusedRecordId_, movesetSlot_) != pokemon::ServiceStatus::Ok) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Moveset);
           return;
@@ -975,7 +975,7 @@ void PokemonActivity::activate() {
       showMessage(tr(STR_POKEMON_BAG_BALLS_INFO), Screen::BagBalls);
       return;
     case Screen::BagEvolution: {
-      // Zero-count stones are already filtered out of the list (GĐ19
+      // Zero-count stones are already filtered out of the list (Stage 19
       // follow-up), so selected_ is a row index among owned stones only -
       // map it back to the real stone slot.
       const int slot = ownedSlotAt(static_cast<size_t>(selected_), snapshot_.state.itemCounts);
@@ -1083,7 +1083,7 @@ void PokemonActivity::activate() {
           showMessage(tr(STR_POKEMON_CANNOT_LEARN_MACHINE), bagScreen);
         } else if (outcome == pokemon::TeachMoveOutcome::MovesetFull) {
           // Full moveset no longer just blocks the TM - let the player
-          // choose which of the 4 current moves to overwrite (GĐ12).
+          // choose which of the 4 current moves to overwrite (Stage 12).
           focusedRecordId_ = recordId;
           setScreen(Screen::TmReplaceSlot);
         } else if (outcome != pokemon::TeachMoveOutcome::Learned) {
@@ -1254,7 +1254,7 @@ void PokemonActivity::activate() {
         finishBattleAfterWildFainted();
       } else if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
         // Only truly a loss once nothing left in the party can fight -
-        // otherwise force a switch instead of ending the battle (GĐ13).
+        // otherwise force a switch instead of ending the battle (Stage 13).
         if (usablePartySlotCount() > 0) {
           forcedBattleSwitch_ = true;
           setScreen(Screen::BattleSwitch);
@@ -1331,19 +1331,19 @@ void PokemonActivity::activate() {
       return;
     }
     case Screen::BattleBalls: {
-      // Defense-in-depth (GĐ19): the only path into this screen already
+      // Defense-in-depth (Stage 19): the only path into this screen already
       // gates on !isGym (see Screen::Battle's selection handler above), so
       // this should never be true - but a ball thrown at a trainer's
       // Pokemon would be a real gameplay bug, not just a cosmetic one, so
       // this is worth guarding directly rather than trusting the one call
-      // site to always stay correct as the menu keeps changing (GĐ18 added
+      // site to always stay correct as the menu keeps changing (Stage 18 added
       // BAG in between BALL and SWITCH, for example).
       if (gymChallengeIndex_ != 0) {
         setScreen(Screen::Battle);
         return;
       }
       if (selected_ < 0) return;
-      // Zero-count ball kinds are already filtered out of the list (GĐ19
+      // Zero-count ball kinds are already filtered out of the list (Stage 19
       // follow-up), so selected_ is a row index among owned kinds only -
       // map it back to the real ball kind/bagCounts slot.
       const int ballSlot =
@@ -1948,7 +1948,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   rowHeight_ = rowHeightForScreen();
   // BattleBalls stays bottom-anchored, overlaid on the still-visible battle
   // HUD, because its row count is always small (at most 4) - it always fits
-  // under the HUD. BattleBag (GĐ18) can list up to 17 items (every Medicine/
+  // under the HUD. BattleBag (Stage 18) can list up to 17 items (every Medicine/
   // StatusCure/PPRestore id, regardless of how many the player owns), which
   // does NOT reliably fit there - forcing it into the same bottom-anchored
   // math pushed the list's top edge up over the HUD instead of scrolling
@@ -2043,7 +2043,7 @@ void PokemonActivity::renderFocused() {
     return;
   }
   // Bag category screens: item rows now hide anything owned in count 0
-  // (GĐ19 follow-up "declutter"), so a category can legitimately end up
+  // (Stage 19 follow-up "declutter"), so a category can legitimately end up
   // empty (e.g. a fresh save with no Medicine yet) - same empty-state
   // pattern as Screen::Pc above, rather than rendering a blank list.
   if ((screen_ == Screen::BagEvolution || screen_ == Screen::BagMedicine || screen_ == Screen::BagBalls ||
@@ -2166,7 +2166,7 @@ void PokemonActivity::renderFocused() {
     drawField(y, tr(STR_POKEMON_EVOLUTION_PROMPTS_FIELD), prompts ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
     y += 26;
     // 2 moves per line (not 1) - landscape's vertical budget is tight
-    // enough already (see the roadmap's GĐ 7 note) that a 4-line block
+    // enough already (see the roadmap's Stage 7 note) that a 4-line block
     // here would run past the button hints.
     const pokemon::BattleRecordEntry moves = service_.peekBattleMoves(record);
     const int moveColumnX = textX + (valueRight - textX) / 2 + 10;
@@ -2580,7 +2580,7 @@ void PokemonActivity::renderRowArt() {
     if (screen_ == Screen::BagEvolution && evolutionSlot >= 0) {
       // No icon assets exist for TM/HM/potions/etc - only the 6 evolution
       // stones (BagEvolution's rows) have art to draw here. Zero-count
-      // stones are filtered from the list (GĐ19 follow-up), so the row
+      // stones are filtered from the list (Stage 19 follow-up), so the row
       // index isn't the stone slot directly - map it back first.
       constexpr int itemSize = 32;
       pokemon::drawPokemonItemArt(renderer, static_cast<pokemon::EvolutionItem>(evolutionSlot + 1), false,
@@ -2618,7 +2618,7 @@ void PokemonActivity::renderRowArt() {
 }
 
 // Drawn in the taller row (see rowHeightForScreen()) for Screen::Party and,
-// since GĐ18, Screen::ItemTarget when picking who receives a Medicine item
+// since Stage 18, Screen::ItemTarget when picking who receives a Medicine item
 // (showsPartyHealthRows()) - a self-contained two-line block to the right of
 // the row's icon: name/level/gender on top (`drawNameLine`), HP bar/text/
 // status underneath, both starting at the same left edge (textX). Name/

@@ -127,7 +127,7 @@ struct PokemonState {
   uint16_t battleProgress = 0;  // bit N (0-7) = gym N+1 defeated, bit 8+M (0-3) = Elite Four member M+1 defeated
   // v4: appended after the v3 layout (PokemonStoreCodec.cpp's byte 195). Pity
   // counters for the three item-drop tracks that gained their own
-  // guaranteed-after-3-misses roll in GĐ 23 (see PokemonGame.cpp) - mirrors
+  // guaranteed-after-3-misses roll in Stage 23 (see PokemonGame.cpp) - mirrors
   // encounterMisses/itemMisses above, just one counter per new track.
   uint8_t ballMisses = 0;
   uint8_t medicineMisses = 0;

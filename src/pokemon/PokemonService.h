@@ -113,12 +113,12 @@ class PokemonService {
   BattleRecordEntry peekBattleMoves(const PokemonRecord& record) const;
 
   // Teaches moveId to recordId via TM/HM. Checks canLearnViaMachine() first
-  // (GĐ12 - a species can only learn the TMs/HMs real Pokemon Red allows,
+  // (Stage 12 - a species can only learn the TMs/HMs real Pokemon Red allows,
   // not every move in the game). Learns straight into an empty move slot
   // when there is one; if the moveset is already full (and doesn't already
   // know the move), returns MovesetFull without changing anything - the
   // caller must then ask the player which slot to overwrite and retry with
-  // replaceSlot in [0, BATTLE_MOVE_SLOTS) (GĐ12; mirrors resolveMoveLearn's
+  // replaceSlot in [0, BATTLE_MOVE_SLOTS) (Stage 12; mirrors resolveMoveLearn's
   // two-call shape).
   TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId, int replaceSlot = -1);
 
@@ -131,7 +131,7 @@ class PokemonService {
   // the UI's own move-picker list already excludes both cases by construction.
   ServiceStatus learnMoveIntoSlot(uint32_t recordId, uint8_t slot, uint8_t moveId);
 
-  // Clears one move slot to empty (GĐ12 - the Moveset screen's "Forget").
+  // Clears one move slot to empty (Stage 12 - the Moveset screen's "Forget").
   // Refuses to clear a Pokemon's last remaining move (NotApplicable) - a
   // Pokemon always has at least one move in the real games too.
   ServiceStatus forgetMove(uint32_t recordId, uint8_t slot);

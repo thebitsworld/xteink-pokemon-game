@@ -53,7 +53,7 @@ BAG_SLOT_COUNT = 77
 
 # State-relative byte offsets (version 4 - see docs/file-formats.md). Bytes
 # 0-194 are unchanged from version 3; 195-197 are new pity counters for the
-# ball/medicine/TM-HM drop tracks (GĐ 23).
+# ball/medicine/TM-HM drop tracks (Stage 23).
 OFF_PARTY_IDS = 0  # 6 x u32
 OFF_PENDING_EVENTS = 24  # 3 x 10 bytes
 OFF_ITEM_COUNTS = 54  # 6 x u16 (evolution stones, ids 1-6)

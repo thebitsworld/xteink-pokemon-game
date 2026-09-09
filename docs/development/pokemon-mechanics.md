@@ -6,105 +6,105 @@ nav_order: 4
 
 # Pokémon Module Mechanics
 
-Ghi chú kỹ thuật về cách module Pokémon (`CROSSINK_ENABLE_POKEMON`) hoạt động bên trong CrossInk, dựa trên việc đọc trực tiếp mã nguồn và build thật trên môi trường `pokemon-x3`. Tài liệu này bổ sung chi tiết vận hành cho [docs/pokemon-game.md](../pokemon-game.md) (vốn là tài liệu hướng người dùng cuối).
+Technical notes on how the Pokémon module (`CROSSINK_ENABLE_POKEMON`) works inside CrossInk, based on reading the source directly and building on the `pokemon-x3` environment. This document adds implementation detail on top of [docs/pokemon-game.md](../pokemon-game.md) (the end-user-facing doc).
 
-## 1. Kiến trúc phân lớp
+## 1. Layered architecture
 
 ```
-EpubReaderActivity (lượt lật trang thật, render e-ink)
+EpubReaderActivity (real page turns, e-ink rendering)
         │
-PokemonTracker / PokemonTurnVerifier   — đo "thời gian đọc chủ động" thật
+PokemonTracker / PokemonTurnVerifier   — measures real "active reading time"
         │
-PokemonService                          — nghiệp vụ thiết bị: RNG, gọi PokemonGame, gọi PokemonStore
+PokemonService                          — device-facing logic: RNG, calls PokemonGame, calls PokemonStore
         │
-PokemonGame.cpp (lib/Pokemon)           — luật chơi thuần hàm: XP, encounter, item, evolution
+PokemonGame.cpp (lib/Pokemon)           — pure-function game rules: XP, encounters, items, evolution
         │
-PokemonStore + PokemonStoreCodec        — lưu file A/B trên SD, CRC32, versioning
+PokemonStore + PokemonStoreCodec        — A/B file storage on SD, CRC32, versioning
 ```
 
-- `lib/Pokemon/*` — core logic không phụ thuộc phần cứng, dễ test độc lập (build environment riêng, không cần thiết bị).
-- `src/pokemon/*` — lớp tích hợp thiết bị thật (đọc/ghi SD qua `HalStorage`, RNG thật, singleton `devicePokemonService()`).
-- `src/activities/pokemon/PokemonActivity.cpp` — UI (Party, PC, Pokédex, resolve encounter/evolution).
-- `src/components/pokemon/PokemonArt*.cpp` — đường dẫn & load ảnh Pokémon (BMP) **từ thẻ SD**, không đóng gói vào firmware.
+- `lib/Pokemon/*` — hardware-independent core logic, easy to test in isolation (its own build environment, no device required).
+- `src/pokemon/*` — real-device integration layer (SD read/write via `HalStorage`, real RNG, the `devicePokemonService()` singleton).
+- `src/activities/pokemon/PokemonActivity.cpp` — UI (Party, PC, Pokédex, resolving encounters/evolutions).
+- `src/components/pokemon/PokemonArt*.cpp` — path resolution & loading of Pokémon images (BMP) **from the SD card**, not bundled into the firmware.
 
-Toàn bộ module được biên dịch có điều kiện qua `#if defined(CROSSINK_ENABLE_POKEMON)` — build môi trường mặc định (`default`) không chứa dòng code nào của module này.
+The whole module is compiled conditionally under `#if defined(CROSSINK_ENABLE_POKEMON)` — the default build environment (`default`) contains none of this module's code.
 
-## 2. Đo thời gian đọc "thật" — chống gian lận
+## 2. Measuring "real" reading time — anti-cheat
 
 File: [lib/Pokemon/PokemonTracker.cpp](../../lib/Pokemon/PokemonTracker.cpp)
 
-- `PokemonTurnVerifier`: cầu nối giữa task xử lý input và task render. `request()` được gọi khi người dùng bấm lật trang; chỉ khi khung hình đã **render xong thành công** trên e-ink thì `renderSucceeded()` mới xác nhận lượt lật hợp lệ (tránh đếm nhầm khi render lag/fail).
-- `PokemonTracker`: chỉ cộng dồn giây vào `creditedSeconds_` nếu có một lượt lật trang **thành công** trong `ACTIVE_WINDOW_SECONDS = 300` giây (5 phút) gần nhất.
-  - Mở sách không lật trang → không tính giờ.
-  - Auto-page-turn (`source == "auto"` trong `EpubReaderActivity`) → bị lọc, không tính.
-- Mỗi `CHECKPOINT_MINUTES = 5` phút, `commitWholeMinutes()` chốt số phút nguyên đã tích lũy và gọi `creditMinutes()` xuống `PokemonService` để ghi vào state.
-- `flushOnExit()` được gọi khi thoát reader (`EpubReaderActivity.cpp:2125`) để chốt nốt phần phút lẻ (<5 phút) còn lại — nếu thoát app đàng hoàng thì **không mất phút nào**.
-- `beginSession()` (gọi khi mở lại reader, `EpubReaderActivity.cpp:1996`) khôi phục phần giây chưa kịp commit từ phiên trước đó **nếu tracker vẫn còn sống trong RAM** — không hoạt động qua một lần khởi động lại thiết bị.
+- `PokemonTurnVerifier`: bridges the input-handling task and the render task. `request()` fires when the user turns a page; only once the frame has **rendered successfully** on the e-ink does `renderSucceeded()` confirm the page turn as valid (avoids miscounting when a render lags or fails).
+- `PokemonTracker`: only accumulates seconds into `creditedSeconds_` if at least one page turn **succeeded** within the last `ACTIVE_WINDOW_SECONDS = 300` seconds (5 minutes).
+  - A book left open without turning pages → no time counted.
+  - Auto-page-turn (`source == "auto"` in `EpubReaderActivity`) → filtered out, not counted.
+- Every `CHECKPOINT_MINUTES = 5` minutes, `commitWholeMinutes()` locks in the whole minutes accumulated so far and calls `creditMinutes()` down into `PokemonService` to persist into state.
+- `flushOnExit()` is called when leaving the reader (`EpubReaderActivity.cpp:2125`) to flush the remaining leftover fraction (<5 minutes) — exiting the app cleanly loses **no minutes**.
+- `beginSession()` (called when reopening the reader, `EpubReaderActivity.cpp:1996`) restores the not-yet-committed seconds from the previous session **only if the tracker survived in RAM** — it does not survive a device reboot.
 
-## 3. Vòng lặp game chính — `applyCreditedMinutes()`
+## 3. Main game loop — `applyCreditedMinutes()`
 
 File: [lib/Pokemon/PokemonGame.cpp:315](../../lib/Pokemon/PokemonGame.cpp)
 
-Xử lý **từng phút một** (không gộp) để mọi sự kiện random rơi đúng mốc thời gian thật.
+Processes **one minute at a time** (never batched) so every random event lands on the correct real timestamp.
 
 **XP & Level**
-- Mỗi phút, Pokémon dẫn đầu Party (`leader`) +1 XP, tối đa `MAXIMUM_TOTAL_XP = 8340` (level 100).
-- `xpRequired(level) = 10*n + 3*n²/4` với `n = level - 1`.
-- `levelForXp()` dùng binary search để tra ngược level từ tổng XP.
-- **XP hoàn toàn theo thời gian đọc thật, không phụ thuộc độ dài sách/số chương.**
+- Every minute, the Party leader (`leader`) gains +1 XP, capped at `MAXIMUM_TOTAL_XP = 8340` (level 100).
+- `xpRequired(level) = 10*n + 3*n²/4` where `n = level - 1`.
+- `levelForXp()` uses binary search to look up level from total XP.
+- **XP is driven purely by real reading time, independent of book length or chapter count.**
 
 **Wild Encounter**
-- Roll mỗi 15 phút (`ENCOUNTER_CHECK_MINUTES`) hoặc mỗi giờ, xác suất **2/5**.
-- Cơ chế pity: trượt 3 lần liên tiếp (`ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3`) → lần tiếp theo chắc chắn trúng.
-- Loài được chọn theo trọng số dựa trên `captureRate` gốc; starter (Bulbasaur/Charmander/Squirtle/Pikachu) bị ép trọng số thấp nhất.
-- **Gating theo `bookProgressPercent`** (% tiến độ *cuốn sách đang đọc*, không phải tổng số trang/phút đã đọc):
-  - Middle-stage evolution chỉ xuất hiện khi `≥50%`.
-  - Final-stage chỉ khi `≥75%`.
-  - Level band của Pokémon hoang dã cũng tăng theo band này (`0%→lv2-6` ... `95%→lv18-30`).
-  - ⚠️ Hệ quả: đọc nhiều sách ngắn (dễ đạt `%` cao) cho encounter chất lượng tốt hơn nhiều so với một cuốn dài, dù tổng thời gian đọc bằng nhau — vì `%` không phải hàm của tổng thời gian mà là hàm của tiến độ trong cuốn hiện tại.
-- Legendary (144-146 chim, 150 Mewtwo): cần cả `lifetimeMinutes` tích lũy toàn thời gian **và** `bookProgressPercent` của sách hiện tại đủ ngưỡng.
-- Mew (151): chỉ xuất hiện khi đã bắt đủ 150 loài còn lại.
-- Giới tính random theo `genderRate` thật của species.
+- Rolled every 15 minutes (`ENCOUNTER_CHECK_MINUTES`) or every hour, at **2/5** odds.
+- Pity mechanic: 3 consecutive misses (`ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3`) → the next roll is guaranteed to hit.
+- The species is chosen by weight based on its base `captureRate`; starters (Bulbasaur/Charmander/Squirtle/Pikachu) are forced to the lowest weight.
+- **Gated by `bookProgressPercent`** (% progress through the *currently open book*, not total pages/minutes read overall):
+  - Middle-stage evolutions only appear at `≥50%`.
+  - Final-stage evolutions only at `≥75%`.
+  - The wild Pokémon's level band also scales with this same progress band (`0%→lv2-6` ... `95%→lv18-30`).
+  - ⚠️ Consequence: reading many short books (easy to reach a high `%`) yields noticeably better encounters than one long book, even for the same total reading time — because `%` is a function of progress through the current book, not of total time spent.
+- Legendaries (144-146 the bird trio, 150 Mewtwo): require both accumulated `lifetimeMinutes` across all time **and** the current book's `bookProgressPercent` to clear their thresholds.
+- Mew (151): only appears once all other 150 species have been caught.
+- Gender is randomized according to the species' real `genderRate`.
 
-**Item hiếm**
-- Roll mỗi giờ, xác suất 1/20, pity sau 19 lần trượt.
-- Ưu tiên loại item mà Party đang cần để tiến hóa.
+**Rare items**
+- Rolled every hour at 1/20 odds, with pity after 19 misses.
+- Prioritizes whichever item type the Party currently needs to evolve.
 
 **Evolution**
-- Khi lên level, kiểm tra `evolutionsFor(speciesId)` (dữ liệu tĩnh `PokemonSpecies.cpp`); nếu đạt `minimumLevel` → đẩy vào hàng đợi sự kiện chờ xác nhận (trừ khi `RecordFlag::EvolutionPromptsDisabled`).
-- Tiến hóa bằng item (`useEvolutionItem`) xử lý ngay, không qua vòng lặp phút.
+- On level-up, `evolutionsFor(speciesId)` (static data in `PokemonSpecies.cpp`) is checked; if `minimumLevel` is reached, an event is queued for confirmation (unless `RecordFlag::EvolutionPromptsDisabled`).
+- Item-triggered evolution (`useEvolutionItem`) is resolved immediately, outside the per-minute loop.
 
-## 4. Hàng đợi sự kiện (Pending Events)
+## 4. Pending event queue
 
-`PokemonState.pendingEvents`: FIFO tối đa `PENDING_EVENT_CAPACITY = 3`. Khi đầy, encounter/item mới bị bỏ qua nhưng bộ đếm pity (`encounterMisses`/`itemMisses`) vẫn giữ nguyên. `DashboardNotice` hiển thị icon `!` khi có sự kiện chờ.
+`PokemonState.pendingEvents`: a FIFO capped at `PENDING_EVENT_CAPACITY = 3`. Once full, new encounters/items are dropped, but the pity counters (`encounterMisses`/`itemMisses`) still keep incrementing. `DashboardNotice` shows a `!` icon while an event is waiting.
 
-## 5. Lưu trữ — double-buffer + CRC
+## 5. Storage — double-buffer + CRC
 
 File: [src/pokemon/PokemonStore.cpp](../../src/pokemon/PokemonStore.cpp)
 
-- 2 file luân phiên `/.crosspoint/pokemon-a.bin` / `pokemon-b.bin`. Mỗi `commit()` ghi vào file **không active**, rồi swap — mất điện giữa chừng vẫn giữ được bản cũ nguyên vẹn.
-- Snapshot = header (version, sequence, recordCount) + state + N record, toàn bộ CRC32.
-- `inspectSnapshot()` lúc boot verify: CRC, `sequence` khớp, `recordId` tăng dần liên tục, mọi record trong Party/pending-evolution đều tồn tại.
-- `validateRecord()`/`validateState()` (PokemonTypes.cpp) là bất biến được kiểm tra ở **mọi** điểm ghi (candidate → validate → commit) — phòng thủ chống corrupt khi rút điện giữa chừng.
-- Bản `pokemon-v2-a/b.bin` cũ tự động migrate sang format hiện tại.
+- Two alternating files, `/.crosspoint/pokemon-a.bin` / `pokemon-b.bin`. Each `commit()` writes to the **inactive** file, then swaps — a power loss mid-write still leaves the previous good copy intact.
+- Snapshot = header (version, sequence, recordCount) + state + N records, all covered by one CRC32.
+- `inspectSnapshot()` verifies at boot: CRC, `sequence` match, `recordId` values increasing contiguously, every record referenced by Party/pending-evolution actually existing.
+- `validateRecord()`/`validateState()` (PokemonTypes.cpp) are invariants checked at **every** write site (candidate → validate → commit) — a defense against corruption from power loss mid-write.
+- Older `pokemon-v2-a/b.bin` files migrate automatically to the current format.
 
-## 6. Ngân sách Flash/RAM thực đo (X3 = ESP32-C3, không PSRAM)
+## 6. Measured Flash/RAM budget (X3 = ESP32-C3, no PSRAM)
 
-Đo bằng `pio run -e pokemon-x3` / `pio run -e default` (16MB flash, dual-OTA `partitions.csv`: mỗi slot app 6.25MB = 6,553,600 bytes):
+Measured via `pio run -e pokemon-x3` / `pio run -e default` (16MB flash, dual-OTA `partitions.csv`: each app slot is 6.25MB = 6,553,600 bytes):
 
-| Build | Flash dùng | % | Free trong OTA slot |
+| Build | Flash used | % | Free in OTA slot |
 |---|---|---|---|
-| `default` (không Pokémon) | 6,259,237 B | 95.5% | 280,208 B |
-| `pokemon-x3` (có Pokémon) | 6,303,483 B | 96.2% | 235,968 B |
+| `default` (no Pokémon) | 6,259,237 B | 95.5% | 280,208 B |
+| `pokemon-x3` (with Pokémon) | 6,303,483 B | 96.2% | 235,968 B |
 
-- **Module Pokémon hiện tại chỉ tốn ~43KB flash** — vì artwork nằm trên SD card (`Storage.openFileForRead`, path `/pokemon/sprites/%03u.bmp`...), không đóng gói vào firmware image.
-- RAM tĩnh (`.data+.bss`) chỉ dùng **17.7%** (`57,852 / 327,680 bytes`) — không phải nút thắt.
-- **Nút thắt thật sự là Flash**: base CrossInk (chưa Pokémon) đã chiếm 95.5% slot OTA. Dư địa còn lại cho tính năng mới chỉ ~230KB.
-- `scripts/check_firmware_size.py` (post-build script trong `platformio.ini`) tự động fail build nếu `firmware.bin` vượt partition "app" nhỏ nhất trong `partitions.csv` — đây là cách kiểm tra flash overflow chính thức, chạy mỗi lần `pio run`.
-- Tăng dung lượng khả dụng cần đổi partition scheme (bỏ dual-OTA rollback an toàn) — đánh đổi lớn, không nên làm tùy tiện.
+- **The Pokémon module currently only costs ~43KB of flash** — because artwork lives on the SD card (`Storage.openFileForRead`, path `/pokemon/sprites/%03u.bmp`...) rather than being bundled into the firmware image.
+- Static RAM (`.data+.bss`) uses only **17.7%** (`57,852 / 327,680 bytes`) — not a bottleneck.
+- **The real bottleneck is flash**: the base CrossInk build (without Pokémon) already occupies 95.5% of the OTA slot. Only about 230KB of headroom remains for new features.
+- `scripts/check_firmware_size.py` (a post-build script in `platformio.ini`) automatically fails the build if `firmware.bin` exceeds the smallest "app" partition in `partitions.csv` — this is the official flash-overflow check, run on every `pio run`.
+- Growing the available headroom would require changing the partition scheme (giving up the safe dual-OTA rollback) — a significant tradeoff, not to be done lightly.
 
-## 7. Gợi ý khi mở rộng thêm cơ chế (ví dụ hệ thống trận đấu)
+## 7. Notes for extending the mechanics further (e.g. a battle system)
 
-- Bản đồ họa/animation kiểu Pokémon Red gốc: rủi ro cao, dễ vượt 230KB còn lại nếu thêm move data + type chart + animation engine + UI trận đấu mới.
-- Bản **text-based** (menu FIGHT/ITEM/PKMN/RUN + log text) khả thi hơn nhiều: tái dùng `EpdFont`/`GfxRenderer`/`ButtonNavigator` đã có, không cần animation engine mới. Ước lượng chi phí thêm ~20-40KB flash — lọt trong dư địa hiện có.
-- Điểm cần cẩn thận: chuỗi text đa ngôn ngữ (i18n) cho tên chiêu/log trận đấu dễ phình nếu nhân theo nhiều ngôn ngữ ngay từ đầu.
+- A full graphical/animated system in the style of the original Pokémon Red games: high risk, easily exceeds the remaining ~230KB once move data + type chart + animation engine + new battle UI are added.
+- A **text-based** approach (FIGHT/ITEM/PKMN/RUN menus + text log) is far more feasible: it reuses the existing `EpdFont`/`GfxRenderer`/`ButtonNavigator`, with no new animation engine required. Estimated additional cost is ~20-40KB of flash — well within the existing headroom.
+- One thing to watch: multi-language (i18n) strings for move names/battle log lines can balloon quickly if multiplied across many languages from the start.

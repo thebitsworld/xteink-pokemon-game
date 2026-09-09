@@ -831,7 +831,7 @@ TEST(PokemonService, TeachMoveChecksCompatibilityThenFreeSlotThenAllowsAReplaceS
   pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.teachMove(1, 84), pokemon::TeachMoveOutcome::AlreadyKnown);
-  // Pound (1) is not in Pikachu's real TM/HM compatibility list (GĐ12).
+  // Pound (1) is not in Pikachu's real TM/HM compatibility list (Stage 12).
   EXPECT_EQ(service.teachMove(1, 1), pokemon::TeachMoveOutcome::Incompatible);
 
   // 5 (Mega Punch/TM01), 6 (Pay Day/TM06), 25 (Mega Kick/TM09) are all in
