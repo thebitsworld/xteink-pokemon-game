@@ -2616,16 +2616,25 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   const uint16_t maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp));
 
   constexpr int iconWidth = 80;
-  const int textX = listBounds_.x + 5 + iconWidth + 14;
+  const int textX = listBounds_.x + 5 + iconWidth + 8;
   const int textRight = listBounds_.x + listBounds_.width - 8;
   constexpr int barH = 8;
-  constexpr int barW = 96;
 
   int barY;
   int hpTextY;
   int statusY;
   int barX;
+  int barW;
   if (drawNameLine) {
+    // Stretches to fill the same width the name line uses, instead of a
+    // fixed width that left a big dead gap between the HP text and the
+    // row's right edge - reserves just enough room after it for "999/999"
+    // and a 3-letter status abbreviation (BRN/PSN/...), whether or not this
+    // particular Pokemon actually has one, so the bar's width (and the
+    // whole block's visual rhythm) stays constant row to row.
+    constexpr int hpTextReserve = 56;
+    constexpr int statusReserve = 44;
+    barW = std::max(40, textRight - textX - hpTextReserve - statusReserve);
     const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
     const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
     constexpr int lineGap = 8;
@@ -2652,6 +2661,7 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
     barY = rowY + rowHeight_ - 22;
     hpTextY = barY - 3;
     statusY = barY - 3;
+    barW = 96;
   }
 
   renderer.drawRect(barX, barY, barW, barH, true);
