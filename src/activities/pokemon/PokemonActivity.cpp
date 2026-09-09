@@ -399,19 +399,20 @@ int PokemonActivity::listTop() const {
   return top;
 }
 
-// Party rows get extra height to fit an HP bar/text strip below the usual
+// Rows get extra height to fit an HP bar/text/status strip below the usual
 // icon+name+level line (see renderPartyRowHealth()) - every other list rides
-// the standard row height.
-// Screen::ItemTarget picking a Medicine/BattleMedicine target also shows HP
-// (GĐ18 follow-up) - Evolution/Machine targets have no HP to show.
-bool PokemonActivity::itemTargetShowsHealth() const {
+// the standard row height. True for Screen::Party; for Screen::ItemTarget
+// only while picking who receives a Medicine/BattleMedicine item
+// (Evolution/Machine targets have no HP to show); and for
+// Screen::BattleSwitch, where seeing HP/status is exactly what decides
+// which Pokemon to send out.
+bool PokemonActivity::showsPartyHealthRows() const {
+  if (screen_ == Screen::Party || screen_ == Screen::BattleSwitch) return true;
   return screen_ == Screen::ItemTarget &&
          (bagCategory_ == BagCategory::Medicine || bagCategory_ == BagCategory::BattleMedicine);
 }
 
-int PokemonActivity::rowHeightForScreen() const {
-  return screen_ == Screen::Party || itemTargetShowsHealth() ? 96 : 64;
-}
+int PokemonActivity::rowHeightForScreen() const { return showsPartyHealthRows() ? 96 : 64; }
 
 int PokemonActivity::rowsPerPage() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -939,13 +940,33 @@ void PokemonActivity::activate() {
         }
         if (!refreshSnapshot()) return;
         const pokemon::ItemData* item = pokemon::itemData(selectedMedicineItemId_);
-        snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
+        char usedLine[80];
+        snprintf(usedLine, sizeof(usedLine), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
                  item == nullptr ? "?" : item->name);
-        // Deliberate simplification, consistent with GĐ13's free Pokemon
-        // switch: using an item mid-battle does not cost a turn either -
-        // stepBattle() has no "item action" concept, and adding one just to
-        // let the opponent get a free hit here would mean touching an
-        // otherwise-stable, already-tested engine for this one feature.
+        // Using an item mid-battle costs the whole turn in Gen 1 - the
+        // opponent attacks the active Pokemon right away regardless of
+        // which party member received the item, with no Speed comparison
+        // (see stepOpponentOnlyTurn()).
+        const pokemon::BattleTurnResult result = service_.resolveOpponentOnlyTurn(battlePlayer_, battleOpponent_);
+        savePlayerBattleEntry();
+        char opponentLine[80] = "";
+        if (result.opponent.acted) {
+          formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+        }
+        if (opponentLine[0] != '\0') {
+          snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", usedLine, opponentLine);
+        } else {
+          snprintf(battleLog_, sizeof(battleLog_), "%s", usedLine);
+        }
+        if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
+          if (usablePartySlotCount() > 0) {
+            forcedBattleSwitch_ = true;
+            setScreen(Screen::BattleSwitch);
+          } else {
+            finishBattleAfterPlayerFainted();
+          }
+          return;
+        }
         setScreen(Screen::Battle);
         return;
       }
@@ -1139,13 +1160,47 @@ void PokemonActivity::activate() {
     case Screen::BattleSwitch: {
       const int slot = usablePartySlotAt(static_cast<size_t>(selected_));
       if (slot < 0) return;
+      // A forced switch (the previous Pokemon just fainted from the
+      // opponent's attack THIS turn) doesn't cost another one - only a
+      // voluntary switch does. Capture this before setupBattlePlayer()
+      // resets the flag below.
+      const bool wasForced = forcedBattleSwitch_;
       savePlayerBattleEntry();
       if (!setupBattlePlayer(slot)) {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Battle);
         return;
       }
       forcedBattleSwitch_ = false;
-      snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
+      char goLine[64];
+      snprintf(goLine, sizeof(goLine), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
+      if (wasForced) {
+        snprintf(battleLog_, sizeof(battleLog_), "%s", goLine);
+        setScreen(Screen::Battle);
+        return;
+      }
+      // Voluntary switch: Gen 1 spends the whole turn on it, so the
+      // opponent gets to attack the newly-sent-out Pokemon right away, with
+      // no Speed comparison (see stepOpponentOnlyTurn()).
+      const pokemon::BattleTurnResult result = service_.resolveOpponentOnlyTurn(battlePlayer_, battleOpponent_);
+      savePlayerBattleEntry();
+      char opponentLine[80] = "";
+      if (result.opponent.acted) {
+        formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+      }
+      if (opponentLine[0] != '\0') {
+        snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", goLine, opponentLine);
+      } else {
+        snprintf(battleLog_, sizeof(battleLog_), "%s", goLine);
+      }
+      if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
+        if (usablePartySlotCount() > 0) {
+          forcedBattleSwitch_ = true;
+          setScreen(Screen::BattleSwitch);
+        } else {
+          finishBattleAfterPlayerFainted();
+        }
+        return;
+      }
       setScreen(Screen::Battle);
       return;
     }
@@ -1620,9 +1675,12 @@ void PokemonActivity::buildRows() {
         const int slot = usablePartySlotAt(static_cast<size_t>(index));
         if (slot < 0) break;
         const pokemon::PokemonRecord& record = snapshot_.party[slot];
-        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+        // HP/status now show via the taller row's health strip
+        // (showsPartyHealthRows()) instead of a plain "HP %u" value text -
+        // the value slot shows Level/gender instead, matching Party's row.
         char value[24];
-        snprintf(value, sizeof(value), "HP %u", entry.currentHp);
+        snprintf(value, sizeof(value), "%s %u  %s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
+                 genderText(record.gender));
         row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), value);
         break;
       }
@@ -2116,17 +2174,24 @@ void PokemonActivity::renderBattleHud() {
 void PokemonActivity::renderRowArt() {
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
-                       screen_ == Screen::Pokedex;
+                       screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch;
   if (!artRows) return;
   const int start = pageStart();
   for (int local = 0; local < rowCount_; ++local) {
     const int rowY = listBounds_.y + local * rowHeight_;
     uint16_t speciesId = 0;
+    // BattleSwitch skips the active combatant and any fainted party member,
+    // so its row index doesn't line up with a plain party slot the way
+    // Party/Move/ItemTarget's does - usablePartySlotAt() maps it.
+    const int battleSwitchSlot =
+        screen_ == Screen::BattleSwitch ? usablePartySlotAt(static_cast<size_t>(start + local)) : -1;
     if (screen_ == Screen::Starter)
       speciesId = STARTERS[start + local];
     else if ((screen_ == Screen::Party || screen_ == Screen::Move || screen_ == Screen::ItemTarget) &&
              start + local < snapshot_.partyCount)
       speciesId = snapshot_.party[start + local].speciesId;
+    else if (screen_ == Screen::BattleSwitch && battleSwitchSlot >= 0)
+      speciesId = snapshot_.party[battleSwitchSlot].speciesId;
     else if (screen_ == Screen::Pc && local < static_cast<int>(pcCount_))
       speciesId = pcPage_[local].speciesId;
     else if (screen_ == Screen::Pokedex &&
@@ -2148,8 +2213,14 @@ void PokemonActivity::renderRowArt() {
       // as a tiny 40x30 mark on the X3 panel.
       pokemon::drawPokemonSpeciesArt(renderer, speciesId, true, Rect{listBounds_.x + 5, rowY + 2, 80, 60});
     }
-    if ((screen_ == Screen::Party || itemTargetShowsHealth()) && start + local < snapshot_.partyCount) {
-      renderPartyRowHealth(rowY, snapshot_.party[start + local]);
+    if (showsPartyHealthRows()) {
+      if ((screen_ == Screen::Party) && start + local < snapshot_.partyCount) {
+        renderPartyRowHealth(rowY, snapshot_.party[start + local]);
+      } else if (screen_ == Screen::BattleSwitch && battleSwitchSlot >= 0) {
+        renderPartyRowHealth(rowY, snapshot_.party[battleSwitchSlot]);
+      } else if (screen_ == Screen::ItemTarget && start + local < snapshot_.partyCount) {
+        renderPartyRowHealth(rowY, snapshot_.party[start + local]);
+      }
     }
   }
 }

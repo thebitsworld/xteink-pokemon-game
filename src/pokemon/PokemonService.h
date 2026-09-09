@@ -158,6 +158,9 @@ class PokemonService {
   // consistent with how every PokemonGame.cpp rule is only ever invoked
   // through a PokemonService method.
   BattleTurnResult resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot);
+  // For a voluntary switch or mid-battle item use - both cost the whole
+  // turn in Gen 1 (no Speed check), so only the opponent acts.
+  BattleTurnResult resolveOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& opponent);
   bool attemptBattleCatch(const BattleCombatant& wild, BallKind ball);
 
  private:

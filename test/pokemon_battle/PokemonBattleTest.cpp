@@ -163,6 +163,51 @@ void alreadyFaintedCombatantsShortCircuitToAnOutcome() {
   CHECK(!result.opponent.acted);
 }
 
+void opponentOnlyTurnActsRegardlessOfSpeedSinceThePlayerAlreadySpentTheTurn() {
+  // Switching or using an item mid-battle costs the whole turn (Gen 1), so
+  // stepOpponentOnlyTurn() never compares Speed - it's called only for the
+  // opponent's own action, full stop. Charmander (4, faster) as "player"
+  // proves this: if Speed were compared, the faster side would go first and
+  // nothing would touch it, but here only the opponent's Squirtle acts.
+  BattleCombatant charmander = makeCombatant(4, 20, {33});
+  BattleCombatant squirtle = makeCombatant(7, 5, {55});
+  const uint16_t playerHpBefore = charmander.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(charmander, squirtle, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::InProgress);
+  CHECK(!result.player.acted);
+  CHECK(result.opponent.acted);
+  CHECK(charmander.currentHp < playerHpBefore);
+  CHECK(squirtle.currentHp == squirtle.maxHp);  // player's side never acted, so it's untouched
+}
+
+void opponentOnlyTurnCanFaintThePlayer() {
+  BattleCombatant player = makeCombatant(1, 5, {33});
+  BattleCombatant opponent = makeCombatant(4, 60, {52});  // Ember, way overleveled
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(player, opponent, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::OpponentWon);
+  CHECK(result.player.event == BattleLogEvent::Fainted);
+}
+
+void opponentOnlyTurnStillAppliesEndOfTurnStatusDamage() {
+  BattleCombatant player = makeCombatant(1, 20, {33});
+  BattleCombatant opponent = makeCombatant(4, 20, {33});
+  opponent.status = Ailment::Poison;
+  const uint16_t opponentHpBefore = opponent.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(player, opponent, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::InProgress);
+  CHECK(opponent.currentHp < opponentHpBefore);  // poison ticked even though only the opponent acted this turn
+}
+
+void opponentOnlyTurnShortCircuitsWhenAlreadyFainted() {
+  BattleCombatant player = makeCombatant(1, 10, {33});
+  BattleCombatant opponent = makeCombatant(4, 10, {33});
+  player.currentHp = 0;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(player, opponent, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::OpponentWon);
+  CHECK(!result.player.acted);
+  CHECK(!result.opponent.acted);
+}
+
 void masterBallAlwaysCatchesRegardlessOfRandomness() {
   BattleCombatant wild = makeCombatant(1, 50, {});
   CHECK(pokemon::attemptCatch(wild, BallKind::Master, MAX_RANDOM));
@@ -205,6 +250,10 @@ int main() {
   aiVariesItsMoveChoiceAcrossRandomSeedsInsteadOfAlwaysTheSameSlot();
   faintingEndsTheBattleImmediatelyWithoutARetaliation();
   alreadyFaintedCombatantsShortCircuitToAnOutcome();
+  opponentOnlyTurnActsRegardlessOfSpeedSinceThePlayerAlreadySpentTheTurn();
+  opponentOnlyTurnCanFaintThePlayer();
+  opponentOnlyTurnStillAppliesEndOfTurnStatusDamage();
+  opponentOnlyTurnShortCircuitsWhenAlreadyFainted();
   masterBallAlwaysCatchesRegardlessOfRandomness();
   pokeBallCatchOddsScaleWithHpAndCaptureRate();
   return failures == 0 ? 0 : 1;

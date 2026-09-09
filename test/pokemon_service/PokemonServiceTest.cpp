@@ -614,6 +614,35 @@ TEST(PokemonService, ResolveBattleTurnDelegatesToTheEngineWithItsOwnRandomSource
   EXPECT_LT(opponent.currentHp, opponent.maxHp);
 }
 
+TEST(PokemonService, ResolveOpponentOnlyTurnDelegatesToTheEngineWithItsOwnRandomSource) {
+  // Same thin-wrapper shape as ResolveBattleTurn above (engine coverage
+  // lives in PokemonBattleTest) - this just confirms the service plumbs its
+  // own RandomSource through to stepOpponentOnlyTurn(), not a null one.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleCombatant player{};
+  player.speciesId = 25;  // Pikachu
+  player.level = 20;
+  player.currentHp = player.maxHp = 100;
+  player.moves[0] = pokemon::BattleMoveSlot{33, 35};  // Tackle
+
+  pokemon::BattleCombatant opponent{};
+  opponent.speciesId = 4;  // Charmander
+  opponent.level = 5;
+  opponent.currentHp = opponent.maxHp = 100;
+  opponent.moves[0] = pokemon::BattleMoveSlot{33, 35};
+
+  const pokemon::BattleTurnResult result = service.resolveOpponentOnlyTurn(player, opponent);
+  EXPECT_FALSE(result.player.acted);   // the player already spent this turn switching/using an item
+  EXPECT_TRUE(result.opponent.acted);  // only the opponent's own action runs
+  EXPECT_LT(player.currentHp, player.maxHp);
+  EXPECT_EQ(opponent.currentHp, opponent.maxHp);  // the opponent's own side is never attacked here
+}
+
 TEST(PokemonService, AttemptBattleCatchDelegatesToTheEngineWithItsOwnRandomSource) {
   // Bulbasaur (SpeciesData::captureRate == 45) at full HP with a Poke Ball
   // has catchValue == 15/255 (see PokemonBattleTest for the exact math);

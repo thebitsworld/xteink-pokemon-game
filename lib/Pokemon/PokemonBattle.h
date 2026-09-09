@@ -97,6 +97,15 @@ void defaultMovesetForLevel(uint16_t speciesId, uint8_t level, std::array<uint8_
 BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot,
                             const RandomSource& random);
 
+// Resolves a turn where the player spent their whole turn on something other
+// than a move - switching Pokemon, or using an item mid-battle. Matches
+// Gen 1: both of those always take the entire turn with no Speed
+// comparison, so only the opponent acts here (`result.player` stays
+// acted=false/None, matching what a caller already fainted looks like in
+// stepBattle()); end-of-turn status damage still applies to both sides
+// exactly as it does after a normal stepBattle() turn.
+BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& opponent, const RandomSource& random);
+
 enum class BallKind : uint8_t {
   Poke = 0,
   Great = 1,

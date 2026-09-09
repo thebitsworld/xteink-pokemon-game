@@ -114,7 +114,7 @@ class PokemonActivity final : public Activity {
   int logicalCount() const;
   int listTop() const;
   int rowHeightForScreen() const;
-  bool itemTargetShowsHealth() const;
+  bool showsPartyHealthRows() const;
   int rowsPerPage() const;
   int pageStart() const;
   void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record);
