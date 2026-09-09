@@ -7,7 +7,7 @@ set up scenarios (queue a wild encounter, wipe HP/PP/status back to full,
 clear gym progress, hand a Pokemon some items) without waiting on real
 gameplay/RNG. See docs/file-formats.md for the on-disk layout this assumes;
 this tool only understands the CURRENT save format used by this branch
-(main save version 3, 195-byte state) and refuses to touch anything else
+(main save version 4, 198-byte state) and refuses to touch anything else
 rather than risk corrupting an unfamiliar layout.
 
 Every write always patches BOTH pokemon-a.bin and pokemon-b.bin (when both
@@ -44,14 +44,16 @@ GYMS_CSV = ROOT / "scripts" / "data" / "pokemon-gyms.csv"
 
 MAGIC = b"PKV2"
 HEADER_BYTES = 24
-STATE_BYTES_V3 = 195
+STATE_BYTES_V4 = 198
 RECORD_BYTES = 48
 PENDING_EVENT_BYTES = 10
 PENDING_EVENT_COUNT = 3
 EVOLUTION_ITEM_COUNT = 6
 BAG_SLOT_COUNT = 77
 
-# State-relative byte offsets (version 3 - see docs/file-formats.md).
+# State-relative byte offsets (version 4 - see docs/file-formats.md). Bytes
+# 0-194 are unchanged from version 3; 195-197 are new pity counters for the
+# ball/medicine/TM-HM drop tracks (GĐ 23).
 OFF_PARTY_IDS = 0  # 6 x u32
 OFF_PENDING_EVENTS = 24  # 3 x 10 bytes
 OFF_ITEM_COUNTS = 54  # 6 x u16 (evolution stones, ids 1-6)
@@ -65,6 +67,9 @@ OFF_ITEM_MISSES = 114  # u8
 OFF_DASHBOARD_NOTICE = 115  # u8
 OFF_BAG_COUNTS = 116  # 77 x u8 (ids 7-83)
 OFF_BATTLE_PROGRESS = 193  # u16
+OFF_BALL_MISSES = 195  # u8
+OFF_MEDICINE_MISSES = 196  # u8
+OFF_MACHINE_MISSES = 197  # u8
 
 PENDING_KIND_NONE = 0
 PENDING_KIND_ENCOUNTER = 1
@@ -210,9 +215,9 @@ def load_save(path: Path) -> SaveFile:
     state_size, record_size = struct.unpack_from("<HH", data, 12)
     if header_size != HEADER_BYTES:
         raise ToolError(f"{path}: unexpected header size {header_size} (expected {HEADER_BYTES})")
-    if state_size != STATE_BYTES_V3:
+    if state_size != STATE_BYTES_V4:
         raise ToolError(
-            f"{path}: this tool only understands version-3 saves (195-byte state), got {state_size} bytes "
+            f"{path}: this tool only understands version-4 saves (198-byte state), got {state_size} bytes "
             f"(version {version}) - refusing to touch an unfamiliar layout"
         )
     if record_size != RECORD_BYTES:
@@ -302,7 +307,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     print("\nparty record ids:", [rid for rid in party_ids if rid != 0])
 
     header_record_count, = struct.unpack_from("<I", active.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V3
+    records_offset = HEADER_BYTES + STATE_BYTES_V4
     print(f"\nrecords ({header_record_count}):")
     for i in range(header_record_count):
         offset = records_offset + i * RECORD_BYTES
@@ -338,6 +343,12 @@ def cmd_dump(args: argparse.Namespace) -> None:
         if count:
             item = item_map.get(i + EVOLUTION_ITEM_COUNT + 1)
             print(f"  id {i + EVOLUTION_ITEM_COUNT + 1} ({item.name if item else '?'}): {count}")
+
+    ball_misses, medicine_misses, machine_misses = struct.unpack_from("<BBB", state_bytes(active, OFF_BALL_MISSES, 3))
+    print(
+        f"\ndrop-track pity counters (miss streak toward each track's guaranteed hit): "
+        f"ball={ball_misses}/3, medicine={medicine_misses}/3, TM-HM={machine_misses}/3"
+    )
 
     print("\npending events:")
     for slot in range(PENDING_EVENT_COUNT):
@@ -439,7 +450,7 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         raise ToolError("--xp must be >= 0")
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, 16)
-        records_offset = HEADER_BYTES + STATE_BYTES_V3
+        records_offset = HEADER_BYTES + STATE_BYTES_V4
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES

@@ -293,6 +293,7 @@ bool validateState(const PokemonState& state) {
     return false;
   }
   if ((state.battleProgress & static_cast<uint16_t>(~POKEMON_GYM_PROGRESS_MASK)) != 0) return false;
+  if (state.ballMisses > 3 || state.medicineMisses > 3 || state.machineMisses > 3) return false;
 
   bool foundEmptyEvent = false;
   for (const PendingEvent& event : state.pendingEvents) {

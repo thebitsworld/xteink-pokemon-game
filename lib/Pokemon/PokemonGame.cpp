@@ -17,13 +17,18 @@ constexpr uint8_t ENCOUNTER_CHECK_MINUTES = 15;
 constexpr uint8_t ENCOUNTER_CHANCE_DENOMINATOR = 5;
 constexpr uint8_t ENCOUNTER_CHANCE_SUCCESSES = 2;
 constexpr uint8_t ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3;
-// Hourly odds for the two "you found something" tracks that are not evolution
-// stones: 1-in-2 for medicine (a convenience on top of the HP/PP that reading
-// already restores) and 1-in-3 for TM/HM (permanent move unlocks, 55 of them
-// to collect). Balls are not here - they are paced per encounter check
-// instead, see grantBall().
-constexpr uint32_t MEDICINE_DROP_DENOMINATOR = 2;
-constexpr uint32_t MACHINE_DROP_DENOMINATOR = 3;
+// Ball, medicine and TM/HM (GĐ 23) all check at the same 15-minute cadence as
+// the encounter roll itself, each with its own pity counter so a streak of
+// bad luck on one track never touches the others. Ball is a notch more
+// generous (3-in-5) than medicine/TM-HM (2-in-5, same shape as the encounter
+// roll) since it needs to comfortably outpace catch consumption (2-3 balls
+// per catch against ~1.84 encounters/hour).
+constexpr uint32_t BALL_CHANCE_NUMERATOR = 3;
+constexpr uint32_t BALL_CHANCE_DENOMINATOR = 5;
+constexpr uint8_t BALL_MISSES_BEFORE_GUARANTEE = 3;
+constexpr uint32_t ITEM_TRACK_CHANCE_NUMERATOR = 2;
+constexpr uint32_t ITEM_TRACK_CHANCE_DENOMINATOR = 5;
+constexpr uint8_t ITEM_TRACK_MISSES_BEFORE_GUARANTEE = 3;
 
 bool randomBelow(const RandomSource& random, const uint32_t upperExclusive, uint32_t& output) {
   if (random.below == nullptr || upperExclusive == 0) return false;
@@ -35,6 +40,28 @@ bool randomBelow(const RandomSource& random, const uint32_t upperExclusive, uint
 
 void incrementCapped(uint8_t& value, const uint8_t maximum) {
   if (value < maximum) ++value;
+}
+
+// Shared shape behind every "roll a chance, but guarantee a hit after enough
+// consecutive misses" track (encounter, evolution stone, ball, medicine,
+// TM/HM): `triggered` reports whether this check produced a hit; the pity
+// roll is skipped entirely once `misses` reaches `pity`, keeping this
+// call-for-call compatible with a scripted exact RandomSource sequence.
+// Returns false only on RNG failure.
+bool rollPityGate(const RandomSource& random, uint8_t& misses, const uint8_t pity, const uint32_t chanceNumerator,
+                  const uint32_t chanceDenominator, bool& triggered) {
+  triggered = misses >= pity;
+  if (!triggered) {
+    uint32_t roll = 0;
+    if (!randomBelow(random, chanceDenominator, roll)) return false;
+    triggered = roll < chanceNumerator;
+  }
+  if (triggered) {
+    misses = 0;
+  } else {
+    incrementCapped(misses, pity);
+  }
+  return true;
 }
 
 bool regularEncounterEligible(const SpeciesData& species, const uint8_t bookProgressPercent) {
@@ -278,8 +305,13 @@ bool isMachineCategory(const ItemCategory category) { return category == ItemCat
 // `categoryMatches` (never null outside that path) narrows the pool to one
 // collection track; each track rolls on its own schedule so a category with
 // many ids (Machine has 55) can no longer crowd out one with few (Ball has 4).
+// `weightOverride`, when given, replaces an item's catalog drop_weight for
+// this roll only (see medicineItemWeight()) - the CSV stays the "official"
+// per-item rarity, this is purely how much of one track's own roll a
+// sub-category gets to claim.
 uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds,
                              const bool preferOwnedNeeds, bool (*categoryMatches)(ItemCategory),
+                             uint32_t (*weightOverride)(const ItemData&),
                              std::array<uint8_t, ITEM_COUNT>& candidateItemIds,
                              std::array<uint32_t, ITEM_COUNT>& candidateWeights, size_t& candidateCount) {
   candidateCount = 0;
@@ -293,12 +325,26 @@ uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeed
     const ItemData* item = itemData(static_cast<uint8_t>(itemId));
     if (item == nullptr || item->dropWeight == 0) continue;
     if (categoryMatches != nullptr && !categoryMatches(item->category)) continue;
+    const uint32_t weight = weightOverride != nullptr ? weightOverride(*item) : item->dropWeight;
+    if (weight == 0) continue;
     candidateItemIds[candidateCount] = static_cast<uint8_t>(itemId);
-    candidateWeights[candidateCount] = item->dropWeight;
-    totalWeight += item->dropWeight;
+    candidateWeights[candidateCount] = weight;
+    totalWeight += weight;
     ++candidateCount;
   }
   return totalWeight;
+}
+
+// Cuts StatusCure/PPRestore down to a third of their catalog drop_weight so
+// the medicine track leans toward HP healing/revival - what an active gym
+// run actually consumes, since HP/PP already regenerate passively while
+// reading (see PokemonService::healPartyOnRead) but nothing regenerates mid-
+// battle. Medicine (HP) and Candy keep their full catalog weight.
+uint32_t medicineItemWeight(const ItemData& item) {
+  if (item.category == ItemCategory::StatusCure || item.category == ItemCategory::PPRestore) {
+    return item.dropWeight / 3U;
+  }
+  return item.dropWeight;
 }
 
 // Picks one id out of a drop_weight-weighted candidate list. Skips the roll
@@ -329,7 +375,7 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
-  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, nullptr, candidateItemIds,
+  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, nullptr, nullptr, candidateItemIds,
                                              candidateWeights, candidateCount);
   if (candidateCount == 0) {
     // Nothing an owned Pokemon can actually evolve with right now - widen to
@@ -338,7 +384,7 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
     // separate collection tracks with their own schedules (GĐ 22), and
     // folding them back in here is exactly what used to starve the ball
     // supply.
-    totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, false, isStoneCategory, candidateItemIds,
+    totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, false, isStoneCategory, nullptr, candidateItemIds,
                                       candidateWeights, candidateCount);
   }
   if (candidateCount == 0 || totalWeight == 0) return true;
@@ -383,18 +429,26 @@ bool ballKindDroppable(const PokemonState& state, const uint8_t itemId, const ui
   }
 }
 
-// One ball per encounter check, so the ball supply is paced by the same clock
-// that decides how often a Pokemon shows up (~1.8 encounters/hour against 4
-// balls/hour). A catch costs 2-3 throws on average, so that ratio leaves a
-// slowly growing reserve rather than stranding the player in front of a
+// Ball is checked at the same 15-minute cadence as the encounter roll (3-in-5
+// + pity after 3 misses, see BALL_CHANCE_NUMERATOR et al.), so the supply is
+// paced by the same clock that decides how often a Pokemon shows up (~1.84
+// encounters/hour). A catch costs 2-3 throws on average, so that ratio leaves
+// a slowly growing reserve rather than stranding the player in front of a
 // Pokemon with nothing to throw.
 //
-// Deliberately does NOT queue a PendingEvent: at this cadence balls would
+// Deliberately does NOT queue a PendingEvent: balls at this cadence would
 // swamp the 3-slot queue and start being dropped on the floor exactly when
 // they matter most. They land straight in the bag the way buying a stack at a
 // Mart would, and the player reads the count in Bag > Balls or on the throw
 // screen.
 bool grantBall(PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random) {
+  bool triggered = false;
+  if (!rollPityGate(random, state.ballMisses, BALL_MISSES_BEFORE_GUARANTEE, BALL_CHANCE_NUMERATOR,
+                    BALL_CHANCE_DENOMINATOR, triggered)) {
+    return false;
+  }
+  if (!triggered) return true;
+
   std::array<uint8_t, BALL_KIND_COUNT> candidateItemIds{};
   std::array<uint32_t, BALL_KIND_COUNT> candidateWeights{};
   size_t candidateCount = 0;
@@ -420,20 +474,27 @@ bool grantBall(PokemonState& state, const uint8_t bookProgressPercent, const Ran
   return true;
 }
 
-// Medicine and TM/HM each get their own hourly roll rather than competing for
-// one shared slot, so tuning either leaves the other (and the stone track,
-// and the ball track) untouched.
-bool processCategoryDrop(PokemonState& state, bool (*categoryMatches)(ItemCategory), const uint32_t denominator,
-                         const RandomSource& random, PendingEventKind& generatedEvent) {
-  if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) return true;
-  uint32_t roll = 0;
-  if (!randomBelow(random, denominator, roll)) return false;
-  if (roll != 0) return true;
+// Medicine and TM/HM each get their own 15-minute-cadence pity roll rather
+// than competing for one shared slot, so tuning either leaves the other (and
+// the stone track, and the ball track) untouched.
+bool processTrackDrop(PokemonState& state, uint8_t& misses, bool (*categoryMatches)(ItemCategory),
+                      uint32_t (*weightOverride)(const ItemData&), const RandomSource& random,
+                      PendingEventKind& generatedEvent) {
+  if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) {
+    misses = ITEM_TRACK_MISSES_BEFORE_GUARANTEE;
+    return true;
+  }
+  bool triggered = false;
+  if (!rollPityGate(random, misses, ITEM_TRACK_MISSES_BEFORE_GUARANTEE, ITEM_TRACK_CHANCE_NUMERATOR,
+                    ITEM_TRACK_CHANCE_DENOMINATOR, triggered)) {
+    return false;
+  }
+  if (!triggered) return true;
 
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
-  const uint32_t totalWeight = buildItemCandidates(state, OwnedEvolutionNeeds{}, false, categoryMatches,
+  const uint32_t totalWeight = buildItemCandidates(state, OwnedEvolutionNeeds{}, false, categoryMatches, weightOverride,
                                                    candidateItemIds, candidateWeights, candidateCount);
   if (candidateCount == 0 || totalWeight == 0) return true;
 
@@ -458,21 +519,14 @@ bool processEncounterCheck(PokemonState& state, const uint8_t bookProgressPercen
     state.encounterMisses = ENCOUNTER_MISSES_BEFORE_GUARANTEE;
     return true;
   }
-
-  bool encounterTriggered = state.encounterMisses >= ENCOUNTER_MISSES_BEFORE_GUARANTEE;
-  if (!encounterTriggered) {
-    uint32_t encounterRoll = 0;
-    if (!randomBelow(random, ENCOUNTER_CHANCE_DENOMINATOR, encounterRoll)) return false;
-    encounterTriggered = encounterRoll < ENCOUNTER_CHANCE_SUCCESSES;
+  bool triggered = false;
+  if (!rollPityGate(random, state.encounterMisses, ENCOUNTER_MISSES_BEFORE_GUARANTEE, ENCOUNTER_CHANCE_SUCCESSES,
+                    ENCOUNTER_CHANCE_DENOMINATOR, triggered)) {
+    return false;
   }
-  if (encounterTriggered) {
-    if (!createEncounter(state, bookProgressPercent, random)) return false;
-    state.encounterMisses = 0;
-    generatedEvent = PendingEventKind::Encounter;
-    return true;
-  }
-  incrementCapped(state.encounterMisses, ENCOUNTER_MISSES_BEFORE_GUARANTEE);
-
+  if (!triggered) return true;
+  if (!createEncounter(state, bookProgressPercent, random)) return false;
+  generatedEvent = PendingEventKind::Encounter;
   return true;
 }
 
@@ -482,20 +536,12 @@ bool processHourlyItem(PokemonState& state, const RandomSource& random, const Ow
     state.itemMisses = 19;
     return true;
   }
-  bool itemTriggered = state.itemMisses == 19;
-  if (!itemTriggered) {
-    uint32_t itemRoll = 0;
-    if (!randomBelow(random, 20, itemRoll)) return false;
-    itemTriggered = itemRoll == 0;
-  }
-  if (itemTriggered) {
-    bool itemCreated = false;
-    if (!createItem(state, ownedEvolutionNeeds, random, itemCreated)) return false;
-    state.itemMisses = 0;
-    if (itemCreated) generatedEvent = PendingEventKind::Item;
-    return true;
-  }
-  incrementCapped(state.itemMisses, 19);
+  bool triggered = false;
+  if (!rollPityGate(random, state.itemMisses, 19, 1, 20, triggered)) return false;
+  if (!triggered) return true;
+  bool itemCreated = false;
+  if (!createItem(state, ownedEvolutionNeeds, random, itemCreated)) return false;
+  if (itemCreated) generatedEvent = PendingEventKind::Item;
   return true;
 }
 
@@ -532,19 +578,23 @@ CreditResult applyCreditedMinutes(PokemonState& state, PokemonRecord& leader, co
     const bool hourlyBoundary = stateCandidate.readingMinuteRemainder == 60;
     if (hourlyBoundary) {
       stateCandidate.readingMinuteRemainder = 0;
+      // Evolution stones are the one track still on an hourly clock (GĐ 22
+      // left this alone on purpose - see processHourlyItem/createItem).
       if (!processHourlyItem(stateCandidate, random, ownedEvolutionNeeds, generatedEvent)) return result;
-      if (!processCategoryDrop(stateCandidate, isMedicineCategory, MEDICINE_DROP_DENOMINATOR, random, generatedEvent)) {
-        return result;
-      }
-      if (!processCategoryDrop(stateCandidate, isMachineCategory, MACHINE_DROP_DENOMINATOR, random, generatedEvent)) {
-        return result;
-      }
     }
 
     if (hourlyBoundary || stateCandidate.readingMinuteRemainder % ENCOUNTER_CHECK_MINUTES == 0) {
       // Ball first, so one found on this tick is already in the bag if this
       // same tick also turns up a Pokemon to throw it at.
       if (!grantBall(stateCandidate, bookProgressPercent, random)) return result;
+      if (!processTrackDrop(stateCandidate, stateCandidate.medicineMisses, isMedicineCategory, medicineItemWeight,
+                            random, generatedEvent)) {
+        return result;
+      }
+      if (!processTrackDrop(stateCandidate, stateCandidate.machineMisses, isMachineCategory, nullptr, random,
+                            generatedEvent)) {
+        return result;
+      }
       if (!processEncounterCheck(stateCandidate, bookProgressPercent, random, generatedEvent)) {
         return result;
       }

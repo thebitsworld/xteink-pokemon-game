@@ -7,6 +7,25 @@ fixed-size char buffer.
 
 ## `/.crosspoint/pokemon-{a,b}.bin`
 
+### Version 4
+
+Version 4 appends three `u8` pity counters after the version 3 state payload,
+without moving or resizing anything at offsets 0-194: one each for the ball,
+medicine (Medicine/StatusCure/PPRestore/Candy), and TM/HM item-drop tracks —
+each mirrors the existing encounter/evolution-stone pity fields (a streak of
+consecutive misses on that track's own roll; reaching the track's threshold
+guarantees the next roll hits and resets the counter to `0`). The 198-byte
+version 4 state payload is the version 3 payload below, plus:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 195 | 1 | Ball misses (`0-3`; guarantee threshold is `3`) |
+| 196 | 1 | Medicine misses (`0-3`; guarantee threshold is `3`) |
+| 197 | 1 | TM/HM misses (`0-3`; guarantee threshold is `3`) |
+
+Unlike the evolution-stone and encounter tracks, these three all check on the
+same 15-minute cadence as the encounter roll rather than once per hour.
+
 ### Version 3
 
 Version 3 appends two fields after the version 2 state payload, without
@@ -67,10 +86,10 @@ written. The file is:
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 4 | Magic `PKV2` |
-| 4 | 2 | Format version (`1`, `2`, or `3`; a build always writes the newest it knows) |
+| 4 | 2 | Format version (`1`, `2`, `3`, or `4`; a build always writes the newest it knows) |
 | 6 | 2 | Header size (`24`) |
 | 8 | 4 | Non-zero snapshot sequence |
-| 12 | 2 | State size (`116` for version 2, `195` for version 3 — see per-version tables below) |
+| 12 | 2 | State size (`116` for version 2, `195` for version 3, `198` for version 4 — see per-version tables below) |
 | 14 | 2 | Record size (`48`) |
 | 16 | 4 | Record count |
 | 20 | 4 | Payload size (`116 + recordCount * 48`) |
