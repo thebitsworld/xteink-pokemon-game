@@ -1663,8 +1663,17 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
                        screen_ == Screen::Pokedex;
   int top = listTop();
   rowHeight_ = rowHeightForScreen();
+  // BattleMoves/BattleBalls stay bottom-anchored, overlaid on the still-
+  // visible battle HUD, because their row count is always small (at most 4)
+  // - it always fits under the HUD. BattleBag (GĐ18) can list up to 17
+  // items (every Medicine/StatusCure/PPRestore id, regardless of how many
+  // the player owns), which does NOT reliably fit there - forcing it into
+  // the same bottom-anchored math pushed the list's top edge up over the
+  // HUD instead of scrolling normally. So BattleBag deliberately uses the
+  // regular full-height top-anchored list instead (see also renderFocused(),
+  // which correspondingly does not draw the HUD behind it).
   const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::Battle || screen_ == Screen::BattleMoves ||
-                              screen_ == Screen::BattleBalls || screen_ == Screen::BattleBag;
+                              screen_ == Screen::BattleBalls;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
   screen.setContentMargin(
@@ -1873,8 +1882,7 @@ void PokemonActivity::renderFocused() {
     }
     return;
   }
-  if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls ||
-      screen_ == Screen::BattleBag) {
+  if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
     renderBattleHud();
     return;
   }
