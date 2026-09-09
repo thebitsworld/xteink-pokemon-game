@@ -155,6 +155,8 @@ TEST(PokemonService, CreatesOneDurableStarterWithChosenIdentity) {
   EXPECT_STREQ(snapshot.party[0].nickname.data(), "CinderVolt");
   EXPECT_TRUE(pokemon::isSpeciesMarked(snapshot.state.seenSpecies, 25));
   EXPECT_TRUE(pokemon::isSpeciesMarked(snapshot.state.caughtSpecies, 25));
+  EXPECT_EQ(snapshot.state.bagCounts[0], 10U);  // starting gift: 10 Poke Balls (item id 7)
+  EXPECT_EQ(snapshot.state.bagCounts[4], 1U);   // starting gift: 1 Potion (item id 11)
 
   pokemon::PokemonStore reopened;
   ASSERT_EQ(reopened.begin(), pokemon::StoreBeginResult::Ready);

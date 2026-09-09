@@ -91,6 +91,14 @@ ServiceStatus PokemonService::createStarter(const uint16_t speciesId, const Gend
   if (!markSpecies(state.seenSpecies, speciesId) || !markSpecies(state.caughtSpecies, speciesId)) {
     return ServiceStatus::Invalid;
   }
+  // Starting gift, same spirit as a new Pokemon game handing over a few
+  // balls and a potion before the first real encounter: 10 Poke Balls (item
+  // id 7 -> bagCounts[0]) and 1 Potion (item id 11 -> bagCounts[4]). The
+  // starter itself needs no explicit full-HP/PP write - peekBattleMoves()
+  // already synthesizes full HP/PP (no battle-store entry exists yet for a
+  // brand-new record).
+  state.bagCounts[0] = 10;
+  state.bagCounts[4] = 1;
   const RecordMutation mutation{starter.recordId, starter, RecordMutationKind::Append};
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to create starter");
@@ -577,7 +585,8 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
     const uint16_t maxHp = battleMaxHp(stats->hp, levelForXp(record.totalXp));
 
     BattleRecordEntry healed = *existing;
-    const uint32_t healedHp = static_cast<uint32_t>(healed.currentHp) + static_cast<uint32_t>(HP_HEAL_PER_MINUTE) * minutes;
+    const uint32_t healedHp =
+        static_cast<uint32_t>(healed.currentHp) + static_cast<uint32_t>(HP_HEAL_PER_MINUTE) * minutes;
     healed.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healedHp));
 
     const uint16_t ppTicks = static_cast<uint16_t>(minutes / MINUTES_PER_PP_TICK);
@@ -642,7 +651,7 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
 }
 
 BattleTurnResult PokemonService::resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent,
-                                                    const uint8_t playerMoveSlot) {
+                                                   const uint8_t playerMoveSlot) {
   return stepBattle(player, opponent, playerMoveSlot, random_);
 }
 
