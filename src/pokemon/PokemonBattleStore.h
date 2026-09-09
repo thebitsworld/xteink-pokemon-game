@@ -34,6 +34,12 @@ class PokemonBattleStore {
   // they were before the call in either case.
   bool upsertEntry(const BattleRecordEntry& entry);
   bool removeEntry(uint32_t recordId);
+  // Writes an empty state (same double-buffer commit as upsertEntry/
+  // removeEntry - lands on the currently-inactive slot, verified, then flips
+  // active). Used by PokemonService::reset() so a fresh game doesn't read
+  // back a previous playthrough's leftover HP/PP/moveset once record ids
+  // start over from 1 again.
+  bool reset();
 
  private:
   bool writeState(const BattleStoreState& state) const;

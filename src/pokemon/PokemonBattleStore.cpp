@@ -176,6 +176,11 @@ bool PokemonBattleStore::removeEntry(const uint32_t recordId) {
   return writeState(candidate);
 }
 
+bool PokemonBattleStore::reset() {
+  if (!loaded_) load();
+  return writeState(BattleStoreState{});
+}
+
 PokemonBattleStore& devicePokemonBattleStore() {
   static PokemonBattleStore store;
   return store;

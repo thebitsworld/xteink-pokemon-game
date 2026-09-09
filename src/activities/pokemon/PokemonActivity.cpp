@@ -409,7 +409,9 @@ int PokemonActivity::logicalCount() const {
     case Screen::ResetFinal:
       return screen_ == Screen::Move ? snapshot_.partyCount : 2;
     case Screen::Menu:
-      return 9;
+      return 8;
+    case Screen::Settings:
+      return 2;
     case Screen::Party:
       return pokemon::PARTY_SIZE;
     case Screen::Actions: {
@@ -835,17 +837,22 @@ void PokemonActivity::activate() {
         setScreen(Screen::GymList);
       else if (selected_ == 6)
         setScreen(Screen::Badges);
-      else if (selected_ == 7) {
+      else
+        setScreen(Screen::Settings);
+      return;
+    case Screen::Settings:
+      if (selected_ == 0) {
         const uint8_t previous = SETTINGS.pokemonHomeScreen;
         SETTINGS.pokemonHomeScreen = previous == 0 ? 1 : 0;
         if (!SETTINGS.saveToFile()) {
           SETTINGS.pokemonHomeScreen = previous;
-          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Settings);
         } else {
-          setScreen(Screen::Menu, selected_);
+          setScreen(Screen::Settings, selected_);
         }
-      } else
+      } else {
         setScreen(Screen::ResetFirst);
+      }
       return;
     case Screen::Party:
     case Screen::Pc: {
@@ -1391,16 +1398,16 @@ void PokemonActivity::activate() {
       if (selected_ == 0)
         setScreen(Screen::ResetFinal);
       else
-        setScreen(Screen::Menu);
+        setScreen(Screen::Settings);
       return;
     case Screen::ResetFinal:
       if (selected_ == 0 && service_.reset() == pokemon::ServiceStatus::Ok) {
         snapshot_ = {};
         setScreen(Screen::Starter);
       } else if (selected_ == 0)
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Settings);
       else
-        setScreen(Screen::Menu);
+        setScreen(Screen::Settings);
       return;
     case Screen::Message:
       setScreen(returnScreen_);
@@ -1478,6 +1485,10 @@ void PokemonActivity::goBack() {
       return;
     case Screen::Message:
       setScreen(returnScreen_);
+      return;
+    case Screen::ResetFirst:
+    case Screen::ResetFinal:
+      setScreen(Screen::Settings);
       return;
     default:
       setScreen(Screen::Menu);
@@ -1603,18 +1614,21 @@ void PokemonActivity::buildRows() {
         row(local, index == 0 ? tr(STR_YES) : tr(STR_NO));
         break;
       case Screen::Menu:
-        if (index == 7) {
+        row(local, index == 0   ? tr(STR_POKEMON_PARTY)
+                   : index == 1 ? tr(STR_POKEDEX)
+                   : index == 2 ? tr(STR_POKEMON_PC_BOX)
+                   : index == 3 ? tr(STR_POKEMON_PC_SORT)
+                   : index == 4 ? tr(STR_POKEMON_BAG)
+                   : index == 5 ? tr(STR_POKEMON_GYM_BATTLE)
+                   : index == 6 ? tr(STR_POKEMON_BADGES)
+                                : tr(STR_POKEMON_SETTINGS));
+        break;
+      case Screen::Settings:
+        if (index == 0) {
           row(local, tr(STR_POKEMON_HOME_SCREEN),
               SETTINGS.pokemonHomeScreen != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
         } else {
-          row(local, index == 0   ? tr(STR_POKEMON_PARTY)
-                     : index == 1 ? tr(STR_POKEDEX)
-                     : index == 2 ? tr(STR_POKEMON_PC_BOX)
-                     : index == 3 ? tr(STR_POKEMON_PC_SORT)
-                     : index == 4 ? tr(STR_POKEMON_BAG)
-                     : index == 5 ? tr(STR_POKEMON_GYM_BATTLE)
-                     : index == 6 ? tr(STR_POKEMON_BADGES)
-                                  : tr(STR_POKEMON_RESET));
+          row(local, tr(STR_POKEMON_RESET));
         }
         break;
       case Screen::Party:
@@ -2727,6 +2741,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_GYM_BATTLE);
   else if (screen_ == Screen::Badges)
     title = tr(STR_POKEMON_BADGES);
+  else if (screen_ == Screen::Settings || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal)
+    title = tr(STR_POKEMON_SETTINGS);
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware())
     TouchHeaderBackButton::draw(renderer, uiTarget_, header, title, false);

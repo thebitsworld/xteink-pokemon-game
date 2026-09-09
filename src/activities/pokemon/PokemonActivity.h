@@ -55,6 +55,7 @@ class PokemonActivity final : public Activity {
     BattleSwitch,
     GymList,
     Badges,
+    Settings,
     ResetFirst,
     ResetFinal,
     Message,

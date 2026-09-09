@@ -669,6 +669,17 @@ ServiceStatus PokemonService::reset() {
     LOG_ERR("PokemonService", "Failed to reset Pokemon save");
     return ServiceStatus::StorageError;
   }
+  // Best-effort: a fresh game reassigns record ids starting from 1 again, so
+  // leaving a previous playthrough's HP/PP/moveset behind under those same
+  // ids would silently hand new Pokemon someone else's battle data the first
+  // time they're looked up. Still report the reset itself as successful if
+  // only this part fails - the main save (the part the player actually sees
+  // and cares about) is already wiped either way, and a stray leftover
+  // battle-store entry gets overwritten the moment its Pokemon fights once
+  // for real.
+  if (!battleStore_.reset()) {
+    LOG_ERR("PokemonService", "Failed to reset Pokemon battle store");
+  }
   return ServiceStatus::Ok;
 }
 

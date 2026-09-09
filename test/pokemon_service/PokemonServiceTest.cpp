@@ -500,6 +500,33 @@ TEST(PokemonService, SaveBattleEntryPersistsAndAFollowingLoadReturnsTheSavedVers
   EXPECT_EQ(reloaded.status, pokemon::Ailment::Poison);
 }
 
+TEST(PokemonService, ResetAlsoClearsTheBattleStoreSoTheNextStarterDoesNotInheritLeftoverBattleData) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu (species 25), level 5, recordId 1
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.currentHp = 1;
+  entry.status = pokemon::Ailment::Poison;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+  ASSERT_NE(battleStore.findEntry(1), nullptr);
+
+  ASSERT_EQ(service.reset(), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(battleStore.findEntry(1), nullptr);
+
+  // A fresh game reassigns record ids from 1 again - a different species
+  // this time, so leftover Pikachu battle data landing on it would be
+  // obviously wrong rather than coincidentally looking right.
+  ASSERT_EQ(service.createStarter(1, pokemon::Gender::Male, ""), pokemon::ServiceStatus::Ok);
+  pokemon::BattleRecordEntry freshEntry{};
+  ASSERT_EQ(service.loadBattleEntry(1, freshEntry), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(freshEntry.status, pokemon::Ailment::None);
+  EXPECT_EQ(freshEntry.currentHp, pokemon::battleMaxHp(pokemon::baseStatsFor(1)->hp, 5));  // full HP, not the old 1
+}
+
 TEST(PokemonService, ConsumeBagItemDecrementsStonesAndNonStoneItemsInTheirOwnArrays) {
   Storage.clear();
   pokemon::PokemonStore store;
