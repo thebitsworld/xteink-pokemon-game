@@ -2135,7 +2135,13 @@ void PokemonActivity::renderBattleHud() {
   constexpr int dotRowHeight = dotSize + 8;
 
   const int hudTop = contentTop;
-  const int hudBottom = battleMenuTop() - 12;
+  // Screen::Battle computes its own menu top (battleMenuTop(), see there) -
+  // it isn't a list screen anymore, so listBounds_ is never set for it.
+  // BattleMoves/BattleBalls are still ordinary bottom-anchored lists
+  // (buildList() sets listBounds_ for them using their own item count, e.g.
+  // battlePlayerMoveCount() - battleMenuTop() would use the wrong count
+  // here since logicalCount() means something different per screen).
+  const int hudBottom = (screen_ == Screen::Battle ? battleMenuTop() : listBounds_.y) - 12;
 
   // Compact box: name/nickname + level on top; below that, the HP bar with
   // its "cur/max" text right after it (and status past that) vertically
