@@ -42,6 +42,7 @@ class PokemonActivity final : public Activity {
     Bag,
     BagEvolution,
     BagMedicine,
+    BagBalls,
     BagMachine,
     ItemTarget,
     Pokedex,

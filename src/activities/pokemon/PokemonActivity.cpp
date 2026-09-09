@@ -356,11 +356,13 @@ int PokemonActivity::logicalCount() const {
     case Screen::PcOrder:
       return 3;
     case Screen::Bag:
-      return 3;
+      return 4;
     case Screen::BagEvolution:
       return pokemon::EVOLUTION_ITEM_COUNT;
     case Screen::BagMedicine:
       return static_cast<int>(bagItemCount(isMedicineCategory));
+    case Screen::BagBalls:
+      return 4;  // Poke/Great/Ultra/Master Ball - same fixed 4 as Screen::BattleBalls
     case Screen::BagMachine:
       return static_cast<int>(bagItemCount(isMachineCategory));
     case Screen::ItemTarget:
@@ -877,7 +879,16 @@ void PokemonActivity::activate() {
       setScreen(Screen::Pc);
       return;
     case Screen::Bag:
-      setScreen(selected_ == 0 ? Screen::BagEvolution : selected_ == 1 ? Screen::BagMedicine : Screen::BagMachine);
+      setScreen(selected_ == 0   ? Screen::BagEvolution
+                : selected_ == 1 ? Screen::BagMedicine
+                : selected_ == 2 ? Screen::BagBalls
+                                 : Screen::BagMachine);
+      return;
+    case Screen::BagBalls:
+      // View-only: balls only do anything mid-battle against a wild
+      // Pokemon (Screen::BattleBalls), which is a completely different
+      // screen/context - there's nothing meaningful to "activate" here.
+      showMessage(tr(STR_POKEMON_BAG_BALLS_INFO), Screen::BagBalls);
       return;
     case Screen::BagEvolution:
       bagCategory_ = BagCategory::Evolution;
@@ -1229,6 +1240,17 @@ void PokemonActivity::activate() {
       return;
     }
     case Screen::BattleBalls: {
+      // Defense-in-depth (GĐ19): the only path into this screen already
+      // gates on !isGym (see Screen::Battle's selection handler above), so
+      // this should never be true - but a ball thrown at a trainer's
+      // Pokemon would be a real gameplay bug, not just a cosmetic one, so
+      // this is worth guarding directly rather than trusting the one call
+      // site to always stay correct as the menu keeps changing (GĐ18 added
+      // BAG in between BALL and SWITCH, for example).
+      if (gymChallengeIndex_ != 0) {
+        setScreen(Screen::Battle);
+        return;
+      }
       if (selected_ < 0 || selected_ >= 4) return;
       const auto ballItemIndex = static_cast<size_t>(selected_);
       if (snapshot_.state.bagCounts[ballItemIndex] == 0) {
@@ -1346,6 +1368,7 @@ void PokemonActivity::goBack() {
       return;
     case Screen::BagEvolution:
     case Screen::BagMedicine:
+    case Screen::BagBalls:
     case Screen::BagMachine:
       setScreen(Screen::Bag);
       return;
@@ -1621,6 +1644,7 @@ void PokemonActivity::buildRows() {
       case Screen::Bag:
         row(local, index == 0   ? tr(STR_POKEMON_BAG_EVOLUTION)
                    : index == 1 ? tr(STR_POKEMON_BAG_MEDICINE)
+                   : index == 2 ? tr(STR_POKEMON_BAG_BALLS)
                                 : tr(STR_POKEMON_BAG_MACHINES));
         break;
       case Screen::BagEvolution: {
@@ -1628,6 +1652,17 @@ void PokemonActivity::buildRows() {
         char count[16];
         snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[index]);
         row(local, itemName(item), count);
+        break;
+      }
+      case Screen::BagBalls: {
+        // Same fixed id/bagCounts indexing Screen::BattleBalls already uses
+        // (ids 7-10 right after the 6 evolution stones) - this screen is
+        // purely a read-only view of the same counts, no separate storage.
+        const pokemon::ItemData* item =
+            pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + index));
+        char count[16];
+        snprintf(count, sizeof(count), "× %u", snapshot_.state.bagCounts[index]);
+        row(local, item == nullptr ? "?" : item->name, count);
         break;
       }
       case Screen::BagMedicine:
@@ -2389,6 +2424,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_BAG_EVOLUTION);
   else if (screen_ == Screen::BagMedicine)
     title = tr(STR_POKEMON_BAG_MEDICINE);
+  else if (screen_ == Screen::BagBalls)
+    title = tr(STR_POKEMON_BAG_BALLS);
   else if (screen_ == Screen::BagMachine)
     title = tr(STR_POKEMON_BAG_MACHINES);
   else if (screen_ == Screen::Pokedex)
