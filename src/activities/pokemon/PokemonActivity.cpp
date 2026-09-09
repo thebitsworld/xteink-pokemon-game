@@ -46,6 +46,18 @@ const char* genderText(const pokemon::Gender gender) {
   return "";
 }
 
+// Compact "M"/"F" for the Party/ItemTarget row's name/level/gender line
+// (renderPartyRowHealth()) - the traditional ♂/♀ glyphs aren't in this
+// device's font (a fixed Latin/Hebrew/Arabic subset baked in at build time),
+// so a single letter is the closest available to a "symbol" without
+// regenerating that font asset. Genderless/Unknown has nothing meaningful to
+// show, matching genderText()'s own "" for Unknown.
+const char* genderAbbrev(const pokemon::Gender gender) {
+  if (gender == pokemon::Gender::Male) return "M";
+  if (gender == pokemon::Gender::Female) return "F";
+  return "";
+}
+
 const char* typeName(const pokemon::PokemonType type) {
   switch (type) {
     case pokemon::PokemonType::Normal:
@@ -1605,6 +1617,16 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_EMPTY));
           break;
         }
+        if (showsPartyHealthRows() && (screen_ == Screen::Party || screen_ == Screen::ItemTarget)) {
+          // Name/level/gender is drawn entirely by renderPartyRowHealth()
+          // alongside the HP bar instead - that keeps both lines sharing one
+          // left edge instead of this generic label/value text (anchored to
+          // the list's sidePadding) and the HP bar (anchored to the icon)
+          // starting at two different x's. Still register the row (empty
+          // label) so touch/selection keep working.
+          row(local, "");
+          break;
+        }
         const auto& record = snapshot_.party[index];
         char value[24];
         snprintf(value, sizeof(value), "%s %u  %s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
@@ -2548,52 +2570,103 @@ void PokemonActivity::renderRowArt() {
       // The 40x30 menu files are intentionally native-sized and GfxRenderer
       // does not upscale. Use the same approved icon's 120x90 presentation
       // copy so it can be reduced cleanly into the row instead of appearing
-      // as a tiny 40x30 mark on the X3 panel.
-      pokemon::drawPokemonSpeciesArt(renderer, speciesId, true, Rect{listBounds_.x + 5, rowY + 2, 80, 60});
+      // as a tiny 40x30 mark on the X3 panel. Vertically centered in the row
+      // (equals the old hardcoded +2 for a plain 64px row; keeps the icon
+      // centered against the two-line text block on the taller 96px health
+      // rows too instead of hugging the top).
+      constexpr int speciesIconH = 60;
+      pokemon::drawPokemonSpeciesArt(
+          renderer, speciesId, true,
+          Rect{listBounds_.x + 5, rowY + pokemon::pokemonCenteredOffset(rowHeight_, speciesIconH), 80, speciesIconH});
     }
     if (showsPartyHealthRows()) {
       if ((screen_ == Screen::Party) && start + local < snapshot_.partyCount) {
-        renderPartyRowHealth(rowY, snapshot_.party[start + local]);
+        renderPartyRowHealth(rowY, snapshot_.party[start + local], true);
       } else if (screen_ == Screen::BattleSwitch && battleSwitchSlot >= 0) {
-        renderPartyRowHealth(rowY, snapshot_.party[battleSwitchSlot]);
+        // BattleSwitch keeps its own name/level/gender text via the generic
+        // list widget (a different buildRows() case than Party/ItemTarget) -
+        // only the HP bar/status strip is custom-drawn here, so the name
+        // line must not be drawn a second time.
+        renderPartyRowHealth(rowY, snapshot_.party[battleSwitchSlot], false);
       } else if (screen_ == Screen::ItemTarget && start + local < snapshot_.partyCount) {
-        renderPartyRowHealth(rowY, snapshot_.party[start + local]);
+        renderPartyRowHealth(rowY, snapshot_.party[start + local], true);
       }
     }
   }
 }
 
-// Drawn in the taller row's bottom strip (see rowHeightForScreen()) for
-// Screen::Party and, since GĐ18, Screen::ItemTarget when picking who
-// receives a Medicine item (itemTargetShowsHealth()) - below the list
-// widget's own centered icon/name/level text, so a fixed offset from the
-// row's bottom edge stays clear of that text regardless of its exact line
-// height. peekBattleMoves() is read-only (never creates or writes a
-// battle-store entry), matching every other read-only HP peek in this file
-// (BattleSwitch rows, Summary, usablePartySlotAt()).
-void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record) {
+// Drawn in the taller row (see rowHeightForScreen()) for Screen::Party and,
+// since GĐ18, Screen::ItemTarget when picking who receives a Medicine item
+// (showsPartyHealthRows()) - a self-contained two-line block to the right of
+// the row's icon: name/level/gender on top (`drawNameLine`), HP bar/text/
+// status underneath, both starting at the same left edge (textX). Name/
+// level/gender used to be the generic list widget's own text (anchored to
+// its own sidePadding) while the HP bar was anchored to the icon instead - two
+// different x's, which is what actually read as messy, not the two-line idea
+// itself. BattleSwitch passes drawNameLine=false and keeps its name/level/
+// gender text from the generic list widget (a different buildRows() case,
+// its own value string), so only the bar/status strip in the row's bottom
+// area is drawn here for it, exactly as before. peekBattleMoves() is
+// read-only (never creates or writes a battle-store entry), matching every
+// other read-only HP peek in this file (Summary, usablePartySlotAt()).
+void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record,
+                                           const bool drawNameLine) {
   const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
   const uint16_t maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp));
 
+  constexpr int iconWidth = 80;
+  const int textX = listBounds_.x + 5 + iconWidth + 14;
+  const int textRight = listBounds_.x + listBounds_.width - 8;
   constexpr int barH = 8;
-  const int barY = rowY + rowHeight_ - 22;
-  const int barX = listBounds_.x + 5;
   constexpr int barW = 96;
+
+  int barY;
+  int hpTextY;
+  int statusY;
+  int barX;
+  if (drawNameLine) {
+    const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
+    const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
+    constexpr int lineGap = 8;
+    const int blockTop = rowY + pokemon::pokemonCenteredOffset(rowHeight_, lineHeight1 + lineGap + lineHeight2);
+    const int line2Top = blockTop + lineHeight1 + lineGap;
+
+    char meta[16];
+    snprintf(meta, sizeof(meta), "%s %u %s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
+             genderAbbrev(record.gender));
+    const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
+    const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - 10);
+    const std::string name = renderer.truncatedText(
+        UI_12_FONT_ID, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
+        nameMaxWidth, EpdFontFamily::BOLD);
+    renderer.drawText(UI_12_FONT_ID, textX, blockTop, name.c_str(), true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_12_FONT_ID, textRight - metaWidth, blockTop, meta);
+
+    barX = textX;
+    barY = line2Top + std::max(0, (lineHeight2 - barH) / 2);
+    hpTextY = line2Top;
+    statusY = line2Top;
+  } else {
+    barX = listBounds_.x + 5;
+    barY = rowY + rowHeight_ - 22;
+    hpTextY = barY - 3;
+    statusY = barY - 3;
+  }
+
   renderer.drawRect(barX, barY, barW, barH, true);
   const int filled = maxHp == 0 ? 0 : (barW - 2) * std::min<uint16_t>(entry.currentHp, maxHp) / maxHp;
   if (filled > 0) renderer.fillRect(barX + 1, barY + 1, filled, barH - 2, true);
 
   char hpText[16];
   snprintf(hpText, sizeof(hpText), "%u/%u", entry.currentHp, maxHp);
-  renderer.drawText(UI_10_FONT_ID, barX + barW + 8, barY - 3, hpText);
+  renderer.drawText(UI_10_FONT_ID, barX + barW + 8, hpTextY, hpText);
 
   if (entry.status != pokemon::Ailment::None) {
     const char* status = statusAbbrev(entry.status);
-    renderer.drawText(
-        UI_10_FONT_ID,
-        listBounds_.x + listBounds_.width - 8 - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
-        barY - 3, status, true, EpdFontFamily::BOLD);
+    const int statusRight = drawNameLine ? textRight : listBounds_.x + listBounds_.width - 8;
+    renderer.drawText(UI_10_FONT_ID, statusRight - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
+                      statusY, status, true, EpdFontFamily::BOLD);
   }
 }
 

@@ -121,7 +121,7 @@ class PokemonActivity final : public Activity {
   bool showsPartyHealthRows() const;
   int rowsPerPage() const;
   int pageStart() const;
-  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record);
+  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record, bool drawNameLine);
   bool isListScreen() const;
   uint32_t selectedRecordId() const;
   static void screenBuilder(UiApp::ScreenType& screen, void* user);
