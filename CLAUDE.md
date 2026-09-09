@@ -2,6 +2,10 @@
 
 Context notes for Claude in a later session (or on another machine) to continue this work without rediscovering everything from scratch. This file is NOT official project documentation — it's just a handoff notebook, and can be cleaned up/deleted once the in-progress work is done.
 
+## Next session TODO (2026-09-09, not started)
+
+- **Bug**: HP-restoring items (Potion/Super Potion/Hyper Potion/Full Restore etc.) can currently be used on a fainted Pokémon (0 HP) — they should only work while HP > 0. A fainted Pokémon should require a revival item (`Revive`/`Max Revive`, item ids 15/16 in `scripts/data/pokemon-items.csv`, category `Medicine`) instead. Check `PokemonService::useConsumable()` (`src/pokemon/PokemonService.cpp:392`) — likely needs a branch that rejects (or routes differently) a non-revive Medicine item when `currentHp == 0`, and possibly a "can't heal a fainted Pokémon" message. Also check the `ItemTarget`/`BattleBag` UI paths in `PokemonActivity.cpp` so a fainted party member isn't offered as a valid target for a plain HP potion (or is offered but the action visibly fails with a clear reason).
+
 ## What this project is
 
 This is a fork of **CrossInk** (ESP32-C3 firmware for the Xteink X3/X4 e-ink reader), extended with a **Pokémon game module** — Pokémon leveling up based on real reading time (not pure grinding). See [docs/pokemon-game.md](docs/pokemon-game.md) (user-facing doc) and [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) (detailed technical doc — **read this one first** to understand the game mechanics).
