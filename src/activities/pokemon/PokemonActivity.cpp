@@ -2189,13 +2189,21 @@ void PokemonActivity::renderFocused() {
   }
 }
 
-// Top Y of the 2-column command grid, anchored to the bottom of the screen
-// exactly like the generic list's own bottomAnchored math (buildList()) -
-// just with ceil(count/2) rows instead of `count` rows, since two commands
-// share each physical row.
+// Top Y of the 2-column command/move grid, anchored to the bottom of the
+// screen exactly like the generic list's own bottomAnchored math
+// (buildList()) - just with ceil(count/2) rows instead of `count` rows,
+// since two commands/moves share each physical row.
+//
+// Screen::BattleMoves always reserves the full 2 rows (BATTLE_MOVE_SLOTS)
+// here rather than however many moves this particular Pokemon actually
+// knows: the rest of the battle HUD (opponent/player boxes, the log box)
+// sizes itself off this same top, so a Pokemon with only 1-2 moves would
+// otherwise reflow - and visually shift - the whole HUD every time FIGHT is
+// opened, instead of just showing fewer buttons in an otherwise fixed-size
+// grid.
 int PokemonActivity::battleMenuTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int count = logicalCount();
+  const int count = screen_ == Screen::BattleMoves ? static_cast<int>(pokemon::BATTLE_MOVE_SLOTS) : logicalCount();
   const int rows = (count + BATTLE_MENU_COLUMNS - 1) / BATTLE_MENU_COLUMNS;
   return renderer.getScreenHeight() - metrics.buttonHintsHeight - rows * BATTLE_MENU_ROW_HEIGHT - 8;
 }
