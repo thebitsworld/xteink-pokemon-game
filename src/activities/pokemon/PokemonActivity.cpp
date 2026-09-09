@@ -2615,8 +2615,12 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
   const uint16_t maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp));
 
-  constexpr int iconWidth = 80;
-  const int textX = listBounds_.x + 5 + iconWidth + 8;
+  // Matches the generic list widget's own sidePadding for artwork rows
+  // (pokemonListPresentation()) so text clears its selection-triangle
+  // marker (markerInset=86, a 12px-wide triangle centered in the row) -
+  // basing this on the icon's own width instead left only ~7px of
+  // clearance, letting the marker land on top of the HP bar/text below it.
+  const int textX = listBounds_.x + 104;
   const int textRight = listBounds_.x + listBounds_.width - 8;
   constexpr int barH = 8;
 
@@ -2626,15 +2630,14 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   int barX;
   int barW;
   if (drawNameLine) {
-    // Stretches to fill the same width the name line uses, instead of a
-    // fixed width that left a big dead gap between the HP text and the
-    // row's right edge - reserves just enough room after it for "999/999"
-    // and a 3-letter status abbreviation (BRN/PSN/...), whether or not this
-    // particular Pokemon actually has one, so the bar's width (and the
-    // whole block's visual rhythm) stays constant row to row.
+    // A bar that stretched to fill the whole remaining line read as too
+    // long/heavy for what is otherwise a compact two-line row - cap it at a
+    // reasonable width instead of always maximizing it, while still letting
+    // it shrink further on a narrower screen.
+    constexpr int maxBarW = 130;
     constexpr int hpTextReserve = 56;
     constexpr int statusReserve = 44;
-    barW = std::max(40, textRight - textX - hpTextReserve - statusReserve);
+    barW = std::min(maxBarW, std::max(40, textRight - textX - hpTextReserve - statusReserve));
     const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
     const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
     constexpr int lineGap = 8;
