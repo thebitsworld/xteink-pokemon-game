@@ -1,5 +1,32 @@
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-09
+
+### Added
+
+- A full turn-based battle system: FIGHT, BAG, SWITCH, and RUN, with real Gen 1 type effectiveness and all six status conditions (sleep, paralysis, poison, burn, freeze, confusion).
+- Catching is now a real encounter: weaken a wild Pokémon in battle, then throw a Poké, Great, Ultra, or Master Ball to try to catch it. All four ball types are found through reading, with higher-tier balls unlocking as your current book's progress increases.
+- Pokémon learn moves by level using authentic Pokémon Red learnsets, hold up to four moves at a time, and can be taught 55 TMs/HMs found through reading. A new Moves screen (Party > Actions > Moves) lets you actively swap or forget moves at any time, not just when leveling up.
+- Potions, status-curing items, PP restores, and Rare Candy are now usable, both from the Bag outside battle and mid-battle on any Party member. The Bag is organized into Evolution, Medicine, Balls, and TM/HM categories that only show what you actually own.
+- All 8 Gym Leaders and the Elite Four are challengeable in order, each with their authentic Pokémon Red team and moveset. Defeating them earns badges, viewable on a new Badges screen.
+- Fainting no longer ends a battle immediately: switch to another Party member and keep fighting. A battle is only lost when the whole Party is out of HP or you run.
+- The Battle screen was redesigned in the classic Pokémon Red diagonal layout, with HP bars, a row of dots showing how many Pokémon each side has left, and a scrolling battle log.
+- The Party and Summary screens now show each Pokémon's HP bar and status condition at a glance.
+- New starters begin fully prepared: full HP/PP and a starting gift of 10 Poké Balls and 1 Potion.
+- HP and PP recover gradually the more you read, and status conditions clear once a Pokémon is fully healed — you're never permanently stuck without a Potion.
+- A new Settings screen groups the "Show on Home Screen" toggle and Reset Game together; resetting now also clears battle data so a new save never inherits leftover HP, status, or moves from a previous playthrough.
+
+### Changed
+
+- Renamed "Reset Pokémon" to "Reset Game" and moved it into the new Settings screen.
+- The README was rewritten with an up-to-date gameplay overview and a clearer install guide, and now credits [padge01](https://github.com/padge01/xteink-pokemon-game) for the original idea of a reading-powered Pokémon companion that this project builds on.
+
+### Fixed
+
+- Long notifications and the battle log now wrap properly instead of overflowing the screen in portrait orientation.
+- Gym and Elite Four teams use their correct, complete Pokémon Red rosters and movesets (previously trimmed for display cost, and briefly missing accurate move data for two Gym members).
+- TM/HM teaching now correctly checks whether a Pokémon's type can actually learn that move.
+
 ## [0.1.1] - 2026-09-02
 
 ### Added
