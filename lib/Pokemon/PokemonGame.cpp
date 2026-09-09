@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 #include "PokemonBattleTypes.h"
 #include "PokemonSpecies.h"
@@ -252,13 +253,16 @@ void incrementItemCount(PokemonState& state, const uint8_t itemId) {
   }
 }
 
-// Builds a drop_weight-weighted candidate list across all ITEM_COUNT items
-// (not just the original 6 evolution stones), skipping any item already at
+// Builds a drop_weight-weighted candidate list, skipping any item already at
 // its per-slot storage cap. When `preferOwnedNeeds` is set, only evolution
 // stones/Link Cable a currently-owned Pokemon can actually evolve with are
-// offered - mirrors the pre-item-expansion behavior exactly.
+// offered - mirrors the pre-item-expansion behavior exactly. Otherwise, when
+// `categoryFilter` is set, only items in that one category are offered - see
+// `chooseItemCategory()` for why the fallback roll goes through a category
+// first instead of flattening every item into one big weighted list.
 uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds,
-                             const bool preferOwnedNeeds, std::array<uint8_t, ITEM_COUNT>& candidateItemIds,
+                             const bool preferOwnedNeeds, const std::optional<ItemCategory> categoryFilter,
+                             std::array<uint8_t, ITEM_COUNT>& candidateItemIds,
                              std::array<uint32_t, ITEM_COUNT>& candidateWeights, size_t& candidateCount) {
   candidateCount = 0;
   uint32_t totalWeight = 0;
@@ -270,6 +274,7 @@ uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeed
     if (itemCountIsFull(state, static_cast<uint8_t>(itemId))) continue;
     const ItemData* item = itemData(static_cast<uint8_t>(itemId));
     if (item == nullptr || item->dropWeight == 0) continue;
+    if (categoryFilter.has_value() && item->category != *categoryFilter) continue;
     candidateItemIds[candidateCount] = static_cast<uint8_t>(itemId);
     candidateWeights[candidateCount] = item->dropWeight;
     totalWeight += item->dropWeight;
@@ -278,17 +283,77 @@ uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeed
   return totalWeight;
 }
 
+struct CategoryWeight {
+  ItemCategory category;
+  uint32_t weight;
+};
+
+// Category-level weights for the fallback item roll (no evolution stone
+// currently needed). Without this, a category's odds of being picked at all
+// depend on how many individual items happen to sit in it in the data file -
+// Machine (55 TM/HM ids) would drown out Ball (only 4 ids) even if every
+// individual TM/HM has a low drop_weight, purely because there are so many
+// of them to sum up. Each item's own drop_weight column still decides which
+// specific item wins *within* whichever category gets picked here (Poke Ball
+// >> Master Ball), so this table only needs to say how common the category
+// itself should feel.
+constexpr CategoryWeight CATEGORY_DROP_WEIGHTS[] = {
+    {ItemCategory::Ball, 25},       {ItemCategory::Stone, 10},     {ItemCategory::Medicine, 20},
+    {ItemCategory::StatusCure, 15}, {ItemCategory::PPRestore, 10}, {ItemCategory::Machine, 15},
+    {ItemCategory::Candy, 5},
+};
+
+bool categoryHasAvailableItem(const PokemonState& state, const ItemCategory category) {
+  for (uint16_t itemId = 1; itemId <= ITEM_COUNT; ++itemId) {
+    const ItemData* item = itemData(static_cast<uint8_t>(itemId));
+    if (item == nullptr || item->category != category || item->dropWeight == 0) continue;
+    if (itemCountIsFull(state, static_cast<uint8_t>(itemId))) continue;
+    return true;
+  }
+  return false;
+}
+
+bool chooseItemCategory(const PokemonState& state, const RandomSource& random, ItemCategory& category) {
+  std::array<ItemCategory, std::size(CATEGORY_DROP_WEIGHTS)> eligible{};
+  std::array<uint32_t, std::size(CATEGORY_DROP_WEIGHTS)> weights{};
+  size_t count = 0;
+  uint32_t totalWeight = 0;
+  for (const CategoryWeight& entry : CATEGORY_DROP_WEIGHTS) {
+    if (!categoryHasAvailableItem(state, entry.category)) continue;
+    eligible[count] = entry.category;
+    weights[count] = entry.weight;
+    totalWeight += entry.weight;
+    ++count;
+  }
+  if (count == 0 || totalWeight == 0) return false;
+
+  category = eligible[count - 1U];
+  if (count == 1) return true;  // skip the roll when there's only one possible outcome (see createItem)
+  uint32_t roll = 0;
+  if (!randomBelow(random, totalWeight, roll)) return false;
+  for (size_t index = 0; index < count; ++index) {
+    if (roll < weights[index]) {
+      category = eligible[index];
+      return true;
+    }
+    roll -= weights[index];
+  }
+  return true;
+}
+
 bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds, const RandomSource& random,
                 bool& created) {
   created = false;
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
-  uint32_t totalWeight =
-      buildItemCandidates(state, ownedEvolutionNeeds, true, candidateItemIds, candidateWeights, candidateCount);
+  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, std::nullopt, candidateItemIds,
+                                             candidateWeights, candidateCount);
   if (candidateCount == 0) {
-    totalWeight =
-        buildItemCandidates(state, ownedEvolutionNeeds, false, candidateItemIds, candidateWeights, candidateCount);
+    ItemCategory category{};
+    if (!chooseItemCategory(state, random, category)) return true;
+    totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, false, category, candidateItemIds, candidateWeights,
+                                      candidateCount);
   }
   if (candidateCount == 0 || totalWeight == 0) return true;
 

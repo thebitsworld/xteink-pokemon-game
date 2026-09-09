@@ -253,7 +253,8 @@ void oneBoundaryQueuesItemEncounterAndEvolutionInOrder() {
   state.encounterMisses = 3;
   state.itemMisses = 19;
   constexpr uint32_t draws[] = {
-      0,           // Select the first forced item.
+      0,           // Select the Ball category.
+      0,           // Poke Ball wins within Ball.
       1, 0, 0, 0,  // Legendary miss, first species, minimum level, female roll.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -335,7 +336,8 @@ void forcedItemWithLevelGainQueuesItemBeforeEvolution() {
   state.readingMinuteRemainder = 59;
   state.itemMisses = 19;
   constexpr uint32_t draws[] = {
-      0,  // Select the first forced item.
+      0,  // Select the Ball category (first entry in CATEGORY_DROP_WEIGHTS).
+      0,  // Poke Ball wins within Ball (highest drop_weight there).
       2,  // Miss the encounter due at the hourly boundary.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -347,7 +349,7 @@ void forcedItemWithLevelGainQueuesItemBeforeEvolution() {
   CHECK(result.generatedEvent == pokemon::PendingEventKind::Evolution);
   CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::Item);
   CHECK(state.pendingEvents[1].kind == pokemon::PendingEventKind::Evolution);
-  CHECK(state.itemCounts[0] == 1);
+  CHECK(state.bagCounts[0] == 1);  // bagCounts[0] = item id 7 (Poke Ball)
   CHECK(sequence.index == std::size(draws));
 }
 
@@ -452,6 +454,46 @@ void everyEligibleRegularEncounterWeightIntervalSelectsItsSpecies() {
   }
 }
 
+void itemCategoryWeightsGiveEachCategoryAFairShareRegardlessOfHowManyItemsItHolds() {
+  // Machine (55 TM/HM ids) used to drown out Ball (only 4 ids) in a single
+  // flat roll across all 83 items, purely because it had far more rows in
+  // the data file. The category roll (GĐ 21) fixes that: each category's
+  // own fixed weight decides its odds, and only *within* the category that
+  // wins does per-item count/drop_weight matter again.
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  state.itemMisses = 19;
+  state.readingMinuteRemainder = 59;
+  constexpr uint32_t ballBoundaryDraws[] = {
+      24,  // Still lands in the Ball category (its range is [0,25)).
+      68,  // Master Ball wins within Ball (its range is [68,69), the top end).
+      2,   // Miss the encounter due at the same hourly boundary.
+  };
+  SequenceRandom ballSequence{ballBoundaryDraws, std::size(ballBoundaryDraws)};
+  pokemon::RandomSource ballRandom{&ballSequence, SequenceRandom::next};
+  const pokemon::CreditResult ballResult =
+      pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, ballRandom);
+  CHECK(ballResult.generatedEvent == pokemon::PendingEventKind::Item);
+  CHECK(state.bagCounts[3] == 1);  // bagCounts[3] = item id 10 (Master Ball)
+  CHECK(ballSequence.index == std::size(ballBoundaryDraws));
+
+  state = stateWithLeader(leader);
+  state.itemMisses = 19;
+  state.readingMinuteRemainder = 59;
+  constexpr uint32_t candyBoundaryDraws[] = {
+      99,  // Lands in the Candy category (its range is [95,100), the last one).
+      2,   // Miss the encounter - no item-level roll needed since Candy only
+           // has one member (Rare Candy), so nothing to choose between.
+  };
+  SequenceRandom candySequence{candyBoundaryDraws, std::size(candyBoundaryDraws)};
+  pokemon::RandomSource candyRandom{&candySequence, SequenceRandom::next};
+  const pokemon::CreditResult candyResult =
+      pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, candyRandom);
+  CHECK(candyResult.generatedEvent == pokemon::PendingEventKind::Item);
+  CHECK(state.bagCounts[17] == 1);  // bagCounts[17] = item id 24 (Rare Candy)
+  CHECK(candySequence.index == std::size(candyBoundaryDraws));
+}
+
 void itemRollAndPityPreferAnOwnedEvolutionNeed() {
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
@@ -489,15 +531,18 @@ void itemRollAndPityPreferAnOwnedEvolutionNeed() {
 
 void saturatedItemsDoNotRejectReadingCredit() {
   // All six evolution stones saturated no longer means "no item drop": the
-  // pool widened to 83 items (GĐ 4), so the roll falls through to the first
-  // eligible non-stone item (id 7, Poke Ball) instead of coming up empty.
+  // pool widened to 83 items (GĐ 4), so the roll falls through to the
+  // category roll (GĐ 21 - see CATEGORY_DROP_WEIGHTS) with Stone excluded,
+  // landing on the first eligible item in whichever category wins instead of
+  // coming up empty.
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
   state.itemCounts.fill(UINT16_MAX);
   state.itemMisses = 19;
   state.readingMinuteRemainder = 59;
   constexpr uint32_t draws[] = {
-      0,  // Select the first eligible item once all six stones are saturated (Poke Ball, id 7).
+      0,  // Select the Ball category (Stone is unavailable - all six saturated).
+      0,  // Select the first eligible item within Ball (Poke Ball, id 7).
       2,  // Miss the encounter due at the same hourly boundary.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -514,7 +559,7 @@ void saturatedItemsDoNotRejectReadingCredit() {
   CHECK(state.lifetimeMinutes == 1);
   CHECK(state.itemMisses == 0);
   CHECK(state.encounterMisses == 1);
-  CHECK(sequence.index == 2);
+  CHECK(sequence.index == 3);
   for (const uint16_t count : state.itemCounts) CHECK(count == UINT16_MAX);  // stones themselves stay untouched
   CHECK(state.bagCounts[0] == 1);                                            // bagCounts[0] = item id 7 (Poke Ball)
 
@@ -523,8 +568,9 @@ void saturatedItemsDoNotRejectReadingCredit() {
   state.itemMisses = 19;
   state.readingMinuteRemainder = 59;
   constexpr uint32_t fallbackDraws[] = {
-      0,  // Select Moon Stone from the non-saturated fallback items.
-      2,  // Miss the encounter due at the same hourly boundary.
+      25,  // Select the Stone category (skipping the first 25 for Ball).
+      0,   // Moon Stone wins within Stone (Thunder Stone is saturated).
+      2,   // Miss the encounter due at the same hourly boundary.
   };
   SequenceRandom fallbackSequence{fallbackDraws, std::size(fallbackDraws)};
   pokemon::RandomSource fallbackRandom{&fallbackSequence, SequenceRandom::next};
@@ -970,6 +1016,7 @@ int main() {
   multiHourCreditUsesLifetimeAtEachHourlyBoundary();
   progressBandsGateStagesAndEncounterLevels();
   everyEligibleRegularEncounterWeightIntervalSelectsItsSpecies();
+  itemCategoryWeightsGiveEachCategoryAFairShareRegardlessOfHowManyItemsItHolds();
   itemRollAndPityPreferAnOwnedEvolutionNeed();
   saturatedItemsDoNotRejectReadingCredit();
   legendaryEligibilityAndMewOverrideRegularEncounters();
