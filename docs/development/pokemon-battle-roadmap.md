@@ -416,6 +416,8 @@ Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch 
 
 **Sửa lần 2 (commit `e7c0968e`)**: chọn item trong `Screen::BattleBag` không dùng được. Nguyên nhân thật: bản đầu tự động áp thẳng lên `battlePartySlot_` (Pokémon đang đánh), bỏ qua việc chọn mục tiêu — không đúng luồng chơi thật (một Pokémon dự bị đang dưỡng thương cũng cần hồi máu được, không chỉ Pokémon đang đánh). Sửa: thêm `BagCategory::BattleMedicine` (mới), `Screen::BattleBag` giờ chỉ chọn item rồi chuyển sang `Screen::ItemTarget` (tái dùng nguyên màn chọn Pokémon đã có sẵn cho luồng ngoài trận, không thêm màn mới) — khác luồng Medicine thường ở chỗ dùng xong quay về `Screen::Battle` thay vì `Screen::Party`, và chỉ đồng bộ `battlePlayer_` (RAM) nếu mục tiêu đúng là Pokémon đang đánh (Pokémon dự bị không tham gia `stepBattle()`/`renderBattleHud()` lúc này nên không cần đồng bộ gì). Flash **6,347,199 B (96.9%, còn 192,256 B)** — +112 B.
 
+**Sửa lần 3 (commit `02fe4a15`)**: màn chọn mục tiêu (`Screen::ItemTarget`) khi dùng item Medicine/BattleMedicine cần hiện thêm HP bar, HP/HP text, status hiện tại của từng Pokémon — đúng thông tin cần để quyết định dùng cho ai. Thêm `itemTargetShowsHealth()` (true khi `bagCategory_` là `Medicine`/`BattleMedicine`, false cho `Evolution`/`Machine` vì đá tiến hóa/TM không có HP để hiện) — tái dùng y hệt cơ chế "dòng cao hơn (96px) + dải HP bar ở đáy dòng" đã làm cho `Screen::Party` ở GĐ17 (`rowHeightForScreen()` và điều kiện gọi `renderPartyRowHealth()` giờ dùng chung điều kiện này), không thêm hàm vẽ mới. Flash **6,347,283 B (96.9%, còn 192,160 B)** — +84 B.
+
 ### GĐ 19 — Bóng trong túi đồ ngoài trận ⏳ CHƯA LÀM
 
 **Đã xác nhận qua code (không cần sửa)**:
