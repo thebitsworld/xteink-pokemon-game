@@ -440,7 +440,9 @@ Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch 
 - [x] Phòng thủ thêm (không có trong kế hoạch gốc, làm luôn vì tiện): `Screen::BattleBalls`'s handler giờ tự kiểm tra `gymChallengeIndex_ != 0` — trước đây chỉ an toàn nhờ đường vào duy nhất đã gate theo `isGym`; đáng làm vì menu Battle đã đổi cấu trúc 2 lần chỉ trong GĐ18 (thêm BAG, rồi đổi bố cục 2 cột).
 - [x] Chỉ sửa `PokemonActivity.cpp/.h` + `english.yaml` — không đụng `PokemonService`/data/test.
 - [x] 19/19 test native pass (không đổi). Build simulator sạch + smoke test không lỗi. Flash **6,351,221 B (96.9%, còn 188,224 B)** — +444 B so với GĐ18.
-- [ ] **Chưa xác nhận bằng mắt** — cần người dùng tự chạy giả lập, vào Bag > Balls xem số lượng hiện đúng không.
+- [x] **Đã xác nhận bằng mắt** — người dùng chạy giả lập, xác nhận "ok rồi" sau khi xem Bag > Balls.
+
+**Mở rộng theo phản hồi (commit `fe283cb3`)**: ẩn item số lượng 0 khỏi **mọi** menu túi đồ, không riêng Balls — `BagEvolution`/`BagMedicine`/`BagBalls`/`BagMachine` (ngoài trận) và `BattleBag`/`BattleBalls` (giữa trận) đều lọc. `bagItemIdAt()`/`bagItemCount()` (Medicine/Machine/BattleBag) nhận thêm `bagCounts`, lọc ngay lúc duyệt category. `ownedSlotAt()`/`ownedSlotCount()` (mới, 2 bản nạp chồng uint8_t/uint16_t) cho 2 màn đánh index trực tiếp vào mảng cố định (BagEvolution's `itemCounts` 6 phần tử, Balls' 4 phần tử đầu `bagCounts`) — map "item thứ N đang sở hữu" ngược về vị trí thật. **Bug phát hiện khi làm (không phải lỗi cũ, phát sinh do chính thay đổi này)**: `renderRowArt()`'s icon cho `BagEvolution` vẫn dùng thẳng row index làm species đá — sau khi lọc sẽ vẽ sai đá nếu không map qua `ownedSlotAt()` trước, đã sửa cùng lúc. Thêm guard "0 bóng tổng thì không cho vào `BattleBalls`" (đúng pattern `BattleBag` đã có) và empty-state `STR_POKEMON_BAG_EMPTY` khi cả category rỗng (đúng pattern `Screen::Pc`'s "No Pokémon are stored"). Flash **6,351,659 B (96.9%, còn 187,792 B)** — +438 B.
 
 ### GĐ 20 — Script chỉnh save file giả lập để test màn bắt Pokémon ⏳ CHƯA LÀM
 
