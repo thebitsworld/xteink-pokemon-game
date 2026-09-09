@@ -398,7 +398,7 @@ Người dùng chơi thử màn Battle mới (GĐ16), yêu cầu thêm 3 việc:
 
 Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch ở đây, chưa viết code** — tách riêng để mỗi giai đoạn triển khai gọn trong 1 phiên, tránh hết token giữa chừng. Đã khảo sát code thật (không đoán) trước khi ghi — số liệu/tên hàm/offset dưới đây đã xác nhận qua đọc trực tiếp source, không phải suy đoán.
 
-### GĐ 18 — Dùng item (Bag) giữa trận đấu ✅ XONG (commit `719fd9e2`)
+### GĐ 18 — Dùng item (Bag) giữa trận đấu ✅ XONG + ĐÃ XÁC NHẬN (commit `719fd9e2` + 6 bản sửa/mở rộng: `e1233cd8`, `e7c0968e`, `02fe4a15`, `6a014052`, `b808335d`, `d278b161`)
 
 **Vấn đề**: `Screen::Battle` hiện chỉ có FIGHT/BALL/SWITCH/RUN (hoang dã) hoặc FIGHT/SWITCH/RUN (gym) — không có cách nào dùng Potion/thuốc giải status giữa trận. `PokemonService::useConsumable()` (đã có từ GĐ9) chỉ được gọi từ `Screen::BagMedicine`, một màn hình ngoài trận, không có đường vào từ `Screen::Battle`.
 
@@ -410,7 +410,7 @@ Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch 
 - [x] 1 key i18n mới: `STR_POKEMON_USED_ITEM` ("%s used %s!") — hiện trong hộp log trận đấu sau khi dùng item, đúng phong cách message các hành động khác trong trận. Tiêu đề màn `Screen::BattleBag` tái dùng thẳng `STR_POKEMON_BAG` có sẵn, không cần key riêng.
 - [x] Chỉ sửa `PokemonActivity.cpp/.h` + `english.yaml` — không đụng `PokemonService`/storage/test native (đúng pattern các GĐ UI-only trước, GĐ13/16/17).
 - [x] 19/19 test native pass (không đổi). Build simulator sạch + smoke test không lỗi. `pio run -e pokemon-x3` (clean rebuild): Flash **6,347,087 B (96.8%, còn 192,368 B)** — +800 B so với GĐ17.
-- [ ] **Chưa xác nhận bằng mắt** — cần người dùng tự chạy giả lập, dùng Potion/thuốc giữa 1 trận thật để xác nhận HP/status hồi đúng và hiện đúng trên `renderBattleHud()`.
+- [x] **Đã xác nhận bằng mắt** — người dùng tự chạy giả lập qua nhiều vòng phản hồi (xem các mục "Sửa"/"Mở rộng" bên dưới: giữ tên/nickname, khung HP hẹp/cao hơn, chọn mục tiêu dùng item, HP trong ItemTarget, lượt đi công bằng + HP ở BattleSwitch, menu 2 cột, sửa tràn màn hình FIGHT), cuối cùng xác nhận "đẹp rồi. tạm dừng ở đây".
 
 **Sửa ngay sau khi chơi thử (commit `e1233cd8`)**: danh sách `Screen::BattleBag` tràn lên đè khung HUD trận đấu, không nhìn được item ở trên. Nguyên nhân: `BattleBag` bị xếp cùng nhóm "neo đáy, đè lên HUD" với `BattleMoves`/`BattleBalls` — nhóm đó an toàn vì tối đa 4 dòng, luôn vừa khoảng trống dưới HUD; nhưng `BattleBag` liệt kê tối đa 17 item (mọi id Medicine/StatusCure/PPRestore bất kể sở hữu hay không), `rowsPerPage()` không biết gì về HUD nên trả về nhiều dòng hơn hẳn 4, đẩy đỉnh danh sách lên đè HUD. Sửa: bỏ `BattleBag` khỏi cả `bottomAnchored` (`buildList()`) lẫn điều kiện vẽ HUD (`renderFocused()`) — giờ dùng list toàn màn hình canh trên xuống như mọi màn Bag khác, đã có sẵn phân trang đúng cho danh sách dài. Đánh đổi: không còn thấy HUD phía sau khi chọn item, chấp nhận được. Flash không đổi (thuần sửa layout).
 
