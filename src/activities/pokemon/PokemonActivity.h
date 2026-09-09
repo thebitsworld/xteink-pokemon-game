@@ -50,6 +50,7 @@ class PokemonActivity final : public Activity {
     Battle,
     BattleMoves,
     BattleBalls,
+    BattleBag,
     BattleSwitch,
     GymList,
     Badges,

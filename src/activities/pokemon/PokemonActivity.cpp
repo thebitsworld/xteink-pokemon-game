@@ -122,6 +122,15 @@ bool isMedicineCategory(const pokemon::ItemCategory category) {
          category == pokemon::ItemCategory::PPRestore || category == pokemon::ItemCategory::Candy;
 }
 
+// Same as isMedicineCategory but without Candy (GĐ18): Candy raises totalXp
+// on the main PokemonState, which can change the active battler's max HP -
+// syncing that into the live in-RAM battlePlayer_ mid-fight is out of scope,
+// so Candy stays an out-of-battle-only item.
+bool isBattleUsableCategory(const pokemon::ItemCategory category) {
+  return category == pokemon::ItemCategory::Medicine || category == pokemon::ItemCategory::StatusCure ||
+         category == pokemon::ItemCategory::PPRestore;
+}
+
 uint8_t bagItemIdAt(const size_t index, bool (*matches)(pokemon::ItemCategory)) {
   size_t count = 0;
   for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
@@ -358,12 +367,15 @@ int PokemonActivity::logicalCount() const {
       return 2;
     }
     case Screen::Battle:
-      // FIGHT+SWITCH+RUN for a trainer battle (no BALL option); FIGHT+BALL+SWITCH+RUN for a wild encounter.
-      return gymChallengeIndex_ != 0 ? 3 : 4;
+      // FIGHT+BAG+SWITCH+RUN for a trainer battle (no BALL option);
+      // FIGHT+BALL+BAG+SWITCH+RUN for a wild encounter.
+      return gymChallengeIndex_ != 0 ? 4 : 5;
     case Screen::BattleMoves:
       return battlePlayerMoveCount();
     case Screen::BattleBalls:
       return 4;
+    case Screen::BattleBag:
+      return static_cast<int>(bagItemCount(isBattleUsableCategory));
     case Screen::BattleSwitch:
       return static_cast<int>(usablePartySlotCount());
     case Screen::GymList:
@@ -1025,12 +1037,20 @@ void PokemonActivity::activate() {
       }
       if (!isGym && selected_ == 1) {
         // Trainer battles (gym/Elite Four) have no BALL option - their
-        // logicalCount() is 3 (FIGHT/SWITCH/RUN), so selected_ == 1 there
-        // is already SWITCH, handled by the shared branch below.
+        // logicalCount() is 4 (FIGHT/BAG/SWITCH/RUN), so selected_ == 1
+        // there is already BAG, handled by the shared branch below.
         setScreen(Screen::BattleBalls);
         return;
       }
       if (selected_ == (isGym ? 1 : 2)) {
+        if (bagItemCount(isBattleUsableCategory) == 0) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
+          return;
+        }
+        setScreen(Screen::BattleBag);
+        return;
+      }
+      if (selected_ == (isGym ? 2 : 3)) {
         if (usablePartySlotCount() == 0) {
           showMessage(tr(STR_POKEMON_NO_OTHER_USABLE), Screen::Battle);
           return;
@@ -1078,6 +1098,49 @@ void PokemonActivity::activate() {
       }
       forcedBattleSwitch_ = false;
       snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
+      setScreen(Screen::Battle);
+      return;
+    }
+    case Screen::BattleBag: {
+      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), isBattleUsableCategory);
+      const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+      if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
+        return;
+      }
+      const uint32_t recordId = snapshot_.party[battlePartySlot_].recordId;
+      const pokemon::UseConsumableOutcome outcome = service_.useConsumable(recordId, itemId);
+      if (outcome == pokemon::UseConsumableOutcome::NotApplicable) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
+        return;
+      }
+      if (outcome != pokemon::UseConsumableOutcome::Applied ||
+          service_.consumeBagItem(itemId) != pokemon::ServiceStatus::Ok) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BattleBag);
+        return;
+      }
+      // useConsumable() persists straight to the on-disk BattleRecordEntry
+      // via recordId - it never touches the live in-RAM battlePlayer_ that
+      // stepBattle()/renderBattleHud() actually read, so pull the entry
+      // back and copy it in, the same fields setupBattlePlayer() seeds at
+      // the start of a fight.
+      pokemon::PokemonRecord record{};
+      if (service_.readRecord(recordId, record) == pokemon::ServiceStatus::Ok) {
+        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+        battlePlayer_.currentHp = entry.currentHp;
+        battlePlayer_.status = entry.status;
+        battlePlayer_.statusTurns = entry.statusTurns;
+        for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battlePlayer_.moves[i].currentPp = entry.pp[i];
+      }
+      if (!refreshSnapshot()) return;
+      const pokemon::ItemData* item = pokemon::itemData(itemId);
+      snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
+               item == nullptr ? "?" : item->name);
+      // Deliberate simplification, consistent with GĐ13's free Pokemon
+      // switch: using an item mid-battle does not cost a turn either -
+      // stepBattle() has no "item action" concept, and adding one just to
+      // let the opponent get a free hit here would mean touching an
+      // otherwise-stable, already-tested engine for this one feature.
       setScreen(Screen::Battle);
       return;
     }
@@ -1208,6 +1271,7 @@ void PokemonActivity::goBack() {
       return;
     case Screen::BattleMoves:
     case Screen::BattleBalls:
+    case Screen::BattleBag:
       setScreen(Screen::Battle);
       return;
     case Screen::BattleSwitch:
@@ -1512,6 +1576,8 @@ void PokemonActivity::buildRows() {
         } else if (!isGym && index == 1) {
           label = tr(STR_POKEMON_BALL);
         } else if (index == (isGym ? 1 : 2)) {
+          label = tr(STR_POKEMON_BAG);
+        } else if (index == (isGym ? 2 : 3)) {
           label = tr(STR_POKEMON_SWITCH);
         } else {
           label = tr(STR_POKEMON_RUN);
@@ -1536,6 +1602,16 @@ void PokemonActivity::buildRows() {
         char value[24];
         snprintf(value, sizeof(value), "HP %u", entry.currentHp);
         row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), value);
+        break;
+      }
+      case Screen::BattleBag: {
+        const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), isBattleUsableCategory);
+        const pokemon::ItemData* item = pokemon::itemData(itemId);
+        const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+        char value[16];
+        snprintf(value, sizeof(value), "× %u",
+                 bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
+        row(local, item == nullptr ? "?" : item->name, value);
         break;
       }
       case Screen::BattleBalls: {
@@ -1588,7 +1664,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   int top = listTop();
   rowHeight_ = rowHeightForScreen();
   const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::Battle || screen_ == Screen::BattleMoves ||
-                              screen_ == Screen::BattleBalls;
+                              screen_ == Screen::BattleBalls || screen_ == Screen::BattleBag;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
   screen.setContentMargin(
@@ -1797,7 +1873,8 @@ void PokemonActivity::renderFocused() {
     }
     return;
   }
-  if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
+  if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls ||
+      screen_ == Screen::BattleBag) {
     renderBattleHud();
     return;
   }
@@ -2105,6 +2182,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_SUMMARY);
   else if (screen_ == Screen::Moveset || screen_ == Screen::MovesetPick || screen_ == Screen::TmReplaceSlot)
     title = tr(STR_POKEMON_MOVES);
+  else if (screen_ == Screen::BattleBag)
+    title = tr(STR_POKEMON_BAG);
   else if (screen_ == Screen::BattleSwitch)
     title = tr(STR_POKEMON_SWITCH);
   else if (screen_ == Screen::GymList)
