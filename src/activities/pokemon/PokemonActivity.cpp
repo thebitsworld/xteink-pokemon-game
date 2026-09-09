@@ -136,24 +136,80 @@ bool isBattleUsableCategory(const pokemon::ItemCategory category) {
          category == pokemon::ItemCategory::PPRestore;
 }
 
-uint8_t bagItemIdAt(const size_t index, bool (*matches)(pokemon::ItemCategory)) {
+// GĐ19 follow-up: every item menu now skips ids the player owns none of
+// ("chỉ hiển thị các item đang sở hữu") - decluttering was requested after
+// GĐ19 added Bag > Balls right next to the other, often-empty categories.
+// bagItemIdAt/bagItemCount take the live bagCounts so they can check
+// ownership alongside category; ownedSlotAt/ownedSlotCount below do the
+// same for the two screens that index a small fixed-size range directly
+// (BagEvolution's 6 stones, Balls' 4 kinds) instead of walking the full
+// item table by predicate.
+uint8_t bagItemIdAt(const size_t index, const std::span<const uint8_t> bagCounts,
+                    bool (*matches)(pokemon::ItemCategory)) {
   size_t count = 0;
   for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
     const pokemon::ItemData* data = pokemon::itemData(id);
     if (data == nullptr || !matches(data->category)) continue;
+    const auto bagIndex = static_cast<size_t>(id - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+    if (bagIndex >= bagCounts.size() || bagCounts[bagIndex] == 0) continue;
     if (count == index) return id;
     ++count;
   }
   return 0;
 }
 
-size_t bagItemCount(bool (*matches)(pokemon::ItemCategory)) {
+size_t bagItemCount(const std::span<const uint8_t> bagCounts, bool (*matches)(pokemon::ItemCategory)) {
   size_t count = 0;
   for (uint8_t id = pokemon::EVOLUTION_ITEM_COUNT + 1U; id <= pokemon::POKEMON_ITEM_ID_MAX; ++id) {
     const pokemon::ItemData* data = pokemon::itemData(id);
-    if (data != nullptr && matches(data->category)) ++count;
+    if (data == nullptr || !matches(data->category)) continue;
+    const auto bagIndex = static_cast<size_t>(id - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+    if (bagIndex >= bagCounts.size() || bagCounts[bagIndex] == 0) continue;
+    ++count;
   }
   return count;
+}
+
+// Maps "the Nth item currently owned" back to its absolute index in a
+// fixed-size count array (BagEvolution's 6-entry itemCounts, or the first 4
+// entries of bagCounts for the 4 ball kinds) - returns -1 past the end.
+int ownedSlotAt(const size_t index, const std::span<const uint8_t> counts) {
+  size_t seen = 0;
+  for (size_t i = 0; i < counts.size(); ++i) {
+    if (counts[i] == 0) continue;
+    if (seen == index) return static_cast<int>(i);
+    ++seen;
+  }
+  return -1;
+}
+
+size_t ownedSlotCount(const std::span<const uint8_t> counts) {
+  size_t total = 0;
+  for (const uint8_t count : counts) {
+    if (count != 0) ++total;
+  }
+  return total;
+}
+
+// BagEvolution's itemCounts is uint16_t (not uint8_t like bagCounts) - same
+// logic, just a second overload since span deduction won't implicitly widen
+// std::array<uint16_t, N> to std::span<const uint8_t>.
+int ownedSlotAt(const size_t index, const std::span<const uint16_t> counts) {
+  size_t seen = 0;
+  for (size_t i = 0; i < counts.size(); ++i) {
+    if (counts[i] == 0) continue;
+    if (seen == index) return static_cast<int>(i);
+    ++seen;
+  }
+  return -1;
+}
+
+size_t ownedSlotCount(const std::span<const uint16_t> counts) {
+  size_t total = 0;
+  for (const uint16_t count : counts) {
+    if (count != 0) ++total;
+  }
+  return total;
 }
 
 bool moveIsKnown(const pokemon::BattleRecordEntry& entry, const uint8_t moveId) {
@@ -358,13 +414,13 @@ int PokemonActivity::logicalCount() const {
     case Screen::Bag:
       return 4;
     case Screen::BagEvolution:
-      return pokemon::EVOLUTION_ITEM_COUNT;
+      return static_cast<int>(ownedSlotCount(snapshot_.state.itemCounts));
     case Screen::BagMedicine:
-      return static_cast<int>(bagItemCount(isMedicineCategory));
+      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
     case Screen::BagBalls:
-      return 4;  // Poke/Great/Ultra/Master Ball - same fixed 4 as Screen::BattleBalls
+      return static_cast<int>(ownedSlotCount(std::span<const uint8_t>(snapshot_.state.bagCounts).first(4)));
     case Screen::BagMachine:
-      return static_cast<int>(bagItemCount(isMachineCategory));
+      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMachineCategory));
     case Screen::ItemTarget:
       return snapshot_.partyCount;
     case Screen::Pokedex:
@@ -383,9 +439,9 @@ int PokemonActivity::logicalCount() const {
     case Screen::BattleMoves:
       return battlePlayerMoveCount();
     case Screen::BattleBalls:
-      return 4;
+      return static_cast<int>(ownedSlotCount(std::span<const uint8_t>(snapshot_.state.bagCounts).first(4)));
     case Screen::BattleBag:
-      return static_cast<int>(bagItemCount(isBattleUsableCategory));
+      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory));
     case Screen::BattleSwitch:
       return static_cast<int>(usablePartySlotCount());
     case Screen::GymList:
@@ -890,18 +946,20 @@ void PokemonActivity::activate() {
       // screen/context - there's nothing meaningful to "activate" here.
       showMessage(tr(STR_POKEMON_BAG_BALLS_INFO), Screen::BagBalls);
       return;
-    case Screen::BagEvolution:
+    case Screen::BagEvolution: {
+      // Zero-count stones are already filtered out of the list (GĐ19
+      // follow-up), so selected_ is a row index among owned stones only -
+      // map it back to the real stone slot.
+      const int slot = ownedSlotAt(static_cast<size_t>(selected_), snapshot_.state.itemCounts);
+      if (slot < 0) return;
       bagCategory_ = BagCategory::Evolution;
-      selectedItem_ = static_cast<pokemon::EvolutionItem>(selected_ + 1);
-      if (snapshot_.state.itemCounts[selected_] == 0) {
-        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagEvolution);
-        return;
-      }
+      selectedItem_ = static_cast<pokemon::EvolutionItem>(slot + 1);
       setScreen(Screen::ItemTarget);
       return;
+    }
     case Screen::BagMedicine: {
       bagCategory_ = BagCategory::Medicine;
-      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), isMedicineCategory);
+      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), snapshot_.state.bagCounts, isMedicineCategory);
       const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
       if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMedicine);
@@ -913,7 +971,7 @@ void PokemonActivity::activate() {
     }
     case Screen::BagMachine: {
       bagCategory_ = BagCategory::Machine;
-      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), isMachineCategory);
+      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), snapshot_.state.bagCounts, isMachineCategory);
       const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
       if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMachine);
@@ -1127,11 +1185,15 @@ void PokemonActivity::activate() {
         // Trainer battles (gym/Elite Four) have no BALL option - their
         // logicalCount() is 4 (FIGHT/BAG/SWITCH/RUN), so selected_ == 1
         // there is already BAG, handled by the shared branch below.
+        if (ownedSlotCount(std::span<const uint8_t>(snapshot_.state.bagCounts).first(4)) == 0) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
+          return;
+        }
         setScreen(Screen::BattleBalls);
         return;
       }
       if (selected_ == (isGym ? 1 : 2)) {
-        if (bagItemCount(isBattleUsableCategory) == 0) {
+        if (bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory) == 0) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
           return;
         }
@@ -1224,7 +1286,8 @@ void PokemonActivity::activate() {
       return;
     }
     case Screen::BattleBag: {
-      const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), isBattleUsableCategory);
+      const uint8_t itemId =
+          bagItemIdAt(static_cast<size_t>(selected_), snapshot_.state.bagCounts, isBattleUsableCategory);
       const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
       if (itemId == 0 || bagIndex >= snapshot_.state.bagCounts.size() || snapshot_.state.bagCounts[bagIndex] == 0) {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
@@ -1251,13 +1314,15 @@ void PokemonActivity::activate() {
         setScreen(Screen::Battle);
         return;
       }
-      if (selected_ < 0 || selected_ >= 4) return;
-      const auto ballItemIndex = static_cast<size_t>(selected_);
-      if (snapshot_.state.bagCounts[ballItemIndex] == 0) {
-        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBalls);
-        return;
-      }
-      const auto ball = static_cast<pokemon::BallKind>(selected_);
+      if (selected_ < 0) return;
+      // Zero-count ball kinds are already filtered out of the list (GĐ19
+      // follow-up), so selected_ is a row index among owned kinds only -
+      // map it back to the real ball kind/bagCounts slot.
+      const int ballSlot =
+          ownedSlotAt(static_cast<size_t>(selected_), std::span<const uint8_t>(snapshot_.state.bagCounts).first(4));
+      if (ballSlot < 0) return;
+      const auto ballItemIndex = static_cast<size_t>(ballSlot);
+      const auto ball = static_cast<pokemon::BallKind>(ballSlot);
       const bool caught = service_.attemptBattleCatch(battleOpponent_, ball);
       const auto itemId = static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1U + ballItemIndex);
       if (service_.consumeBagItem(itemId) != pokemon::ServiceStatus::Ok) {
@@ -1648,9 +1713,11 @@ void PokemonActivity::buildRows() {
                                 : tr(STR_POKEMON_BAG_MACHINES));
         break;
       case Screen::BagEvolution: {
-        const auto item = static_cast<pokemon::EvolutionItem>(index + 1);
+        const int slot = ownedSlotAt(static_cast<size_t>(index), snapshot_.state.itemCounts);
+        if (slot < 0) break;
+        const auto item = static_cast<pokemon::EvolutionItem>(slot + 1);
         char count[16];
-        snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[index]);
+        snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[slot]);
         row(local, itemName(item), count);
         break;
       }
@@ -1658,18 +1725,21 @@ void PokemonActivity::buildRows() {
         // Same fixed id/bagCounts indexing Screen::BattleBalls already uses
         // (ids 7-10 right after the 6 evolution stones) - this screen is
         // purely a read-only view of the same counts, no separate storage.
+        const int slot =
+            ownedSlotAt(static_cast<size_t>(index), std::span<const uint8_t>(snapshot_.state.bagCounts).first(4));
+        if (slot < 0) break;
         const pokemon::ItemData* item =
-            pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + index));
+            pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + slot));
         char count[16];
-        snprintf(count, sizeof(count), "× %u", snapshot_.state.bagCounts[index]);
+        snprintf(count, sizeof(count), "× %u", snapshot_.state.bagCounts[slot]);
         row(local, item == nullptr ? "?" : item->name, count);
         break;
       }
       case Screen::BagMedicine:
       case Screen::BagMachine: {
         const bool machine = screen_ == Screen::BagMachine;
-        const uint8_t itemId =
-            bagItemIdAt(static_cast<size_t>(index), machine ? isMachineCategory : isMedicineCategory);
+        const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts,
+                                           machine ? isMachineCategory : isMedicineCategory);
         const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
         const pokemon::ItemData* data = pokemon::itemData(itemId);
         char count[16];
@@ -1764,7 +1834,8 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::BattleBag: {
-        const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), isBattleUsableCategory);
+        const uint8_t itemId =
+            bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isBattleUsableCategory);
         const pokemon::ItemData* item = pokemon::itemData(itemId);
         const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
         char value[16];
@@ -1774,10 +1845,13 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::BattleBalls: {
+        const int slot =
+            ownedSlotAt(static_cast<size_t>(index), std::span<const uint8_t>(snapshot_.state.bagCounts).first(4));
+        if (slot < 0) break;
         const pokemon::ItemData* item =
-            pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + index));
+            pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + slot));
         char value[16];
-        snprintf(value, sizeof(value), "× %u", snapshot_.state.bagCounts[index]);
+        snprintf(value, sizeof(value), "× %u", snapshot_.state.bagCounts[slot]);
         row(local, item == nullptr ? "?" : item->name, value);
         break;
       }
@@ -1904,6 +1978,16 @@ void PokemonActivity::renderFocused() {
   }
   if (screen_ == Screen::Pc && logicalCount() == 0) {
     centered(renderer, UI_12_FONT_ID, contentTop + 100, tr(STR_POKEMON_NO_STORED), EpdFontFamily::BOLD);
+    return;
+  }
+  // Bag category screens: item rows now hide anything owned in count 0
+  // (GĐ19 follow-up "declutter"), so a category can legitimately end up
+  // empty (e.g. a fresh save with no Medicine yet) - same empty-state
+  // pattern as Screen::Pc above, rather than rendering a blank list.
+  if ((screen_ == Screen::BagEvolution || screen_ == Screen::BagMedicine || screen_ == Screen::BagBalls ||
+       screen_ == Screen::BagMachine) &&
+      logicalCount() == 0) {
+    centered(renderer, UI_12_FONT_ID, contentTop + 100, tr(STR_POKEMON_BAG_EMPTY), EpdFontFamily::BOLD);
     return;
   }
   if (screen_ == Screen::NicknameQuestion || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal) {
@@ -2345,11 +2429,16 @@ void PokemonActivity::renderRowArt() {
              pokemon::isSpeciesMarked(snapshot_.state.seenSpecies, static_cast<uint16_t>(start + local + 1))) {
       speciesId = static_cast<uint16_t>(start + local + 1);
     }
-    if (screen_ == Screen::BagEvolution) {
+    const int evolutionSlot = screen_ == Screen::BagEvolution
+                                  ? ownedSlotAt(static_cast<size_t>(start + local), snapshot_.state.itemCounts)
+                                  : -1;
+    if (screen_ == Screen::BagEvolution && evolutionSlot >= 0) {
       // No icon assets exist for TM/HM/potions/etc - only the 6 evolution
-      // stones (BagEvolution's rows) have art to draw here.
+      // stones (BagEvolution's rows) have art to draw here. Zero-count
+      // stones are filtered from the list (GĐ19 follow-up), so the row
+      // index isn't the stone slot directly - map it back first.
       constexpr int itemSize = 32;
-      pokemon::drawPokemonItemArt(renderer, static_cast<pokemon::EvolutionItem>(start + local + 1), false,
+      pokemon::drawPokemonItemArt(renderer, static_cast<pokemon::EvolutionItem>(evolutionSlot + 1), false,
                                   Rect{listBounds_.x + 5 + pokemon::pokemonCenteredOffset(80, itemSize),
                                        rowY + pokemon::pokemonCenteredOffset(rowHeight_, itemSize), itemSize, itemSize},
                                   false);
