@@ -530,4 +530,21 @@ Người dùng phản hồi sau khi chơi thử: text thông báo trong gym batt
 - [x] `loop()` thêm `BattleMoves` vào nhánh điều hướng lưới 2 cột đã có sẵn cho `Battle` (Left/Right ±1, Up/Down ±2 cột, wrap).
 - [x] Trong mỗi nút: tên chiêu chữ đậm dòng trên (qua `truncatedText()` phòng chiêu tên dài như "Solar Beam"/"Sky Attack"), PP hiện "cur/max" chữ thường dòng dưới, căn phải — **không có font nhỏ hơn `UI_10_FONT_ID` trên máy này** (chỉ có 2 font: `UI_10`/`UI_12`), nên "PP nhỏ hơn" đạt được bằng độ đậm (không bold) + vị trí phụ (dòng dưới, căn phải) thay vì cỡ chữ thật sự nhỏ hơn.
 - [x] Chỉ sửa `PokemonActivity.cpp/.h`. 19/19 test native pass (không đổi logic ngoài UI). Build simulator sạch. Flash **6,353,495 B (96.9%, còn 200,105 B)** — +474 B.
-- [ ] **Chưa xác nhận bằng mắt** — cần chơi thử lại để xem layout 2 cột đã hết đè lên battle log chưa.
+- [x] **Sửa lần 2 (commit `7b600718`)**: người dùng phản hồi "số PP đang gần như bị ra khỏi ô của move đó" — bố cục 2 dòng (tên trên/PP dưới) khiến PP tràn gần hết đáy nút (56px cao không đủ cho 2 dòng + padding thoải mái). Đổi sang **1 hàng duy nhất, căn giữa theo chiều dọc**: tên bên trái (`truncatedText()` trừ hao đúng phần PP chiếm để 2 chữ không bao giờ chồng nhau), PP bên phải cùng hàng — đúng kiểu bố cục đã dùng cho HP bar (GĐ17). Flash **6,353,533 B** — +38 B.
+
+### GĐ 25 — Tặng 10 Poke Ball + 1 Potion khi tạo starter (theo phản hồi người dùng) ✅ XONG (commit `9174a992`)
+
+**Yêu cầu**: "sau khi player chọn xong starter pokemon thì pokemon phải đầy HP/PP, tặng cho 1 potion, 10 pokeball". HP/PP đầy **đã đúng sẵn** — `peekBattleMoves()` tự tổng hợp full HP/PP khi Pokémon chưa có `BattleRecordEntry` nào (starter mới tạo luôn ở trạng thái này), không cần ghi gì thêm.
+
+- [x] `createStarter()` (`PokemonService.cpp`) set thẳng `state.bagCounts[0]=10` (Poke Ball, item id 7) và `state.bagCounts[4]=1` (Potion, item id 11) trước khi commit — chỉ 2 dòng, không cần API service mới, đúng tinh thần game gốc luôn phát vài quả bóng + thuốc trước khi gặp Pokémon hoang dã đầu tiên.
+- [x] Thêm assertion vào test `CreatesOneDurableStarterWithChosenIdentity` (`PokemonServiceTest.cpp`) xác nhận quà khởi đầu.
+- [x] 19/19 test native pass. Flash **6,353,555 B (96.9%, còn 200,045 B)** — +22 B so với GĐ24.
+- [ ] **Chưa xác nhận bằng mắt** — cần tạo starter mới trên giả lập, kiểm tra Bag > Balls/Medicine hiện đúng 10 Poke Ball + 1 Potion.
+
+### GĐ 26 — Màn chọn chiêu không còn dịch HUD khi Pokémon chưa đủ 4 chiêu (theo phản hồi người dùng) ✅ XONG (commit `5f1d4dde`)
+
+**Vấn đề**: "màn hình battle không thay đổi layout khi số move của pokemon không đủ để phân thành 2 dòng. hiện tại đối với pokemon có 1-2 move thì màn hình battle đang bị dịch xuống để bù vào 2 slot còn lại." Nguyên nhân: `battleMenuTop()` (dùng chung cho cả menu Battle lẫn `BattleMoves` từ GĐ24) tính số dòng theo `battlePlayerMoveCount()` **thật** — đúng cho việc vẽ bao nhiêu nút, nhưng `renderBattleHud()` cũng neo theo cùng giá trị này, nên 1 Pokémon mới bắt/mới tạo (level 5, chỉ 1-2 chiêu) khiến toàn bộ HUD (khung đối thủ/player, hộp log) giãn ra/dịch xuống khác hẳn so với lúc Pokémon đã học đủ 4 chiêu.
+
+- [x] `battleMenuTop()` khi `screen_==Screen::BattleMoves` giờ luôn tính đúng `BATTLE_MOVE_SLOTS` (2 dòng cố định) bất kể Pokémon biết bao nhiêu chiêu thật, thay vì `logicalCount()` động — HUD/hộp log giữ nguyên kích thước dù chiêu ít hay đủ 4. `renderBattleMoveMenu()` vẫn chỉ vẽ đúng số nút Pokémon thực sự biết (dòng 2 để trống nếu chỉ có 1-2 chiêu) — chỉ layout HUD xung quanh là cố định, không phải số nút hiển thị.
+- [x] Chỉ sửa `PokemonActivity.cpp` (1 hàm). 19/19 test native pass (không đổi logic ngoài UI). Flash **6,353,555 B (96.9%, còn 200,045 B)** — +22 B (gộp cùng build với GĐ25 nên số byte trùng nhau, đo riêng phần này không tách được).
+- [ ] **Chưa xác nhận bằng mắt** — cần chơi thử với Pokémon mới bắt/mới tạo (1-2 chiêu) để xác nhận HUD không còn dịch/giãn so với lúc đủ 4 chiêu.
