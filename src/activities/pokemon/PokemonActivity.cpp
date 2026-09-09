@@ -2253,11 +2253,12 @@ void PokemonActivity::renderBattleMenu() {
 // returns battlePlayerMoveCount() when this screen is active, so the "N
 // items, 2-column grid" math is identical). A single-column list of 4 moves
 // used to need 4 stacked rows tall enough to push up into the still-visible
-// battle log box; 2 columns halves that to 2 rows. Move name sits on its own
-// bold line so longer names (Solar Beam, Sky Attack...) stay readable;
-// current/max PP sits on the line under it in the plain (non-bold) weight,
-// right-aligned, so it reads as secondary to the name rather than competing
-// with it - there's no smaller font available on this device to shrink it
+// battle log box; 2 columns halves that to 2 rows. Name and PP share one
+// row, vertically centered in the button (a stacked two-line layout pushed
+// PP past the button's bottom edge) - name in bold on the left (truncated to
+// leave room for PP, so long names like Solar Beam/Sky Attack never collide
+// with it), PP in the plain (non-bold) weight on the right so it reads as
+// secondary - there's no smaller font available on this device to shrink it
 // further (only UI_10_FONT_ID/UI_12_FONT_ID exist).
 void PokemonActivity::renderBattleMoveMenu() {
   const int count = battlePlayerMoveCount();
@@ -2267,6 +2268,7 @@ void PokemonActivity::renderBattleMoveMenu() {
   constexpr int gap = 8;
   constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
   constexpr int textPad = 10;
+  constexpr int nameToPpGap = 8;
   const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
   const int menuTop = battleMenuTop();
 
@@ -2278,10 +2280,12 @@ void PokemonActivity::renderBattleMoveMenu() {
 
     const uint8_t moveId = battlePlayer_.moves[index].moveId;
     const pokemon::MoveData* move = pokemon::moveData(moveId);
-    const std::string name = renderer.truncatedText(UI_10_FONT_ID, move == nullptr ? "?" : move->name,
-                                                    buttonWidth - 2 * textPad, EpdFontFamily::BOLD);
     char pp[16];
     snprintf(pp, sizeof(pp), "%u/%u", battlePlayer_.moves[index].currentPp, move == nullptr ? 0 : move->pp);
+    const int ppWidth = renderer.getTextWidth(UI_10_FONT_ID, pp);
+    const int nameMaxWidth = std::max(0, buttonWidth - 2 * textPad - nameToPpGap - ppWidth);
+    const std::string name =
+        renderer.truncatedText(UI_10_FONT_ID, move == nullptr ? "?" : move->name, nameMaxWidth, EpdFontFamily::BOLD);
 
     const bool selected = index == selected_;
     if (selected) {
@@ -2290,11 +2294,9 @@ void PokemonActivity::renderBattleMoveMenu() {
       renderer.drawRoundedRect(x, y, buttonWidth, buttonHeight, 2, 6, true);
     }
     const bool black = !selected;
-    const int nameY = y + 8;
-    renderer.drawText(UI_10_FONT_ID, x + textPad, nameY, name.c_str(), black, EpdFontFamily::BOLD);
-    const int ppY = nameY + renderer.getLineHeight(UI_10_FONT_ID) + 2;
-    const int ppWidth = renderer.getTextWidth(UI_10_FONT_ID, pp);
-    renderer.drawText(UI_10_FONT_ID, x + buttonWidth - textPad - ppWidth, ppY, pp, black);
+    const int textY = y + std::max(0, (buttonHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2);
+    renderer.drawText(UI_10_FONT_ID, x + textPad, textY, name.c_str(), black, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, x + buttonWidth - textPad - ppWidth, textY, pp, black);
   }
 }
 
