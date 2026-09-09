@@ -33,6 +33,13 @@ constexpr uint16_t STARTERS[] = {1, 4, 7, 25};
 // grid-aware Up/Down/Left/Right navigation for that screen.
 constexpr int BATTLE_MENU_COLUMNS = 2;
 constexpr int BATTLE_MENU_ROW_HEIGHT = 64;
+// An artwork list row reads left to right as: selection triangle (drawn by
+// fui::list at markerInset=4, see pokemonListPresentation()), then the icon,
+// then any text. This is the icon's left edge, offset far enough from the
+// row's own left edge to clear that marker instead of the ~1px gap it used
+// to leave (the marker used to sit *after* the icon, at markerInset=86,
+// almost touching it).
+constexpr int ROW_ICON_X = 24;
 
 const char* speciesName(const uint16_t id) {
   const pokemon::SpeciesData* species = pokemon::speciesData(id);
@@ -2563,7 +2570,7 @@ void PokemonActivity::renderRowArt() {
       // index isn't the stone slot directly - map it back first.
       constexpr int itemSize = 32;
       pokemon::drawPokemonItemArt(renderer, static_cast<pokemon::EvolutionItem>(evolutionSlot + 1), false,
-                                  Rect{listBounds_.x + 5 + pokemon::pokemonCenteredOffset(80, itemSize),
+                                  Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, itemSize),
                                        rowY + pokemon::pokemonCenteredOffset(rowHeight_, itemSize), itemSize, itemSize},
                                   false);
     } else if (speciesId != 0) {
@@ -2577,7 +2584,8 @@ void PokemonActivity::renderRowArt() {
       constexpr int speciesIconH = 60;
       pokemon::drawPokemonSpeciesArt(
           renderer, speciesId, true,
-          Rect{listBounds_.x + 5, rowY + pokemon::pokemonCenteredOffset(rowHeight_, speciesIconH), 80, speciesIconH});
+          Rect{listBounds_.x + ROW_ICON_X, rowY + pokemon::pokemonCenteredOffset(rowHeight_, speciesIconH), 80,
+               speciesIconH});
     }
     if (showsPartyHealthRows()) {
       if ((screen_ == Screen::Party) && start + local < snapshot_.partyCount) {
@@ -2616,11 +2624,11 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   const uint16_t maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp));
 
   // Matches the generic list widget's own sidePadding for artwork rows
-  // (pokemonListPresentation()) so text clears its selection-triangle
-  // marker (markerInset=86, a 12px-wide triangle centered in the row) -
-  // basing this on the icon's own width instead left only ~7px of
-  // clearance, letting the marker land on top of the HP bar/text below it.
-  const int textX = listBounds_.x + 104;
+  // (pokemonListPresentation()) - the icon sits at ROW_ICON_X and this
+  // starts right after it, both clearing the selection triangle now reserved
+  // at the row's own left edge (markerInset=4) instead of squeezed in
+  // between icon and text.
+  const int textX = listBounds_.x + 112;
   const int textRight = listBounds_.x + listBounds_.width - 8;
   constexpr int barH = 8;
 
@@ -2660,7 +2668,7 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
     hpTextY = line2Top;
     statusY = line2Top;
   } else {
-    barX = listBounds_.x + 5;
+    barX = listBounds_.x + ROW_ICON_X;
     barY = rowY + rowHeight_ - 22;
     hpTextY = barY - 3;
     statusY = barY - 3;

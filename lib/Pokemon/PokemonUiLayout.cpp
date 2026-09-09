@@ -27,7 +27,15 @@ PokemonListPresentation pokemonListPresentation(const bool hasArtwork) {
   styles.selected = styles.normal;
   styles.focused = styles.normal;
   styles.active = styles.normal;
-  return PokemonListPresentation{styles, hasArtwork ? 104 : 16, hasArtwork ? 86 : 0};
+  // Artwork rows read left to right as marker, then icon, then text: the
+  // selection triangle sits in its own small reserved strip at the row's
+  // left edge (markerInset=4) before the icon (PokemonActivity.cpp's
+  // renderRowArt() shifts the icon right to clear it) rather than squeezed
+  // into the ~1px gap the icon and marker used to leave between them, which
+  // let the marker land on top of whatever the icon's row drew immediately
+  // after it (a wide HP bar made this obvious, but the tight gap existed
+  // regardless of what followed the icon).
+  return PokemonListPresentation{styles, hasArtwork ? 112 : 16, hasArtwork ? 4 : 0};
 }
 
 PokemonUiRect pokemonPokedexCardBounds(const int screenWidth, const int screenHeight, const int marginTop,

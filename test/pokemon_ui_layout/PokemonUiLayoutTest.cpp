@@ -42,8 +42,8 @@ TEST(PokemonUiLayoutTest, UsesTheSameWhitePaperCursorForTextAndArtworkLists) {
   EXPECT_EQ(textOnly.markerInset, 0);
 
   const auto artwork = pokemon::pokemonListPresentation(true);
-  EXPECT_EQ(artwork.sidePadding, 104);
-  EXPECT_EQ(artwork.markerInset, 86);
+  EXPECT_EQ(artwork.sidePadding, 112);
+  EXPECT_EQ(artwork.markerInset, 4);
 }
 
 TEST(PokemonUiLayoutTest, RightAlignsSummaryValuesToTheContentEdge) {
