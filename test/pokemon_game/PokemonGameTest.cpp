@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
@@ -160,7 +161,8 @@ void fourthEncounterCheckIsForcedAndCreatesOnlyOneEvent() {
   pokemon::PokemonState state = stateWithLeader(leader);
   constexpr uint32_t draws[] = {
       2, 2, 2,     // Three encounter misses.
-      1,           // Hourly item miss.
+      1,           // Hourly evolution-stone miss.
+      1, 1,        // Hourly medicine miss, hourly TM/HM miss.
       1, 0, 0, 0,  // Legendary miss, first weighted species, minimum level, female roll.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -213,7 +215,7 @@ void fifteenMinuteCheckUsesFortyPercentEncounterChance() {
   CHECK(sequence.index == std::size(draws));
 }
 
-void fullQueueCreditsReadingAndPrimesGuaranteesWithoutRolling() {
+void fullQueuePrimesGuaranteesButStillHandsOutBalls() {
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
   state.pendingEvents[0] = {
@@ -229,7 +231,13 @@ void fullQueueCreditsReadingAndPrimesGuaranteesWithoutRolling() {
   state.readingMinuteRemainder = 59;
   const auto pendingBefore = state.pendingEvents;
   const uint32_t xpBefore = leader.totalXp;
-  pokemon::RandomSource random{nullptr, rejectUnexpectedDraw};
+  // A full queue short-circuits all three event-producing tracks before they
+  // roll, so the only draw left is the ball's own kind roll - balls never
+  // touch the queue precisely so a player who has not opened the app in a
+  // while still ends up with something to throw.
+  constexpr uint32_t draws[] = {0};  // Poke Ball.
+  SequenceRandom sequence{draws, std::size(draws)};
+  pokemon::RandomSource random{&sequence, SequenceRandom::next};
 
   const pokemon::CreditResult result =
       pokemon::applyCreditedMinutes(state, leader, 1, 50, pokemon::OwnedEvolutionNeeds{}, random);
@@ -242,6 +250,8 @@ void fullQueueCreditsReadingAndPrimesGuaranteesWithoutRolling() {
   CHECK(state.readingMinuteRemainder == 0);
   CHECK(state.lifetimeMinutes == 1);
   CHECK(leader.totalXp == xpBefore + 1U);
+  CHECK(state.bagCounts[0] == 1);
+  CHECK(sequence.index == std::size(draws));
 }
 
 void oneBoundaryQueuesItemEncounterAndEvolutionInOrder() {
@@ -253,8 +263,8 @@ void oneBoundaryQueuesItemEncounterAndEvolutionInOrder() {
   state.encounterMisses = 3;
   state.itemMisses = 19;
   constexpr uint32_t draws[] = {
-      0,           // Select the Ball category.
-      0,           // Poke Ball wins within Ball.
+      0,           // Forced hourly stone: Moon Stone, the first one still with room.
+      1, 1,        // Hourly medicine miss, hourly TM/HM miss.
       1, 0, 0, 0,  // Legendary miss, first species, minimum level, female roll.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -313,7 +323,11 @@ void encounterDueWithLevelGainQueuesEncounterBeforeEvolution() {
   pokemon::PokemonState state = stateWithLeader(bulbasaur);
   state.readingMinuteRemainder = 59;
   state.encounterMisses = 3;
-  constexpr uint32_t draws[] = {1, 1, 0, 0, 0};
+  constexpr uint32_t draws[] = {
+      1,           // Hourly evolution-stone miss.
+      1, 1,        // Hourly medicine miss, hourly TM/HM miss.
+      1, 0, 0, 0,  // Legendary miss, first species, minimum level, female roll.
+  };
   SequenceRandom sequence{draws, std::size(draws)};
   pokemon::RandomSource random{&sequence, SequenceRandom::next};
 
@@ -336,8 +350,9 @@ void forcedItemWithLevelGainQueuesItemBeforeEvolution() {
   state.readingMinuteRemainder = 59;
   state.itemMisses = 19;
   constexpr uint32_t draws[] = {
-      0,  // Select the Ball category (first entry in CATEGORY_DROP_WEIGHTS).
-      0,  // Poke Ball wins within Ball (highest drop_weight there).
+      0,  // Forced hourly stone: Moon Stone, the first one still with room.
+      1,
+      1,  // Hourly medicine miss, hourly TM/HM miss.
       2,  // Miss the encounter due at the hourly boundary.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -349,7 +364,10 @@ void forcedItemWithLevelGainQueuesItemBeforeEvolution() {
   CHECK(result.generatedEvent == pokemon::PendingEventKind::Evolution);
   CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::Item);
   CHECK(state.pendingEvents[1].kind == pokemon::PendingEventKind::Evolution);
-  CHECK(state.bagCounts[0] == 1);  // bagCounts[0] = item id 7 (Poke Ball)
+  CHECK(state.itemCounts[0] == 1);  // the stone that dropped (Moon Stone)
+  // The ball handed out silently at this same check - it spends no draw at 0%
+  // progress (only Poke Balls are unlocked) and queues no event of its own.
+  CHECK(state.bagCounts[0] == 1);
   CHECK(sequence.index == std::size(draws));
 }
 
@@ -359,12 +377,14 @@ void multiHourCreditUsesLifetimeAtEachHourlyBoundary() {
   state.lifetimeMinutes = 1079;
   state.readingMinuteRemainder = 59;
   state.encounterMisses = 3;
+  // At 75% progress three ball kinds are unlocked, so every encounter check
+  // spends one draw on the ball it hands out before the encounter itself.
   constexpr uint32_t draws[] = {
-      1, 1, 0, 0, 0,  // 1080 minutes: item miss, then a regular encounter.
-      2, 2, 2,        // Three encounter misses.
-      1, 1, 0, 0, 0,  // 1140 minutes: item miss, then a regular encounter.
-      2, 2, 2,        // Three more encounter misses.
-      1, 0, 0, 0,     // 1200 minutes: item miss, Articuno, minimum level.
+      1, 1, 1, 0, 1, 0, 0, 0,  // 1080 minutes: stone/medicine/TM misses, a Poke Ball, a regular encounter.
+      0, 2, 0, 2, 0, 2,        // Three encounter misses, each preceded by that check's ball.
+      1, 1, 1, 0, 1, 0, 0, 0,  // 1140 minutes: same shape as 1080.
+      0, 2, 0, 2, 0, 2,        // Three more encounter misses.
+      1, 1, 1, 0, 0, 0, 0,     // 1200 minutes: misses, a ball, then Articuno at minimum level.
   };
   SequenceRandom sequence{draws, std::size(draws)};
   pokemon::RandomSource random{&sequence, SequenceRandom::next};
@@ -386,13 +406,19 @@ pokemon::PendingEvent forceEncounterAtProgress(const uint8_t progress, const uin
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
   state.encounterMisses = 3;
-  SequenceRandom sequence{draws, drawCount};
+  // The ball handed out at this same encounter check only spends a draw once
+  // more than one kind is unlocked, i.e. from 50% book progress onwards.
+  std::array<uint32_t, 8> allDraws{};
+  size_t allCount = 0;
+  if (progress >= 50) allDraws[allCount++] = 0;  // first unlocked ball kind
+  for (size_t index = 0; index < drawCount; ++index) allDraws[allCount++] = draws[index];
+  SequenceRandom sequence{allDraws.data(), allCount};
   pokemon::RandomSource random{&sequence, SequenceRandom::next};
   const pokemon::CreditResult result =
       pokemon::applyCreditedMinutes(state, leader, 15, progress, pokemon::OwnedEvolutionNeeds{}, random);
   CHECK(result.status == pokemon::CreditStatus::Applied);
   CHECK(result.generatedEvent == pokemon::PendingEventKind::Encounter);
-  CHECK(sequence.index == drawCount);
+  CHECK(sequence.index == allCount);
   return state.pendingEvents[0];
 }
 
@@ -454,44 +480,115 @@ void everyEligibleRegularEncounterWeightIntervalSelectsItsSpecies() {
   }
 }
 
-void itemCategoryWeightsGiveEachCategoryAFairShareRegardlessOfHowManyItemsItHolds() {
-  // Machine (55 TM/HM ids) used to drown out Ball (only 4 ids) in a single
-  // flat roll across all 83 items, purely because it had far more rows in
-  // the data file. The category roll (GĐ 21) fixes that: each category's
-  // own fixed weight decides its odds, and only *within* the category that
-  // wins does per-item count/drop_weight matter again.
+void everyEncounterCheckHandsOutABallWithoutQueueingAnEvent() {
+  // The whole point of pacing balls off the encounter clock: a reader who
+  // keeps meeting Pokemon keeps getting something to throw. Four checks an
+  // hour against ~1.8 encounters means the reserve grows instead of running
+  // dry, and none of it costs a slot in the 3-deep pending-event queue.
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
-  state.itemMisses = 19;
+  constexpr uint32_t draws[] = {2, 2};  // Two encounter misses; the balls themselves spend no draw at 10% progress.
+  SequenceRandom sequence{draws, std::size(draws)};
+  pokemon::RandomSource random{&sequence, SequenceRandom::next};
+
+  const pokemon::CreditResult result =
+      pokemon::applyCreditedMinutes(state, leader, 30, 10, pokemon::OwnedEvolutionNeeds{}, random);
+
+  CHECK(result.status == pokemon::CreditStatus::Applied);
+  CHECK(result.generatedEvent == pokemon::PendingEventKind::None);
+  CHECK(state.bagCounts[0] == 2);  // one Poke Ball per encounter check, 2 checks in 30 minutes
+  CHECK(pokemon::pendingEventCount(state) == 0);
+  CHECK(state.dashboardNotice == pokemon::DashboardNotice::None);
+  CHECK(sequence.index == std::size(draws));
+}
+
+void ballKindsUnlockWithProgressAndMasterBallStaysOneAtATime() {
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+
+  // Below 50% only Poke Balls exist, so there is nothing to roll between.
+  pokemon::PokemonState earlyState = stateWithLeader(leader);
+  constexpr uint32_t earlyDraws[] = {2};  // Encounter miss only.
+  SequenceRandom earlySequence{earlyDraws, std::size(earlyDraws)};
+  pokemon::RandomSource earlyRandom{&earlySequence, SequenceRandom::next};
+  CHECK(pokemon::applyCreditedMinutes(earlyState, leader, 15, 49, pokemon::OwnedEvolutionNeeds{}, earlyRandom).status ==
+        pokemon::CreditStatus::Applied);
+  CHECK(earlyState.bagCounts[0] == 1);
+  CHECK(earlySequence.index == std::size(earlyDraws));
+
+  // From 50% Great Balls join in: weights are Poke 40 then Great 20, so a
+  // roll of 40 is the first value that lands past Poke Ball.
+  pokemon::PokemonState greatState = stateWithLeader(leader);
+  constexpr uint32_t greatDraws[] = {40, 2};
+  SequenceRandom greatSequence{greatDraws, std::size(greatDraws)};
+  pokemon::RandomSource greatRandom{&greatSequence, SequenceRandom::next};
+  CHECK(pokemon::applyCreditedMinutes(greatState, leader, 15, 50, pokemon::OwnedEvolutionNeeds{}, greatRandom).status ==
+        pokemon::CreditStatus::Applied);
+  CHECK(greatState.bagCounts[1] == 1);  // bagCounts[1] = item id 8 (Great Ball)
+  CHECK(greatSequence.index == std::size(greatDraws));
+
+  // At 95% all four are unlocked (total weight 69) and Master Ball sits at
+  // the very top, [68,69).
+  pokemon::PokemonState masterState = stateWithLeader(leader);
+  constexpr uint32_t masterDraws[] = {68, 2};
+  SequenceRandom masterSequence{masterDraws, std::size(masterDraws)};
+  pokemon::RandomSource masterRandom{&masterSequence, SequenceRandom::next};
+  CHECK(
+      pokemon::applyCreditedMinutes(masterState, leader, 15, 95, pokemon::OwnedEvolutionNeeds{}, masterRandom).status ==
+      pokemon::CreditStatus::Applied);
+  CHECK(masterState.bagCounts[3] == 1);  // bagCounts[3] = item id 10 (Master Ball)
+  CHECK(masterSequence.index == std::size(masterDraws));
+
+  // Holding one takes it back out of the pool, so the next check is back to
+  // three kinds (total weight 68) and 68 is no longer a legal roll there.
+  constexpr uint32_t heldDraws[] = {67, 2};
+  SequenceRandom heldSequence{heldDraws, std::size(heldDraws)};
+  pokemon::RandomSource heldRandom{&heldSequence, SequenceRandom::next};
+  CHECK(pokemon::applyCreditedMinutes(masterState, leader, 15, 95, pokemon::OwnedEvolutionNeeds{}, heldRandom).status ==
+        pokemon::CreditStatus::Applied);
+  CHECK(masterState.bagCounts[3] == 1);  // still exactly one - no second Master Ball
+  CHECK(masterState.bagCounts[2] == 1);  // bagCounts[2] = item id 9 (Ultra Ball), [60,68)
+  CHECK(heldSequence.index == std::size(heldDraws));
+}
+
+void medicineAndMachineRollOnSeparateHourlyTracks() {
+  // Each track owns its own roll, so Machine's 55 ids can no longer swallow
+  // the odds that used to be shared with every other category.
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
   state.readingMinuteRemainder = 59;
-  constexpr uint32_t ballBoundaryDraws[] = {
-      24,  // Still lands in the Ball category (its range is [0,25)).
-      68,  // Master Ball wins within Ball (its range is [68,69), the top end).
-      2,   // Miss the encounter due at the same hourly boundary.
+  constexpr uint32_t medicineDraws[] = {
+      1,  // Hourly evolution-stone miss.
+      0,  // Medicine track hits (1-in-2).
+      0,  // Potion, the first medicine id and the heaviest.
+      1,  // TM/HM track misses (1-in-3).
+      2,  // Miss the encounter due at the same hourly boundary.
   };
-  SequenceRandom ballSequence{ballBoundaryDraws, std::size(ballBoundaryDraws)};
-  pokemon::RandomSource ballRandom{&ballSequence, SequenceRandom::next};
-  const pokemon::CreditResult ballResult =
-      pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, ballRandom);
-  CHECK(ballResult.generatedEvent == pokemon::PendingEventKind::Item);
-  CHECK(state.bagCounts[3] == 1);  // bagCounts[3] = item id 10 (Master Ball)
-  CHECK(ballSequence.index == std::size(ballBoundaryDraws));
+  SequenceRandom medicineSequence{medicineDraws, std::size(medicineDraws)};
+  pokemon::RandomSource medicineRandom{&medicineSequence, SequenceRandom::next};
+  const pokemon::CreditResult medicineResult =
+      pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, medicineRandom);
+  CHECK(medicineResult.generatedEvent == pokemon::PendingEventKind::Item);
+  CHECK(static_cast<uint8_t>(state.pendingEvents[0].item) == 11);  // Potion
+  CHECK(state.bagCounts[4] == 1);                                  // bagCounts[4] = item id 11 (Potion)
+  CHECK(medicineSequence.index == std::size(medicineDraws));
 
   state = stateWithLeader(leader);
-  state.itemMisses = 19;
   state.readingMinuteRemainder = 59;
-  constexpr uint32_t candyBoundaryDraws[] = {
-      99,  // Lands in the Candy category (its range is [95,100), the last one).
-      2,   // Miss the encounter - no item-level roll needed since Candy only
-           // has one member (Rare Candy), so nothing to choose between.
+  constexpr uint32_t machineDraws[] = {
+      1,  // Hourly evolution-stone miss.
+      1,  // Medicine track misses.
+      0,  // TM/HM track hits.
+      0,  // TM01, the first machine id.
+      2,  // Miss the encounter due at the same hourly boundary.
   };
-  SequenceRandom candySequence{candyBoundaryDraws, std::size(candyBoundaryDraws)};
-  pokemon::RandomSource candyRandom{&candySequence, SequenceRandom::next};
-  const pokemon::CreditResult candyResult =
-      pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, candyRandom);
-  CHECK(candyResult.generatedEvent == pokemon::PendingEventKind::Item);
-  CHECK(state.bagCounts[17] == 1);  // bagCounts[17] = item id 24 (Rare Candy)
-  CHECK(candySequence.index == std::size(candyBoundaryDraws));
+  SequenceRandom machineSequence{machineDraws, std::size(machineDraws)};
+  pokemon::RandomSource machineRandom{&machineSequence, SequenceRandom::next};
+  const pokemon::CreditResult machineResult =
+      pokemon::applyCreditedMinutes(state, leader, 1, 25, pokemon::OwnedEvolutionNeeds{}, machineRandom);
+  CHECK(machineResult.generatedEvent == pokemon::PendingEventKind::Item);
+  CHECK(static_cast<uint8_t>(state.pendingEvents[0].item) == 29);  // TM01
+  CHECK(state.bagCounts[22] == 1);                                 // bagCounts[22] = item id 29 (TM01)
+  CHECK(machineSequence.index == std::size(machineDraws));
 }
 
 void itemRollAndPityPreferAnOwnedEvolutionNeed() {
@@ -499,7 +596,9 @@ void itemRollAndPityPreferAnOwnedEvolutionNeed() {
   pokemon::PokemonState state = stateWithLeader(leader);
   state.readingMinuteRemainder = 59;
   constexpr uint32_t randomItemDraws[] = {
-      0,  // Trigger the hourly item.
+      0,  // Trigger the hourly evolution-stone roll.
+      1,
+      1,  // Hourly medicine miss, hourly TM/HM miss.
       2,  // Miss the encounter due at the same boundary.
   };
   SequenceRandom randomItemSequence{randomItemDraws, std::size(randomItemDraws)};
@@ -530,19 +629,20 @@ void itemRollAndPityPreferAnOwnedEvolutionNeed() {
 }
 
 void saturatedItemsDoNotRejectReadingCredit() {
-  // All six evolution stones saturated no longer means "no item drop": the
-  // pool widened to 83 items (GĐ 4), so the roll falls through to the
-  // category roll (GĐ 21 - see CATEGORY_DROP_WEIGHTS) with Stone excluded,
-  // landing on the first eligible item in whichever category wins instead of
-  // coming up empty.
+  // All six evolution stones saturated means the stone track simply has
+  // nothing to give this hour - it no longer spills over into the other
+  // categories, because those collect on their own schedules now. Reading
+  // credit still applies, the other tracks still fire, and the ball handed
+  // out at the same check lands regardless.
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
   state.itemCounts.fill(UINT16_MAX);
   state.itemMisses = 19;
   state.readingMinuteRemainder = 59;
   constexpr uint32_t draws[] = {
-      0,  // Select the Ball category (Stone is unavailable - all six saturated).
-      0,  // Select the first eligible item within Ball (Poke Ball, id 7).
+      0,  // Medicine track hits - the forced stone roll found nothing to give.
+      0,  // Potion, the first medicine id.
+      1,  // TM/HM track misses.
       2,  // Miss the encounter due at the same hourly boundary.
   };
   SequenceRandom sequence{draws, std::size(draws)};
@@ -554,13 +654,14 @@ void saturatedItemsDoNotRejectReadingCredit() {
   CHECK(result.status == pokemon::CreditStatus::Applied);
   CHECK(result.generatedEvent == pokemon::PendingEventKind::Item);
   CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::Item);
-  CHECK(static_cast<uint8_t>(state.pendingEvents[0].item) == 7);
+  CHECK(static_cast<uint8_t>(state.pendingEvents[0].item) == 11);  // Potion, not a stone
   CHECK(leader.totalXp == 53);
   CHECK(state.lifetimeMinutes == 1);
   CHECK(state.itemMisses == 0);
   CHECK(state.encounterMisses == 1);
-  CHECK(sequence.index == 3);
+  CHECK(sequence.index == std::size(draws));
   for (const uint16_t count : state.itemCounts) CHECK(count == UINT16_MAX);  // stones themselves stay untouched
+  CHECK(state.bagCounts[4] == 1);                                            // bagCounts[4] = item id 11 (Potion)
   CHECK(state.bagCounts[0] == 1);                                            // bagCounts[0] = item id 7 (Poke Ball)
 
   state = stateWithLeader(leader);
@@ -568,9 +669,11 @@ void saturatedItemsDoNotRejectReadingCredit() {
   state.itemMisses = 19;
   state.readingMinuteRemainder = 59;
   constexpr uint32_t fallbackDraws[] = {
-      25,  // Select the Stone category (skipping the first 25 for Ball).
-      0,   // Moon Stone wins within Stone (Thunder Stone is saturated).
-      2,   // Miss the encounter due at the same hourly boundary.
+      0,  // Moon Stone: Thunder Stone is needed but saturated, so the roll
+          // widens to any stone with room and lands on the first of them.
+      1,
+      1,  // Hourly medicine miss, hourly TM/HM miss.
+      2,  // Miss the encounter due at the same hourly boundary.
   };
   SequenceRandom fallbackSequence{fallbackDraws, std::size(fallbackDraws)};
   pokemon::RandomSource fallbackRandom{&fallbackSequence, SequenceRandom::next};
@@ -589,7 +692,16 @@ void legendaryEligibilityAndMewOverrideRegularEncounters() {
   state.encounterMisses = 3;
   state.readingMinuteRemainder = 59;
   state.lifetimeMinutes = 1199;
-  constexpr uint32_t birdDraws[] = {1, 0, 0, 0};
+  // At 75% progress three ball kinds are unlocked, so the ball handed out at
+  // this check spends a draw of its own ahead of the encounter.
+  constexpr uint32_t birdDraws[] = {
+      1,     // Hourly evolution-stone miss.
+      1, 1,  // Hourly medicine miss, hourly TM/HM miss.
+      0,     // Poke Ball.
+      0,     // Legendary roll hits.
+      0,     // Articuno, first of the three uncaught birds.
+      0,     // Minimum level for the band.
+  };
   SequenceRandom birdSequence{birdDraws, std::size(birdDraws)};
   pokemon::RandomSource birdRandom{&birdSequence, SequenceRandom::next};
 
@@ -611,7 +723,13 @@ void legendaryEligibilityAndMewOverrideRegularEncounters() {
   CHECK(pokemon::markSpecies(state.seenSpecies, 145));
   CHECK(pokemon::markSpecies(state.caughtSpecies, 146));
   CHECK(pokemon::markSpecies(state.seenSpecies, 146));
-  constexpr uint32_t mewtwoDraws[] = {1, 0, 0};
+  constexpr uint32_t mewtwoDraws[] = {
+      1,     // Hourly evolution-stone miss.
+      1, 1,  // Hourly medicine miss, hourly TM/HM miss.
+      0,     // Poke Ball.
+      0,     // Legendary roll hits - Mewtwo is the only uncaught one left.
+      0,     // Minimum level for the band.
+  };
   SequenceRandom mewtwoSequence{mewtwoDraws, std::size(mewtwoDraws)};
   pokemon::RandomSource mewtwoRandom{&mewtwoSequence, SequenceRandom::next};
   result = pokemon::applyCreditedMinutes(state, leader, 1, 95, pokemon::OwnedEvolutionNeeds{}, mewtwoRandom);
@@ -625,7 +743,14 @@ void legendaryEligibilityAndMewOverrideRegularEncounters() {
   state.readingMinuteRemainder = 59;
   CHECK(pokemon::markSpecies(state.caughtSpecies, 150));
   CHECK(pokemon::markSpecies(state.seenSpecies, 150));
-  constexpr uint32_t duplicateDraws[] = {1, 0, 3, 0};
+  constexpr uint32_t duplicateDraws[] = {
+      1,     // Hourly evolution-stone miss.
+      1, 1,  // Hourly medicine miss, hourly TM/HM miss.
+      0,     // Poke Ball.
+      0,     // Legendary roll hits.
+      3,     // All four are caught already, so the pick falls back to the full list.
+      0,     // Minimum level for the band.
+  };
   SequenceRandom duplicateSequence{duplicateDraws, std::size(duplicateDraws)};
   pokemon::RandomSource duplicateRandom{&duplicateSequence, SequenceRandom::next};
   result = pokemon::applyCreditedMinutes(state, leader, 1, 95, pokemon::OwnedEvolutionNeeds{}, duplicateRandom);
@@ -641,7 +766,12 @@ void legendaryEligibilityAndMewOverrideRegularEncounters() {
     CHECK(pokemon::markSpecies(state.seenSpecies, speciesId));
     CHECK(pokemon::markSpecies(state.caughtSpecies, speciesId));
   }
-  constexpr uint32_t mewDraws[] = {1, 0};
+  constexpr uint32_t mewDraws[] = {
+      1,     // Hourly evolution-stone miss.
+      1, 1,  // Hourly medicine miss, hourly TM/HM miss.
+      0,     // Poke Ball.
+      0,     // Minimum level - Mew skips the legendary roll entirely.
+  };
   SequenceRandom mewSequence{mewDraws, std::size(mewDraws)};
   pokemon::RandomSource mewRandom{&mewSequence, SequenceRandom::next};
   result = pokemon::applyCreditedMinutes(state, leader, 1, 95, pokemon::OwnedEvolutionNeeds{}, mewRandom);
@@ -1008,7 +1138,7 @@ int main() {
   creditClampsAndRejectsInvalidCallsWithoutMutation();
   fifteenMinuteCheckUsesFortyPercentEncounterChance();
   fourthEncounterCheckIsForcedAndCreatesOnlyOneEvent();
-  fullQueueCreditsReadingAndPrimesGuaranteesWithoutRolling();
+  fullQueuePrimesGuaranteesButStillHandsOutBalls();
   oneBoundaryQueuesItemEncounterAndEvolutionInOrder();
   resolvingEventsPopsOnlyTheFrontAndRefreshesTheNotice();
   encounterDueWithLevelGainQueuesEncounterBeforeEvolution();
@@ -1016,7 +1146,9 @@ int main() {
   multiHourCreditUsesLifetimeAtEachHourlyBoundary();
   progressBandsGateStagesAndEncounterLevels();
   everyEligibleRegularEncounterWeightIntervalSelectsItsSpecies();
-  itemCategoryWeightsGiveEachCategoryAFairShareRegardlessOfHowManyItemsItHolds();
+  everyEncounterCheckHandsOutABallWithoutQueueingAnEvent();
+  ballKindsUnlockWithProgressAndMasterBallStaysOneAtATime();
+  medicineAndMachineRollOnSeparateHourlyTracks();
   itemRollAndPityPreferAnOwnedEvolutionNeed();
   saturatedItemsDoNotRejectReadingCredit();
   legendaryEligibilityAndMewOverrideRegularEncounters();

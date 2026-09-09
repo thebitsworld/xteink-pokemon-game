@@ -4,7 +4,7 @@
 
 #include <array>
 #include <cstdint>
-#include <optional>
+#include <span>
 
 #include "PokemonBattleTypes.h"
 #include "PokemonSpecies.h"
@@ -17,6 +17,13 @@ constexpr uint8_t ENCOUNTER_CHECK_MINUTES = 15;
 constexpr uint8_t ENCOUNTER_CHANCE_DENOMINATOR = 5;
 constexpr uint8_t ENCOUNTER_CHANCE_SUCCESSES = 2;
 constexpr uint8_t ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3;
+// Hourly odds for the two "you found something" tracks that are not evolution
+// stones: 1-in-2 for medicine (a convenience on top of the HP/PP that reading
+// already restores) and 1-in-3 for TM/HM (permanent move unlocks, 55 of them
+// to collect). Balls are not here - they are paced per encounter check
+// instead, see grantBall().
+constexpr uint32_t MEDICINE_DROP_DENOMINATOR = 2;
+constexpr uint32_t MACHINE_DROP_DENOMINATOR = 3;
 
 bool randomBelow(const RandomSource& random, const uint32_t upperExclusive, uint32_t& output) {
   if (random.below == nullptr || upperExclusive == 0) return false;
@@ -253,15 +260,26 @@ void incrementItemCount(PokemonState& state, const uint8_t itemId) {
   }
 }
 
+bool isStoneCategory(const ItemCategory category) { return category == ItemCategory::Stone; }
+
+// Matches what the Bag > Medicine screen shows, so "the medicine you collect"
+// means the same set in the drop rules as it does on screen.
+bool isMedicineCategory(const ItemCategory category) {
+  return category == ItemCategory::Medicine || category == ItemCategory::StatusCure ||
+         category == ItemCategory::PPRestore || category == ItemCategory::Candy;
+}
+
+bool isMachineCategory(const ItemCategory category) { return category == ItemCategory::Machine; }
+
 // Builds a drop_weight-weighted candidate list, skipping any item already at
 // its per-slot storage cap. When `preferOwnedNeeds` is set, only evolution
 // stones/Link Cable a currently-owned Pokemon can actually evolve with are
-// offered - mirrors the pre-item-expansion behavior exactly. Otherwise, when
-// `categoryFilter` is set, only items in that one category are offered - see
-// `chooseItemCategory()` for why the fallback roll goes through a category
-// first instead of flattening every item into one big weighted list.
+// offered - mirrors the pre-item-expansion behavior exactly. Otherwise
+// `categoryMatches` (never null outside that path) narrows the pool to one
+// collection track; each track rolls on its own schedule so a category with
+// many ids (Machine has 55) can no longer crowd out one with few (Ball has 4).
 uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds,
-                             const bool preferOwnedNeeds, const std::optional<ItemCategory> categoryFilter,
+                             const bool preferOwnedNeeds, bool (*categoryMatches)(ItemCategory),
                              std::array<uint8_t, ITEM_COUNT>& candidateItemIds,
                              std::array<uint32_t, ITEM_COUNT>& candidateWeights, size_t& candidateCount) {
   candidateCount = 0;
@@ -274,7 +292,7 @@ uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeed
     if (itemCountIsFull(state, static_cast<uint8_t>(itemId))) continue;
     const ItemData* item = itemData(static_cast<uint8_t>(itemId));
     if (item == nullptr || item->dropWeight == 0) continue;
-    if (categoryFilter.has_value() && item->category != *categoryFilter) continue;
+    if (categoryMatches != nullptr && !categoryMatches(item->category)) continue;
     candidateItemIds[candidateCount] = static_cast<uint8_t>(itemId);
     candidateWeights[candidateCount] = item->dropWeight;
     totalWeight += item->dropWeight;
@@ -283,60 +301,24 @@ uint32_t buildItemCandidates(const PokemonState& state, const OwnedEvolutionNeed
   return totalWeight;
 }
 
-struct CategoryWeight {
-  ItemCategory category;
-  uint32_t weight;
-};
-
-// Category-level weights for the fallback item roll (no evolution stone
-// currently needed). Without this, a category's odds of being picked at all
-// depend on how many individual items happen to sit in it in the data file -
-// Machine (55 TM/HM ids) would drown out Ball (only 4 ids) even if every
-// individual TM/HM has a low drop_weight, purely because there are so many
-// of them to sum up. Each item's own drop_weight column still decides which
-// specific item wins *within* whichever category gets picked here (Poke Ball
-// >> Master Ball), so this table only needs to say how common the category
-// itself should feel.
-constexpr CategoryWeight CATEGORY_DROP_WEIGHTS[] = {
-    {ItemCategory::Ball, 25},       {ItemCategory::Stone, 10},     {ItemCategory::Medicine, 20},
-    {ItemCategory::StatusCure, 15}, {ItemCategory::PPRestore, 10}, {ItemCategory::Machine, 15},
-    {ItemCategory::Candy, 5},
-};
-
-bool categoryHasAvailableItem(const PokemonState& state, const ItemCategory category) {
-  for (uint16_t itemId = 1; itemId <= ITEM_COUNT; ++itemId) {
-    const ItemData* item = itemData(static_cast<uint8_t>(itemId));
-    if (item == nullptr || item->category != category || item->dropWeight == 0) continue;
-    if (itemCountIsFull(state, static_cast<uint8_t>(itemId))) continue;
-    return true;
-  }
-  return false;
-}
-
-bool chooseItemCategory(const PokemonState& state, const RandomSource& random, ItemCategory& category) {
-  std::array<ItemCategory, std::size(CATEGORY_DROP_WEIGHTS)> eligible{};
-  std::array<uint32_t, std::size(CATEGORY_DROP_WEIGHTS)> weights{};
-  size_t count = 0;
-  uint32_t totalWeight = 0;
-  for (const CategoryWeight& entry : CATEGORY_DROP_WEIGHTS) {
-    if (!categoryHasAvailableItem(state, entry.category)) continue;
-    eligible[count] = entry.category;
-    weights[count] = entry.weight;
-    totalWeight += entry.weight;
-    ++count;
-  }
-  if (count == 0 || totalWeight == 0) return false;
-
-  category = eligible[count - 1U];
-  if (count == 1) return true;  // skip the roll when there's only one possible outcome (see createItem)
+// Picks one id out of a drop_weight-weighted candidate list. Skips the roll
+// entirely when there is only one possible outcome - both an efficiency win
+// and what keeps this call-for-call compatible with the pre-item-expansion
+// behavior (which only rolled when there was an actual choice to make),
+// preserving determinism for anything that scripts an exact call sequence.
+bool pickWeightedItem(std::span<const uint8_t> candidateItemIds, std::span<const uint32_t> candidateWeights,
+                      const uint32_t totalWeight, const RandomSource& random, uint8_t& selectedItemId) {
+  selectedItemId = candidateItemIds[0];
+  if (candidateItemIds.size() == 1) return true;
   uint32_t roll = 0;
   if (!randomBelow(random, totalWeight, roll)) return false;
-  for (size_t index = 0; index < count; ++index) {
-    if (roll < weights[index]) {
-      category = eligible[index];
-      return true;
+  selectedItemId = candidateItemIds[candidateItemIds.size() - 1U];
+  for (size_t index = 0; index < candidateItemIds.size(); ++index) {
+    if (roll < candidateWeights[index]) {
+      selectedItemId = candidateItemIds[index];
+      break;
     }
-    roll -= weights[index];
+    roll -= candidateWeights[index];
   }
   return true;
 }
@@ -347,33 +329,24 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
-  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, std::nullopt, candidateItemIds,
+  uint32_t totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, true, nullptr, candidateItemIds,
                                              candidateWeights, candidateCount);
   if (candidateCount == 0) {
-    ItemCategory category{};
-    if (!chooseItemCategory(state, random, category)) return true;
-    totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, false, category, candidateItemIds, candidateWeights,
-                                      candidateCount);
+    // Nothing an owned Pokemon can actually evolve with right now - widen to
+    // any stone that still has room so the player can stock up ahead of a
+    // future evolution, but never past Stone: medicine, TM/HM and balls are
+    // separate collection tracks with their own schedules (GĐ 22), and
+    // folding them back in here is exactly what used to starve the ball
+    // supply.
+    totalWeight = buildItemCandidates(state, ownedEvolutionNeeds, false, isStoneCategory, candidateItemIds,
+                                      candidateWeights, candidateCount);
   }
   if (candidateCount == 0 || totalWeight == 0) return true;
 
-  uint8_t selectedItemId = candidateItemIds[0];
-  if (candidateCount > 1) {
-    // Skip the roll entirely when there is only one possible outcome - both
-    // an efficiency win and what keeps this call-for-call compatible with
-    // the pre-item-expansion behavior (which only rolled when there was an
-    // actual choice to make), preserving determinism for anything that
-    // scripts an exact RandomSource call sequence.
-    uint32_t roll = 0;
-    if (!randomBelow(random, totalWeight, roll)) return false;
-    selectedItemId = candidateItemIds[candidateCount - 1U];
-    for (size_t index = 0; index < candidateCount; ++index) {
-      if (roll < candidateWeights[index]) {
-        selectedItemId = candidateItemIds[index];
-        break;
-      }
-      roll -= candidateWeights[index];
-    }
+  uint8_t selectedItemId = 0;
+  if (!pickWeightedItem(std::span{candidateItemIds}.first(candidateCount),
+                        std::span{candidateWeights}.first(candidateCount), totalWeight, random, selectedItemId)) {
+    return false;
   }
 
   incrementItemCount(state, selectedItemId);
@@ -382,6 +355,100 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
   if (!enqueuePendingEvent(state, event)) return false;
   refreshDashboardNotice(state);
   created = true;
+  return true;
+}
+
+// Ball ids sit contiguously right after the six evolution stones (7..10 =
+// Poke/Great/Ultra/Master), the same fixed layout Screen::BattleBalls indexes.
+constexpr uint8_t FIRST_BALL_ITEM_ID = EVOLUTION_ITEM_COUNT + 1U;
+constexpr uint8_t BALL_KIND_COUNT = 4;
+
+// Which ball kinds a reader can find yet. Mirrors how regularEncounterEligible
+// gates evolved species behind book progress: early on it is Poke Balls only.
+// Master Ball is both the last unlock and strictly one-at-a-time - it stops
+// dropping while the player still holds one, so it stays an emergency button
+// instead of something to stockpile.
+bool ballKindDroppable(const PokemonState& state, const uint8_t itemId, const uint8_t bookProgressPercent) {
+  switch (itemId - FIRST_BALL_ITEM_ID) {
+    case 0:
+      return true;
+    case 1:
+      return bookProgressPercent >= 50;
+    case 2:
+      return bookProgressPercent >= 75;
+    case 3:
+      return bookProgressPercent >= 95 && state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U] == 0;
+    default:
+      return false;
+  }
+}
+
+// One ball per encounter check, so the ball supply is paced by the same clock
+// that decides how often a Pokemon shows up (~1.8 encounters/hour against 4
+// balls/hour). A catch costs 2-3 throws on average, so that ratio leaves a
+// slowly growing reserve rather than stranding the player in front of a
+// Pokemon with nothing to throw.
+//
+// Deliberately does NOT queue a PendingEvent: at this cadence balls would
+// swamp the 3-slot queue and start being dropped on the floor exactly when
+// they matter most. They land straight in the bag the way buying a stack at a
+// Mart would, and the player reads the count in Bag > Balls or on the throw
+// screen.
+bool grantBall(PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random) {
+  std::array<uint8_t, BALL_KIND_COUNT> candidateItemIds{};
+  std::array<uint32_t, BALL_KIND_COUNT> candidateWeights{};
+  size_t candidateCount = 0;
+  uint32_t totalWeight = 0;
+  for (uint8_t offset = 0; offset < BALL_KIND_COUNT; ++offset) {
+    const uint8_t itemId = static_cast<uint8_t>(FIRST_BALL_ITEM_ID + offset);
+    if (itemCountIsFull(state, itemId) || !ballKindDroppable(state, itemId, bookProgressPercent)) continue;
+    const ItemData* item = itemData(itemId);
+    if (item == nullptr || item->dropWeight == 0) continue;
+    candidateItemIds[candidateCount] = itemId;
+    candidateWeights[candidateCount] = item->dropWeight;
+    totalWeight += item->dropWeight;
+    ++candidateCount;
+  }
+  if (candidateCount == 0 || totalWeight == 0) return true;
+
+  uint8_t selectedItemId = 0;
+  if (!pickWeightedItem(std::span{candidateItemIds}.first(candidateCount),
+                        std::span{candidateWeights}.first(candidateCount), totalWeight, random, selectedItemId)) {
+    return false;
+  }
+  incrementItemCount(state, selectedItemId);
+  return true;
+}
+
+// Medicine and TM/HM each get their own hourly roll rather than competing for
+// one shared slot, so tuning either leaves the other (and the stone track,
+// and the ball track) untouched.
+bool processCategoryDrop(PokemonState& state, bool (*categoryMatches)(ItemCategory), const uint32_t denominator,
+                         const RandomSource& random, PendingEventKind& generatedEvent) {
+  if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) return true;
+  uint32_t roll = 0;
+  if (!randomBelow(random, denominator, roll)) return false;
+  if (roll != 0) return true;
+
+  std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
+  std::array<uint32_t, ITEM_COUNT> candidateWeights{};
+  size_t candidateCount = 0;
+  const uint32_t totalWeight = buildItemCandidates(state, OwnedEvolutionNeeds{}, false, categoryMatches,
+                                                   candidateItemIds, candidateWeights, candidateCount);
+  if (candidateCount == 0 || totalWeight == 0) return true;
+
+  uint8_t selectedItemId = 0;
+  if (!pickWeightedItem(std::span{candidateItemIds}.first(candidateCount),
+                        std::span{candidateWeights}.first(candidateCount), totalWeight, random, selectedItemId)) {
+    return false;
+  }
+
+  incrementItemCount(state, selectedItemId);
+  const PendingEvent event{
+      0, 0, 0, Gender::Unknown, static_cast<EvolutionItem>(selectedItemId), PendingEventKind::Item};
+  if (!enqueuePendingEvent(state, event)) return false;
+  refreshDashboardNotice(state);
+  generatedEvent = PendingEventKind::Item;
   return true;
 }
 
@@ -466,9 +533,18 @@ CreditResult applyCreditedMinutes(PokemonState& state, PokemonRecord& leader, co
     if (hourlyBoundary) {
       stateCandidate.readingMinuteRemainder = 0;
       if (!processHourlyItem(stateCandidate, random, ownedEvolutionNeeds, generatedEvent)) return result;
+      if (!processCategoryDrop(stateCandidate, isMedicineCategory, MEDICINE_DROP_DENOMINATOR, random, generatedEvent)) {
+        return result;
+      }
+      if (!processCategoryDrop(stateCandidate, isMachineCategory, MACHINE_DROP_DENOMINATOR, random, generatedEvent)) {
+        return result;
+      }
     }
 
     if (hourlyBoundary || stateCandidate.readingMinuteRemainder % ENCOUNTER_CHECK_MINUTES == 0) {
+      // Ball first, so one found on this tick is already in the bag if this
+      // same tick also turns up a Pokemon to throw it at.
+      if (!grantBall(stateCandidate, bookProgressPercent, random)) return result;
       if (!processEncounterCheck(stateCandidate, bookProgressPercent, random, generatedEvent)) {
         return result;
       }
