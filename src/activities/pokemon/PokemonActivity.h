@@ -104,6 +104,7 @@ class PokemonActivity final : public Activity {
   void buildBattleLog(const pokemon::BattleTurnResult& result);
   void renderBattleHud();
   void renderBattleMenu();
+  void renderBattleMoveMenu();
   int battleMenuTop() const;
   int battlePlayerMoveCount() const;
   // GĐ 13: which party members can currently fight (BattleRecordEntry's
