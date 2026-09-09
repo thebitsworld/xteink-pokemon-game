@@ -66,6 +66,11 @@ class PokemonActivity final : public Activity {
     Evolution,
     Medicine,
     Machine,
+    // Entered from Screen::BattleBag (GĐ18) rather than the out-of-battle
+    // Screen::Bag - same item-then-target flow through Screen::ItemTarget,
+    // but the outcome returns to Screen::Battle (and syncs battlePlayer_ if
+    // the target was the active combatant) instead of Screen::Party.
+    BattleMedicine,
   };
 
   static constexpr uint8_t ROW_CAPACITY = 10;

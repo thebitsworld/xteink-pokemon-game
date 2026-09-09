@@ -898,9 +898,48 @@ void PokemonActivity::activate() {
     }
     case Screen::ItemTarget: {
       const uint32_t recordId = selectedRecordId();
-      const Screen bagScreen = bagCategory_ == BagCategory::Evolution  ? Screen::BagEvolution
-                               : bagCategory_ == BagCategory::Medicine ? Screen::BagMedicine
-                                                                       : Screen::BagMachine;
+      const Screen bagScreen = bagCategory_ == BagCategory::Evolution        ? Screen::BagEvolution
+                               : bagCategory_ == BagCategory::Medicine       ? Screen::BagMedicine
+                               : bagCategory_ == BagCategory::BattleMedicine ? Screen::BattleBag
+                                                                             : Screen::BagMachine;
+      if (bagCategory_ == BagCategory::BattleMedicine) {
+        const pokemon::UseConsumableOutcome outcome = service_.useConsumable(recordId, selectedMedicineItemId_);
+        if (outcome == pokemon::UseConsumableOutcome::NotApplicable) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), bagScreen);
+          return;
+        }
+        if (outcome != pokemon::UseConsumableOutcome::Applied ||
+            service_.consumeBagItem(selectedMedicineItemId_) != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
+          return;
+        }
+        // useConsumable() persists straight to the on-disk BattleRecordEntry
+        // via recordId - it never touches the live in-RAM battlePlayer_ that
+        // stepBattle()/renderBattleHud() actually read. If the target was
+        // the active combatant, pull the entry back and copy it in, the
+        // same fields setupBattlePlayer() seeds at the start of a fight.
+        pokemon::PokemonRecord targetRecord{};
+        const bool isActiveCombatant = battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount &&
+                                       recordId == snapshot_.party[battlePartySlot_].recordId;
+        if (isActiveCombatant && service_.readRecord(recordId, targetRecord) == pokemon::ServiceStatus::Ok) {
+          const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(targetRecord);
+          battlePlayer_.currentHp = entry.currentHp;
+          battlePlayer_.status = entry.status;
+          battlePlayer_.statusTurns = entry.statusTurns;
+          for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battlePlayer_.moves[i].currentPp = entry.pp[i];
+        }
+        if (!refreshSnapshot()) return;
+        const pokemon::ItemData* item = pokemon::itemData(selectedMedicineItemId_);
+        snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
+                 item == nullptr ? "?" : item->name);
+        // Deliberate simplification, consistent with GĐ13's free Pokemon
+        // switch: using an item mid-battle does not cost a turn either -
+        // stepBattle() has no "item action" concept, and adding one just to
+        // let the opponent get a free hit here would mean touching an
+        // otherwise-stable, already-tested engine for this one feature.
+        setScreen(Screen::Battle);
+        return;
+      }
       if (bagCategory_ == BagCategory::Machine) {
         const pokemon::TeachMoveOutcome outcome = service_.teachMove(recordId, selectedMachineMoveId_);
         if (outcome == pokemon::TeachMoveOutcome::AlreadyKnown) {
@@ -1108,40 +1147,13 @@ void PokemonActivity::activate() {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
         return;
       }
-      const uint32_t recordId = snapshot_.party[battlePartySlot_].recordId;
-      const pokemon::UseConsumableOutcome outcome = service_.useConsumable(recordId, itemId);
-      if (outcome == pokemon::UseConsumableOutcome::NotApplicable) {
-        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
-        return;
-      }
-      if (outcome != pokemon::UseConsumableOutcome::Applied ||
-          service_.consumeBagItem(itemId) != pokemon::ServiceStatus::Ok) {
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BattleBag);
-        return;
-      }
-      // useConsumable() persists straight to the on-disk BattleRecordEntry
-      // via recordId - it never touches the live in-RAM battlePlayer_ that
-      // stepBattle()/renderBattleHud() actually read, so pull the entry
-      // back and copy it in, the same fields setupBattlePlayer() seeds at
-      // the start of a fight.
-      pokemon::PokemonRecord record{};
-      if (service_.readRecord(recordId, record) == pokemon::ServiceStatus::Ok) {
-        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
-        battlePlayer_.currentHp = entry.currentHp;
-        battlePlayer_.status = entry.status;
-        battlePlayer_.statusTurns = entry.statusTurns;
-        for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battlePlayer_.moves[i].currentPp = entry.pp[i];
-      }
-      if (!refreshSnapshot()) return;
-      const pokemon::ItemData* item = pokemon::itemData(itemId);
-      snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
-               item == nullptr ? "?" : item->name);
-      // Deliberate simplification, consistent with GĐ13's free Pokemon
-      // switch: using an item mid-battle does not cost a turn either -
-      // stepBattle() has no "item action" concept, and adding one just to
-      // let the opponent get a free hit here would mean touching an
-      // otherwise-stable, already-tested engine for this one feature.
-      setScreen(Screen::Battle);
+      // Like the out-of-battle Bag, picking an item doesn't use it on the
+      // active combatant right away - it goes to Screen::ItemTarget to pick
+      // which of the up-to-6 party members receives it (a benched Pokemon
+      // can be healed mid-fight too, not just the one currently battling).
+      bagCategory_ = BagCategory::BattleMedicine;
+      selectedMedicineItemId_ = itemId;
+      setScreen(Screen::ItemTarget);
       return;
     }
     case Screen::BattleBalls: {
@@ -1255,9 +1267,10 @@ void PokemonActivity::goBack() {
       setScreen(Screen::Pc);
       return;
     case Screen::ItemTarget:
-      setScreen(bagCategory_ == BagCategory::Evolution  ? Screen::BagEvolution
-                : bagCategory_ == BagCategory::Medicine ? Screen::BagMedicine
-                                                        : Screen::BagMachine);
+      setScreen(bagCategory_ == BagCategory::Evolution        ? Screen::BagEvolution
+                : bagCategory_ == BagCategory::Medicine       ? Screen::BagMedicine
+                : bagCategory_ == BagCategory::BattleMedicine ? Screen::BattleBag
+                                                              : Screen::BagMachine);
       return;
     case Screen::BagEvolution:
     case Screen::BagMedicine:
