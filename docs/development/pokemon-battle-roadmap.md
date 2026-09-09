@@ -429,21 +429,18 @@ Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch 
 
 **Sửa ngay sau khi chơi thử (commit `d278b161`)**: bấm FIGHT, danh sách chiêu (`Screen::BattleMoves`) đè lên khung text HUD. Nguyên nhân: `hudBottom` đổi sang `battleMenuTop()` cho **mọi** screen dùng chung `renderBattleHud()` (Battle/BattleMoves/BattleBalls), nhưng `battleMenuTop()` gọi `logicalCount()` — hàm này trả số khác nhau tùy `screen_` (số lệnh cho `Battle`, số chiêu cho `BattleMoves`) nên tính sai đỉnh vùng dành cho HUD khi đang ở `BattleMoves`. Sửa: chỉ dùng `battleMenuTop()` khi `screen_ == Battle`; `BattleMoves`/`BattleBalls` quay lại dùng `listBounds_.y` như trước (2 màn này vẫn là list thường qua `buildList()`, không đổi ở lần mở rộng 5). Flash **6,350,777 B (96.9%, còn 188,672 B)** — +28 B.
 
-### GĐ 19 — Bóng trong túi đồ ngoài trận ⏳ CHƯA LÀM
+### GĐ 19 — Bóng trong túi đồ ngoài trận ✅ XONG (commit `f0b49554`)
 
-**Đã xác nhận qua code (không cần sửa)**:
-- Bóng **đã** rớt được qua đọc sách — `scripts/data/pokemon-items.csv` id 7-10 (Poke/Great/Ultra/Master Ball) đã nằm trong bảng rơi đồ theo trọng số 83 vật phẩm từ GĐ4, `dropWeight` **đã phân tầng đúng theo độ hiếm**: Poke Ball 40 > Great Ball 20 > Ultra Ball 8 > Master Ball 1 (so với Potion 60 phổ biến hơn nữa, Rare Candy 4 hiếm tương đương Ultra Ball). Không cần sửa gì — chỉ cần build xong rồi xác nhận lại bằng chơi thử.
-- Bóng **đã** bị khóa hoàn toàn ở gym battle — `Screen::Battle`'s label switch (`if (!isGym && index == 1) label = tr(STR_POKEMON_BALL);`) và selection handler (`if (!isGym && selected_ == 1) setScreen(Screen::BattleBalls);`) đều gate theo `isGym`, dòng BALL không hề xuất hiện/chọn được khi đấu gym. Không cần sửa gì — nhưng `Screen::BattleBalls` (`PokemonActivity.cpp:1541-1548`, `:1084-1106`) **không tự kiểm tra `isGym` bên trong nó** — chỉ an toàn nhờ không có đường vào nào khác dẫn tới nó khi đang đấu gym. Cân nhắc thêm 1 dòng guard phòng thủ (`if (gymChallengeIndex_ != 0) return;`) ngay đầu handler của `Screen::BattleBalls` cho chắc chắn, phòng khi GĐ18 (thêm màn BattleBag) vô tình mở thêm đường vào chưa lường tới.
+**Đã xác nhận qua code, không cần sửa**: rớt bóng qua đọc sách + `dropWeight` phân tầng theo độ hiếm (Poke 40 > Great 20 > Ultra 8 > Master 1) đã đúng từ GĐ1/GĐ4; bóng đã bị khóa hoàn toàn ở gym battle (gate theo `isGym` ở cả label switch lẫn selection handler của `Screen::Battle`) đã đúng từ trước.
 
-**Việc thật sự cần làm**: hiện tại bóng **không có chỗ xem/quản lý ngoài trận** — theo comment sẵn có trong code (`PokemonActivity.cpp:110-116`): "Ball items have no Bag row at all — they are only ever consumed via BattleBalls." Người chơi không có cách nào biết mình đang có bao nhiêu bóng mỗi loại trừ khi đang bắt gặp Pokémon hoang dã.
-
-- [ ] Thêm `Screen::BagBalls` (màn mới) — liệt kê 4 loại bóng (id 7-10) + số lượng từ `snapshot_.state.bagCounts[0..3]`, đúng cách `Screen::BattleBalls` đã đọc (`pokemon::itemData(EVOLUTION_ITEM_COUNT + 1 + index)` + `bagCounts[index]`) — tái dùng y hệt logic đọc, chỉ khác chỗ hiển thị (ngoài trận, không phải trong `Screen::BattleBalls`).
-- [ ] `Screen::Bag` (màn chọn category) từ 3 dòng (Evolution/Medicine/Machine) lên **4 dòng** (thêm Balls) — sửa switch cứng 3 nhánh hiện tại ở `PokemonActivity.cpp:849-850` (`selected_ == 0 ? BagEvolution : selected_ == 1 ? BagMedicine : Machine`), cập nhật cả row-count switch (`:341-348`) và label rows cho màn `Screen::Bag` (số lượng dòng đổi từ 3 sang 4 kéo theo `logicalCount()` cho chính `Screen::Bag` cũng phải đổi).
-- [ ] `BagCategory` enum (`PokemonActivity.h:64`) thêm giá trị `Balls`.
-- [ ] **Quyết định thiết kế cần chốt khi triển khai**: `Screen::BagBalls` có cho **kích hoạt/dùng** dòng nào không? Bóng chỉ có tác dụng khi đang bắt Pokémon hoang dã (một hành động trong trận, không phải ngoài trận) — nên màn này nên là **chỉ xem** (giống `Screen::BattleSwitch` kiểu liệt kê, nhưng không có action khi Activate — có thể hiện message "Chỉ dùng được khi gặp Pokémon hoang dã" qua `showMessage()` có sẵn, hoặc đơn giản là no-op). Không thiết kế theo hướng "chọn bóng rồi làm gì đó ngoài trận" vì không có ý nghĩa gameplay.
-- [ ] 1-2 key i18n mới: tên màn `STR_POKEMON_BAG_BALLS` (hoặc tương tự) + có thể 1 message giải thích nếu chọn dòng bóng ngoài trận.
-- [ ] Chỉ sửa `PokemonActivity.cpp/.h` — không đụng `PokemonService`/data/test.
-- [ ] Build simulator + smoke test + đo flash.
+- [x] `Screen::BagBalls` (mới) — liệt kê 4 loại bóng + số lượng, tái dùng đúng cách `Screen::BattleBalls` đọc (`itemData(EVOLUTION_ITEM_COUNT+1+index)` + `bagCounts[index]`) — chỉ xem, không action khi Activate (hiện `STR_POKEMON_BAG_BALLS_INFO` giải thích bóng chỉ dùng được khi bắt Pokémon hoang dã).
+- [x] `Screen::Bag` từ 3 lên 4 dòng: Evolution/Medicine/Balls/TM-HM.
+- [x] 2 key i18n mới: `STR_POKEMON_BAG_BALLS` ("Balls"), `STR_POKEMON_BAG_BALLS_INFO`.
+- [x] **Không thêm `BagCategory::Balls`** — lệch khỏi kế hoạch ban đầu có chủ đích: `BagBalls` không đi qua luồng chọn-item-rồi-chọn-mục-tiêu (`Screen::ItemTarget`) như Evolution/Medicine/Machine, nên không cần phân biệt ngữ cảnh qua `bagCategory_` — `goBack()` map thẳng `BagBalls → Bag` như 3 màn kia, không cần thêm state.
+- [x] Phòng thủ thêm (không có trong kế hoạch gốc, làm luôn vì tiện): `Screen::BattleBalls`'s handler giờ tự kiểm tra `gymChallengeIndex_ != 0` — trước đây chỉ an toàn nhờ đường vào duy nhất đã gate theo `isGym`; đáng làm vì menu Battle đã đổi cấu trúc 2 lần chỉ trong GĐ18 (thêm BAG, rồi đổi bố cục 2 cột).
+- [x] Chỉ sửa `PokemonActivity.cpp/.h` + `english.yaml` — không đụng `PokemonService`/data/test.
+- [x] 19/19 test native pass (không đổi). Build simulator sạch + smoke test không lỗi. Flash **6,351,221 B (96.9%, còn 188,224 B)** — +444 B so với GĐ18.
+- [ ] **Chưa xác nhận bằng mắt** — cần người dùng tự chạy giả lập, vào Bag > Balls xem số lượng hiện đúng không.
 
 ### GĐ 20 — Script chỉnh save file giả lập để test màn bắt Pokémon ⏳ CHƯA LÀM
 
