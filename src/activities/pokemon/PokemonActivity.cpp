@@ -402,7 +402,16 @@ int PokemonActivity::listTop() const {
 // Party rows get extra height to fit an HP bar/text strip below the usual
 // icon+name+level line (see renderPartyRowHealth()) - every other list rides
 // the standard row height.
-int PokemonActivity::rowHeightForScreen() const { return screen_ == Screen::Party ? 96 : 64; }
+// Screen::ItemTarget picking a Medicine/BattleMedicine target also shows HP
+// (GĐ18 follow-up) - Evolution/Machine targets have no HP to show.
+bool PokemonActivity::itemTargetShowsHealth() const {
+  return screen_ == Screen::ItemTarget &&
+         (bagCategory_ == BagCategory::Medicine || bagCategory_ == BagCategory::BattleMedicine);
+}
+
+int PokemonActivity::rowHeightForScreen() const {
+  return screen_ == Screen::Party || itemTargetShowsHealth() ? 96 : 64;
+}
 
 int PokemonActivity::rowsPerPage() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -2139,18 +2148,20 @@ void PokemonActivity::renderRowArt() {
       // as a tiny 40x30 mark on the X3 panel.
       pokemon::drawPokemonSpeciesArt(renderer, speciesId, true, Rect{listBounds_.x + 5, rowY + 2, 80, 60});
     }
-    if (screen_ == Screen::Party && start + local < snapshot_.partyCount) {
+    if ((screen_ == Screen::Party || itemTargetShowsHealth()) && start + local < snapshot_.partyCount) {
       renderPartyRowHealth(rowY, snapshot_.party[start + local]);
     }
   }
 }
 
-// Drawn in the taller Party row's bottom strip (see rowHeightForScreen()),
-// below the list widget's own centered icon/name/level text - so a fixed
-// offset from the row's bottom edge stays clear of that text regardless of
-// its exact line height. peekBattleMoves() is read-only (never creates or
-// writes a battle-store entry), matching every other read-only HP peek in
-// this file (BattleSwitch rows, Summary, usablePartySlotAt()).
+// Drawn in the taller row's bottom strip (see rowHeightForScreen()) for
+// Screen::Party and, since GĐ18, Screen::ItemTarget when picking who
+// receives a Medicine item (itemTargetShowsHealth()) - below the list
+// widget's own centered icon/name/level text, so a fixed offset from the
+// row's bottom edge stays clear of that text regardless of its exact line
+// height. peekBattleMoves() is read-only (never creates or writes a
+// battle-store entry), matching every other read-only HP peek in this file
+// (BattleSwitch rows, Summary, usablePartySlotAt()).
 void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record) {
   const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
