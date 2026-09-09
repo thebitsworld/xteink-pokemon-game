@@ -418,6 +418,13 @@ Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch 
 
 **Sửa lần 3 (commit `02fe4a15`)**: màn chọn mục tiêu (`Screen::ItemTarget`) khi dùng item Medicine/BattleMedicine cần hiện thêm HP bar, HP/HP text, status hiện tại của từng Pokémon — đúng thông tin cần để quyết định dùng cho ai. Thêm `itemTargetShowsHealth()` (true khi `bagCategory_` là `Medicine`/`BattleMedicine`, false cho `Evolution`/`Machine` vì đá tiến hóa/TM không có HP để hiện) — tái dùng y hệt cơ chế "dòng cao hơn (96px) + dải HP bar ở đáy dòng" đã làm cho `Screen::Party` ở GĐ17 (`rowHeightForScreen()` và điều kiện gọi `renderPartyRowHealth()` giờ dùng chung điều kiện này), không thêm hàm vẽ mới. Flash **6,347,283 B (96.9%, còn 192,160 B)** — +84 B.
 
+**Mở rộng lần 4 (commit `6a014052`)**: 3 yêu cầu tiếp theo.
+1. `Screen::BattleSwitch` hiện HP bar/text/status như Party/ItemTarget (`showsPartyHealthRows()` đổi tên từ `itemTargetShowsHealth()`, mở rộng bao gồm `BattleSwitch`) — `renderRowArt()` cần ánh xạ riêng qua `usablePartySlotAt()` vì index của màn này không phải party slot trực tiếp.
+2. **Đổi Pokémon hoặc dùng item giữa trận giờ tốn nguyên 1 lượt** — đảo ngược giản lược "không tốn lượt" đã chọn ở GĐ13/bản đầu GĐ18, theo đúng luật Gen 1: cả hai hành động luôn giải quyết tức thì (không so Speed), rồi đối thủ được đánh trả ngay. Engine thêm `stepOpponentOnlyTurn()` (mới, `PokemonBattle.h/.cpp`) — chỉ chạy hành động của đối thủ, không so Speed (người chơi không đưa hành động nào ra để so), vẫn áp dụng end-of-turn status damage như bình thường. Tách `chooseOpponentMoveSlot()` và `finishTurn()` ra khỏi lambda nội bộ cũ của `stepBattle()` thành hàm dùng chung giữa 2 hàm — xác nhận refactor không đổi hành vi bằng cách chạy 19/19 test cũ pass **trước khi** thêm test mới. `PokemonService::resolveOpponentOnlyTurn()` (wrapper mỏng, đúng pattern `resolveBattleTurn()`). UI gọi hàm này ngay sau khi đổi Pokémon tự nguyện (không phải bị ép đổi sau khi gục) hoặc dùng item, xử lý outcome giống hệt `Screen::BattleMoves`.
+3. Thứ tự ra đòn khi cả 2 bên dùng FIGHT vẫn theo Speed như cũ (đúng từ GĐ2, không đổi) — phần mới chỉ là switch/item không tham gia so Speed vì luôn giải quyết trước, đúng game gốc.
+- Test: 4 test mới `PokemonBattleTest.cpp` (không so Speed dù player nhanh hơn, có thể hạ gục player, vẫn tick status cuối lượt, short-circuit khi đã gục sẵn) + 1 test `PokemonServiceTest.cpp` (thin-wrapper).
+- 19/19 test pass. Build simulator sạch + smoke test không lỗi. Flash **6,349,315 B (96.9%, còn 190,128 B)** — +2,032 B.
+
 ### GĐ 19 — Bóng trong túi đồ ngoài trận ⏳ CHƯA LÀM
 
 **Đã xác nhận qua code (không cần sửa)**:
