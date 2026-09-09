@@ -27,6 +27,11 @@ namespace fui = freeink::ui;
 namespace {
 constexpr fui::ActionId ACTION_ROW = 1;
 constexpr uint16_t STARTERS[] = {1, 4, 7, 25};
+// Screen::Battle's own FIGHT/BALL/BAG/SWITCH/RUN command grid (2 columns to
+// save vertical space - see renderBattleMenu()); shared with loop()'s
+// grid-aware Up/Down/Left/Right navigation for that screen.
+constexpr int BATTLE_MENU_COLUMNS = 2;
+constexpr int BATTLE_MENU_ROW_HEIGHT = 64;
 
 const char* speciesName(const uint16_t id) {
   const pokemon::SpeciesData* species = pokemon::speciesData(id);
@@ -310,7 +315,10 @@ void PokemonActivity::setScreen(const Screen screen, const int selected) {
 }
 
 bool PokemonActivity::isListScreen() const {
-  return screen_ != Screen::Summary && screen_ != Screen::PokedexDetail && screen_ != Screen::Message;
+  // Screen::Battle draws its own 2-column command grid (renderBattleMenu())
+  // instead of the generic single-column list - see the comment there.
+  return screen_ != Screen::Summary && screen_ != Screen::PokedexDetail && screen_ != Screen::Message &&
+         screen_ != Screen::Battle;
 }
 
 int PokemonActivity::logicalCount() const {
@@ -1388,6 +1396,37 @@ void PokemonActivity::loop() {
   }
   const int count = logicalCount();
   if (count <= 0) return;
+  if (screen_ == Screen::Battle) {
+    // 2-column grid (renderBattleMenu()) instead of a single-column list:
+    // Left/Right step through in reading order same as everywhere else;
+    // Up/Down jump by BATTLE_MENU_COLUMNS to move within the same column,
+    // wrapping to the column's other end - a plain page-jump (what every
+    // other screen uses) doesn't make sense for a 2-column grid.
+    const auto moveBattle = [this](const int next) {
+      selected_ = next;
+      requestUpdate();
+    };
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Right},
+                                    [this, count, &moveBattle] { moveBattle((selected_ + 1) % count); });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Left},
+                                    [this, count, &moveBattle] { moveBattle((selected_ - 1 + count) % count); });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Down}, [this, count, &moveBattle] {
+      int next = selected_ + BATTLE_MENU_COLUMNS;
+      if (next >= count) next = selected_ % BATTLE_MENU_COLUMNS;  // wrap to this column's top row
+      moveBattle(next);
+    });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Up}, [this, count, &moveBattle] {
+      int prev = selected_ - BATTLE_MENU_COLUMNS;
+      if (prev < 0) {
+        const int column = selected_ % BATTLE_MENU_COLUMNS;
+        const int lastRowStart = ((count - 1) / BATTLE_MENU_COLUMNS) * BATTLE_MENU_COLUMNS;
+        prev = lastRowStart + column;
+        if (prev >= count) prev -= BATTLE_MENU_COLUMNS;  // last row is short a column
+      }
+      moveBattle(prev);
+    });
+    return;
+  }
   const int perPage = rowsPerPage();
   const auto move = [this, count](const int next) {
     selected_ = next;
@@ -1645,6 +1684,11 @@ void PokemonActivity::buildRows() {
         } else
           row(local, tr(STR_OK));
         break;
+      // Unreachable in practice: isListScreen() excludes Screen::Battle
+      // (it draws its own 2-column grid via renderBattleMenu(), which has
+      // its own copy of this same label logic), so buildRows() is never
+      // called with screen_ == Battle. Kept only so this switch stays
+      // exhaustive over Screen's enumerators.
       case Screen::Battle: {
         const bool isGym = gymChallengeIndex_ != 0;
         const char* label;
@@ -1752,8 +1796,10 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   // HUD instead of scrolling normally. So BattleBag deliberately uses the
   // regular full-height top-anchored list instead (see also renderFocused(),
   // which correspondingly does not draw the HUD behind it).
-  const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::Battle || screen_ == Screen::BattleMoves ||
-                              screen_ == Screen::BattleBalls;
+  // Screen::Battle itself never reaches here - isListScreen() excludes it
+  // (it draws its own 2-column command grid, see renderBattleMenu()).
+  const bool bottomAnchored =
+      screen_ == Screen::Event || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
   screen.setContentMargin(
@@ -1964,6 +2010,7 @@ void PokemonActivity::renderFocused() {
   }
   if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
     renderBattleHud();
+    if (screen_ == Screen::Battle) renderBattleMenu();
     return;
   }
   if (screen_ != Screen::Event) return;
@@ -2003,14 +2050,73 @@ void PokemonActivity::renderFocused() {
   }
 }
 
+// Top Y of the 2-column command grid, anchored to the bottom of the screen
+// exactly like the generic list's own bottomAnchored math (buildList()) -
+// just with ceil(count/2) rows instead of `count` rows, since two commands
+// share each physical row.
+int PokemonActivity::battleMenuTop() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int count = logicalCount();
+  const int rows = (count + BATTLE_MENU_COLUMNS - 1) / BATTLE_MENU_COLUMNS;
+  return renderer.getScreenHeight() - metrics.buttonHintsHeight - rows * BATTLE_MENU_ROW_HEIGHT - 8;
+}
+
+// Screen::Battle's FIGHT/BALL/BAG/SWITCH/RUN menu as a 2-column button grid
+// instead of the generic single-column list - halves the vertical space the
+// menu needs (5 commands for a wild encounter used to mean 5 stacked rows,
+// which pushed into the battle HUD above it). Bypasses buildList() entirely
+// (see isListScreen()); loop() has a matching grid-aware navigation branch.
+void PokemonActivity::renderBattleMenu() {
+  const int count = logicalCount();
+  if (count <= 0) return;
+  const int width = renderer.getScreenWidth();
+  constexpr int margin = 8;
+  constexpr int gap = 8;
+  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
+  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
+  const int menuTop = battleMenuTop();
+  const bool isGym = gymChallengeIndex_ != 0;
+
+  for (int index = 0; index < count; ++index) {
+    const int row = index / BATTLE_MENU_COLUMNS;
+    const int column = index % BATTLE_MENU_COLUMNS;
+    const int x = margin + column * (buttonWidth + gap);
+    const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+
+    const char* label;
+    if (index == 0) {
+      label = tr(STR_POKEMON_FIGHT);
+    } else if (!isGym && index == 1) {
+      label = tr(STR_POKEMON_BALL);
+    } else if (index == (isGym ? 1 : 2)) {
+      label = tr(STR_POKEMON_BAG);
+    } else if (index == (isGym ? 2 : 3)) {
+      label = tr(STR_POKEMON_SWITCH);
+    } else {
+      label = tr(STR_POKEMON_RUN);
+    }
+
+    const bool selected = index == selected_;
+    if (selected) {
+      renderer.fillRoundedRect(x, y, buttonWidth, buttonHeight, 6, Color::Black);
+    } else {
+      renderer.drawRoundedRect(x, y, buttonWidth, buttonHeight, 2, 6, true);
+    }
+    const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
+    const int textX = x + std::max(0, (buttonWidth - textWidth) / 2);
+    const int textY = y + std::max(0, (buttonHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2);
+    renderer.drawText(UI_12_FONT_ID, textX, textY, label, !selected, EpdFontFamily::BOLD);
+  }
+}
+
 // Pokemon Red's battlefield reads as a diagonal: the opponent's compact HP
 // box sits top-left with its sprite floating top-right, the player's sprite
 // sits bottom-left with its own compact HP box bottom-right, and a bordered
-// message box holds the turn-by-turn log above the FIGHT/BALL/SWITCH/RUN menu
-// (already a bottom-anchored list - see buildList()'s bottomAnchored branch).
-// A row of dots above each box (filled = still able to battle, crossed-out
-// circle = fainted) shows how many Pokemon remain on each side, mirroring
-// Red's row of Poke Balls above a trainer's HP box.
+// message box holds the turn-by-turn log above the FIGHT/BALL/BAG/SWITCH/RUN
+// grid (renderBattleMenu()). A row of dots above each box (filled = still
+// able to battle, crossed-out circle = fainted) shows how many Pokemon
+// remain on each side, mirroring Red's row of Poke Balls above a trainer's
+// HP box.
 void PokemonActivity::renderBattleHud() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
@@ -2029,7 +2135,7 @@ void PokemonActivity::renderBattleHud() {
   constexpr int dotRowHeight = dotSize + 8;
 
   const int hudTop = contentTop;
-  const int hudBottom = listBounds_.y - 12;
+  const int hudBottom = battleMenuTop() - 12;
 
   // Compact box: name/nickname + level on top; below that, the HP bar with
   // its "cur/max" text right after it (and status past that) vertically

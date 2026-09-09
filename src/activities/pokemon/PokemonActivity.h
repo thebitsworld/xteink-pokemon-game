@@ -102,6 +102,8 @@ class PokemonActivity final : public Activity {
   void finishGymChallenge(bool won);
   void buildBattleLog(const pokemon::BattleTurnResult& result);
   void renderBattleHud();
+  void renderBattleMenu();
+  int battleMenuTop() const;
   int battlePlayerMoveCount() const;
   // GĐ 13: which party members can currently fight (BattleRecordEntry's
   // currentHp > 0, via the read-only peekBattleMoves - no battle-store
