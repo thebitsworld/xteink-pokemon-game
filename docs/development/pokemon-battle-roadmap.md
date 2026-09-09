@@ -453,20 +453,18 @@ Người dùng phản hồi sau khi chơi thử: text thông báo trong gym batt
 - [x] Chỉ sửa `PokemonActivity.cpp` (thêm `#include <vector>` cho kiểu trả về của `wrappedText()`). 19/19 test native pass (không đổi). Build simulator sạch + smoke test không lỗi. Flash **6,351,915 B (96.9%, còn 187,536 B)** — +256 B so với GĐ19.
 - [ ] **Chưa xác nhận bằng mắt** — cần người dùng tự chạy giả lập, kiểm tra thông báo dài (VD thua trận, hạ huy hiệu) và log trận đấu dài không còn tràn/cắt xén xấu.
 
-### GĐ 20 — Script chỉnh save file giả lập để test màn bắt Pokémon ⏳ CHƯA LÀM
+### GĐ 20 — Công cụ chỉnh save file giả lập (mở rộng thành tool đa năng) ✅ XONG (commit — xem bên dưới)
 
-**Mục đích**: người dùng cần vào thẳng màn bắt Pokémon hoang dã (`Screen::Event` nhánh `PendingEventKind::Encounter`) để test mà không phải chờ đọc sách đủ lâu để trigger encounter tự nhiên. Giải pháp: chỉnh trực tiếp file save của giả lập (`fs_/.crosspoint/pokemon-{a,b}.bin`) để chèn sẵn 1 pending event Encounter — cùng kỹ thuật đã dùng ở phiên trước để reset `battleProgress` (patch nhị phân + tính lại CRC32 bằng `zlib.crc32`, xác nhận khớp thuật toán CRC-32 chuẩn của firmware).
+**Thay đổi phạm vi so với kế hoạch gốc**: kế hoạch ban đầu chỉ định viết 1 script hẹp để chèn 1 pending encounter. Người dùng sau đó yêu cầu rộng hơn: "tạo 1 tool hỗ trợ edit save file để tiện edit cập nhật thông số nếu cần" — nên viết luôn thành `scripts/dev/edit_pokemon_save.py`, một CLI đa năng với nhiều subcommand, thay vì 1 script dùng-một-lần.
 
-**Dữ liệu đã xác nhận qua code/docs (không đoán)**:
-- Vị trí: pending event index 0 nằm ở offset tuyệt đối `24 (header) + 24 (offset trong state) = 48` trong file, dài 10 byte: `recordId(u32)@0, speciesId(u16)@4, level(u8)@6, gender(u8)@7, item(u8)@8, kind(u8)@9`. 3 slot liên tiếp (30 byte tổng), "index 0 luôn là event đang hiện cho người chơi".
-- `PendingEventKind::Encounter = 1` (`lib/Pokemon/PokemonTypes.h:58-67`).
-- Luật hợp lệ cho Encounter (`validatePendingEvent`, `PokemonTypes.cpp:98-124`): `recordId` **phải bằng 0**; `speciesId` trong [1,151]; `level` trong [1,100]; `gender` phải khớp `genderMatchesSpecies(speciesId, gender)` (loài genderless → `Genderless`; genderRate 0 → `Male`; genderRate 8 → `Female`; còn lại → `Male` hoặc `Female`, không phải `Unknown`); `item` **phải bằng 0** (`EvolutionItem::None`).
-- File giả lập hiện tại: `pokemon-a.bin` sequence 23, `pokemon-b.bin` sequence 24 (511 byte mỗi file) — **`pokemon-b.bin` đang là bản active** (sequence cao hơn).
-
-- [ ] Viết script Python (đặt ở scratchpad hoặc `scripts/dev/` nếu muốn tái dùng về sau) đọc file active (sequence cao hơn giữa a/b), kiểm tra slot 0 hiện có đang rỗng (`kind == 0`) hay không:
-  - Nếu rỗng: ghi thẳng vào slot 0.
-  - Nếu đã có event khác: hỏi người dùng có muốn ghi đè hay chèn lên đầu (dồn các slot hiện có xuống, bỏ slot cuối nếu đầy) — quyết định cụ thể lúc code, không đoán trước ở đây.
-- [ ] Cho phép chọn loài (mặc định 1 loài phổ biến dễ test, ví dụ Rattata/Pidgey — species id cụ thể tra lại từ `pokemon-kanto-v2.csv` lúc code, không đoán) + level (mặc định thấp, ví dụ 5, để bắt dễ) + gender hợp lệ theo `genderMatchesSpecies`.
-- [ ] Ghi đè cả 2 file `pokemon-a.bin`/`pokemon-b.bin` giống hệt nhau (đúng tiền lệ script reset trước) để chắc chắn dù file nào được load cũng đúng — tính lại CRC32 bằng `zlib.crc32(payload) & 0xFFFFFFFF` (đã xác nhận khớp thuật toán firmware ở phiên trước).
-- [ ] Chạy simulator xác nhận `Screen::Event` hiện đúng loài/level đã chèn, vào được `Screen::Battle` qua "Catch", bắt được bằng bóng.
-- [ ] Đây là công cụ dev/test, **không phải tính năng sản phẩm** — không cần commit vào nhánh feature trừ khi người dùng muốn giữ lại script để dùng lại nhiều lần (quyết định lúc đó).
+- [x] `scripts/dev/edit_pokemon_save.py` (mới) — CLI dựa trên `argparse`, mặc định thao tác trên `fs_/.crosspoint` (đường dẫn tương đối từ vị trí script, override được qua `--save-dir`). Chỉ hiểu đúng format v3 hiện tại (195-byte state) — từ chối thao tác nếu gặp version khác thay vì đoán mò làm hỏng dữ liệu lạ.
+- [x] Subcommand `dump` — in party (recordId/species/totalXp/caughtLevel/gender/nickname), `battleProgress` (gym + Elite Four đã hạ), item đá tiến hóa + túi đồ (chỉ hiện cái > 0), và cả 3 pending event slot. Tra tên loài/item trực tiếp từ `pokemon-kanto-v2.csv`/`pokemon-items.csv` (không hardcode bảng tên riêng, tránh lệch với data thật).
+- [x] Subcommand `reset-battle-store` — xóa `pokemon-battle-{a,b}.bin` + file cũ `pokemon-battle.bin`, để HP/PP/status tự dựng lại đầy khi cần.
+- [x] Subcommand `reset-gym-progress` — set `battleProgress` về 0 (xóa cả lịch sử đấu gym lẫn huy hiệu, vì đây là cùng 1 field).
+- [x] Subcommand `queue-encounter --species --level [--gender] [--slot]` — chèn 1 pending event Encounter; tự chọn gender hợp lệ theo đúng luật `genderMatchesSpecies()` nếu không chỉ định (`validate_gender()`/`default_gender_for()` implement lại y hệt rule trong `PokemonTypes.cpp`); tự chọn slot rỗng đầu tiên nếu không chỉ định `--slot`, báo lỗi rõ ràng nếu cả 3 slot đều đầy.
+- [x] Subcommand `set-bag-item --item --count` — set thẳng số lượng 1 item (tự nhận diện đá tiến hóa id 1-6 dùng `itemCounts` u16, hay item túi đồ id 7-83 dùng `bagCounts` u8).
+- [x] Subcommand `set-record-xp --record-id --xp` — set thẳng `totalXp` của 1 record (party hoặc PC) để test ngưỡng lên cấp/tiến hóa mà không cần đọc sách.
+- [x] Chấp nhận id số hoặc tên (không phân biệt hoa/thường, bỏ qua dấu gạch ngang/khoảng trắng) cho `--species`/`--item`.
+- [x] Mọi lệnh ghi đều patch **cả 2** file `pokemon-a.bin`/`pokemon-b.bin` giống hệt nhau (đúng tiền lệ double-buffer), tính lại CRC32 bằng `zlib.crc32` (đã xác nhận khớp thuật toán firmware từ phiên trước). Tự động backup `.bak` trước lần ghi đầu (tắt được qua `--no-backup`); `--dry-run` xem trước không ghi gì.
+- [x] Đã tự kiểm thử toàn bộ 5 subcommand ghi (dry-run rồi ghi thật) trên save thật của giả lập, xác nhận CRC hợp lệ sau mỗi lần ghi, `dump` đọc lại đúng giá trị vừa đổi, và simulator boot sạch không lỗi/corrupt sau khi tool ghi đè.
+- [x] Không đụng code C++/test — thuần công cụ Python độc lập, không ảnh hưởng build/flash.
