@@ -412,6 +412,8 @@ Ba yêu cầu mới của người dùng, cố tình **chỉ lập kế hoạch 
 - [x] 19/19 test native pass (không đổi). Build simulator sạch + smoke test không lỗi. `pio run -e pokemon-x3` (clean rebuild): Flash **6,347,087 B (96.8%, còn 192,368 B)** — +800 B so với GĐ17.
 - [ ] **Chưa xác nhận bằng mắt** — cần người dùng tự chạy giả lập, dùng Potion/thuốc giữa 1 trận thật để xác nhận HP/status hồi đúng và hiện đúng trên `renderBattleHud()`.
 
+**Sửa ngay sau khi chơi thử (commit `e1233cd8`)**: danh sách `Screen::BattleBag` tràn lên đè khung HUD trận đấu, không nhìn được item ở trên. Nguyên nhân: `BattleBag` bị xếp cùng nhóm "neo đáy, đè lên HUD" với `BattleMoves`/`BattleBalls` — nhóm đó an toàn vì tối đa 4 dòng, luôn vừa khoảng trống dưới HUD; nhưng `BattleBag` liệt kê tối đa 17 item (mọi id Medicine/StatusCure/PPRestore bất kể sở hữu hay không), `rowsPerPage()` không biết gì về HUD nên trả về nhiều dòng hơn hẳn 4, đẩy đỉnh danh sách lên đè HUD. Sửa: bỏ `BattleBag` khỏi cả `bottomAnchored` (`buildList()`) lẫn điều kiện vẽ HUD (`renderFocused()`) — giờ dùng list toàn màn hình canh trên xuống như mọi màn Bag khác, đã có sẵn phân trang đúng cho danh sách dài. Đánh đổi: không còn thấy HUD phía sau khi chọn item, chấp nhận được. Flash không đổi (thuần sửa layout).
+
 ### GĐ 19 — Bóng trong túi đồ ngoài trận ⏳ CHƯA LÀM
 
 **Đã xác nhận qua code (không cần sửa)**:
