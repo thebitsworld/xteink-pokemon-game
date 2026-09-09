@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "CrossPointSettings.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -1963,7 +1964,17 @@ void PokemonActivity::renderFocused() {
   }
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
   if (screen_ == Screen::Message) {
-    centered(renderer, UI_12_FONT_ID, contentTop + 100, message_, EpdFontFamily::BOLD);
+    // message_ is an arbitrary sentence (up to 96 chars, e.g. "None of your
+    // Pokémon can battle right now!") - centered() alone only understands a
+    // single already-embedded '\n', so a long line with none would just run
+    // past the screen edge in portrait. Word-wrap it first.
+    const int maxWidth = renderer.getScreenWidth() - 48;
+    const auto lines = renderer.wrappedText(UI_12_FONT_ID, message_, maxWidth, 6, EpdFontFamily::BOLD);
+    int messageLineY = contentTop + 100;
+    for (const auto& line : lines) {
+      centered(renderer, UI_12_FONT_ID, messageLineY, line.c_str(), EpdFontFamily::BOLD);
+      messageLineY += 28;
+    }
     return;
   }
   if (screen_ == Screen::Starter) {
@@ -2247,7 +2258,7 @@ void PokemonActivity::renderBattleHud() {
   constexpr int panelHeight = 92;  // and taller, so it reads less like a thin bar
   constexpr int spriteGapMin = 16;
   constexpr int messageGap = 12;
-  constexpr int messageHeight = 90;  // fixed and smaller, freeing height for the battlefield above it
+  constexpr int messageHeight = 160;  // fixed - tall enough to word-wrap 2 log lines without overflowing
   constexpr int barHeight = 12;
   constexpr int dotSize = 12;
   constexpr int dotGap = 6;
@@ -2388,17 +2399,37 @@ void PokemonActivity::renderBattleHud() {
   if (battleLog_[0] == '\0') return;
   const int textX = messageX + 16;
   const int textMaxWidth = messageW - 32;
-  const char* newline = strchr(battleLog_, '\n');
-  if (newline == nullptr) {
-    renderer.drawText(UI_10_FONT_ID, textX, messageY + 18,
-                      renderer.truncatedText(UI_10_FONT_ID, battleLog_, textMaxWidth).c_str());
-  } else {
-    char first[96];
-    snprintf(first, sizeof(first), "%.*s", static_cast<int>(newline - battleLog_), battleLog_);
-    renderer.drawText(UI_10_FONT_ID, textX, messageY + 18,
-                      renderer.truncatedText(UI_10_FONT_ID, first, textMaxWidth).c_str());
-    renderer.drawText(UI_10_FONT_ID, textX, messageY + 18 + 26,
-                      renderer.truncatedText(UI_10_FONT_ID, newline + 1, textMaxWidth).c_str());
+  // battleLog_ is at most 2 logical lines (player action + opponent action,
+  // joined by a single '\n' - see buildBattleLog() and every other
+  // snprintf(battleLog_, ...) site). Each one word-wraps independently
+  // instead of being truncated with an ellipsis, so a line that's merely
+  // too WIDE reflows onto a second line rather than losing its tail; the
+  // combined line budget is still capped to what messageHeight can hold, so
+  // the box itself never overflows.
+  constexpr int textTopPad = 18;
+  constexpr int textBottomPad = 12;
+  constexpr int lineSpacing = 26;
+  const int maxLines = std::max(1, (messageHeight - textTopPad - textBottomPad) / lineSpacing);
+  std::vector<std::string> lines;
+  const char* segmentStart = battleLog_;
+  while (*segmentStart != '\0' && static_cast<int>(lines.size()) < maxLines) {
+    const char* segmentEnd = strchr(segmentStart, '\n');
+    const size_t segmentLen =
+        segmentEnd != nullptr ? static_cast<size_t>(segmentEnd - segmentStart) : strlen(segmentStart);
+    char segment[96];
+    snprintf(segment, sizeof(segment), "%.*s", static_cast<int>(segmentLen), segmentStart);
+    const int remainingLines = maxLines - static_cast<int>(lines.size());
+    for (auto& wrapped : renderer.wrappedText(UI_10_FONT_ID, segment, textMaxWidth, remainingLines)) {
+      if (static_cast<int>(lines.size()) >= maxLines) break;
+      lines.push_back(std::move(wrapped));
+    }
+    if (segmentEnd == nullptr) break;
+    segmentStart = segmentEnd + 1;
+  }
+  int lineY = messageY + textTopPad;
+  for (const auto& line : lines) {
+    renderer.drawText(UI_10_FONT_ID, textX, lineY, line.c_str());
+    lineY += lineSpacing;
   }
 }
 
