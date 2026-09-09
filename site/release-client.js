@@ -1,5 +1,5 @@
 const RELEASES_API_URL =
-  'https://api.github.com/repos/padge01/xteink-pokemon-game/releases';
+  'https://api.github.com/repos/thebitsworld/xteink-pokemon-game/releases';
 
 export function selectReleaseAssets(release) {
   const assets = release?.assets ?? [];

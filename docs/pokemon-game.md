@@ -21,7 +21,7 @@ Books, reading statistics, and Pokémon saves remain separate.
 
 ## Install and saves
 
-Use the [download and install guide](https://padge01.github.io/xteink-pokemon-game/install.html). The full install contains the firmware, Pokémon artwork, Pokédex cards, checksums, and rights notice. It contains no Pokémon saves, books, or reading data.
+Use the [GitHub releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases). The full install contains the firmware, Pokémon artwork, Pokédex cards, checksums, and rights notice. It contains no Pokémon saves, books, or reading data.
 
 Pokémon saves are `/.crosspoint/pokemon-a.bin` and `/.crosspoint/pokemon-b.bin`. Back up both files to preserve a collection. Earlier `pokemon-v2-a.bin` and `pokemon-v2-b.bin` saves migrate automatically.
 

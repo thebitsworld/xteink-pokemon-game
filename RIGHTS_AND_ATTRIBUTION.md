@@ -8,7 +8,7 @@ The Pokémon Company, Xteink, CrossInk, or CrossPoint Reader.
 Artwork has been adapted for the Xteink X3 e-ink display. If you are a rights
 holder or original contributor and want an asset removed, replaced, or credited
 differently, please open a
-[Rights or Attribution issue](https://github.com/padge01/xteink-pokemon-game/issues/new?template=rights_attribution.yml).
+[Rights or Attribution issue](https://github.com/thebitsworld/xteink-pokemon-game/issues/new?template=rights_attribution.yml).
 The maintainer will review the request and remove, replace, or re-credit the
 affected asset as appropriate.
 

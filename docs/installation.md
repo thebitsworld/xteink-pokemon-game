@@ -9,7 +9,7 @@ nav_order: 2
 
 Xteink X3 only. Do not install this build on an X4, X4 Pro, Sticky, or another device.
 
-Download the current package from the [download and install guide](https://padge01.github.io/xteink-pokemon-game/install.html) or the [GitHub releases page](https://github.com/padge01/xteink-pokemon-game/releases).
+Download the current package from the [GitHub releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases).
 
 ## Full installation
 

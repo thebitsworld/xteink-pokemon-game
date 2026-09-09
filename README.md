@@ -1,22 +1,18 @@
 # Xteink Pokémon Game
 
-<a href="https://ko-fi.com/padge01"><img src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" alt="Buy Me a Coffee at Ko-fi" height="36"></a>
+This project was inspired by [the reading companion idea built by Joshua Miller](https://github.com/JoshuaMillerCode/crosspoint-reader-companion). It started by bringing CrossInk up to date with the current CrossPoint 1.5 release, then adapted the reading companion idea into a full Pokémon game built around CrossInk's reading sessions and dashboards.
 
-This project was inspired by [the reading companion idea built by Joshua Miller](https://github.com/JoshuaMillerCode/crosspoint-reader-companion). I started by bringing CrossInk up to date with the current CrossPoint 1.5 release. Then I adapted the reading companion idea into a lightweight Pokémon game built around CrossInk's reading sessions and dashboards.
-
-Real page turns train your lead Pokémon, trigger encounters and item finds, and let you build a party and Pokédex while you read.
-
-The first release has been installed and tested on a physical Xteink X3.
+Real page turns train your lead Pokémon, trigger wild encounters and item finds, and let you build a party, battle gyms, and complete a Pokédex — all driven by time spent actually reading.
 
 ## How it works
 
-Put the Pokémon you want to train at the top of your Party. As you read, it gains experience and levels up.
+Put the Pokémon you want to train at the top of your Party. As you read, it gains experience and levels up, learning new moves along the way.
 
-Every 15–60 minutes of active reading, a wild Pokémon encounter or item find can occur. A `!` on the dashboard tells you something is waiting in the Pokémon menu.
+While you read, wild Pokémon encounters and item finds happen on their own — a `!` on the dashboard tells you something is waiting in the Pokémon menu. Meeting a wild Pokémon starts a short turn-based battle: weaken it, then throw a Poké Ball to try to catch it. Balls, potions, status-curing items, and TMs/HMs are found the same way, just while reading.
 
-The Pokémon you encounter is random, but your progress through the current book influences its level and rarity. Catch, train, and evolve Pokémon to complete the original 151 entries in the Pokédex.
+Once your team is strong enough, challenge the eight Gym Leaders (and the Elite Four) in order to earn badges. Evolution stones, level-up evolutions, and a full 151-entry Pokédex round out the loop.
 
-Only active reading counts. Leaving a book open does not train your Pokémon.
+Only active reading counts — leaving a book open without turning pages does not train your Pokémon.
 
 ## Screenshots
 
@@ -39,15 +35,15 @@ These are current X3 simulator captures using the artwork included in the full i
 1. Choose Bulbasaur, Charmander, Squirtle, or Pikachu as your first partner. Choose its gender and give it a nickname if you want one.
 2. Put the Pokémon you want to train at the top of your Party. Only your lead Pokémon gains experience while you read.
 3. When a `!` appears on the dashboard, open the Pokémon menu to see what happened.
-4. Catch or pass on wild Pokémon. Your Party holds six. Additional Pokémon are sent to the PC Box.
+4. Meeting a wild Pokémon opens a battle — fight it down, then throw a ball to try to catch it, or run. Your Party holds six; additional Pokémon go to the PC Box.
 5. Reorder your Party and deposit or withdraw Pokémon from the PC Box.
-6. Use evolution stones and Link Cables from the Bag. Level-based evolutions ask before changing your Pokémon and can be turned off from its summary.
-7. Fill the original 151 Pokédex by catching and evolving Pokémon.
+6. Manage moves from a Pokémon's Summary screen, use items and TMs/HMs from the Bag, and use evolution stones or Link Cables when you have them. Level-based evolutions ask before changing your Pokémon and can be turned off from its summary.
+7. Once your team can handle it, take on the Gym Leaders in order from the Pokémon menu to earn badges, then the Elite Four.
+8. Fill the original 151 Pokédex entries by catching and evolving Pokémon.
 
 ## Download and install
 
-- [**Download from GitHub Releases**](https://github.com/padge01/xteink-pokemon-game/releases)
-- [Open the guided installer](https://padge01.github.io/xteink-pokemon-game/install.html)
+- [Download from GitHub Releases](https://github.com/thebitsworld/xteink-pokemon-game/releases)
 
 This build is for the **Xteink X3 only**. Do not install it on an X4, X4 Pro, Sticky, or another device. Back up the SD card before updating.
 
@@ -62,11 +58,7 @@ This build is for the **Xteink X3 only**. Do not install it on an X4, X4 Pro, St
 
 The full-install ZIP contains the firmware and all required artwork. It does not contain or replace Pokémon saves, books, or reading data. The first release that moves artwork to `/pokemon` must be installed from the full ZIP; later releases can use the firmware-only download over the X3's Wi-Fi file transfer.
 
-The [download and install guide](https://padge01.github.io/xteink-pokemon-game/install.html) always points to the latest release and includes both update options.
-
-## Support
-
-Xteink Pokémon Game is free and open source. If it has made reading more fun and you would like to support continued development and testing, you can leave an optional tip on [Ko-fi](https://ko-fi.com/padge01).
+Building from source? See [Getting Started](docs/development/getting-started.md).
 
 ## Credits
 
@@ -78,10 +70,11 @@ Xteink Pokémon Game is free and open source. If it has made reading more fun an
 
 See [NOTICE.md](NOTICE.md) and [Rights and attribution](RIGHTS_AND_ATTRIBUTION.md). Project code is covered by the inherited [MIT License](LICENSE).
 
-Pokémon and related names, characters, and artwork belong to their respective rights holders. This is an unofficial fan project and is not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK Inc., The Pokémon Company, Xteink, CrossInk, or CrossPoint Reader. Optional tips support development and testing; they do not purchase access to Pokémon content.
+Pokémon and related names, characters, and artwork belong to their respective rights holders. This is an unofficial fan project and is not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK Inc., The Pokémon Company, Xteink, CrossInk, or CrossPoint Reader.
 
 ## Development notes
 
 - [Release checklist](docs/release-checklist.md)
 - [Artwork and packaging](docs/artwork-setup.md)
 - [Save-file formats](docs/file-formats.md)
+- [Pokémon battle system roadmap](docs/development/pokemon-battle-roadmap.md)
