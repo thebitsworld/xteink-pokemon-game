@@ -391,7 +391,14 @@ disturb the existing one.
 
 ## Phase 3 — Touch support for the Pokémon UI
 
-**Status:** Not started
+**Status:** Done (commits `e8ab0693`, `1d69ea03`, `c387b648`, `afa7a891`, `8b98b5f4` on
+`feat/X4Pro-support` - see `CLAUDE.md`'s Phase 3 section for the full detail). Battle-grid
+touch + Message tap-to-dismiss added, then every list screen (including the battle-only
+ones - ItemTarget/BattleSwitch/BattleBag/BattleBalls, which needed a pre-seeded save via
+`edit_pokemon_save.py`) verified end to end with an automated touch script on
+`pokemon-x4-pro-simulator`. `pokemon-x3` reconfirmed unaffected throughout (touch-gate audit
+passes, flash unchanged). A pre-existing, unrelated smoke-test navigation bug (dating back to
+Stage 10) was found and fixed along the way.
 
 **Prerequisites:** Phase 2 done (need a buildable X4 Pro env — with `CAP_TOUCH=1` — to test
 against; can partially prototype earlier against `x4-pro-simulator` alone if desired, but

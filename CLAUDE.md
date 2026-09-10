@@ -74,12 +74,32 @@ the `Screen::Message` tap-to-dismiss path, via a new `tapCenter()` helper using
 selecting a gym starts a real battle). All confirmed via `pokemon-x4-pro-simulator`:
 "Simulator smoke test passed".
 
-**Still not covered by the touch script**: `ItemTarget`, `BattleSwitch`, `BattleBag`,
-`BattleBalls` - all only reachable from inside an active battle, which the script doesn't set
-up (would need a pre-seeded encounter/battle-store entry via `edit_pokemon_save.py` before
-boot - more plumbing than the rest of the audit needed). Manual verification is a reasonable
-substitute here since the underlying `fui::list()` touch mechanism is already proven across
-every other screen.
+**Phase 3 is now fully done** (commit `8b98b5f4`): added `buildPokemonBattleTouchInputScript()`
+covering the last 4 screens - `ItemTarget`, `BattleSwitch`, `BattleBag`, `BattleBalls` - which
+only exist inside an active battle. Selected via a new `CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH`
+env var. Requires pre-seeding the save first (simulator closed) so `loadInitialScreen()` opens
+`Screen::Event` directly instead of onboarding:
+
+```sh
+python3 scripts/dev/edit_pokemon_save.py add-party-member --species pikachu --level 20
+python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --level 5
+python3 scripts/dev/edit_pokemon_save.py reset-battle-store
+export PATH="$HOME/.platformio/penv/bin:$PATH"
+CROSSINK_SIMULATOR_SMOKE_TEST=1 CROSSINK_SIMULATOR_START_POKEMON=1 \
+  CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH=1 \
+  pio run -e pokemon-x4-pro-simulator -t run_simulator
+```
+
+Taps: Event's Catch row -> Battle -> FIGHT (BattleMoves - the first automated verification of
+the Part 1 battle-grid touch hit-test itself, never actually script-driven until now) -> BAG
+(BattleBag -> the starter's free Potion -> ItemTarget, applied to the active combatant) ->
+SWITCH (BattleSwitch -> the pre-seeded second party member, high-level enough that the
+opponent's Stage-18 free hit for switching can't faint it) -> BALL (BattleBalls, view-only -
+not thrown, to avoid catch-RNG ending the battle nondeterministically).
+`verifyPokemonSmokeState()` is skipped in this mode (the save is deliberately not the fresh
+single-starter state it checks for). Confirmed via art-loading log lines (Pidgey/Charmander/
+Pikachu sprites requested at each expected transition): "Simulator smoke test passed".
+**Every screen in the original list-screen audit is now covered.**
 
 **Pre-existing bug found while testing this - now fixed** (commit `afa7a891`): running the
 *button*-driven `buildPokemonInputScript()` the correct way (fresh save +
