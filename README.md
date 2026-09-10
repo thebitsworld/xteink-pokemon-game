@@ -45,12 +45,12 @@ These are current X3 simulator captures using the artwork included in the full i
 
 - [Download from GitHub Releases](https://github.com/thebitsworld/xteink-pokemon-game/releases)
 
-This build is tested on **Xteink X3**. **Xteink X4 Pro** is now also supported (touch-only
-UI, portrait orientation) as of this release, verified on the simulator; physical-device
-acceptance is still pending. Some friends reported the X3 firmware also working on **Xteink
-X4**, at your own risk. **X3 and X4 Pro firmware are not interchangeable** — they target
-different chips (ESP32-C3 vs. ESP32-S3) and a device will not boot the wrong one. Do not
-install on Sticky or another device. Back up the SD card before updating.
+This build is tested on **Xteink X3** and **Xteink X4 Pro** (touch-only UI, portrait
+orientation), both confirmed working on physical hardware. Some friends reported the X3
+firmware also working on **Xteink X4**, at your own risk. **X3 and X4 Pro firmware are not
+interchangeable** — they target different chips (ESP32-C3 vs. ESP32-S3) and a device will not
+boot the wrong one. Do not install on Sticky or another device. Back up the SD card before
+updating.
 
 1. Download the full-install ZIP to a computer, matching your device (`xteink-pokemon-x3-full-v<version>.zip` or `xteink-pokemon-x4-pro-full-v<version>.zip`).
 2. Extract the ZIP. Do not copy the ZIP itself to the SD card.

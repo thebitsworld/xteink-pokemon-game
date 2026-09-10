@@ -9,8 +9,8 @@ nav_order: 2
 
 **Xteink X3** and **Xteink X4 Pro**. Do not install this build on a Sticky or another device.
 
-X4 Pro support (touch-only UI, portrait orientation) is new as of this release, verified on
-the simulator; physical-device acceptance is still pending.
+X4 Pro support (touch-only UI, portrait orientation) is new as of this release, confirmed
+working on physical hardware.
 
 **X3 and X4 Pro firmware are not interchangeable.** They target different chips (ESP32-C3 vs.
 ESP32-S3) — installing the wrong one will not boot. Always match the asset name
