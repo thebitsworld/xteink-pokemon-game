@@ -355,6 +355,12 @@ PokemonActivity::PokemonActivity(GfxRenderer& renderer, MappedInputManager& mapp
 
 void PokemonActivity::onEnter() {
   Activity::onEnter();
+  // Pokemon is portrait-only by design - force it on entry the same way
+  // NearbyBookTransferActivity/SettingsActivity/SleepActivity do, so a
+  // device left in landscape by the reader (or, in the simulator, by
+  // CROSSINK_SIMULATOR_POKEMON_LANDSCAPE) never shows the unsupported
+  // landscape layout.
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   app_.setTheme(uiThemeTokens(uiTarget_));
   app_.on(ACTION_ROW, &PokemonActivity::onRow, this);
   loadInitialScreen();
