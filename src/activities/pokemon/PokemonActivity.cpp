@@ -1963,9 +1963,19 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::BattleBalls;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
-  screen.setContentMargin(
-      fui::Insets{static_cast<int16_t>(listBounds_.y), 8,
-                  static_cast<int16_t>(renderer.getScreenHeight() - listBounds_.y - listBounds_.height), 8});
+  // setContentMargin() insets from frame_.safeRect() (the screen already
+  // shrunk by the device's top/bottom viewable margin), not from the raw
+  // screen - see Screen::setContentMargin()/insetClamped() in FreeInkApp.h.
+  // listBounds_ above is computed in raw-screen coordinates, so passing it
+  // straight through double-applies the viewable margin (once here, once
+  // inside safeRect()) and silently clips the last row. Subtract the same
+  // margin back out here so the resulting content rect matches listBounds_
+  // exactly.
+  int viewableTop = 0, viewableRight = 0, viewableBottom = 0, viewableLeft = 0;
+  renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
+  screen.setContentMargin(fui::Insets{
+      static_cast<int16_t>(listBounds_.y - viewableTop), 8,
+      static_cast<int16_t>(renderer.getScreenHeight() - listBounds_.y - listBounds_.height - viewableBottom), 8});
   fui::ListProps props;
   props.items = rows_.data();
   props.count = static_cast<uint16_t>(std::max(0, rowCount_));
