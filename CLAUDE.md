@@ -2,22 +2,44 @@
 
 Context notes for Claude in a later session (or on another machine) to continue this work without rediscovering everything from scratch. This file is NOT official project documentation — it's just a handoff notebook, and can be cleaned up/deleted once the in-progress work is done.
 
-## New work in progress: Xteink X4 Pro support (2026-09-10, not started)
+## New work in progress: Xteink X4 Pro support (started 2026-09-10)
 
 Branch: **`feat/X4Pro-support`**. Full 5-phase plan, hardware findings, measured flash
 numbers, and per-phase "definition of done" all live in:
 
 👉 **[docs/development/pokemon-x4pro-roadmap.md](docs/development/pokemon-x4pro-roadmap.md)**
 — read this before writing any code for X4 Pro. It's written so a session with zero prior
-context can pick up exactly one phase (1: merge upstream CrossInk v1.5.1-rc-6 via a
-git-graft to fix the missing-common-ancestor problem; 2: add the `pokemon-x4-pro`
-PlatformIO env; 3: touch support for the whole Pokémon UI, since X4 Pro has no physical
-d-pad; 4: layout fixes for the 800×480 panel, mainly the Battle HUD's tight vertical
-budget; 5: release packaging) and execute it independently. Update that doc's per-phase
-Status line and add a short result note (same style as the battle-system stage writeups
-below) as each phase finishes, so the next session doesn't have to replay this one.
+context can pick up exactly one phase (1: merge upstream CrossInk v1.5.1-rc-6; 2: add the
+`pokemon-x4-pro` PlatformIO env; 3: touch support for the whole Pokémon UI, since X4 Pro has
+no physical d-pad; 4: layout fixes for the 800×480 panel, mainly the Battle HUD's tight
+vertical budget; 5: release packaging) and execute it independently.
 
-Nothing has been implemented yet — this is plan-only as of this writing.
+**Phase 1 is done** (merge commit `414958d8` + fixup commit `ec666a15`). Turned out a
+prepared remote branch `origin/upstream-history` already carried real CrossInk history back
+through `v1.5.0`, so a `git replace --graft` onto its tip (not `v1.5.0` directly, a closer
+match) gave a genuine 3-way merge instead of the ~630-file conflict a naive
+`--allow-unrelated-histories` merge would have produced — only 61 files actually conflicted.
+The graft itself was removed after the merge commit landed (no longer needed - the merge
+commit's second parent is a real, permanent link to upstream now). A second round of ~10
+fixes was needed after the merge *looked* clean (built the 61-conflict resolution fine) but
+several files where this fork's now-abandoned pre-squash experiment and upstream both edited
+non-overlapping hunks had silently combined into code that doesn't compile or doesn't match
+either side's real intent — git can't flag that as a conflict, only building/testing catches
+it. See the roadmap doc's Phase 1 section for the full list (API drift in
+GfxRenderer/ImageToFramebufferDecoder/ButtonNavigator, a missing build flag, a stale
+simulator SDK pin, host-vs-ESP32 `char` signedness, two orphaned tests) — one item worth
+flagging on its own: **a real navigation bug already in upstream's own v1.5.1-rc-6 tag**
+(confirmed byte-identical, not something this merge introduced) where a single-button
+`Buttons{X}` release/press handler also silently fires on Back, in `FileBrowserActivity.cpp`
+and `RecentBooksGridActivity.cpp` — worked around locally, but worth reporting upstream.
+
+Confirmed green: `pio run -e pokemon-x3` (**Flash 93.1%, 439,232 B free** — down from
+97.0%/185,216 B pre-merge, a big unplanned win from upstream's font compression work), the
+native suite (**333/333**), and the X3 simulator smoke run (boots, runs the full script
+including Pokémon, exits clean).
+
+Next: Phase 2 (add `[env:pokemon-x4-pro]`, modeled on upstream's now-available
+`[env:x4-pro]`) — not started yet.
 
 ## Recent fixes (2026-09-10)
 

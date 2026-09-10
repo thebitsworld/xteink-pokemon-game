@@ -109,7 +109,116 @@ SDK commit) since this doc may be read much later.
 
 ## Phase 1 — Establish a real merge ancestor, then merge upstream CrossInk v1.5.1-rc-6
 
-**Status:** Not started
+**Status:** Done (commit `414958d8` on `feat/X4Pro-support`, build/test verification below)
+
+A prepared remote branch `origin/upstream-history` (1608 commits of real CrossInk/CrossPoint
+Reader history, not something this session created) turned out to already exist and made
+this far more precise than the plan above assumed. Its tip (`e5f6b6e5`, "chore: clear
+formatter and static-analysis debt") matched this fork's squashed root commit (`ff8f841e`,
+"Xteink Pokemon Game v0.1.0") almost exactly outside Pokémon-specific paths — the only
+difference was internal planning docs (`docs/plans/*`, `AGENTS.md`) deleted as part of the
+public-release squash. `e5f6b6e5` in turn has *real* (not grafted) ancestry back through
+`0de623ed` (`v1.5.0`, hash-for-hash identical to the real upstream tag), which is a real
+ancestor of `v1.5.1-rc-6`. So the graft target was `e5f6b6e5`, not `v1.5.0` directly as
+originally planned — a closer match produces a more accurate merge-base and fewer spurious
+conflicts. `git merge-base` correctly resolved to `4b2199b7` ("Update release manifests for
+v1.5.0", one commit past the tag) automatically once grafted.
+
+Result: **61 conflicted files**, not ~630 — confirming the graft approach worked. Handled as:
+- **3 files kept deleted** (`AGENTS.md`, `.github/workflows/release.yml`,
+  `.github/workflows/release_candidate.yml`) — these existed pre-squash and were
+  deliberately removed for the public repo (internal dev notes; CrossInk-org-targeting CI
+  workflows that `docs/release-checklist.md` already warns must not accidentally publish
+  CrossInk/Sticky/X4/Pages artifacts from this fork).
+- **50 files taken wholesale from upstream** — confirmed via `git log ff8f841e..HEAD
+  --name-only` that none of them were touched by this fork's own Pokémon-era commits, so
+  upstream's version is authoritative.
+- **8 files merged by hand** because this fork's own commits touched them:
+  `README.md`, `CHANGELOG.md`, `docs/development/README.md`, `docs/file-formats.md`,
+  `docs/installation.md`, `src/components/themes/lyra/LyraCarouselTheme.cpp`,
+  `src/simulator/SimulatorSmokeTest.cpp`, `test/CMakeLists.txt`. Notable non-trivial ones:
+  - `docs/file-formats.md` had a genuine version-number collision: this fork's own
+    abandoned "1.6 parity experiment" branch had independently bumped the `section.bin`
+    cache format to its own "Version 63" (image-margin clamping) via a bespoke
+    `lib/Epub/Epub/SectionCacheFormat.h` abstraction, while real upstream's "Version 63"
+    means something entirely different (paragraph base direction) en route to their real
+    "Version 66". Since the actual `Section.cpp`/`ParsedText.cpp` code was taken wholesale
+    from upstream (untouched by this fork), `SectionCacheFormat.h` became fully orphaned
+    dead code — deleted it, and trimmed the one test
+    (`test/footnote_cache/FootnoteCacheTest.cpp`) that still referenced it, keeping the
+    still-valid `footnote_cache::` assertions in that same test.
+  - `src/simulator/SimulatorSmokeTest.cpp` had a real rename collision: this fork's Pokémon
+    smoke-test work had renamed `SmokeStep::ReaderInput`/`runReaderInputScript()` to the more
+    generic `SmokeStep::InputScript`/`runInputScript()` (since Pokémon's own smoke script
+    reuses the same runner). Upstream independently generalized the same function via a new
+    `inputCompletionStep` member (defaulting to `Done`) to support a new FileBrowserSettings
+    flow. Kept this fork's naming (already used by multiple call sites) and adopted
+    upstream's `inputCompletionStep` generalization into it. Also had to fix one orphaned
+    `SmokeStep::ReaderInput` reference inside upstream's new `buildFileBrowserInputScript()`
+    that git auto-merged cleanly (no conflict marker) but referenced an enum value this
+    fork had already renamed away — a latent compile error a text-based merge cannot catch;
+    caught it here by tracing every remaining reference by hand.
+  - `README.md`/`docs/installation.md`: kept this fork's Pokémon-focused content entirely,
+    dropped upstream's generic CrossInk sections (device list, feature list, Inky
+    install instructions, Nix dev shell, PR policy, Ko-fi ask) — none of that applies to
+    this fork's own product README, and re-adding an X4 Pro device claim here is Phase 5's
+    job once the device is actually supported, not Phase 1's.
+- New submodule `assets/tabler-icons` (added by upstream) initialized via
+  `git submodule update --init --recursive`; `freeink-sdk` bumped to the commit the merge
+  staged automatically (`2400379`, "Merge pull request #72 ... fix/onepage-sd-power-rail").
+- The temporary `git replace --graft` was removed after the merge commit landed — it was
+  only needed to compute a correct 3-way merge; the merge commit's second parent
+  (`v1.5.1-rc-6` itself) is a permanent, real link into upstream history from here on,
+  verified by `git merge-base --is-ancestor v1.5.0 HEAD` still returning true with the
+  graft deleted.
+
+**Verification result (commit `ec666a15`, same session)**: the initial merge commit
+(`414958d8`) built and passed the 61-file conflict resolution cleanly, but a full build/test
+pass surfaced ~10 more latent breakages that git's line-based merge couldn't catch — every
+one was a case where this fork's abandoned pre-squash "1.6 parity experiment" and upstream's
+real implementation touched the *same file* in non-overlapping hunks, so git combined them
+without a conflict marker even though the result didn't compile or didn't match either
+side's real intent. Found and fixed by actually building, not by re-reading diffs:
+- `platformio.ini`: `pokemon-x3`/`pokemon-simulator-X3` (this fork's own envs, invisible to
+  upstream's restructuring) were missing the now-mandatory `-DARDUINO_USB_MODE=1` /
+  `-DCROSSINK_APP_CAP_USB_DRIVE=0` (moved out of `[base]` into each env; newly enforced by
+  `include/AppCapabilities.h`'s `#error` guards). Also bumped the pinned `crossink-simulator`
+  SDK commit (`d07c681` → `95be4c2`, "fix: add missing shutdown shims") since the merged
+  `main.cpp` calls `Storage.shutdown()`, which the old-pinned simulator stub didn't have yet.
+- `GfxRenderer`/image-decoder API drift: `PokemonArt.cpp`, `BaseTheme.cpp`,
+  `ImageDimsProbe.cpp`, `Jpeg`/`PngToFramebufferConverter.cpp`, and `ButtonNavigator.cpp` all
+  called APIs (`BitmapBwPolicy`, `getTextPixelHeight`, `validateAndStoreDimensions`, the old
+  `initializer_list`-based `ButtonNavigator::Buttons`) that only existed in this fork's own
+  abandoned experiment, removed/redesigned in upstream's real code. Updated call sites to the
+  current API, or took the whole file from upstream where nothing fork-specific depended on it.
+- A **real navigation bug already present in upstream's own tagged v1.5.1-rc-6** (confirmed
+  byte-identical to the tag, not introduced by this merge): `Button::Back` is enum value `0`,
+  so `Buttons{X}` (upstream's `Buttons` is now a fixed 2-slot `std::array`) leaves the second
+  slot value-initialized to `Back` — a single-button release/press handler also silently
+  fires on Back. `FileBrowserActivity.cpp` and `RecentBooksGridActivity.cpp` both did this for
+  every directional button; fixed by duplicating the button (`Buttons{X, X}`), matching how
+  real 2-button call sites already do it safely. Worth an upstream bug report at some point.
+- `scripts/build_web.py`/`CrossPointWebServer.cpp`: kept the generated web-page byte arrays as
+  `uint8_t[]` (this fork's own choice) rather than upstream's `char[]`, since host/x86 `char`
+  is signed and the same gzip bytes that compile fine as unsigned on the ESP32 toolchain
+  become narrowing-conversion errors past 127 on the simulator build. `reinterpret_cast` to
+  `const char*` only at the 4 `send_P`/`sendHtmlContent` call sites that need it.
+- Deleted two native tests that only ever existed in this fork's own abandoned history (never
+  upstream, unrelated to Pokémon): `ClippingHighlightGeometryTest.cpp` (pinned to a
+  now-replaced constexpr redesign) and the `validateAndStoreDimensions`-based half of
+  `ImageDecoderSafetyTest.cpp` (that safety check now lives in a protected, no-longer
+  directly-testable method). Added a `vTaskDelay` test stub the surviving
+  `yieldDuringDecode()` assertions needed once `ImageToFramebufferDecoder.cpp` came from
+  upstream (calls `vTaskDelay` directly instead of Arduino's `delay()`).
+
+**Confirmed green**: `pio run -e pokemon-x3` succeeds — **Flash 93.1% used, 439,232 B free**,
+down from the pre-merge 97.0%/185,216 B thanks to upstream's font-compression work (a big,
+unplanned win for X4 Pro's own headroom too). Native suite: **333/333 tests pass**. Simulator
+(`pio run -e pokemon-simulator-X3 -t run_simulator`) boots, runs its full smoke script
+including the Pokémon activity, and exits cleanly (only pre-existing "missing art asset" log
+lines from the incomplete local sandbox, unrelated to this merge).
+
+**Phase 1 is fully done.** Safe to start Phase 2.
 
 **Prerequisites:** none (this is the first phase). Must run before Phase 2 (X4 Pro needs
 the upstream env as a template) but Phase 3/4 (touch, layout) can technically be prototyped
