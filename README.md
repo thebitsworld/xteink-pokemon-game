@@ -61,7 +61,7 @@ install on Sticky or another device. Back up the SD card before updating.
 7. Safely eject the card and return it to your device.
 8. Open **Settings → System → SD Card Firmware Update**, select `update.bin`, and confirm.
 
-The full-install ZIP contains the firmware and all required artwork. It does not contain or replace Pokémon saves, books, or reading data. The first release that moves artwork to `/pokemon` must be installed from the full ZIP; later releases can use the firmware-only download (`xteink-pokemon-x3-v<version>.bin` or `xteink-pokemon-x4-pro-v<version>.bin`) over the device's Wi-Fi file transfer. Artwork is shared between X3 and X4 Pro (same files, same paths) — only the firmware binary differs per device.
+The full-install ZIP contains the firmware and all required artwork. It does not contain or replace Pokémon saves, books, or reading data. The first release that moves artwork to `/pokemon` must be installed from the full ZIP; later releases can use the firmware-only download (`xteink-pokemon-x3-firmware-v<version>.bin` or `xteink-pokemon-x4-pro-firmware-v<version>.bin`) over the device's Wi-Fi file transfer. Artwork is shared between X3 and X4 Pro (same files, same paths) — only the firmware binary differs per device.
 
 Building from source? See [Getting Started](docs/development/getting-started.md).
 

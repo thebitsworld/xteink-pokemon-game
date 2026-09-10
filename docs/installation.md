@@ -38,8 +38,8 @@ The full ZIP contains the firmware and required artwork. It contains no Pokémon
 
 Use this only when `/pokemon/` is already installed at the SD-card root. If the artwork is still under `/.crosspoint/pokemon/`, install the full ZIP once instead.
 
-1. Download the firmware that matches your device: `xteink-pokemon-x3-v<version>.bin`
-   or `xteink-pokemon-x4-pro-v<version>.bin`.
+1. Download the firmware that matches your device: `xteink-pokemon-x3-firmware-v<version>.bin`
+   or `xteink-pokemon-x4-pro-firmware-v<version>.bin`.
 2. Leave the SD card inside the device and open **File Transfer**.
 3. Open the address displayed by the device in a browser.
 4. Upload the `.bin` to the SD-card root.
