@@ -1514,9 +1514,38 @@ void PokemonActivity::loop() {
     activate();
     return;
   }
+  // Screen::Message has no list/grid to route a tap into (logicalCount() is
+  // 0), so without this it could only be dismissed by the physical Confirm
+  // button or by leaving via the header's Back tap - not by tapping the
+  // message itself, unlike every other screen. wasScreenTapped() is a no-op
+  // stub on CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
+  if (screen_ == Screen::Message) {
+    int x = 0, y = 0;
+    if (mappedInput.wasScreenTapped(x, y)) {
+      activate();
+      return;
+    }
+  }
   const int count = logicalCount();
   if (count <= 0) return;
   if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves) {
+    // These two screens bypass buildList()/fui::list() entirely (they draw
+    // their own 2-column grid - see renderBattleMenu()/renderBattleMoveMenu()),
+    // so the generic app_.route() touch dispatch above never sees them. Hit-
+    // test each cell using the exact same rect the render functions draw
+    // into (battleGridCellRect()), so a tap can never land on a cell the
+    // drawing doesn't agree with. wasTapInRect() is a no-op stub on
+    // CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
+    if (mappedInput.hasTouchHardware()) {
+      for (int index = 0; index < count; ++index) {
+        const Rect cell = battleGridCellRect(index);
+        if (mappedInput.wasTapInRect(cell.x, cell.y, cell.width, cell.height)) {
+          selected_ = index;
+          activate();
+          return;
+        }
+      }
+    }
     // 2-column grid (renderBattleMenu()/renderBattleMoveMenu()) instead of a
     // single-column list: Left/Right step through in reading order same as
     // everywhere else; Up/Down jump by BATTLE_MENU_COLUMNS to move within
@@ -2261,6 +2290,23 @@ int PokemonActivity::battleMenuTop() const {
   return renderer.getScreenHeight() - metrics.buttonHintsHeight - rows * BATTLE_MENU_ROW_HEIGHT - 8;
 }
 
+// Shared by renderBattleMenu()/renderBattleMoveMenu() (what gets drawn) and
+// loop()'s touch hit-test (what gets tapped) - computed once here so the two
+// can never drift apart.
+Rect PokemonActivity::battleGridCellRect(int index) const {
+  const int width = renderer.getScreenWidth();
+  constexpr int margin = 8;
+  constexpr int gap = 8;
+  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
+  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
+  const int menuTop = battleMenuTop();
+  const int row = index / BATTLE_MENU_COLUMNS;
+  const int column = index % BATTLE_MENU_COLUMNS;
+  const int x = margin + column * (buttonWidth + gap);
+  const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+  return Rect{x, y, buttonWidth, buttonHeight};
+}
+
 // Screen::Battle's FIGHT/BALL/BAG/SWITCH/RUN menu as a 2-column button grid
 // instead of the generic single-column list - halves the vertical space the
 // menu needs (5 commands for a wild encounter used to mean 5 stacked rows,
@@ -2269,19 +2315,14 @@ int PokemonActivity::battleMenuTop() const {
 void PokemonActivity::renderBattleMenu() {
   const int count = logicalCount();
   if (count <= 0) return;
-  const int width = renderer.getScreenWidth();
-  constexpr int margin = 8;
-  constexpr int gap = 8;
-  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
-  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
-  const int menuTop = battleMenuTop();
   const bool isGym = gymChallengeIndex_ != 0;
 
   for (int index = 0; index < count; ++index) {
-    const int row = index / BATTLE_MENU_COLUMNS;
-    const int column = index % BATTLE_MENU_COLUMNS;
-    const int x = margin + column * (buttonWidth + gap);
-    const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+    const Rect cell = battleGridCellRect(index);
+    const int x = cell.x;
+    const int y = cell.y;
+    const int buttonWidth = cell.width;
+    const int buttonHeight = cell.height;
 
     const char* label;
     if (index == 0) {
@@ -2324,20 +2365,15 @@ void PokemonActivity::renderBattleMenu() {
 void PokemonActivity::renderBattleMoveMenu() {
   const int count = battlePlayerMoveCount();
   if (count <= 0) return;
-  const int width = renderer.getScreenWidth();
-  constexpr int margin = 8;
-  constexpr int gap = 8;
-  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
   constexpr int textPad = 10;
   constexpr int nameToPpGap = 8;
-  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
-  const int menuTop = battleMenuTop();
 
   for (int index = 0; index < count; ++index) {
-    const int row = index / BATTLE_MENU_COLUMNS;
-    const int column = index % BATTLE_MENU_COLUMNS;
-    const int x = margin + column * (buttonWidth + gap);
-    const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+    const Rect cell = battleGridCellRect(index);
+    const int x = cell.x;
+    const int y = cell.y;
+    const int buttonWidth = cell.width;
+    const int buttonHeight = cell.height;
 
     const uint8_t moveId = battlePlayer_.moves[index].moveId;
     const pokemon::MoveData* move = pokemon::moveData(moveId);
