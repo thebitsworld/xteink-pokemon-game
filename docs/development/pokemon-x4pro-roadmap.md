@@ -462,16 +462,19 @@ reachable without any keyboard/physical-button input.
 
 ## Phase 4 — Layout fixes for 800×480
 
-**Status:** In progress (commit `b2f4d920` on `feat/X4Pro-support` - see `CLAUDE.md`'s Phase 4
-section). The Battle HUD, the one screen this doc flagged as genuinely at risk, is fixed:
-measured real numbers on the X4 Pro simulator first (only ~172px available for the whole
-battlefield in landscape - confirmed X3 landscape computes to essentially the same ~173px,
-so it was equally broken there, never previously checked), confirmed the predicted overlap
-visually via a screenshot, then switched to a compact side-by-side layout below a threshold
-while leaving portrait's original layout untouched. Party/Summary spot-checked fine in
-landscape too. Not yet checked: Pokédex detail in landscape (likely fine, not visually
-confirmed), and a full inventory pass for any other hardcoded vertical constants beyond the
-Battle HUD's.
+**Status:** Scope changed by product decision (2026-09-10): **Pokemon is portrait-only, on
+both X3 and X4 Pro - landscape is out of scope for now**, to revisit later. See `CLAUDE.md`'s
+Phase 4 section for the full detail. Before this was decided, landscape was investigated and
+confirmed broken on both devices (only ~172-173px available for the Battle HUD in landscape
+on either device, not just X4 Pro), and a working compact-layout fix was written and verified
+(commit `b2f4d920`) - it's kept in the code (currently unreachable) in case landscape support
+resumes later. `PokemonActivity::onEnter()` now force-sets Portrait orientation unconditionally
+(commit `d4c46297`), so this phase's remaining scope is just confirming portrait looks right
+on both devices - already largely covered by Phase 1's fix and the generic width/height-derived
+layout formulas (X4 Pro portrait, 480x800, has *more* room than X3 portrait, 528x792, not
+less, so nothing X4-Pro-specific has been needed so far). Battle/Party/Summary spot-checked
+clean in portrait; Pokédex detail not yet visually confirmed but its rendering path doesn't
+depend on anything changed this phase.
 
 **Prerequisites:** Phase 2 done (need the X4 Pro simulator to see the actual layout).
 Can run in parallel with Phase 3 if two sessions split the work, since they touch mostly
@@ -523,9 +526,9 @@ cd test && ctest -R Pokemon --output-on-failure   # layout constants aren't usua
 pio run -e pokemon-simulator-X3 -t run_simulator
 pio run -e pokemon-x4-pro-simulator -t run_simulator
 ```
-Visually confirm on both simulators, side by side: Battle screen (both orientations if the
-device supports rotation), Party list, Summary, Pokédex detail — nothing clipped, no
-overlap, selection marker fully visible.
+Visually confirm on both simulators, side by side, in portrait only (landscape is out of
+scope - see the Status note above): Battle screen, Party list, Summary, Pokédex detail —
+nothing clipped, no overlap, selection marker fully visible.
 
 ---
 
