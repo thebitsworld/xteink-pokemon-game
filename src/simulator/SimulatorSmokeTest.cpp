@@ -319,7 +319,15 @@ class SimulatorSmokeTest {
 
       case SmokeStep::Pokemon:
 #if defined(CROSSINK_ENABLE_POKEMON)
+#if CROSSINK_APP_CAP_TOUCH
+        if (mappedInputManager.hasTouchHardware()) {
+          buildPokemonTouchInputScript();
+        } else {
+          buildPokemonInputScript();
+        }
+#else
         buildPokemonInputScript();
+#endif
         step = SmokeStep::InputScript;
 #else
         fail("Pokemon smoke-test step is unavailable");
@@ -738,6 +746,106 @@ class SimulatorSmokeTest {
 
     LOG_INF("SMOKE", "Running Pokemon input script");
   }
+
+#if CROSSINK_APP_CAP_TOUCH
+  // Phase 3 (X4 Pro touch support) audit: the button-driven script above
+  // proves the Pokemon activity still works with no touch input at all, but
+  // never exercises a single tap - X4 Pro has no physical d-pad, so every
+  // list screen must be genuinely reachable by touch. Reruns the same
+  // Menu -> Party -> Actions -> Summary -> Pokedex -> PC path, but selects
+  // and activates every row with a tap at that row's actual on-screen
+  // position (computed the same way PokemonActivity::listTop()/rowHeightFor
+  // Screen() do, from the same public metrics) instead of Down+Confirm, and
+  // leaves screens via a tap on the header's Back button instead of the
+  // physical Back button.
+  void buildPokemonTouchInputScript() {
+    inputScript.clear();
+    scriptIndex = 0;
+
+    // Onboarding (Starter/Gender/Nickname) isn't part of Phase 3's
+    // list-screen audit - drive it the same way as the button script so both
+    // scripts reach an identical starting save state.
+    inputScript.push_back(press(MappedInputManager::Button::Right));
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Pokemon Gender (touch script)", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+    inputScript.push_back(release(MappedInputManager::Button::Right));
+
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("Pokemon Gender Female (touch script)", 3));
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Pokemon Nickname Question (touch script)", 4));
+
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("Pokemon Nickname No (touch script)", 3));
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Pokemon Menu (touch script)", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int listTop =
+        metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInputManager) + metrics.verticalSpacing;
+    const int centerX = renderer.getScreenWidth() / 2;
+    const auto tapRow = [&](const int index, const int rowHeight) {
+      const int y = listTop + index * rowHeight + rowHeight / 2;
+      inputScript.push_back(touchDown(centerX, y));
+      inputScript.push_back(touchRelease(centerX, y));
+    };
+    const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
+    const auto backLayout = TouchHeaderBackButton::layout(header);
+    const int backX = header.x + header.width - backLayout.iconRect.width / 2;
+    const int backY = backLayout.iconRect.y + backLayout.iconRect.height / 2;
+    const auto tapBack = [&] {
+      inputScript.push_back(touchDown(backX, backY));
+      inputScript.push_back(touchRelease(backX, backY));
+    };
+
+    // Menu row 0 = Party.
+    tapRow(0, 64);
+    inputScript.push_back(render("Pokemon Party via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // Party row 0 = the starter (96px rows - reserves space for the HP bar
+    // strip renderPartyRowHealth() draws under the name/level line).
+    tapRow(0, 96);
+    inputScript.push_back(render("Pokemon Actions via touch", 4));
+
+    // Actions row 0 = Summary (collectionActions() always appends it first).
+    tapRow(0, 64);
+    inputScript.push_back(render("Pokemon Summary via touch", 4));
+
+    tapBack();
+    inputScript.push_back(render("Pokemon Actions Restored via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Party Restored via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Menu Restored via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // Menu row 1 = Pokedex.
+    tapRow(1, 64);
+    inputScript.push_back(render("Pokemon Pokedex via touch", 4));
+
+    // Row 3 - matches the button script's "3x Down from the top" entry, a
+    // species already seen from starter selection.
+    tapRow(3, 64);
+    inputScript.push_back(render("Pokemon Pokedex Detail via touch", 4));
+
+    tapBack();
+    inputScript.push_back(render("Pokemon Pokedex Restored via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Menu Restored 2 via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // Menu row 2 = PC Box (empty on a fresh save - still a real fui::list()
+    // screen showing the empty-state message, per buildUi()).
+    tapRow(2, 64);
+    inputScript.push_back(render("Pokemon Empty PC via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    LOG_INF("SMOKE", "Running Pokemon touch input script");
+  }
+#endif
 
   static void verifyPokemonSmokeState() {
     pokemon::PokemonSnapshot snapshot{};
