@@ -299,7 +299,29 @@ pre-merge baseline to catch any unexpected regression from the upstream bump its
 
 ## Phase 2 — Add the `pokemon-x4-pro` hardware environment
 
-**Status:** Not started
+**Status:** Done (commit `2ce2a09e`)
+
+Both `[env:pokemon-x4-pro]` and `[env:pokemon-x4-pro-simulator]` built clean on the first
+try — no include/config fixes needed, confirming the Pokémon lib code really is
+MCU-agnostic. The real, merged-in `[env:x4-pro]` differed from this doc's pre-merge
+template in a few load-bearing ways worth noting for later phases: it already carries
+`-DARDUINO_USB_MODE=1` (the exact flag `pokemon-x3` was missing back in Phase 1),
+`-DUSB_PRODUCT`/`-DUSB_MANUFACTURER` strings, and `-DFREEINK_FB_PSRAM=1` (framebuffer in
+PSRAM) — all copied over as-is. `[env:pokemon-x4-pro-simulator]` extends `simulator-base`
+directly and re-declares the X4 Pro simulator flags itself, mirroring exactly how
+`[env:pokemon-simulator-X3]` already does it (PlatformIO's `extends` needs the `env:`
+section referenced as a "base" section like `simulator-base`, not another `env:` section by
+bare name — attending an `[env:x4-pro-simulator]` env directly is not valid `extends`
+syntax, confirmed by an immediate parse error when first tried).
+
+Verified:
+```
+pio run -e pokemon-x4-pro                              # Flash 92.7%, 478,320 B free
+pio run -e pokemon-x4-pro-simulator -t run_simulator    # boots, runs clean
+pio run -e pokemon-x3                                   # still clean, unaffected
+```
+
+**Phase 2 is fully done.** Safe to start Phase 3 (touch support).
 
 **Prerequisites:** Phase 1 done (needs the upstream `[env:x4-pro]` section as a template).
 

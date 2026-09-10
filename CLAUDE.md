@@ -38,8 +38,13 @@ Confirmed green: `pio run -e pokemon-x3` (**Flash 93.1%, 439,232 B free** — do
 native suite (**333/333**), and the X3 simulator smoke run (boots, runs the full script
 including Pokémon, exits clean).
 
-Next: Phase 2 (add `[env:pokemon-x4-pro]`, modeled on upstream's now-available
-`[env:x4-pro]`) — not started yet.
+**Phase 2 is done** (commit `2ce2a09e`): added `[env:pokemon-x4-pro]` and
+`[env:pokemon-x4-pro-simulator]` to `platformio.ini`. Both built clean on the first try - no
+fixes needed. `pio run -e pokemon-x4-pro`: Flash 92.7%, 478,320 B free. Simulator boots and
+runs clean. `pokemon-x3` re-verified unaffected.
+
+Next: Phase 3 (touch support for the whole Pokémon UI - mandatory, X4 Pro has no physical
+d-pad) — not started yet.
 
 ## Recent fixes (2026-09-10)
 
