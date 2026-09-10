@@ -2,9 +2,10 @@
 
 Context notes for Claude in a later session (or on another machine) to continue this work without rediscovering everything from scratch. This file is NOT official project documentation — it's just a handoff notebook, and can be cleaned up/deleted once the in-progress work is done.
 
-## Next session TODO (2026-09-09, not started)
+## Recent fixes (2026-09-10)
 
-- **Bug**: HP-restoring items (Potion/Super Potion/Hyper Potion/Full Restore etc.) can currently be used on a fainted Pokémon (0 HP) — they should only work while HP > 0. A fainted Pokémon should require a revival item (`Revive`/`Max Revive`, item ids 15/16 in `scripts/data/pokemon-items.csv`, category `Medicine`) instead. Check `PokemonService::useConsumable()` (`src/pokemon/PokemonService.cpp:392`) — likely needs a branch that rejects (or routes differently) a non-revive Medicine item when `currentHp == 0`, and possibly a "can't heal a fainted Pokémon" message. Also check the `ItemTarget`/`BattleBag` UI paths in `PokemonActivity.cpp` so a fainted party member isn't offered as a valid target for a plain HP potion (or is offered but the action visibly fails with a clear reason).
+- **Fainted Pokemon now require Revive/Max Revive** (`72ef328b`): `useConsumable()` previously let a plain Potion/Full Restore/status cure/PP restore quietly act on a fainted Pokemon (`currentHp == 0`). Fixed: those items now require `currentHp > 0` and return `NotApplicable` otherwise; only Revive/Max Revive (item ids 15/16) can act on a fainted one, restoring 50%/100% of max HP (their `effectValue` now read as a percentage for these two ids specifically) rather than curing status. No UI changes needed — both Bag and BattleBag paths already surface `NotApplicable` with a message. 19/19 tests pass (added `UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequiresRevive`). Flash 6,354,239 B/97.0%, 185,216 B free.
+- **Wi-Fi OTA update pointed at the wrong repo** (`9952a2c5`): `pokemon-x3` never overrode `CROSSINK_OTA_RELEASE_URL`, so "Check for Update" silently pulled firmware from upstream `uxjulia/CrossInk` (matching asset name `firmware-x3-x4.bin`), which would flash a Pokemon-less build. Fixed by overriding the URL to this fork's own releases in that environment only.
 
 ## What this project is
 
