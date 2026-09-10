@@ -771,7 +771,8 @@ void RecentBooksGridActivity::render(RenderLock&&) {
 
   // The four physical hint slots are already occupied; Up/Down still navigate
   // the grid but are not rendered in this compact hint bar.
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_HOME)), tr(STR_OPEN), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (pendingCacheDeletedFeedback) {

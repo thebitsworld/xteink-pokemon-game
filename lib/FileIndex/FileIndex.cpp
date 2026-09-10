@@ -129,14 +129,12 @@ bool FileIndex::scanDirectory(const char* dirPath, AcceptFn accept, uint32_t& si
     file.close();
     maybeYield(yieldCounter);
   }
-
-  const auto iterationResult = FsHelpers::directoryIterationResult(root);
-  if (FsHelpers::directoryIterationFailed(iterationResult)) {
-    if (iterationResult == FsHelpers::DirectoryIterationResult::ReadFailed) {
-      directoryReadFailed_ = true;
-      LOG_ERR("FIDX", "directory read failed while scanning %s", dirPath);
+  if (FsHelpers::directoryIterationFailed(root)) {
+    if (root.allocationFailed()) {
+      LOG_ERR("FIDX", "directory entry allocation failed: %s", dirPath);
     } else {
-      LOG_ERR("FIDX", "directory entry allocation failed while scanning %s", dirPath);
+      LOG_ERR("FIDX", "directory listing failed before EOF: %s", dirPath);
+      directoryReadFailed_ = true;
     }
     root.close();
     return false;
@@ -300,14 +298,12 @@ bool FileIndex::build(const char* dirPath, AcceptFn accept, uint32_t signature, 
         file.close();
         maybeYield(bs.yieldCounter);
       }
-
-      const auto iterationResult = FsHelpers::directoryIterationResult(root);
-      if (FsHelpers::directoryIterationFailed(iterationResult)) {
-        if (iterationResult == FsHelpers::DirectoryIterationResult::ReadFailed) {
-          directoryReadFailed_ = true;
-          LOG_ERR("FIDX", "directory read failed while building index for %s", dirPath);
+      if (FsHelpers::directoryIterationFailed(root)) {
+        if (root.allocationFailed()) {
+          LOG_ERR("FIDX", "directory entry allocation failed during index build: %s", dirPath);
         } else {
-          LOG_ERR("FIDX", "directory entry allocation failed while building index for %s", dirPath);
+          LOG_ERR("FIDX", "directory listing failed during index build: %s", dirPath);
+          directoryReadFailed_ = true;
         }
         ok = false;
       }

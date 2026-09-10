@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "MappedInputManager.h"
+#include "ReaderUtils.h"
 #include "activities/ActivityResult.h"
 #include "activities/home/FileBrowserActionActivity.h"
 #include "components/TouchHeaderBackButton.h"
@@ -25,7 +26,6 @@ constexpr int DETAIL_BOTTOM_RESERVE = 55;
 constexpr int DETAIL_LINE_GAP = 6;
 constexpr int TOUCH_DETAIL_BUTTON_HEIGHT = 52;
 constexpr int TOUCH_DETAIL_PAGE_LABEL_RESERVE = 24;
-constexpr unsigned long CLIPPING_DELETE_HOLD_MS = 1000;
 
 Rect clippingHeaderRect(const Rect& safe, const ThemeMetrics& metrics, const MappedInputManager& mappedInput) {
   return Rect{safe.x, safe.y + metrics.topPadding, safe.width, TouchHeaderBackButton::height(metrics, mappedInput)};
@@ -94,16 +94,17 @@ size_t utf8CharLen(const std::string& text, const size_t index) {
 
 void appendLongWordLines(const GfxRenderer& renderer, const int fontId, const std::string& word, const int maxWidth,
                          std::vector<std::string>& out) {
+  // Measure in place and roll back on overflow so the line buffer grows to its
+  // high-water mark once instead of allocating two temporaries per character.
   std::string line;
   for (size_t i = 0; i < word.size();) {
     const size_t charLen = utf8CharLen(word, i);
-    const std::string next = word.substr(i, charLen);
-    const std::string candidate = line + next;
-    if (!line.empty() && renderer.getTextWidth(fontId, candidate.c_str()) > maxWidth) {
+    const size_t committedLen = line.size();
+    line.append(word, i, charLen);
+    if (committedLen > 0 && renderer.getTextWidth(fontId, line.c_str()) > maxWidth) {
+      line.resize(committedLen);
       out.push_back(line);
-      line = next;
-    } else {
-      line = candidate;
+      line.assign(word, i, charLen);
     }
     i += charLen;
   }
@@ -170,7 +171,7 @@ void EpubReaderClippingListActivity::onEnter() {
   topIndex = 0;
   visibleRows = 1;
   uiReady = false;
-  app.setTheme(uiThemeTokens(uiTarget));
+  applySharedUiTheme(app, uiTarget);
   app.on(ACTION_ROW, &EpubReaderClippingListActivity::onRowEvent, this);
   app.setScreen(&EpubReaderClippingListActivity::listScreen, this);
   detailText.reserve(CLIPPING_TEXT_MAX);
@@ -349,7 +350,7 @@ void EpubReaderClippingListActivity::loop() {
 
   if (CLIPPINGS.clippingCount() > 0 && !longPressConfirmHandled &&
       mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
-      mappedInput.getHeldTime() >= CLIPPING_DELETE_HOLD_MS) {
+      mappedInput.getHeldTime() >= ReaderUtils::DELETE_HOLD_MS) {
     longPressConfirmHandled = true;
     showClippingActionMenu(true);
     return;
@@ -390,7 +391,7 @@ void EpubReaderClippingListActivity::loop() {
       detailTouchBottom = openButton.y;
     }
 #endif
-    if (!longPressConfirmHandled && mappedInput.isScreenTouchLongPress(touchX, touchY, CLIPPING_DELETE_HOLD_MS) &&
+    if (!longPressConfirmHandled && mappedInput.isScreenTouchLongPress(touchX, touchY, ReaderUtils::DELETE_HOLD_MS) &&
         touchY >= detailTouchTop && touchY < detailTouchBottom) {
       mappedInput.suppressNextTouchTap();
       longPressConfirmHandled = true;
@@ -437,21 +438,6 @@ void EpubReaderClippingListActivity::loop() {
     return;
   }
 
-  int tx = 0;
-  int ty = 0;
-  if (!longPressConfirmHandled && mappedInput.isScreenTouchLongPress(tx, ty, CLIPPING_DELETE_HOLD_MS) &&
-      listRowStep > 0 && ty >= listTop && ty < listBottom) {
-    const int offset = ty - listTop;
-    const int row = offset / listRowStep;
-    const int touchedIndex = topIndex + row;
-    if (row < visibleRows && offset % listRowStep < listRowHeight && touchedIndex < total) {
-      selectedIndex = touchedIndex;
-      mappedInput.suppressNextTouchTap();
-      longPressConfirmHandled = true;
-      showClippingActionMenu(false);
-    }
-    return;
-  }
   if (uiReady) {
     const fui::InputSnapshot snap = touchSnapshotFrom(mappedInput);
     if (snap.touchPressed || snap.touchReleased) {
@@ -467,6 +453,12 @@ void EpubReaderClippingListActivity::loop() {
                                   visibleRows, total);
     if (next != topIndex) {
       topIndex = next;
+      requestUpdate();
+    } else if (swipe == MappedInputManager::SwipeDir::Down && topIndex == 0) {
+      // Match the physical Previous button: the touch gesture for the previous
+      // list page wraps from the first clipping to the last one.
+      selectedIndex = total - 1;
+      topIndex = followListSelection(selectedIndex, topIndex, visibleRows, total);
       requestUpdate();
     }
     return;
@@ -493,6 +485,11 @@ void EpubReaderClippingListActivity::onRowEvent(const fui::ActionEvent& event, v
   auto* self = static_cast<EpubReaderClippingListActivity*>(user);
   if (event.value < 0 || event.value >= static_cast<int16_t>(CLIPPINGS.clippingCount())) return;
   self->selectedIndex = event.value;
+  if (event.longPress) {
+    self->app.clearTapFlash();
+    self->showClippingActionMenu(false);
+    return;
+  }
   self->app.clearTapFlash();
   self->openSelectedDetail();
 }
@@ -515,21 +512,13 @@ void EpubReaderClippingListActivity::buildListScreen(UiApp::ScreenType& screen) 
     return;
   }
   fui::ListProps props;
-  props.items = uiItems.data();
-  props.count = static_cast<uint16_t>(uiItems.size());
-  props.selectedIndex = static_cast<int16_t>(selectedIndex);
   props.action = ACTION_ROW;
-  props.inputMask = fui::InputTouch;
+  props.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
   const fui::Rect bounds = screen.body();
-  listTop = bounds.y;
-  listBottom = bounds.bottom();
   const auto rows = configureUiList(props, screen.theme(), bounds, UiListRowType::WithSubtitle);
-  listRowHeight = props.rowHeight;
-  listRowStep = props.rowHeight + props.rowGap;
-  visibleRows = rows > 0 ? rows : 1;
+  visibleRows = std::min(rows > 0 ? static_cast<int>(rows) : 1, static_cast<int>(CLIPPING_WINDOW_SIZE));
   topIndex = scrollListBy(topIndex, 0, visibleRows, static_cast<int>(count));
-  props.topIndex = static_cast<uint16_t>(topIndex);
-  const int end = std::min(static_cast<int>(count), topIndex + visibleRows);
+  const int end = std::min({static_cast<int>(count), static_cast<int>(uiItems.size()), topIndex + visibleRows});
   for (int i = topIndex; i < end; ++i) {
     const size_t slot = static_cast<size_t>(i - topIndex);
     uiRawText[slot].clear();
@@ -542,6 +531,15 @@ void EpubReaderClippingListActivity::buildListScreen(UiApp::ScreenType& screen) 
     if (clipping) item.subtitle = clipping->chapterTitle[0] != '\0' ? clipping->chapterTitle : tr(STR_UNKNOWN_CHAPTER);
     item.actionValue = static_cast<int16_t>(i);
   }
+
+  // Hand FreeInkUI only the rows populated above. Passing the whole list instead lets a
+  // geometry taller than CLIPPING_WINDOW_SIZE draw entries this pass never filled, whose
+  // labels still point into uiLabels slots that a later pass reassigns.
+  const int drawCount = std::max(0, end - topIndex);
+  props.items = uiItems.data() + topIndex;
+  props.count = static_cast<uint16_t>(drawCount);
+  props.selectedIndex = static_cast<int16_t>(selectedIndex - topIndex);
+  props.topIndex = 0;
   screen.list(props);
 }
 
@@ -621,8 +619,9 @@ void EpubReaderClippingListActivity::renderDetail() {
   }
 #endif
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), detailPage > 0 ? tr(STR_DIR_UP) : "",
-                                            detailPage < detailPageCount - 1 ? tr(STR_DIR_DOWN) : "");
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), tr(STR_OPEN), detailPage > 0 ? tr(STR_DIR_UP) : "",
+                            detailPage < detailPageCount - 1 ? tr(STR_DIR_DOWN) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
 }
 
@@ -647,8 +646,9 @@ void EpubReaderClippingListActivity::render(RenderLock&&) {
   app.render();
   uiReady = true;
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), CLIPPINGS.clippingCount() == 0 ? "" : tr(STR_OPEN),
-                                            tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), CLIPPINGS.clippingCount() == 0 ? "" : tr(STR_OPEN),
+                            tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
   renderer.displayBuffer();
 }

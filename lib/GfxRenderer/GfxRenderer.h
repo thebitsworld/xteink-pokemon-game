@@ -32,7 +32,6 @@ enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 
 class GfxRenderer {
  public:
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
-  enum class BitmapBwPolicy : uint8_t { ExistingThreshold, DitherNativeGray };
 
   // Logical screen orientation from the perspective of callers
   enum Orientation {
@@ -71,6 +70,15 @@ class GfxRenderer {
   mutable int _stripY0 = 0;
   mutable int _stripRows = 0;
   mutable bool _stripActive = false;
+
+  // Optional logical-space clip used while a TextBlock is rendered inside a
+  // table cell. Glyph bitmaps and background fills both pass through this
+  // guard, so an emergency oversized codepoint cannot paint into a neighbour.
+  mutable bool textClipActive_ = false;
+  mutable int textClipLeft_ = 0;
+  mutable int textClipTop_ = 0;
+  mutable int textClipRight_ = 0;   // half-open
+  mutable int textClipBottom_ = 0;  // half-open
 
   class BitmapScratchLock {
     const GfxRenderer& renderer_;
@@ -250,9 +258,12 @@ class GfxRenderer {
   void drawIcon(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawIconInverted(const uint8_t bitmap[], int x, int y, int size) const;
   void drawIconInverted(const uint8_t bitmap[], int x, int y, int width, int height) const;
-  bool drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0, float cropY = 0,
-                  BitmapBwPolicy bwPolicy = BitmapBwPolicy::ExistingThreshold) const;
-  bool drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
+  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
+                  float cropY = 0) const;
+  void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
+  // Counter-invert content images in the logical framebuffer so output-level
+  // Dark Mode leaves their original polarity unchanged.
+  void preserveImagePolarity(int x, int y, int width, int height) const;
   // Trapezoidal blit used by Flow/iPod-style carousels. Fits the bitmap into a
   // bounding box of width `w` and height `max(hL, hR)` whose top-left is (x, y).
   void drawPerspectiveBitmap(const Bitmap& bitmap, int x, int y, int w, int hL, int hR) const;
@@ -272,6 +283,11 @@ class GfxRenderer {
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                 BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO) const;
+  // Guard text/background pixels while a table cell is rendered. The guard is
+  // intentionally single-level and scoped by the caller; nested use is a
+  // programming error caught in debug builds.
+  void beginTextClip(int x, int y, int width, int height) const;
+  void endTextClip() const;
   int getSpaceWidth(int fontId, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   /// Returns the total inter-word advance: fp4::toPixel(spaceAdvance + kern(leftCp,' ') + kern(' ',rightCp)).
   /// Using a single snap avoids the +/-1 px rounding error that arises when space advance and kern are
@@ -292,9 +308,6 @@ class GfxRenderer {
   /// truncated with an ellipsis (U+2026).
   std::vector<std::string> wrappedText(int fontId, const char* text, int maxWidth, int maxLines,
                                        EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
-  /// Returns the full ascender-to-descender pixel bounds for the font that
-  /// drawText() resolves for this text, including a registered CJK fallback.
-  int getTextPixelHeight(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
 
   // Helper for drawing rotated text (90 degrees clockwise, for side buttons)
   void drawTextRotated90CW(int fontId, int x, int y, const char* text, bool black = true,

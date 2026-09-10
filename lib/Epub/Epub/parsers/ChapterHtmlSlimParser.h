@@ -20,6 +20,7 @@
 #include "Epub/blocks/TextBlock.h"
 #include "Epub/css/CssParser.h"
 #include "Epub/css/CssStyle.h"
+#include "Epub/tables/CompactTableLayout.h"
 
 class GfxRenderer;
 class Epub;
@@ -130,6 +131,7 @@ class ChapterHtmlSlimParser {
     bool hasBackgroundBlack = false, backgroundBlack = false;
     bool hasDirection = false;
     CssTextDirection direction = CssTextDirection::Ltr;
+    bool setsParagraphDirection = false;
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
     bool hasSmallCaps = false, smallCaps = false;
@@ -196,6 +198,15 @@ class ChapterHtmlSlimParser {
   uint8_t currentTableCellColSpan = 1;
   uint32_t currentTableCellVisibleOffset = 0;
   std::unique_ptr<BufferedTable> currentTableBuffer = nullptr;
+  std::unique_ptr<CompactTableLayout> currentCompactTable = nullptr;
+  bool compactTableFlattened = false;
+  bool compactTableUnsupported = false;
+  bool compactTableTopSpacingApplied = false;
+  uint8_t compactFragmentColumnCount = 0;
+  uint16_t compactFragmentHeight = 1;
+  uint32_t compactFragmentVisibleOffset = 0;
+  std::vector<TableFragmentRow> compactFragmentRows;
+  std::vector<FootnoteEntry> compactFragmentFootnotes;
   std::vector<CssAncestorEntry> ancestorStack_;
 
   // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
@@ -258,6 +269,7 @@ class ChapterHtmlSlimParser {
   void pushCssAncestor(int depth, const char* tag, std::string_view classAttr);
   static void applyDirectionToEntry(StyleStackEntry& entry, const CssStyle& css);
   static void applySmallCapsToEntry(StyleStackEntry& entry, const CssStyle& css);
+  static void applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& css);
   void emitHorizontalRule(const BlockStyle& blockStyle);
   void finalizeCurrentTableCell();
   void emitBufferedTableAsParagraphs(BufferedTable& table);
@@ -266,6 +278,11 @@ class ChapterHtmlSlimParser {
   bool flushStreamingTableFragment(BufferedTable& table);
   void emitStreamingTableRowsAsParagraphs(BufferedTable& table);
   void finishStreamingTable(BufferedTable& table);
+  bool flushCompactTableFragment();
+  bool emitCompactTableRow(TableFragmentRow& row, std::vector<std::shared_ptr<TextBlock>>& flatLines,
+                           const std::vector<FootnoteEntry>& footnotes, uint32_t visibleTextOffset,
+                           uint8_t fragmentColumnCount, bool flatten);
+  void finishCompactTable();
   void fallbackStreamingTableToParagraphs(const char* reason);
   void emitCurrentTableBuffer();
   void fallbackCurrentTableBufferToParagraphs(const char* reason);

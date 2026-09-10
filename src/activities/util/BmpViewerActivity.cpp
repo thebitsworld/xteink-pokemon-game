@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "Epub/converters/PngToFramebufferConverter.h"
 #include "components/UITheme.h"
@@ -24,7 +25,7 @@ bool isMacOSSidecarFile(const std::string& filename) { return filename.rfind("._
 void drawImageError(GfxRenderer& renderer, const MappedInputManager& mappedInput, const char* message) {
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2, message);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
@@ -112,12 +113,14 @@ bool BmpViewerActivity::renderPngImage() {
     drawImageError(renderer, mappedInput, "Invalid PNG File");
     return false;
   }
+  renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
 
   bool hasPrevious = (siblingImages.size() > 1 && currentImageIndex > 0);
   bool hasNext = (siblingImages.size() > 1 && currentImageIndex != -1 &&
                   currentImageIndex < static_cast<int>(siblingImages.size()) - 1);
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", (hasPrevious ? "<" : ""), (hasNext ? ">" : ""));
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), tr(STR_SET_SLEEP_COVER),
+                                            (hasPrevious ? "<" : nullptr), (hasNext ? ">" : nullptr));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   return true;
@@ -174,8 +177,8 @@ void BmpViewerActivity::onEnter() {
       bool hasNext = (siblingImages.size() > 1 && currentImageIndex != -1 &&
                       currentImageIndex < static_cast<int>(siblingImages.size()) - 1);
 
-      const auto labels =
-          mappedInput.mapLabels(tr(STR_BACK), tr(STR_SET_SLEEP_COVER), (hasPrevious ? "<" : ""), (hasNext ? ">" : ""));
+      const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), tr(STR_SET_SLEEP_COVER),
+                                                (hasPrevious ? "<" : nullptr), (hasNext ? ">" : nullptr));
 
       GUI.fillPopupProgress(renderer, popupRect, 50);
 
@@ -214,6 +217,19 @@ void BmpViewerActivity::doSetSleepCover() {
   APP_STATE.favoriteSleepImagePath = filePath;
   if (APP_STATE.saveToFile()) {
     LOG_INF("BmpViewer", "Pinned favorite sleep image: %s", filePath.c_str());
+
+    // PNG covers only render in Page Overlay sleep mode; other modes silently skip them (see
+    // selectPinnedSleepImage() in SleepActivity.cpp), so switch the setting for the user.
+    if (FsHelpers::hasPngExtension(filePath) &&
+        SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY) {
+      SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY;
+      if (SETTINGS.saveToFile()) {
+        LOG_INF("BmpViewer", "Switched sleep wallpaper mode to Page Overlay for PNG cover");
+      } else {
+        LOG_ERR("BmpViewer", "Failed to save sleep wallpaper mode after setting PNG cover");
+      }
+    }
+
     GUI.drawPopup(renderer, tr(STR_DONE));
   } else {
     LOG_ERR("BmpViewer", "Failed to save favorite sleep image path: %s", filePath.c_str());
@@ -260,7 +276,7 @@ void BmpViewerActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (FsHelpers::hasBmpExtension(filePath)) {
+    if (isViewableImageFile(filePath)) {
       doSetSleepCover();
     }
     return;

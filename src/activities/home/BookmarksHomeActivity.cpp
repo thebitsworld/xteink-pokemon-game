@@ -43,7 +43,7 @@ void BookmarksHomeActivity::onEnter() {
   topIndex = 0;
   visibleRows = 1;
   uiReady = false;
-  app.setTheme(uiThemeTokens(uiTarget));
+  applySharedUiTheme(app, uiTarget);
   app.on(ACTION_ROW, &BookmarksHomeActivity::onRowEvent, this);
   app.setScreen(&BookmarksHomeActivity::listScreen, this);
   requestUpdate();
@@ -85,20 +85,6 @@ void BookmarksHomeActivity::loop() {
   const int listSize = static_cast<int>(books.size());
   if (listSize == 0) return;
 
-  int tx = 0;
-  int ty = 0;
-  if (mappedInput.isScreenTouchLongPress(tx, ty, BOOKMARK_DELETE_HOLD_MS) && listRowStep > 0 && ty >= listTop &&
-      ty < listBottom) {
-    const int offset = ty - listTop;
-    const int row = offset / listRowStep;
-    const int touchedIndex = topIndex + row;
-    if (row >= visibleRows || offset % listRowStep >= listRowHeight || touchedIndex >= listSize) return;
-    selectedIndex = touchedIndex;
-    mappedInput.suppressNextTouchTap();
-    longPressOpenHandled = true;
-    showBookmarkBookActionMenu(selectedIndex, true);
-    return;
-  }
   if (uiReady) {
     const fui::InputSnapshot snap = touchSnapshotFrom(mappedInput);
     if (snap.touchPressed || snap.touchReleased) {
@@ -140,6 +126,11 @@ void BookmarksHomeActivity::onRowEvent(const fui::ActionEvent& event, void* user
   auto* self = static_cast<BookmarksHomeActivity*>(user);
   if (event.value < 0 || event.value >= static_cast<int16_t>(self->books.size())) return;
   self->selectedIndex = event.value;
+  if (event.longPress) {
+    self->app.clearTapFlash();
+    self->showBookmarkBookActionMenu(self->selectedIndex, false);
+    return;
+  }
   self->app.clearTapFlash();
   self->openBookmarkList(self->selectedIndex);
 }
@@ -172,13 +163,9 @@ void BookmarksHomeActivity::buildListScreen(UiApp::ScreenType& screen) {
   props.count = static_cast<uint16_t>(items.size());
   props.selectedIndex = static_cast<int16_t>(selectedIndex);
   props.action = ACTION_ROW;
-  props.inputMask = fui::InputTouch;
+  props.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
   const fui::Rect bounds = screen.body();
-  listTop = bounds.y;
-  listBottom = bounds.bottom();
   const auto rows = configureUiList(props, screen.theme(), bounds, UiListRowType::WithSubtitle);
-  listRowHeight = props.rowHeight;
-  listRowStep = props.rowHeight + props.rowGap;
   visibleRows = rows > 0 ? rows : 1;
   topIndex = scrollListBy(topIndex, 0, visibleRows, static_cast<int>(books.size()));
   props.topIndex = static_cast<uint16_t>(topIndex);
@@ -199,7 +186,8 @@ void BookmarksHomeActivity::render(RenderLock&&) {
   app.render();
   uiReady = true;
 
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_HOME)), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

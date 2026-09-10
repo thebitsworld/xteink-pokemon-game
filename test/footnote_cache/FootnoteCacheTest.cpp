@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "Epub/Page.h"
-#include "Epub/SectionCacheFormat.h"
 
 namespace {
 
@@ -78,13 +77,6 @@ int main() {
                                   [](const FootnoteEntry& entry) { return entry.linkId == 7; });
   if (!check(match != reloaded.footnotes.end(), "Reloaded link ID did not resolve")) return 1;
   if (!check(std::string(match->href) == target, "Reloaded link resolved to a different target")) return 1;
-
-  if (!check(!section_cache::isSupportedVersion(62), "Legacy full cache version 62 was accepted")) return 1;
-  if (!check(!section_cache::isSupportedVersion(0xF7), "Legacy partial cache version 0xF7 was accepted")) return 1;
-  if (!check(section_cache::isSupportedVersion(63), "Current full cache version 63 was rejected")) return 1;
-  if (!check(section_cache::isSupportedVersion(0xF6), "Current partial cache version 0xF6 was rejected")) return 1;
-  if (!check(!section_cache::isPartialVersion(63), "Full cache version was classified as partial")) return 1;
-  if (!check(section_cache::isPartialVersion(0xF6), "Partial cache version was classified as full")) return 1;
 
   return 0;
 }

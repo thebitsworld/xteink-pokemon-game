@@ -79,3 +79,4 @@ Pokémon and related names, characters, and artwork belong to their respective r
 - [Artwork and packaging](docs/artwork-setup.md)
 - [Save-file formats](docs/file-formats.md)
 - [Pokémon battle system roadmap](docs/development/pokemon-battle-roadmap.md)
+- [Xteink X4 Pro support roadmap](docs/development/pokemon-x4pro-roadmap.md)

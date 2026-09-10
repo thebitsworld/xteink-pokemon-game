@@ -1,26 +1,29 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
-#include <vector>
+#include <cstdio>
 
 class SdCardFont {
  public:
   struct PrewarmCall {
-    std::string text;
+    char text[32] = {};
     uint8_t styleMask = 0;
-    bool metadataOnly = false;
-    bool includeKerning = false;
   };
 
   void clearCache() {}
-  int prewarm(const char* text, const uint8_t styleMask, const bool metadataOnly, const bool includeKerning) {
-    prewarmCalls.push_back({text, styleMask, metadataOnly, includeKerning});
+  void releaseResidentCaches() {}
+  int prewarm(const char* text, uint8_t styleMask, bool, bool) {
+    auto& call = prewarmCalls[prewarmCallCount++];
+    std::snprintf(call.text, sizeof(call.text), "%s", text);
+    call.styleMask = styleMask;
     return 0;
   }
+  uint8_t resolveStyle(uint8_t style) const { return resolvedStyles[style & 0x03]; }
   bool lastPrewarmFailed() const { return false; }
   void logStats(const char*) {}
   void resetStats() {}
 
-  std::vector<PrewarmCall> prewarmCalls;
+  PrewarmCall prewarmCalls[4] = {};
+  int prewarmCallCount = 0;
+  uint8_t resolvedStyles[4] = {0, 1, 2, 3};
 };

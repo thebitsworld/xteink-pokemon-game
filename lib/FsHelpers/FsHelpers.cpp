@@ -5,30 +5,23 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <string_view>
 #include <vector>
 
 namespace FsHelpers {
 
-DirectoryIterationResult directoryIterationResult(const HalFile& directory) {
+bool directoryIterationFailed(const HalFile& directory) {
 #ifdef SIMULATOR
   // The host filesystem adapter cannot surface an SdFat read error.
-  return classifyDirectoryIterationEnd(directory.allocationFailed(), false);
+  return directory.allocationFailed();
 #else
-  return classifyDirectoryIterationEnd(directory.allocationFailed(), directory.iterationFailed());
+  return directory.allocationFailed() || directory.iterationFailed();
 #endif
 }
 
-bool directoryIterationFailed(const HalFile& directory) {
-  return directoryIterationFailed(directoryIterationResult(directory));
-}
-
 bool directoryCanBeEnumerated(const char* path) {
-  if (!path) {
-    return false;
-  }
-
   HalFile directory = Storage.open(path);
   if (!directory || !directory.isDirectory()) {
     directory.close();
@@ -49,9 +42,7 @@ bool directoryCanBeEnumerated(const char* path) {
 }
 
 DirectoryEntryVisibility directoryEntryVisibility(const char* directoryPath, const char* entryPath) {
-  if (!directoryPath || !entryPath || entryPath[0] == '\0') {
-    return DirectoryEntryVisibility::Missing;
-  }
+  if (!directoryPath || !entryPath || entryPath[0] == '\0') return DirectoryEntryVisibility::Missing;
 
   HalFile expectedEntry = Storage.open(entryPath);
   if (!expectedEntry) {
@@ -62,9 +53,7 @@ DirectoryEntryVisibility directoryEntryVisibility(const char* directoryPath, con
   char expectedName[256] = {};  // FAT long filenames are at most 255 bytes.
   expectedEntry.getName(expectedName, sizeof(expectedName));
   expectedEntry.close();
-  if (expectedName[0] == '\0') {
-    return DirectoryEntryVisibility::IterationFailed;
-  }
+  if (expectedName[0] == '\0') return DirectoryEntryVisibility::IterationFailed;
 
   HalFile directory = Storage.open(directoryPath);
   if (!directory || !directory.isDirectory()) {
@@ -72,7 +61,7 @@ DirectoryEntryVisibility directoryEntryVisibility(const char* directoryPath, con
     return DirectoryEntryVisibility::IterationFailed;
   }
 
-  char name[256] = {};  // FAT long filenames are at most 255 bytes.
+  char name[256];  // FAT long filenames are at most 255 bytes.
   for (HalFile entry = directory.openNextFile(); entry; entry = directory.openNextFile()) {
     entry.getName(name, sizeof(name));
     entry.close();
@@ -90,6 +79,43 @@ DirectoryEntryVisibility directoryEntryVisibility(const char* directoryPath, con
   }
   directory.close();
   return DirectoryEntryVisibility::Missing;
+}
+
+bool resolveRootDirectoryIgnoreCase(const char* expectedPath, char* resolvedPath, const size_t resolvedPathSize) {
+  if (!expectedPath || expectedPath[0] != '/' || expectedPath[1] == '\0' || strchr(expectedPath + 1, '/') ||
+      !resolvedPath || resolvedPathSize == 0) {
+    return false;
+  }
+
+  HalFile exact = Storage.open(expectedPath);
+  if (exact && exact.isDirectory()) {
+    const int written = snprintf(resolvedPath, resolvedPathSize, "%s", expectedPath);
+    exact.close();
+    return written > 0 && static_cast<size_t>(written) < resolvedPathSize;
+  }
+  exact.close();
+
+  HalFile root = Storage.open("/");
+  if (!root || !root.isDirectory()) {
+    root.close();
+    return false;
+  }
+
+  char name[256];  // FAT long filenames are at most 255 bytes.
+  const char* expectedName = expectedPath + 1;
+  for (HalFile entry = root.openNextFile(); entry; entry = root.openNextFile()) {
+    const bool isDirectory = entry.isDirectory();
+    entry.getName(name, sizeof(name));
+    entry.close();
+    if (!isDirectory || strcasecmp(name, expectedName) != 0) continue;
+
+    const int written = snprintf(resolvedPath, resolvedPathSize, "/%s", name);
+    root.close();
+    return written > 0 && static_cast<size_t>(written) < resolvedPathSize;
+  }
+
+  root.close();
+  return false;
 }
 
 namespace {

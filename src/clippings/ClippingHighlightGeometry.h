@@ -19,9 +19,9 @@ struct GapRect {
   int height = 0;
 };
 
-constexpr bool gapBetweenAdjacentWords(const WordRect& previous, const WordRect& current, GapRect& gap) {
+inline bool gapBetweenAdjacentWords(const WordRect& previous, const WordRect& current, GapRect& gap) {
   if (static_cast<uint32_t>(current.pageWordIndex) != static_cast<uint32_t>(previous.pageWordIndex) + 1U ||
-      previous.y != current.y || previous.width <= 0 || previous.height <= 0 || current.width <= 0 ||
+      previous.y != current.y || previous.width <= 0 || current.width <= 0 || previous.height <= 0 ||
       current.height <= 0) {
     return false;
   }
@@ -34,10 +34,8 @@ constexpr bool gapBetweenAdjacentWords(const WordRect& previous, const WordRect&
     return false;
   }
 
-  gap.x = leftWordRight;
-  gap.y = current.y;
-  gap.width = rightWordLeft - leftWordRight;
-  gap.height = previous.height < current.height ? previous.height : current.height;
+  const int gapHeight = previous.height < current.height ? previous.height : current.height;
+  gap = {leftWordRight, current.y, rightWordLeft - leftWordRight, gapHeight};
   return true;
 }
 

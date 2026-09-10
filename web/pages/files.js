@@ -2318,6 +2318,66 @@ function rewriteImageSrcReferences(content, xhtmlPath, renamed, splitImages = {}
   return { content: rewritten, changed };
 }
 
+/** Remove XML comments from XHTML source text. Returns { text, count, bytes }. */
+function stripComments(xml) {
+  const skippedSections = [
+    { open: "<![CDATA[", close: "]]>" },
+    { open: "<?", close: "?>" },
+  ];
+  const encoder = new TextEncoder();
+  const out = [];
+  let index = 0;
+  let count = 0;
+  let bytes = 0;
+
+  const doctypeEnd = (from) => {
+    const gt = xml.indexOf(">", from);
+    const subset = xml.indexOf("[", from);
+    if (subset < 0 || (gt >= 0 && subset > gt)) return gt < 0 ? xml.length : gt + 1;
+    const close = xml.indexOf("]>", subset);
+    return close < 0 ? xml.length : close + 2;
+  };
+
+  while (index < xml.length) {
+    const next = xml.indexOf("<", index);
+    if (next < 0) {
+      out.push(xml.slice(index));
+      break;
+    }
+    if (next > index) out.push(xml.slice(index, next));
+
+    if (xml.startsWith("<!--", next)) {
+      const close = xml.indexOf("-->", next + 4);
+      const end = close < 0 ? xml.length : close + 3;
+      count++;
+      bytes += encoder.encode(xml.slice(next, end)).length;
+      index = end;
+      continue;
+    }
+
+    if (xml.startsWith("<!DOCTYPE", next)) {
+      const end = doctypeEnd(next + 9);
+      out.push(xml.slice(next, end));
+      index = end;
+      continue;
+    }
+
+    const skipped = skippedSections.find((section) => xml.startsWith(section.open, next));
+    if (skipped) {
+      const close = xml.indexOf(skipped.close, next + skipped.open.length);
+      const end = close < 0 ? xml.length : close + skipped.close.length;
+      out.push(xml.slice(next, end));
+      index = end;
+      continue;
+    }
+
+    out.push("<");
+    index = next + 1;
+  }
+
+  return { text: out.join(""), count, bytes };
+}
+
 /**
  * Serialize an XML doc back to string, preserving the original <?xml?> declaration
  * and cleaning up XMLSerializer namespace prefix noise (xmlns:ns0 etc).
@@ -3121,10 +3181,10 @@ function syncNCXIdentifier(ncxText, mainIdentifier) {
 
 /**
  * Fix OPF content: fix media-types, strip svg properties,
- * update split image manifest entries, remove stripped font entries,
- * and ensure cover meta. DOMParser with regex fallback.
+ * update split image manifest entries, ensure cover meta.
+ * DOMParser with regex fallback.
  */
-function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}, fontPaths = null) {
+function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}) {
   let t = opfText;
 
   try {
@@ -3155,14 +3215,6 @@ function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}, fontPaths = null
           .trim();
         if (newProps) item.setAttribute("properties", newProps);
         else item.removeAttribute("properties");
-      }
-    }
-
-    if (fontPaths && fontPaths.size) {
-      for (const item of items) {
-        const href = decodeHref(item.getAttribute("href") || "");
-        const fullPath = resolvePath(`${opfDir ? `${opfDir}/` : ""}content.opf`, href);
-        if (fontPaths.has(fullPath)) item.parentNode.removeChild(item);
       }
     }
 
@@ -3207,7 +3259,6 @@ function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}, fontPaths = null
       '$1media-type="image/jpeg"$3',
     );
     t = t.replace(/\s+svg(?=["'\s>])/g, "");
-    if (fontPaths && fontPaths.size) t = stripFontManifestItems(t, opfDir, fontPaths).xml;
     for (const [splitKey, splitInfo] of Object.entries(splitImages)) {
       const parts = splitInfo.parts || splitInfo;
       let origHref = opfDir && splitKey.startsWith(opfDir + "/") ? splitKey.substring(opfDir.length + 1) : splitKey;
@@ -4093,15 +4144,10 @@ async function convertEpubFile(file, progressCallback) {
     if (progressCallback) progressCallback((i / entries.length) * 60);
   }
 
-  const fontPaths = collectFontPaths(zip, opfContent, opfPath);
-  let removedFontCount = 0;
-  let removedFontBytes = 0;
-  let removedFontFaceRules = 0;
-
   // Second pass: update XHTML using DOMParser
   for (const [xhtmlPath, content] of Object.entries(xhtmlFiles)) {
     if (operationCancelled) throw new Error("Cancelled by user");
-    let t = content;
+    let t = scrubEpubTextResource(xhtmlPath, content);
 
     const stripped = stripComments(t);
     if (stripped.count) {
@@ -4109,7 +4155,6 @@ async function convertEpubFile(file, progressCallback) {
       logFix(`Comments (${stripped.count}, ${formatBytes(stripped.bytes)})`, xhtmlPath.split("/").pop());
     }
 
-    t = scrubEpubTextResource(xhtmlPath, t);
     const r = fixSvgCover(t);
     if (r.fixed) {
       t = r.c;
@@ -4272,15 +4317,6 @@ async function convertEpubFile(file, progressCallback) {
       if (fallback.changed) t = fallback.content;
     }
 
-    t = t.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (match, open, css, close) => {
-      const result = stripFontFaceRules(css);
-      if (!result.count) return match;
-      removedFontFaceRules += result.count;
-      removedFontBytes += new TextEncoder().encode(css).length - new TextEncoder().encode(result.css).length;
-      logFix("@font-face", `${result.count} rule(s) removed from ${escapeHtml(xhtmlPath.split("/").pop())}`);
-      return open + result.css + close;
-    });
-
     // Inject universal image constraint — prevents overflow on e-ink displays
     if (t.includes("</head>")) {
       t = t.replace("</head>", DEFENSIVE_STYLE + "</head>");
@@ -4344,7 +4380,7 @@ async function convertEpubFile(file, progressCallback) {
       t = t.split(o.split("/").pop()).join(n.split("/").pop());
     }
     const opfDir = opfPath.includes("/") ? opfPath.substring(0, opfPath.lastIndexOf("/")) : "";
-    t = fixOPF(t, opfContent, opfDir, splitImages, fontPaths);
+    t = fixOPF(t, opfContent, opfDir, splitImages);
     t = addSplitSectionsToOpf(t, opfPath, sectionSplitResult.splitSections);
     t = rewriteSplitSectionReferences(t, opfPath, sectionSplitResult.anchorTargets);
     if (t !== opfContent) logFix("OPF", "manifest updated");
@@ -4382,46 +4418,13 @@ async function convertEpubFile(file, progressCallback) {
     if (low.match(/\.(png|gif|webp|bmp|jpg|jpeg|svg)$/) || low.match(/\.(xhtml|html|htm)$/) || low.endsWith(".opf"))
       continue;
 
-    if (fontPaths.has(path)) {
-      const fontData = await fileObj.async("arraybuffer");
-      removedFontCount++;
-      removedFontBytes += fontData.byteLength;
-      log(
-        `${escapeHtml(path.split("/").pop())} <span class="log-detail">(${formatBytes(fontData.byteLength)})</span>`,
-        "success",
-        "REMOVE",
-      );
-      continue;
-    }
-
     let data = await fileObj.async("arraybuffer");
     if (low.endsWith(".css")) {
       let t = scrubEpubTextResource(path, await safeReadText(fileObj));
       for (const [o, n] of Object.entries(renamed)) {
         t = t.split(o.split("/").pop()).join(n.split("/").pop());
       }
-      const result = stripFontFaceRules(t);
-      if (result.count) {
-        removedFontFaceRules += result.count;
-        removedFontBytes += new TextEncoder().encode(t).length - new TextEncoder().encode(result.css).length;
-        t = result.css;
-        logFix("@font-face", `${result.count} rule(s) removed from ${escapeHtml(path.split("/").pop())}`);
-      }
       data = new TextEncoder().encode(t);
-    } else if (low === "meta-inf/encryption.xml" && fontPaths.size) {
-      const t = extraTextFiles[path] || scrubEpubTextResource(path, await safeReadText(fileObj));
-      const result = stripFontEncryptionEntries(t, fontPaths);
-      if (result.dropFile) {
-        removedFontBytes += data.byteLength;
-        logFix("encryption.xml", "removed (contained only font obfuscation entries)");
-        continue;
-      }
-      if (result.modified) {
-        const encoded = new TextEncoder().encode(result.xml);
-        removedFontBytes += Math.max(0, data.byteLength - encoded.length);
-        data = encoded;
-        logFix("encryption.xml", "font obfuscation entries removed");
-      }
     } else if (low.endsWith(".ncx")) {
       let t = extraTextFiles[path] || scrubEpubTextResource(path, await safeReadText(fileObj));
       for (const [o, n] of Object.entries(renamed)) {
@@ -4436,14 +4439,6 @@ async function convertEpubFile(file, progressCallback) {
       data = new TextEncoder().encode(t);
     }
     out.file(path, data, DEFLATE_OPTS);
-  }
-
-  if (removedFontCount > 0 || removedFontFaceRules > 0) {
-    log(
-      `Removed ${removedFontCount} embedded font(s) and ${removedFontFaceRules} @font-face rule(s), ${formatBytes(removedFontBytes)} of font data`,
-      "",
-      "INFO",
-    );
   }
 
   if (progressCallback) progressCallback(100);

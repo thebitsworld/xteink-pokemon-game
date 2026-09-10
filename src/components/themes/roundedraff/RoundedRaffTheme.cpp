@@ -450,35 +450,52 @@ void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, 
         TouchRegistry::Button);
   }
 
-  // Ensure button hints always "win" visually even if other elements accidentally render into this area.
-  renderer.fillRect(leftGroupX, outlineY, groupWidth, hintHeight, false);
-  renderer.fillRect(rightGroupX, outlineY, groupWidth, hintHeight, false);
+  const int outerButtonWidth = groupWidth / 2;
+  const int innerButtonWidth = groupWidth - outerButtonWidth;
+  const auto drawHintGroup = [&renderer, outlineY, hintHeight](const int x, const int width) {
+    // Ensure button hints always "win" visually even if other elements accidentally render into this area.
+    renderer.fillRect(x, outlineY, width, hintHeight, false);
+    renderer.drawRoundedRect(x, outlineY, width, hintHeight, 2, kBottomRadius, true);
+  };
+  const auto drawGroupedHints = [&drawHintGroup, outerButtonWidth, innerButtonWidth](
+                                    const int groupX, const char* outerLabel, const char* innerLabel) {
+    if (outerLabel != nullptr && innerLabel != nullptr) {
+      drawHintGroup(groupX, outerButtonWidth + innerButtonWidth);
+    } else if (outerLabel != nullptr) {
+      drawHintGroup(groupX, outerButtonWidth);
+    } else if (innerLabel != nullptr) {
+      drawHintGroup(groupX + outerButtonWidth, innerButtonWidth);
+    }
+  };
 
-  renderer.drawRoundedRect(leftGroupX, outlineY, groupWidth, hintHeight, 2, kBottomRadius, true);
+  // A nullptr means the caller intentionally wants the reader pixels retained.
+  // Empty strings still render an empty group so old hint pixels are cleared.
+  drawGroupedHints(leftGroupX, leftOuterLabel, leftInnerLabel);
+  drawGroupedHints(rightGroupX, rightInnerLabel, rightOuterLabel);
+
+  const int selectWidth = renderer.getTextWidth(kGuideFontId, selectText.c_str(), EpdFontFamily::REGULAR);
+  const int upWidth = renderer.getTextWidth(kGuideFontId, upText.c_str(), EpdFontFamily::REGULAR);
+  const int downWidth = renderer.getTextWidth(kGuideFontId, downText.c_str(), EpdFontFamily::REGULAR);
   constexpr int innerEdgePadding = 16;
 
-  renderer.drawRoundedRect(rightGroupX, outlineY, groupWidth, hintHeight, 2, kBottomRadius, true);
+  const int backX = leftGroupX + innerEdgePadding;
+  const int selectX = leftOuterLabel == nullptr ? leftGroupX + outerButtonWidth + (innerButtonWidth - selectWidth) / 2
+                                                : leftGroupX + groupWidth - innerEdgePadding - selectWidth;
+  const int upX =
+      rightOuterLabel == nullptr ? rightGroupX + (outerButtonWidth - upWidth) / 2 : rightGroupX + innerEdgePadding;
+  const int downX = rightInnerLabel == nullptr ? rightGroupX + outerButtonWidth + (innerButtonWidth - downWidth) / 2
+                                               : rightGroupX + groupWidth - innerEdgePadding - downWidth;
 
   renderer.setOrientation(invertText ? GfxRenderer::Orientation::PortraitInverted : GfxRenderer::Orientation::Portrait);
-  const int labelTop = invertText ? bottomMargin : outlineY;
-  const int textYOffset = (hintHeight - renderer.getLineHeight(kGuideFontId)) / 2;
-  const int leftHalfWidth = groupWidth / 2;
-  const int rightHalfWidth = groupWidth - leftHalfWidth;
-  const Rect leftOuterRect{leftGroupX, labelTop, leftHalfWidth, hintHeight};
-  const Rect leftInnerRect{leftGroupX + leftHalfWidth, labelTop, rightHalfWidth, hintHeight};
-  const Rect rightInnerRect{rightGroupX, labelTop, leftHalfWidth, hintHeight};
-  const Rect rightOuterRect{rightGroupX + leftHalfWidth, labelTop, rightHalfWidth, hintHeight};
+  const int textY = (invertText ? bottomMargin : outlineY) + (hintHeight - renderer.getLineHeight(kGuideFontId)) / 2;
 
   if (!backDisabled) {
-    drawHintLabel(renderer, kGuideFontId, EpdFontFamily::REGULAR, backLabel.c_str(), leftOuterRect, textYOffset,
-                  ButtonHintLayout::Alignment::Left, innerEdgePadding);
+    renderer.drawText(kGuideFontId, backX, textY, backLabel.c_str(), true, EpdFontFamily::REGULAR);
   }
-  drawHintLabel(renderer, kGuideFontId, EpdFontFamily::REGULAR, selectText.c_str(), leftInnerRect, textYOffset,
-                ButtonHintLayout::Alignment::Right, innerEdgePadding);
-  drawHintLabel(renderer, kGuideFontId, EpdFontFamily::REGULAR, upText.c_str(), rightInnerRect, textYOffset,
-                ButtonHintLayout::Alignment::Left, innerEdgePadding);
-  drawHintLabel(renderer, kGuideFontId, EpdFontFamily::REGULAR, downText.c_str(), rightOuterRect, textYOffset,
-                ButtonHintLayout::Alignment::Right, innerEdgePadding);
+  renderer.drawText(kGuideFontId, selectX, textY, selectText.c_str(), true, EpdFontFamily::REGULAR);
+
+  renderer.drawText(kGuideFontId, upX, textY, upText.c_str(), true, EpdFontFamily::REGULAR);
+  renderer.drawText(kGuideFontId, downX, textY, downText.c_str(), true, EpdFontFamily::REGULAR);
 
   renderer.setOrientation(origOrientation);
 }

@@ -130,6 +130,7 @@ class FontDownloadActivity : public Activity {
   static void onRowEvent(const freeink::ui::ActionEvent& event, void* user);
   void buildListScreen(UiApp::ScreenType& screen);
   void activateSelected();
+  bool pollCancelInput(bool includeDownloadScreenButton);
 
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();

@@ -13,13 +13,14 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "SettingsList.h"
 #include "activities/ActivityManager.h"
 #include "activities/reader/EpubReaderMenuActivity.h"
 #include "activities/reader/ReaderMenuItems.h"
 #include "activities/reader/ReaderOptionsActivity.h"
+#include "activities/settings/QuickActionsActivity.h"
+#include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
-#include "components/UIThemeTokens.h"
-#include "components/UiAppHelpers.h"
 #include "simulator/SimulatorHomeKeyInput.h"
 #if defined(CROSSINK_ENABLE_POKEMON)
 #include <Memory.h>
@@ -37,6 +38,7 @@ enum class SmokeStep : uint8_t {
   Start,
   Home,
   FileBrowser,
+  FileBrowserSettings,
   RecentBooks,
   Settings,
   ReaderOptions,
@@ -83,6 +85,8 @@ class SimulatorSmokeTest {
     Release,
     HomeTap,
     HomeLongPress,
+    AssertTouchscreenDisabled,
+    AssertTouchscreenEnabled,
     OpenSmokeBook,
     DisableReaderTouch,
     EnableReaderTouch,
@@ -107,6 +111,7 @@ class SimulatorSmokeTest {
   const char* activeStepName = nullptr;
   std::vector<ScriptAction> inputScript;
   size_t scriptIndex = 0;
+  SmokeStep inputCompletionStep = SmokeStep::Done;
 
   static bool enabled() { return std::getenv("CROSSINK_SIMULATOR_SMOKE_TEST") != nullptr; }
 
@@ -133,6 +138,42 @@ class SimulatorSmokeTest {
       return 2;
     }
     return std::max(0, std::atoi(raw));
+  }
+
+  static bool landscapeReaderRequested() {
+    const char* raw = std::getenv("CROSSINK_SIMULATOR_SMOKE_LANDSCAPE_READER");
+    return raw != nullptr && raw[0] != '\0' && raw[0] != '0';
+  }
+
+  static void applyRequestedTheme() {
+    const char* raw = std::getenv("CROSSINK_SIMULATOR_SMOKE_THEME");
+    if (raw == nullptr || raw[0] == '\0') {
+      return;
+    }
+
+    const int theme = std::atoi(raw);
+    if (theme < 0 || theme >= CrossPointSettings::UI_THEME_COUNT) {
+      fail("Invalid smoke test theme index: %d", theme);
+    }
+
+    SETTINGS.uiTheme = static_cast<uint8_t>(theme);
+    UITheme::getInstance().reload();
+    LOG_INF("SMOKE", "Using theme index %d", theme);
+  }
+
+  static void verifyUpDownShortcutAvailability() {
+    const auto allSettings = getSettingsList();
+    const auto sideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
+    const bool hasSideButtonChord =
+        std::any_of(sideButtonSettings.begin(), sideButtonSettings.end(),
+                    [](const SettingInfo& setting) { return setting.nameId == StrId::STR_SIDE_BUTTON_CHORD; });
+    if (hasSideButtonChord != gpio.hasTouch()) {
+      fail("Side-button chord availability does not match touch capability");
+    }
+
+    if (QuickActionsActivityTest::isTriggerAvailable(QuickActions::Trigger::UpDown) != gpio.hasTouch()) {
+      fail("Quick Actions Up + Down availability does not match touch capability");
+    }
   }
 
   [[noreturn]] static void fail(const char* message) {
@@ -184,6 +225,8 @@ class SimulatorSmokeTest {
         if (!SimulatorHomeKeyInput::verifyTimingContract()) {
           fail("Simulator Home key timing contract failed");
         }
+        verifyUpDownShortcutAvailability();
+        applyRequestedTheme();
 #if defined(CROSSINK_ENABLE_POKEMON)
         if (pokemonMode()) {
           startPokemonActivity();
@@ -208,16 +251,32 @@ class SimulatorSmokeTest {
         break;
 
       case SmokeStep::FileBrowser:
+#if CROSSINK_APP_CAP_TOUCH
+        if (mappedInputManager.hasTouchHardware()) {
+          buildFileBrowserInputScript();
+          step = SmokeStep::InputScript;
+          break;
+        }
+#endif
+        activityManager.goToRecentBooks();
+        queueStep("Recent Books", SmokeStep::RecentBooks);
+        break;
+
+      case SmokeStep::FileBrowserSettings:
         activityManager.goToRecentBooks();
         queueStep("Recent Books", SmokeStep::RecentBooks);
         break;
 
       case SmokeStep::RecentBooks:
+        if (mappedInputManager.hasHomeKey()) {
+          renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+        }
         activityManager.goToSettings();
-        queueStep("Settings", SmokeStep::Settings);
+        queueStep(mappedInputManager.hasHomeKey() ? "Settings landscape" : "Settings", SmokeStep::Settings);
         break;
 
       case SmokeStep::Settings:
+        renderer.setOrientation(GfxRenderer::Orientation::Portrait);
         activityManager.replaceActivity(std::make_unique<ReaderOptionsActivity>(renderer, mappedInputManager));
         queueStep("Reader Options", SmokeStep::ReaderOptions);
         break;
@@ -243,6 +302,10 @@ class SimulatorSmokeTest {
         }
         if (!Storage.exists(bookPath)) {
           fail("Smoke test book is missing: %s", bookPath);
+        }
+        if (landscapeReaderRequested()) {
+          SETTINGS.orientation = CrossPointSettings::LANDSCAPE_CCW;
+          LOG_INF("SMOKE", "Opening smoke reader in landscape");
         }
         activityManager.goToReader(bookPath, true);
         queueStep("Reader", SmokeStep::Reader, 8);
@@ -287,6 +350,14 @@ class SimulatorSmokeTest {
 
   static ScriptAction homeLongPress() {
     return {ScriptActionType::HomeLongPress, MappedInputManager::Button::Back, nullptr, 0, 0, 0};
+  }
+
+  static ScriptAction assertTouchscreenDisabled() {
+    return {ScriptActionType::AssertTouchscreenDisabled, MappedInputManager::Button::Back, nullptr, 0, 0, 0};
+  }
+
+  static ScriptAction assertTouchscreenEnabled() {
+    return {ScriptActionType::AssertTouchscreenEnabled, MappedInputManager::Button::Back, nullptr, 0, 0, 0};
   }
 
   static ScriptAction openSmokeBook() {
@@ -349,6 +420,7 @@ class SimulatorSmokeTest {
   void buildReaderInputScript() {
     inputScript.clear();
     scriptIndex = 0;
+    inputCompletionStep = SmokeStep::Done;
 
     const int turns = pageTurnCount();
 #if CROSSINK_APP_CAP_TOUCH
@@ -370,19 +442,99 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchRelease(width / 2, height / 4));
         inputScript.push_back(render("Frontlight Panel opened from touch gesture", 4));
         inputScript.push_back(assertActivity("FrontlightPanel"));
-        inputScript.push_back(touchDown(width / 2, height * 3 / 4));
-        inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
-        inputScript.push_back(render("Reader restored after dismissing Frontlight Panel", 4));
+        const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
+        inputScript.push_back(touchDown(header.x + header.width - 32, header.y + header.height / 2));
+        inputScript.push_back(touchRelease(header.x + header.width - 32, header.y + header.height / 2));
+        inputScript.push_back(render("Home opened by Frontlight Panel Home button", 4));
+        inputScript.push_back(assertActivity("Home"));
+        inputScript.push_back(openSmokeBook());
+        inputScript.push_back(render("Reader reopened after Frontlight Panel Home button", 8));
         inputScript.push_back(assertActivity("EpubReader"));
-        inputScript.push_back(homeLongPress());
-        inputScript.push_back(render("Reader Menu opened from simulated Home key hold", 4));
-        inputScript.push_back(assertActivity("EpubReaderMenu"));
         inputScript.push_back(touchDown(width / 2, 8));
         inputScript.push_back(touchMove(width / 2, height / 4));
         inputScript.push_back(touchRelease(width / 2, height / 4));
-        inputScript.push_back(render("Reader restored after top-edge swipe dismisses Reader Menu", 4));
+        inputScript.push_back(render("Frontlight Panel reopened after Home button", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        inputScript.push_back(touchDown(20, height / 3));
+        inputScript.push_back(touchMove(20, 8));
+        inputScript.push_back(touchRelease(20, 8));
+        inputScript.push_back(render("Frontlight Panel remains open after in-drawer swipe up", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        // X4 Pro's portrait frontlight sheet ends just below mid-screen; this
+        // point lands in its centered 29 px handle band.
+        inputScript.push_back(touchDown(width / 2, height * 21 / 40));
+        inputScript.push_back(touchMove(width / 2, 8));
+        inputScript.push_back(touchRelease(width / 2, 8));
+        inputScript.push_back(render("Reader restored after Frontlight Panel handle drag up", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
+        inputScript.push_back(touchDown(width / 2, 8));
+        inputScript.push_back(touchMove(width / 2, height / 4));
+        inputScript.push_back(touchRelease(width / 2, height / 4));
+        inputScript.push_back(render("Frontlight Panel reopened from touch gesture", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        // The fourth action-bar slot opens Global Settings through the real
+        // FrontlightPanelActivity callback path.
+        inputScript.push_back(touchDown(width * 7 / 10, height * 15 / 32));
+        inputScript.push_back(touchRelease(width * 7 / 10, height * 15 / 32));
+        inputScript.push_back(render("Global Settings opened from Frontlight Panel", 4));
+        inputScript.push_back(assertActivity("Settings"));
+        inputScript.push_back(touchDown(width / 2, height * 3 / 4));
+        inputScript.push_back(touchMove(width / 2, height / 2));
+        inputScript.push_back(touchRelease(width / 2, height / 2));
+        inputScript.push_back(render("Global Settings remains open after interior swipe up", 4));
+        inputScript.push_back(assertActivity("Settings"));
+        inputScript.push_back(touchDown(width / 2, height - 8));
+        inputScript.push_back(touchMove(width / 2, height * 3 / 4));
+        inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
+        inputScript.push_back(render("Reader restored after Settings bottom-edge swipe", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
+        inputScript.push_back(touchDown(width / 2, 8));
+        inputScript.push_back(touchMove(width / 2, height / 4));
+        inputScript.push_back(touchRelease(width / 2, height / 4));
+        inputScript.push_back(render("Frontlight Panel reopened after Global Settings", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        inputScript.push_back(touchDown(width * 3 / 10, height * 3 / 8));
+        inputScript.push_back(touchRelease(width * 3 / 10, height * 3 / 8));
+        inputScript.push_back(render("Sync dialog opened from Frontlight Panel", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        inputScript.push_back(touchDown(width / 2, height - 60));
+        inputScript.push_back(touchRelease(width / 2, height - 60));
+        inputScript.push_back(render("Reader restored after dismissing Frontlight sync dialog", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
+        inputScript.push_back(homeLongPress());
+        inputScript.push_back(render("Reader Menu opened from simulated Home key hold", 4));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(touchDown(width / 2, height / 2 + 24));
+        inputScript.push_back(touchRelease(width / 2, height / 2 + 24));
+        inputScript.push_back(render("Reader Font opened from touch reader menu", 4));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(homeTap());
+        inputScript.push_back(render("Reader Menu root restored by simulated Home key tap", 4));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(homeTap());
+        inputScript.push_back(render("Reader restored by simulated Home key tap at drawer root", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
+        inputScript.push_back(homeLongPress());
+        inputScript.push_back(render("Reader Menu reopened from simulated Home key hold", 4));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(touchDown(width / 2, height * 3 / 4));
+        inputScript.push_back(touchMove(width / 2, height - 8));
+        inputScript.push_back(touchRelease(width / 2, height - 8));
+        inputScript.push_back(render("Reader Menu remains open after in-drawer swipe down", 4));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(touchDown(width / 2, height / 2 - 14));
+        inputScript.push_back(touchMove(width / 2, height - 8));
+        inputScript.push_back(touchRelease(width / 2, height - 8));
+        inputScript.push_back(render("Reader restored after Reader Menu handle drag down", 4));
         inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(disableReaderTouch());
+        inputScript.push_back(homeLongPress());
+        inputScript.push_back(render("Reader Menu opened from Home key hold with touch disabled", 4));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+        inputScript.push_back(touchDown(width / 2, height / 4));
+        inputScript.push_back(touchRelease(width / 2, height / 4));
+        inputScript.push_back(render("Reader restored after Home key menu with touch disabled", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(homeTap());
         inputScript.push_back(render("Home opened from simulated Home key tap", 4));
         inputScript.push_back(assertActivity("Home"));
@@ -394,48 +546,85 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchMove(width / 2, height * 3 / 4));
         inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
       } else {
+        // Sticky uses the same vertical gesture split as X4 Pro: swipe down
+        // opens reader details/actions and swipe up opens the bottom menu.
         inputScript.push_back(touchDown(width / 2, 8));
         inputScript.push_back(touchMove(width / 2, height / 4));
         inputScript.push_back(touchRelease(width / 2, height / 4));
+        inputScript.push_back(render("Sticky Reader Details opened from touch gesture", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        inputScript.push_back(touchDown(20, height / 3));
+        inputScript.push_back(touchMove(20, 8));
+        inputScript.push_back(touchRelease(20, 8));
+        inputScript.push_back(render("Sticky Reader Details remains open after in-drawer swipe up", 4));
+        inputScript.push_back(assertActivity("FrontlightPanel"));
+        inputScript.push_back(touchDown(width / 2, height * 3 / 4));
+        inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
+        inputScript.push_back(render("Reader restored after Sticky details outside tap", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
+        inputScript.push_back(touchDown(width / 2, height - 8));
+        inputScript.push_back(touchMove(width / 2, height * 3 / 4));
+        inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
       }
       inputScript.push_back(render("Reader Menu opened from touch gesture", 4));
-      inputScript.push_back(assertActivity("EpubReaderMenu"));
+      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
 
-      // The menu itself registers its tab and list hit areas through the active
-      // theme. Exercise both before activating Reader Options from list row 1.
-      const auto& metrics = UITheme::getInstance().getMetrics();
-      const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, !mappedInputManager.hasTouch(), false);
-      const int tabHeight = metrics.tabBarHeight * 2;
-      const bool tabsAtBottom = mappedInputManager.hasHomeKey();
-      const int tabTop = tabsAtBottom ? safe.y + safe.height - tabHeight
-                                      : safe.y + metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight;
-      const int listTop = safe.y + metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight +
-                          (tabsAtBottom ? 0 : tabHeight) + metrics.verticalSpacing;
-      const int rowHeight = uiThemeTokens(makeUiTarget(renderer)).rowHeight;
-      if (rowHeight <= 0) fail("Touch smoke test has invalid list row height");
+      // Touch every bottom-drawer tab slot, then dismiss from its handle.
+      const int tabY = height - 28;
+      for (int tab = 0; tab < static_cast<int>(READER_DRAWER_TAB_COUNT); ++tab) {
+        const int tabX = width * (tab * 2 + 1) / (static_cast<int>(READER_DRAWER_TAB_COUNT) * 2);
+        inputScript.push_back(touchDown(tabX, tabY));
+        inputScript.push_back(touchRelease(tabX, tabY));
+        inputScript.push_back(render("Touch Reader Menu tab", 3));
+        inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      }
 
-      inputScript.push_back(touchDown(safe.x + safe.width / 2, tabTop + tabHeight / 2));
-      inputScript.push_back(touchRelease(safe.x + safe.width / 2, tabTop + tabHeight / 2));
-      inputScript.push_back(render("Reader Menu tab touch navigation", 3));
-      inputScript.push_back(assertActivity("EpubReaderMenu"));
-      inputScript.push_back(touchDown(safe.x + safe.width / 6, tabTop + tabHeight / 2));
-      inputScript.push_back(touchRelease(safe.x + safe.width / 6, tabTop + tabHeight / 2));
-      inputScript.push_back(render("Reader Menu main tab restored", 3));
-      inputScript.push_back(assertActivity("EpubReaderMenu"));
+      const int moreTabX = width / 2;
+      const int drawerTop = height / 2;
+      constexpr int rootRowStep = 60;
+      constexpr int rootRowCenterOffset = 31;
+      inputScript.push_back(touchDown(moreTabX, tabY));
+      inputScript.push_back(touchRelease(moreTabX, tabY));
+      inputScript.push_back(render("Touch Reader Menu More tab", 3));
+      inputScript.push_back(touchDown(width / 2, drawerTop + rootRowStep + rootRowCenterOffset));
+      inputScript.push_back(touchRelease(width / 2, drawerTop + rootRowStep + rootRowCenterOffset));
+      inputScript.push_back(render("Touch Reader Go to Percent pane", 4));
+      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(touchDown(20, drawerTop + 26));
+      inputScript.push_back(touchRelease(20, drawerTop + 26));
+      inputScript.push_back(render("Touch Reader More tab restored", 3));
+      inputScript.push_back(touchDown(width / 2, drawerTop + rootRowStep * 2 + rootRowCenterOffset));
+      inputScript.push_back(touchRelease(width / 2, drawerTop + rootRowStep * 2 + rootRowCenterOffset));
+      inputScript.push_back(render("Touch Reader Auto Page Turn pane", 4));
+      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(touchDown(20, drawerTop + 26));
+      inputScript.push_back(touchRelease(20, drawerTop + 26));
+      inputScript.push_back(render("Touch Reader More tab restored", 3));
+      inputScript.push_back(touchDown(width / 2, height * 3 / 4));
+      inputScript.push_back(touchMove(width / 2, height - 8));
+      inputScript.push_back(touchRelease(width / 2, height - 8));
+      inputScript.push_back(render("Reader Menu remains open after in-drawer swipe down", 4));
+      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(touchDown(width / 2, drawerTop - 14));
+      inputScript.push_back(touchRelease(width / 2, drawerTop - 14));
+      inputScript.push_back(render("Reader restored after drawer handle tap", 4));
+      inputScript.push_back(assertActivity("EpubReader"));
 
-      const int readerOptionsY = listTop + rowHeight + rowHeight / 2;
-      inputScript.push_back(touchDown(safe.x + safe.width / 2, readerOptionsY));
-      inputScript.push_back(touchRelease(safe.x + safe.width / 2, readerOptionsY));
-      inputScript.push_back(render("Reader Options opened by touch list activation", 4));
-      inputScript.push_back(assertActivity("ReaderOptions"));
-
-      const int optionsListTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-      const int optionsStartY = optionsListTop + rowHeight * 4 + rowHeight / 2;
-      inputScript.push_back(touchDown(width / 2, optionsStartY));
-      inputScript.push_back(touchMove(width / 2, optionsListTop + rowHeight / 2));
-      inputScript.push_back(touchRelease(width / 2, optionsListTop + rowHeight / 2));
-      inputScript.push_back(render("Reader Options touch swipe navigation", 3));
-      inputScript.push_back(assertActivity("ReaderOptions"));
+      inputScript.push_back(touchDown(width / 2, height - 8));
+      inputScript.push_back(touchMove(width / 2, height * 3 / 4));
+      inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
+      inputScript.push_back(render("Reader Menu reopened for bottom-edge Home gesture", 4));
+      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(touchDown(width / 2, height * 3 / 4));
+      inputScript.push_back(touchMove(width / 2, height / 2 + 8));
+      inputScript.push_back(touchRelease(width / 2, height / 2 + 8));
+      inputScript.push_back(render("Reader Menu remains open after interior swipe up", 4));
+      inputScript.push_back(assertActivity("EpubReaderTouchMenu"));
+      inputScript.push_back(touchDown(width / 2, height - 8));
+      inputScript.push_back(touchMove(width / 2, height * 3 / 4));
+      inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
+      inputScript.push_back(render("Home opened from Reader Menu bottom-edge swipe", 6));
+      inputScript.push_back(assertActivity("Home"));
       return;
     }
 #endif
@@ -563,12 +752,67 @@ class SimulatorSmokeTest {
   }
 #endif
 
+#if CROSSINK_APP_CAP_TOUCH
+  void buildFileBrowserInputScript() {
+    inputScript.clear();
+    scriptIndex = 0;
+    inputCompletionStep = SmokeStep::FileBrowserSettings;
+
+    if (mappedInputManager.hasHomeKey()) {
+      const int width = renderer.getScreenWidth();
+      const int height = renderer.getScreenHeight();
+      inputScript.push_back(touchDown(width / 2, 8));
+      inputScript.push_back(touchMove(width / 2, height / 4));
+      inputScript.push_back(touchRelease(width / 2, height / 4));
+      inputScript.push_back(render("Frontlight Panel opened outside Reader", 4));
+      inputScript.push_back(assertActivity("FrontlightPanel"));
+      inputScript.push_back(touchDown(width * 9 / 10, height / 2));
+      inputScript.push_back(touchRelease(width * 9 / 10, height / 2));
+      inputScript.push_back(render("Reader touchscreen disabled from Frontlight Panel outside Reader", 4));
+      inputScript.push_back(assertActivity("FrontlightPanel"));
+      inputScript.push_back(touchDown(width / 2, height - 60));
+      inputScript.push_back(touchRelease(width / 2, height - 60));
+      inputScript.push_back(render("File Browser restored after disabling reader touchscreen", 4));
+      inputScript.push_back(assertActivity("FileBrowser"));
+      inputScript.push_back(assertTouchscreenDisabled());
+      inputScript.push_back(touchDown(width / 2, 8));
+      inputScript.push_back(touchMove(width / 2, height / 4));
+      inputScript.push_back(touchRelease(width / 2, height / 4));
+      inputScript.push_back(render("Frontlight Panel reopened outside Reader", 4));
+      inputScript.push_back(assertActivity("FrontlightPanel"));
+      inputScript.push_back(touchDown(width * 9 / 10, height / 2));
+      inputScript.push_back(touchRelease(width * 9 / 10, height / 2));
+      inputScript.push_back(render("Reader touchscreen enabled from Frontlight Panel outside Reader", 4));
+      inputScript.push_back(assertActivity("FrontlightPanel"));
+      inputScript.push_back(touchDown(width / 2, height - 60));
+      inputScript.push_back(touchRelease(width / 2, height - 60));
+      inputScript.push_back(render("File Browser restored after enabling reader touchscreen", 4));
+      inputScript.push_back(assertActivity("FileBrowser"));
+      inputScript.push_back(assertTouchscreenEnabled());
+    }
+
+    const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
+    const auto backLayout = TouchHeaderBackButton::layout(header);
+    const int x = header.x + header.width - backLayout.iconRect.width / 2;
+    const int y = backLayout.iconRect.y + backLayout.iconRect.height / 2;
+    inputScript.push_back(touchDown(x, y));
+    inputScript.push_back(touchRelease(x, y));
+    inputScript.push_back(render("File Browser Settings opened from header shortcut", 4));
+    inputScript.push_back(assertActivity("FileBrowserSettings"));
+    const int rowY = header.y + header.height + 32;
+    inputScript.push_back(touchDown(renderer.getScreenWidth() / 2, rowY));
+    inputScript.push_back(touchRelease(renderer.getScreenWidth() / 2, rowY));
+    inputScript.push_back(render("File Browser Settings toggle without row highlight", 4));
+    inputScript.push_back(assertActivity("FileBrowserSettings"));
+  }
+#endif
+
   void runInputScript() {
     if (scriptIndex >= inputScript.size()) {
 #if defined(CROSSINK_ENABLE_POKEMON)
       if (pokemonMode()) verifyPokemonSmokeState();
 #endif
-      step = SmokeStep::Done;
+      step = inputCompletionStep;
       return;
     }
 
@@ -585,6 +829,12 @@ class SimulatorSmokeTest {
         break;
       case ScriptActionType::HomeLongPress:
         simulatorHomeKeyInput.injectLongPress();
+        break;
+      case ScriptActionType::AssertTouchscreenDisabled:
+        if (!SETTINGS.disableReaderTouchscreen) fail("Expected reader touchscreen to be disabled");
+        break;
+      case ScriptActionType::AssertTouchscreenEnabled:
+        if (SETTINGS.disableReaderTouchscreen) fail("Expected reader touchscreen to be enabled");
         break;
       case ScriptActionType::OpenSmokeBook: {
         const char* bookPath = std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK");

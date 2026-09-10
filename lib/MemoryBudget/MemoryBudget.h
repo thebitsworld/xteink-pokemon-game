@@ -17,6 +17,12 @@ struct HeapSnapshot {
   uint32_t maxAllocHeap;
 };
 
+struct PsramSnapshot {
+  uint32_t totalHeap;
+  uint32_t freeHeap;
+  uint32_t maxAllocHeap;
+};
+
 struct HeapShapeSnapshot {
   uint32_t freeHeap;
   uint32_t maxAllocHeap;
@@ -49,6 +55,23 @@ constexpr uint32_t EPUB_INLINE_JPEG_MIN_FREE = JPEG_DECODER_APPROX_BYTES + IMAGE
 constexpr uint32_t EPUB_INLINE_JPEG_MIN_MAX_ALLOC = JPEG_DECODER_APPROX_BYTES;
 
 inline HeapSnapshot snapshot() { return {ESP.getFreeHeap(), ESP.getMaxAllocHeap()}; }
+
+inline PsramSnapshot psramSnapshot() {
+#if defined(ARDUINO_ARCH_ESP32) && !defined(SIMULATOR)
+  return {static_cast<uint32_t>(heap_caps_get_total_size(MALLOC_CAP_SPIRAM)),
+          static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+          static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM))};
+#else
+  return {0, 0, 0};
+#endif
+}
+
+inline void logEpubHeapPools(const char* stage) {
+  const auto internal = snapshot();
+  const auto psram = psramSnapshot();
+  LOG_INF("EPS", "%s: internal free=%u max=%u; psram free=%u max=%u total=%u", stage, internal.freeHeap,
+          internal.maxAllocHeap, psram.freeHeap, psram.maxAllocHeap, psram.totalHeap);
+}
 
 inline HeapShapeSnapshot shapeSnapshot() {
   const auto heap = snapshot();
