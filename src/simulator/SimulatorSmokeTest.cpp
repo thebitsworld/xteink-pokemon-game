@@ -116,6 +116,17 @@ class SimulatorSmokeTest {
   static bool enabled() { return std::getenv("CROSSINK_SIMULATOR_SMOKE_TEST") != nullptr; }
 
   static bool pokemonMode() { return std::getenv("CROSSINK_SIMULATOR_START_POKEMON") != nullptr; }
+  // Phase 3 battle-screen touch audit (ItemTarget/BattleSwitch/BattleBag/
+  // BattleBalls): these only exist inside an active battle, which this
+  // script cannot set up on its own (no public PokemonService API to queue
+  // an encounter or add a party member outside of real reading-time
+  // credit). The save must be pre-seeded with `scripts/dev/edit_pokemon_save.py`
+  // (add-party-member + queue-encounter) before boot; loadInitialScreen()
+  // then skips onboarding entirely (a starter already exists) and opens
+  // Screen::Event directly for the queued encounter.
+  static bool pokemonBattleTouchMode() {
+    return std::getenv("CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH") != nullptr;
+  }
 
   static bool homeNavigationMode() { return std::getenv("CROSSINK_SIMULATOR_HOME_NAVIGATION") != nullptr; }
 
@@ -320,7 +331,9 @@ class SimulatorSmokeTest {
       case SmokeStep::Pokemon:
 #if defined(CROSSINK_ENABLE_POKEMON)
 #if CROSSINK_APP_CAP_TOUCH
-        if (mappedInputManager.hasTouchHardware()) {
+        if (pokemonBattleTouchMode()) {
+          buildPokemonBattleTouchInputScript();
+        } else if (mappedInputManager.hasTouchHardware()) {
           buildPokemonTouchInputScript();
         } else {
           buildPokemonInputScript();
@@ -933,6 +946,114 @@ class SimulatorSmokeTest {
 
     LOG_INF("SMOKE", "Running Pokemon touch input script");
   }
+
+  // Phase 3 battle-screen touch audit: Screen::Battle/BattleMoves draw their
+  // own 2-column button grid (not fui::list()) - see
+  // PokemonActivity::renderBattleMenu()/renderBattleMoveMenu()/
+  // battleGridCellRect(). Their layout constants (2 columns, 64px row
+  // height, 8px margin/gap) are file-local to PokemonActivity.cpp, so they
+  // are duplicated here rather than shared - if those ever change, this
+  // needs updating to match. Requires the save to already have a queued
+  // wild encounter and a second party member (see pokemonBattleTouchMode()
+  // above); loadInitialScreen() then opens Screen::Event directly.
+  void buildPokemonBattleTouchInputScript() {
+    inputScript.clear();
+    scriptIndex = 0;
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int centerX = renderer.getScreenWidth() / 2;
+    constexpr int listRowHeight = 64;
+    const int listTop =
+        metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInputManager) + metrics.verticalSpacing;
+    const auto tapListRow = [&](const int index, const int rowHeight) {
+      const int y = listTop + index * rowHeight + rowHeight / 2;
+      inputScript.push_back(touchDown(centerX, y));
+      inputScript.push_back(touchRelease(centerX, y));
+    };
+    const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
+    const auto backLayout = TouchHeaderBackButton::layout(header);
+    const int backX = header.x + header.width - backLayout.iconRect.width / 2;
+    const int backY = backLayout.iconRect.y + backLayout.iconRect.height / 2;
+    const auto tapBack = [&] {
+      inputScript.push_back(touchDown(backX, backY));
+      inputScript.push_back(touchRelease(backX, backY));
+    };
+    // Mirrors PokemonActivity::battleGridCellRect()/battleMenuTop().
+    // `count` is the number of grid buttons (5 for a wild Screen::Battle:
+    // FIGHT/BALL/BAG/SWITCH/RUN; 4 for Screen::BattleMoves).
+    const auto tapBattleGrid = [&](const int index, const int count) {
+      constexpr int columns = 2;
+      constexpr int rowHeight = 64;
+      constexpr int margin = 8;
+      constexpr int gap = 8;
+      const int rows = (count + columns - 1) / columns;
+      const int menuTop = renderer.getScreenHeight() - metrics.buttonHintsHeight - rows * rowHeight - 8;
+      const int buttonWidth = (renderer.getScreenWidth() - 2 * margin - gap * (columns - 1)) / columns;
+      const int buttonHeight = rowHeight - 8;
+      const int row = index / columns;
+      const int column = index % columns;
+      const int x = margin + column * (buttonWidth + gap) + buttonWidth / 2;
+      const int y = menuTop + row * rowHeight + buttonHeight / 2;
+      inputScript.push_back(touchDown(x, y));
+      inputScript.push_back(touchRelease(x, y));
+    };
+
+    // Screen::Event (the queued wild encounter) is bottom-anchored (see
+    // buildList()'s bottomAnchored check), not top-anchored like every list
+    // screen the earlier touch script visited.
+    const int eventRowCount = 2;  // Catch / Run
+    const int eventTop = renderer.getScreenHeight() - metrics.buttonHintsHeight - eventRowCount * listRowHeight - 8;
+    inputScript.push_back(render("Pokemon Event via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+    {
+      const int y = eventTop + 0 * listRowHeight + listRowHeight / 2;
+      inputScript.push_back(touchDown(centerX, y));
+      inputScript.push_back(touchRelease(centerX, y));
+    }
+    inputScript.push_back(render("Pokemon Battle via touch", 6));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // FIGHT (index 0 of 5) -> BattleMoves, then back - the first automated
+    // touch verification of the Part 1 battle-grid hit-test itself (added
+    // alongside the Message tap-to-dismiss, never actually script-driven
+    // until now).
+    tapBattleGrid(0, 5);
+    inputScript.push_back(render("Pokemon BattleMoves via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Battle Restored via touch", 4));
+
+    // BAG (index 2 of 5) -> BattleBag -> the one owned item (Potion, from
+    // createStarter()'s starting gift) -> ItemTarget -> apply to the
+    // currently battling Pokemon.
+    tapBattleGrid(2, 5);
+    inputScript.push_back(render("Pokemon BattleBag via touch", 4));
+    tapListRow(0, listRowHeight);
+    inputScript.push_back(render("Pokemon ItemTarget via touch", 4));
+    tapListRow(0, 96);  // ItemTarget shows HP rows (96px) for a Medicine item.
+    inputScript.push_back(render("Pokemon Battle Restored 2 via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // SWITCH (index 3 of 5) -> BattleSwitch -> the pre-seeded second party
+    // member (a high-level Pokemon relative to the weak wild opponent, so
+    // the opponent's free hit for switching - Stage 18 - can't faint it).
+    tapBattleGrid(3, 5);
+    inputScript.push_back(render("Pokemon BattleSwitch via touch", 4));
+    tapListRow(0, 96);  // BattleSwitch also shows HP rows.
+    inputScript.push_back(render("Pokemon Battle Restored 3 via touch", 6));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // BALL (index 1 of 5) -> BattleBalls - view only (deliberately not
+    // tapping a ball row: throwing one could catch the wild Pokemon and end
+    // the battle, making the outcome depend on catch-rate RNG instead of a
+    // deterministic script).
+    tapBattleGrid(1, 5);
+    inputScript.push_back(render("Pokemon BattleBalls via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Battle Restored 4 via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    LOG_INF("SMOKE", "Running Pokemon battle touch input script");
+  }
 #endif
 
   static void verifyPokemonSmokeState() {
@@ -1006,7 +1127,10 @@ class SimulatorSmokeTest {
   void runInputScript() {
     if (scriptIndex >= inputScript.size()) {
 #if defined(CROSSINK_ENABLE_POKEMON)
-      if (pokemonMode()) verifyPokemonSmokeState();
+      // The battle-touch script runs against a deliberately pre-seeded save
+      // (a second party member + a queued encounter), not the fresh
+      // single-starter state verifyPokemonSmokeState() checks for.
+      if (pokemonMode() && !pokemonBattleTouchMode()) verifyPokemonSmokeState();
 #endif
       step = inputCompletionStep;
       return;
