@@ -818,7 +818,10 @@ class SimulatorSmokeTest {
     };
     const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
     const auto backLayout = TouchHeaderBackButton::layout(header);
-    const int backX = header.x + header.width - backLayout.iconRect.width / 2;
+    // The back icon sits at the header's LEFT edge (TouchHeaderBackButton::
+    // layout()/draw(): iconRect.x == header.x, title text follows to its
+    // right) - not the right edge.
+    const int backX = backLayout.iconRect.x + backLayout.iconRect.width / 2;
     const int backY = backLayout.iconRect.y + backLayout.iconRect.height / 2;
     const auto tapBack = [&] {
       inputScript.push_back(touchDown(backX, backY));
@@ -972,7 +975,10 @@ class SimulatorSmokeTest {
     };
     const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
     const auto backLayout = TouchHeaderBackButton::layout(header);
-    const int backX = header.x + header.width - backLayout.iconRect.width / 2;
+    // The back icon sits at the header's LEFT edge (TouchHeaderBackButton::
+    // layout()/draw(): iconRect.x == header.x, title text follows to its
+    // right) - not the right edge.
+    const int backX = backLayout.iconRect.x + backLayout.iconRect.width / 2;
     const int backY = backLayout.iconRect.y + backLayout.iconRect.height / 2;
     const auto tapBack = [&] {
       inputScript.push_back(touchDown(backX, backY));
