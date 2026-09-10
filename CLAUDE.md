@@ -67,11 +67,19 @@ all - easy to miss, cost real time to discover this session) against
 `pokemon-x4-pro-simulator`, with `fs_/.crosspoint/pokemon-{a,b}.bin` deleted first for a truly
 fresh onboarding state. Confirmed: "Simulator smoke test passed".
 
-**Still not covered by the touch script**: Bag + sub-categories, Moveset, GymList, Badges,
-ItemTarget, BattleSwitch, BattleBag, BattleBalls (all reachable in principle via the same
-`fui::list()` touch path already proven for Party/Pokedex/PC, but not yet walked by name) - a
-good next increment if picking Phase 3 back up, or manual verification is fine too since the
-underlying mechanism is already shared/proven.
+**Extended further** (commit `c387b648`): the touch script now also walks Moveset (Actions row
+1), all 4 Bag category rows (Evolution/Medicine/Balls/Machine - Balls doubles as coverage for
+the `Screen::Message` tap-to-dismiss path, via a new `tapCenter()` helper using
+`wasScreenTapped()`), and GymList/Badges (entered and left without activating a row, since
+selecting a gym starts a real battle). All confirmed via `pokemon-x4-pro-simulator`:
+"Simulator smoke test passed".
+
+**Still not covered by the touch script**: `ItemTarget`, `BattleSwitch`, `BattleBag`,
+`BattleBalls` - all only reachable from inside an active battle, which the script doesn't set
+up (would need a pre-seeded encounter/battle-store entry via `edit_pokemon_save.py` before
+boot - more plumbing than the rest of the audit needed). Manual verification is a reasonable
+substitute here since the underlying `fui::list()` touch mechanism is already proven across
+every other screen.
 
 **Pre-existing bug found while testing this (not caused by this session's work, not fixed
 yet)**: running the *button*-driven `buildPokemonInputScript()` the same correct way (fresh
