@@ -118,6 +118,31 @@ was being tested. Verified via the art-loading log lines (`heroes/004.bmp` and
 `pokedex/portrait/004.bmp` genuinely requested, proving detail really opened) -
 `pokemon-simulator-X3` now reaches "Simulator smoke test passed" end to end on a fresh save.
 
+**Important touch-test infrastructure bug found and fixed** (commit `bfedd33a`): while trying
+to visually confirm Pokedex detail's portrait layout, discovered that the touch script's
+`tapBack()` (tap the header's Back button) computed its coordinate as
+`header.x + header.width - iconRect.width / 2` (the right edge) - but
+`TouchHeaderBackButton::layout()`/`draw()` actually place the back icon at the header's
+**left** edge (`iconRect.x == header.x`, title text follows to its right - visible in every
+"< Title" screenshot taken this session). The touchRect is only 68px wide, nowhere near the
+right edge on a 480-800px header, so every scripted `tapBack()` landed outside any real
+tappable element and silently did nothing. Confirmed via a `loop()`-level trace: `onRow()`
+fired for the first 3 forward taps (Menu->Party->Actions->Summary) and then never again for
+the rest of the run - every later step (Back, Pokedex, Bag, GymList, Badges...) kept landing
+on the unreachable coordinate, leaving `screen_` stuck on Summary for good.
+`assertActivity()` only checks the activity name, not the screen, so "Simulator smoke test
+passed" never caught this - the render step labels logged were just strings, not proof the
+screen actually changed. Ruled out the just-added force-portrait `onEnter()` change as the
+cause by temporarily disabling it and reproducing the identical freeze. Fixed by using
+`iconRect.x + iconRect.width / 2` instead. Re-verified end to end with hard evidence (not
+just labels): the full non-battle touch script now reaches every screen for real
+(`pokedex/portrait/004.bmp` genuinely requested for Pokedex Detail), the battle touch script
+(also using `tapBack()`) still passes, and `pokemon-x3`'s button-driven script (a different,
+unaffected code path) still passes. **Not fixed, out of scope**:
+`buildFileBrowserInputScript()` (pre-existing, not written this session) has the identical
+`header.x + header.width - ...` pattern for its own header-shortcut tap - worth checking
+separately if that test also silently no-ops.
+
 **Phase 4 scope decision (2026-09-10): Pokemon is portrait-only, on both X3 and X4 Pro -
 landscape is explicitly out of scope for now, to revisit later.** Before this was decided,
 some landscape investigation already happened and is worth knowing about if landscape work
