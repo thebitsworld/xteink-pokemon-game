@@ -462,7 +462,16 @@ reachable without any keyboard/physical-button input.
 
 ## Phase 4 — Layout fixes for 800×480
 
-**Status:** Not started
+**Status:** In progress (commit `b2f4d920` on `feat/X4Pro-support` - see `CLAUDE.md`'s Phase 4
+section). The Battle HUD, the one screen this doc flagged as genuinely at risk, is fixed:
+measured real numbers on the X4 Pro simulator first (only ~172px available for the whole
+battlefield in landscape - confirmed X3 landscape computes to essentially the same ~173px,
+so it was equally broken there, never previously checked), confirmed the predicted overlap
+visually via a screenshot, then switched to a compact side-by-side layout below a threshold
+while leaving portrait's original layout untouched. Party/Summary spot-checked fine in
+landscape too. Not yet checked: Pokédex detail in landscape (likely fine, not visually
+confirmed), and a full inventory pass for any other hardcoded vertical constants beyond the
+Battle HUD's.
 
 **Prerequisites:** Phase 2 done (need the X4 Pro simulator to see the actual layout).
 Can run in parallel with Phase 3 if two sessions split the work, since they touch mostly

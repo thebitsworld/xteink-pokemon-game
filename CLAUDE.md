@@ -118,7 +118,33 @@ was being tested. Verified via the art-loading log lines (`heroes/004.bmp` and
 `pokedex/portrait/004.bmp` genuinely requested, proving detail really opened) -
 `pokemon-simulator-X3` now reaches "Simulator smoke test passed" end to end on a fresh save.
 
-Then Phase 4 (800×480 layout fixes) and Phase 5 (release).
+**Phase 4 is in progress** (commit `b2f4d920`, part 1 of 1 known layout risk): fixed the
+Battle HUD, the one screen the roadmap flagged as genuinely at risk. Measured the real
+numbers on the X4 Pro simulator first (`hudTop=96 hudBottom=268`, i.e. only 172px available
+for the whole battlefield+message box) rather than guessing, then confirmed visually via a
+landscape screenshot that the two HP panels and the message box were all drawing on top of
+each other and the FIGHT/BAG/SWITCH/RUN menu - exactly as the roadmap predicted. X3 landscape
+computes to essentially the same ~173px available (528px screen height minus its taller
+button-hints reservation roughly cancels the 48px X4 Pro loses on screenHeight alone), so
+this was already broken there too, just never actually looked at before. Fixed by computing
+`available` up front in `renderBattleHud()` and switching to a compact side-by-side layout
+below a threshold (opponent's panel in the left half, player's in the right half, sharing one
+row instead of two stacked ones, smaller sprites, a shorter message box) - portrait is
+completely unaffected since `available` stays 400+px there and the original code path never
+changes. Verified: `pokemon-x4-pro-simulator` and `pokemon-simulator-X3` both pass their
+smoke tests in both orientations; a landscape screenshot after the fix shows Pidgey/Charmander
+side by side with the log box and full 5-button menu, nothing overlapping. Also spot-checked
+Party and Summary in landscape (via more screenshots) - both already fine, no changes needed
+(they use generic width/height-derived layout, not the Battle HUD's fixed pixel budget).
+
+**Not yet checked**: Pokédex detail in landscape (visited during testing but a screenshot
+wasn't captured for it - the other two screens looked clean, and its rendering path is
+independent of the Battle HUD change, so it's likely fine, just not visually confirmed).
+GymList/Badges/Bag/Moveset in landscape - Phase 3's touch script already exercises these
+successfully on the X4 Pro simulator in portrait; landscape wasn't separately re-checked for
+them since they don't share the Battle HUD's fixed-pixel-budget design.
+
+Then Phase 5 (release).
 
 ## Recent fixes (2026-09-10)
 
