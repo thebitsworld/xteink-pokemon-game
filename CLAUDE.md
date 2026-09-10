@@ -2,6 +2,23 @@
 
 Context notes for Claude in a later session (or on another machine) to continue this work without rediscovering everything from scratch. This file is NOT official project documentation — it's just a handoff notebook, and can be cleaned up/deleted once the in-progress work is done.
 
+## New work in progress: Xteink X4 Pro support (2026-09-10, not started)
+
+Branch: **`feat/X4Pro-support`**. Full 5-phase plan, hardware findings, measured flash
+numbers, and per-phase "definition of done" all live in:
+
+👉 **[docs/development/pokemon-x4pro-roadmap.md](docs/development/pokemon-x4pro-roadmap.md)**
+— read this before writing any code for X4 Pro. It's written so a session with zero prior
+context can pick up exactly one phase (1: merge upstream CrossInk v1.5.1-rc-6 via a
+git-graft to fix the missing-common-ancestor problem; 2: add the `pokemon-x4-pro`
+PlatformIO env; 3: touch support for the whole Pokémon UI, since X4 Pro has no physical
+d-pad; 4: layout fixes for the 800×480 panel, mainly the Battle HUD's tight vertical
+budget; 5: release packaging) and execute it independently. Update that doc's per-phase
+Status line and add a short result note (same style as the battle-system stage writeups
+below) as each phase finishes, so the next session doesn't have to replay this one.
+
+Nothing has been implemented yet — this is plan-only as of this writing.
+
 ## Recent fixes (2026-09-10)
 
 - **Fainted Pokemon now require Revive/Max Revive** (`72ef328b`): `useConsumable()` previously let a plain Potion/Full Restore/status cure/PP restore quietly act on a fainted Pokemon (`currentHp == 0`). Fixed: those items now require `currentHp > 0` and return `NotApplicable` otherwise; only Revive/Max Revive (item ids 15/16) can act on a fainted one, restoring 50%/100% of max HP (their `effectValue` now read as a percentage for these two ids specifically) rather than curing status. No UI changes needed — both Bag and BattleBag paths already surface `NotApplicable` with a message. 19/19 tests pass (added `UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequiresRevive`). Flash 6,354,239 B/97.0%, 185,216 B free.
