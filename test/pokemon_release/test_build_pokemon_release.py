@@ -36,6 +36,29 @@ class BuildPokemonReleaseTest(unittest.TestCase):
             )
             self.assertEqual(binary.read_bytes(), b"x3 firmware")
 
+    def test_build_release_merges_checksums_for_a_second_device(self) -> None:
+        release = load_release_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            x3_firmware = root / "x3-firmware.bin"
+            x3_firmware.write_bytes(b"x3 firmware")
+            x4_pro_firmware = root / "x4-pro-firmware.bin"
+            x4_pro_firmware.write_bytes(b"x4 pro firmware")
+
+            x3_binary, sums = release.build_release(x3_firmware, "1.0.0", root / "dist", "x3")
+            x4_pro_binary, sums_again = release.build_release(x4_pro_firmware, "1.0.0", root / "dist", "x4-pro")
+
+            self.assertEqual(sums, sums_again)
+            self.assertEqual(x3_binary.name, "xteink-pokemon-x3-v1.0.0.bin")
+            self.assertEqual(x4_pro_binary.name, "xteink-pokemon-x4-pro-v1.0.0.bin")
+            x3_digest = hashlib.sha256(b"x3 firmware").hexdigest()
+            x4_pro_digest = hashlib.sha256(b"x4 pro firmware").hexdigest()
+            self.assertEqual(
+                sums.read_text(encoding="ascii"),
+                f"{x3_digest}  xteink-pokemon-x3-v1.0.0.bin\n"
+                f"{x4_pro_digest}  xteink-pokemon-x4-pro-v1.0.0.bin\n",
+            )
+
     def test_build_release_rejects_empty_firmware(self) -> None:
         release = load_release_module()
         with tempfile.TemporaryDirectory() as temporary:
