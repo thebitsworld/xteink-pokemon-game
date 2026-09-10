@@ -135,6 +135,36 @@ class PokemonArtPackTest(unittest.TestCase):
             )
             PACKAGE.verify_archive(full_zip, firmware_asset, notice)
 
+    def test_public_release_merges_sha256sums_for_a_second_device(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.make_complete_source(root)
+            firmware = root / "firmware.bin"
+            firmware.write_bytes(b"tested firmware")
+            notice = root / "RIGHTS_AND_ATTRIBUTION.md"
+            notice.write_bytes(b"rights and credits\n")
+
+            x3_zip, x3_firmware, sums = PACKAGE.build_public_release(
+                source, firmware, notice, "0.3.0", root / "dist", "x3"
+            )
+            x4_zip, x4_firmware, sums_again = PACKAGE.build_public_release(
+                source, firmware, notice, "0.3.0", root / "dist", "x4-pro"
+            )
+
+            self.assertEqual(sums, sums_again)
+            self.assertEqual(x3_zip.name, "xteink-pokemon-x3-full-v0.3.0.zip")
+            self.assertEqual(x4_zip.name, "xteink-pokemon-x4-pro-full-v0.3.0.zip")
+            self.assertEqual(x3_firmware.name, "xteink-pokemon-x3-firmware-v0.3.0.bin")
+            self.assertEqual(x4_firmware.name, "xteink-pokemon-x4-pro-firmware-v0.3.0.bin")
+
+            expected_lines = {
+                f"{hashlib.sha256(x3_zip.read_bytes()).hexdigest()}  {x3_zip.name}",
+                f"{hashlib.sha256(x3_firmware.read_bytes()).hexdigest()}  {x3_firmware.name}",
+                f"{hashlib.sha256(x4_zip.read_bytes()).hexdigest()}  {x4_zip.name}",
+                f"{hashlib.sha256(x4_firmware.read_bytes()).hexdigest()}  {x4_firmware.name}",
+            }
+            self.assertEqual(set(sums.read_text(encoding="ascii").splitlines()), expected_lines)
+
     def test_extracting_public_release_preserves_existing_saves(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
