@@ -45,18 +45,23 @@ These are current X3 simulator captures using the artwork included in the full i
 
 - [Download from GitHub Releases](https://github.com/thebitsworld/xteink-pokemon-game/releases)
 
-This build is tested on **Xteink X3 only**. Some friends reported that it also worked on **Xteink X4** but do it at your own risk. Do not install it on an X4 Pro or another device. Back up the SD card before updating.
+This build is tested on **Xteink X3**. **Xteink X4 Pro** is now also supported (touch-only
+UI, portrait orientation) as of this release, verified on the simulator; physical-device
+acceptance is still pending. Some friends reported the X3 firmware also working on **Xteink
+X4**, at your own risk. **X3 and X4 Pro firmware are not interchangeable** — they target
+different chips (ESP32-C3 vs. ESP32-S3) and a device will not boot the wrong one. Do not
+install on Sticky or another device. Back up the SD card before updating.
 
-1. Download the full-install ZIP to a computer.
+1. Download the full-install ZIP to a computer, matching your device (`xteink-pokemon-x3-full-v<version>.zip` or `xteink-pokemon-x4-pro-full-v<version>.zip`).
 2. Extract the ZIP. Do not copy the ZIP itself to the SD card.
 3. Back up any `/.crosspoint/pokemon*.bin` files if they already exist. Earlier `pokemon-v2-a.bin` and `pokemon-v2-b.bin` saves migrate automatically.
 4. Copy `update.bin` to the SD-card root and merge the extracted `pokemon` folder into the root.
 5. **Do not format the SD card. Do not delete any existing folder. Do not replace any existing folder.** Keep your books, sleep covers, settings, reading progress, and Pokémon saves in place.
 6. Confirm both `update.bin` and the visible `pokemon` folder are directly at the SD-card root.
-7. Safely eject the card and return it to the X3.
+7. Safely eject the card and return it to your device.
 8. Open **Settings → System → SD Card Firmware Update**, select `update.bin`, and confirm.
 
-The full-install ZIP contains the firmware and all required artwork. It does not contain or replace Pokémon saves, books, or reading data. The first release that moves artwork to `/pokemon` must be installed from the full ZIP; later releases can use the firmware-only download over the X3's Wi-Fi file transfer.
+The full-install ZIP contains the firmware and all required artwork. It does not contain or replace Pokémon saves, books, or reading data. The first release that moves artwork to `/pokemon` must be installed from the full ZIP; later releases can use the firmware-only download (`xteink-pokemon-x3-v<version>.bin` or `xteink-pokemon-x4-pro-v<version>.bin`) over the device's Wi-Fi file transfer. Artwork is shared between X3 and X4 Pro (same files, same paths) — only the firmware binary differs per device.
 
 Building from source? See [Getting Started](docs/development/getting-started.md).
 

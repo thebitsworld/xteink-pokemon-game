@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-10
+
+### Added
+
+- The Xteink X4 Pro is now a supported device, alongside the X3. The Pokémon UI is fully operable by touch (Battle's FIGHT/BAG/SWITCH/RUN grid, every list screen, and mid-battle item/switch/ball screens), matching the existing button controls on X3.
+- Release downloads now include a separate X4 Pro firmware asset and full-install ZIP, alongside the existing X3 ones. Artwork is identical between the two devices; only the firmware binary differs.
+
+### Changed
+
+- Pokémon is portrait-only by design on both devices; the app now forces portrait orientation when entering the Pokémon activity, so a device left in landscape by the reader never shows an unsupported layout.
+
+### Fixed
+
+- Every Pokémon menu and list screen was silently missing its last row (and showing a stray scrollbar) due to a display-margin miscalculation introduced by an earlier CrossInk update. This affected X3 as well as X4 Pro.
+
 ## [0.2.0] - 2026-09-09
 
 ### Added
