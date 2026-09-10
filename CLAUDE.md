@@ -55,12 +55,33 @@ header's Back tap or the physical Confirm button). Both APIs are constexpr no-op
 native tests pass; both `pokemon-x3` and `pokemon-x4-pro` build clean, flash unchanged; both
 simulators boot and run the (button-driven) Pokemon smoke script clean.
 
-**Not done yet in Phase 3**: step 2 (confirm `Summary`/`PokedexDetail` are fully touch-leavable
-- likely already fine via `TouchHeaderBackButton`, just needs a check) and step 3 (audit every
-`fui::list()`-based screen - Party, PC, Bag + sub-categories, Pokédex, Moveset, GymList,
-Badges, ItemTarget, BattleSwitch, BattleBag, BattleBalls - under real touch clicks on the X4
-Pro simulator; the smoke test script is button-driven only, so this still needs either a
-touch-scripted extension to `SimulatorSmokeTest.cpp` or manual mouse-driven verification).
+**Phase 3 step 3 (list-screen touch audit) is now covered for the core screens** (commit
+`1d69ea03`): added `buildPokemonTouchInputScript()` to `SimulatorSmokeTest.cpp`, auto-selected
+when `mappedInputManager.hasTouchHardware()` is true. It walks
+Menu -> Party -> Actions -> Summary -> Pokedex -> PokedexDetail -> PC using real tap
+coordinates (each row's actual on-screen position, same formula as
+`PokemonActivity::listTop()`/`rowHeightForScreen()`) plus a tap on the header's Back button.
+Run it with **both** `CROSSINK_SIMULATOR_SMOKE_TEST=1` and `CROSSINK_SIMULATOR_START_POKEMON=1`
+set (the first flag alone only starts the Pokemon activity manually with no scripted input at
+all - easy to miss, cost real time to discover this session) against
+`pokemon-x4-pro-simulator`, with `fs_/.crosspoint/pokemon-{a,b}.bin` deleted first for a truly
+fresh onboarding state. Confirmed: "Simulator smoke test passed".
+
+**Still not covered by the touch script**: Bag + sub-categories, Moveset, GymList, Badges,
+ItemTarget, BattleSwitch, BattleBag, BattleBalls (all reachable in principle via the same
+`fui::list()` touch path already proven for Party/Pokedex/PC, but not yet walked by name) - a
+good next increment if picking Phase 3 back up, or manual verification is fine too since the
+underlying mechanism is already shared/proven.
+
+**Pre-existing bug found while testing this (not caused by this session's work, not fixed
+yet)**: running the *button*-driven `buildPokemonInputScript()` the same correct way (fresh
+save + `CROSSINK_SIMULATOR_SMOKE_TEST=1`, apparently never actually combined like this
+before) fails - two Down page-jumps on `Screen::Menu` (8 items, likely all fitting on one
+"page") land somewhere unexpected and the Pokemon activity exits to Home before reaching
+`Screen::Pc`. Confirmed present on commit `1ab5f17d` (before any Phase 1/3 work) via a
+throwaway `git worktree`, so it's a real latent bug in `ButtonNavigator`'s page-jump math or
+`PokemonActivity`'s Menu-reentry state, not a regression - worth a dedicated look later.
+
 Then Phase 4 (800×480 layout fixes) and Phase 5 (release).
 
 ## Recent fixes (2026-09-10)
