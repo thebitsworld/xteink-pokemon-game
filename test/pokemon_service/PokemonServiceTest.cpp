@@ -892,6 +892,52 @@ TEST(PokemonService, UseConsumableHealsWithMedicineAndRejectsAtFullHp) {
   EXPECT_EQ(service.useConsumable(1, 11), pokemon::UseConsumableOutcome::NotApplicable);  // already full HP
 }
 
+TEST(PokemonService, UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequiresRevive) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu, maxHp 18 once synthesized
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.currentHp = 0;
+  entry.status = pokemon::Ailment::Poison;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  // A fainted Pokemon cannot be healed, cured, or have its PP restored by
+  // anything but a revival item - Potion/Full Restore/status cures/PP
+  // restores all no-op instead of quietly reviving it as a side effect.
+  EXPECT_EQ(service.useConsumable(1, 11), pokemon::UseConsumableOutcome::NotApplicable);  // Potion
+  EXPECT_EQ(service.useConsumable(1, 17), pokemon::UseConsumableOutcome::NotApplicable);  // Full Restore
+  EXPECT_EQ(service.useConsumable(1, 22), pokemon::UseConsumableOutcome::NotApplicable);  // Paralyze Heal
+  EXPECT_EQ(service.useConsumable(1, 25), pokemon::UseConsumableOutcome::NotApplicable);  // Ether
+  const pokemon::BattleRecordEntry* untouched = battleStore.findEntry(1);
+  ASSERT_NE(untouched, nullptr);
+  EXPECT_EQ(untouched->currentHp, 0U);
+  EXPECT_EQ(untouched->status, pokemon::Ailment::Poison);
+
+  // Revive (id 15) restores half max HP; a second faint then requires Max
+  // Revive (id 16) to come back at full HP. Neither item cures status - the
+  // real games leave that to a dedicated status cure once the Pokemon is up.
+  EXPECT_EQ(service.useConsumable(1, 15), pokemon::UseConsumableOutcome::Applied);
+  const pokemon::BattleRecordEntry* revived = battleStore.findEntry(1);
+  ASSERT_NE(revived, nullptr);
+  EXPECT_EQ(revived->currentHp, 9U);  // 50% of 18, rounded down
+  EXPECT_EQ(revived->status, pokemon::Ailment::Poison);
+
+  pokemon::BattleRecordEntry fainted = *revived;
+  fainted.currentHp = 0;
+  ASSERT_EQ(service.saveBattleEntry(fainted), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(service.useConsumable(1, 16), pokemon::UseConsumableOutcome::Applied);  // Max Revive
+  const pokemon::BattleRecordEntry* maxRevived = battleStore.findEntry(1);
+  ASSERT_NE(maxRevived, nullptr);
+  EXPECT_EQ(maxRevived->currentHp, 18U);  // 100% of max
+
+  // Revive on a Pokemon that isn't fainted has no effect either.
+  EXPECT_EQ(service.useConsumable(1, 15), pokemon::UseConsumableOutcome::NotApplicable);
+}
+
 TEST(PokemonService, UseConsumableCuresOnlyTheMatchingStatusWithStatusCureItems) {
   Storage.clear();
   pokemon::PokemonStore store;

@@ -418,28 +418,43 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
   if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
   const uint16_t maxHp = battleMaxHp(stats->hp, level);
 
+  // Revive/Max Revive (ids 15/16, pinned in scripts/data/pokemon-items.csv) are
+  // the only items that can act on a fainted Pokemon, and only a fainted one -
+  // effectValue is the percent of max HP to restore (50/100). Every other
+  // Medicine/StatusCure/PPRestore item requires the Pokemon to still have
+  // HP > 0, matching how these items behave in the real games.
+  const bool isRevive = itemId == 15 || itemId == 16;
+
   bool changed = false;
-  if (item->category == ItemCategory::Medicine && entry.currentHp < maxHp) {
-    const uint32_t healed = static_cast<uint32_t>(entry.currentHp) + item->effectValue;
-    entry.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healed));
-    changed = true;
-  }
-  if ((item->category == ItemCategory::Medicine || item->category == ItemCategory::StatusCure) &&
-      item->curesAilment != Ailment::None && entry.status != Ailment::None &&
-      (item->curesAilment == Ailment::All || item->curesAilment == entry.status)) {
-    entry.status = Ailment::None;
-    entry.statusTurns = 0;
-    changed = true;
-  }
-  if (item->category == ItemCategory::PPRestore) {
-    for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
-      if (entry.moves[slot] == 0) continue;
-      const MoveData* move = moveData(entry.moves[slot]);
-      const uint8_t maxPp = move == nullptr ? 0 : move->pp;
-      if (entry.pp[slot] >= maxPp) continue;
-      entry.pp[slot] =
-          static_cast<uint8_t>(std::min<uint32_t>(maxPp, static_cast<uint32_t>(entry.pp[slot]) + item->effectValue));
+  if (isRevive) {
+    if (item->category == ItemCategory::Medicine && entry.currentHp == 0) {
+      const uint32_t healed = (static_cast<uint32_t>(maxHp) * item->effectValue) / 100U;
+      entry.currentHp = static_cast<uint16_t>(std::max<uint32_t>(1U, std::min<uint32_t>(maxHp, healed)));
       changed = true;
+    }
+  } else if (entry.currentHp > 0) {
+    if (item->category == ItemCategory::Medicine && entry.currentHp < maxHp) {
+      const uint32_t healed = static_cast<uint32_t>(entry.currentHp) + item->effectValue;
+      entry.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healed));
+      changed = true;
+    }
+    if ((item->category == ItemCategory::Medicine || item->category == ItemCategory::StatusCure) &&
+        item->curesAilment != Ailment::None && entry.status != Ailment::None &&
+        (item->curesAilment == Ailment::All || item->curesAilment == entry.status)) {
+      entry.status = Ailment::None;
+      entry.statusTurns = 0;
+      changed = true;
+    }
+    if (item->category == ItemCategory::PPRestore) {
+      for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+        if (entry.moves[slot] == 0) continue;
+        const MoveData* move = moveData(entry.moves[slot]);
+        const uint8_t maxPp = move == nullptr ? 0 : move->pp;
+        if (entry.pp[slot] >= maxPp) continue;
+        entry.pp[slot] = static_cast<uint8_t>(
+            std::min<uint32_t>(maxPp, static_cast<uint32_t>(entry.pp[slot]) + item->effectValue));
+        changed = true;
+      }
     }
   }
   if (!changed) return UseConsumableOutcome::NotApplicable;
