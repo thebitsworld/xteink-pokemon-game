@@ -179,7 +179,7 @@ void BaseTheme::drawHintLabel(const GfxRenderer& renderer, const int fontId, con
 
   constexpr int lineGap = 2;
   const int overflowMaxWidth = ButtonHintLayout::overflowMaxTextWidth(contentRect.width, horizontalPadding, alignment);
-  const int pixelHeight = renderer.getTextPixelHeight(fontId, label, fontStyle);
+  const int pixelHeight = renderer.getLineHeight(fontId);
   const int maxLines = ButtonHintLayout::maxVisibleLines(contentRect.height, pixelHeight, 2, lineGap);
   if (maxLines == 1) {
     // Current front-button guides cannot contain two complete rows of their

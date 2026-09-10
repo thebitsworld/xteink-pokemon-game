@@ -455,15 +455,15 @@ void RecentBooksGridActivity::loop() {
     }
   }
 
-  buttonNavigator.onRelease({MappedInputManager::Button::Right}, [&] { handleNav(NavDirection::Right); });
-  buttonNavigator.onRelease({MappedInputManager::Button::Left}, [&] { handleNav(NavDirection::Left); });
-  buttonNavigator.onRelease({MappedInputManager::Button::Down}, [&] { handleNav(NavDirection::Down); });
-  buttonNavigator.onRelease({MappedInputManager::Button::Up}, [&] { handleNav(NavDirection::Up); });
+  buttonNavigator.onRelease({MappedInputManager::Button::Right, MappedInputManager::Button::Right}, [&] { handleNav(NavDirection::Right); });
+  buttonNavigator.onRelease({MappedInputManager::Button::Left, MappedInputManager::Button::Left}, [&] { handleNav(NavDirection::Left); });
+  buttonNavigator.onRelease({MappedInputManager::Button::Down, MappedInputManager::Button::Down}, [&] { handleNav(NavDirection::Down); });
+  buttonNavigator.onRelease({MappedInputManager::Button::Up, MappedInputManager::Button::Up}, [&] { handleNav(NavDirection::Up); });
 
-  buttonNavigator.onContinuous({MappedInputManager::Button::Right}, [&] { handleNav(NavDirection::Right); });
-  buttonNavigator.onContinuous({MappedInputManager::Button::Left}, [&] { handleNav(NavDirection::Left); });
-  buttonNavigator.onContinuous({MappedInputManager::Button::Down}, [&] { handleNav(NavDirection::Down); });
-  buttonNavigator.onContinuous({MappedInputManager::Button::Up}, [&] { handleNav(NavDirection::Up); });
+  buttonNavigator.onContinuous({MappedInputManager::Button::Right, MappedInputManager::Button::Right}, [&] { handleNav(NavDirection::Right); });
+  buttonNavigator.onContinuous({MappedInputManager::Button::Left, MappedInputManager::Button::Left}, [&] { handleNav(NavDirection::Left); });
+  buttonNavigator.onContinuous({MappedInputManager::Button::Down, MappedInputManager::Button::Down}, [&] { handleNav(NavDirection::Down); });
+  buttonNavigator.onContinuous({MappedInputManager::Button::Up, MappedInputManager::Button::Up}, [&] { handleNav(NavDirection::Up); });
 }
 
 void RecentBooksGridActivity::reloadAfterBookAction() {

@@ -319,11 +319,12 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
     return false;
   }
 
-  const bool valid = validateAndStoreDimensions(png->getWidth(), png->getHeight(), out, "PNG");
+  out.width = png->getWidth();
+  out.height = png->getHeight();
 
   png->close();
   delete png;
-  return valid;
+  return true;
 }
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
@@ -353,16 +354,15 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     return false;
   }
 
-  ImageDimensions sourceDimensions;
-  if (!validateAndStoreDimensions(png->getWidth(), png->getHeight(), sourceDimensions, "PNG")) {
+  if (!validateImageDimensions(png->getWidth(), png->getHeight(), "PNG")) {
     png->close();
     delete png;
     return false;
   }
 
   // Calculate output dimensions
-  ctx.srcWidth = sourceDimensions.width;
-  ctx.srcHeight = sourceDimensions.height;
+  ctx.srcWidth = png->getWidth();
+  ctx.srcHeight = png->getHeight();
 
   if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
     // Use exact dimensions as specified (avoids rounding mismatches with pre-calculated sizes)

@@ -1055,10 +1055,10 @@ void FileBrowserActivity::loop() {
   if (mode == Mode::PickDirectory) {
     // The front-right button selects this folder. Keep navigation on the side
     // buttons so the remaining front-left button is not a misleading one-way control.
-    buttonNavigator.onRelease({MappedInputManager::Button::Down}, moveNext);
-    buttonNavigator.onRelease({MappedInputManager::Button::Up}, movePrevious);
-    buttonNavigator.onContinuous({MappedInputManager::Button::Down}, pageNext);
-    buttonNavigator.onContinuous({MappedInputManager::Button::Up}, pagePrevious);
+    buttonNavigator.onRelease({MappedInputManager::Button::Down, MappedInputManager::Button::Down}, moveNext);
+    buttonNavigator.onRelease({MappedInputManager::Button::Up, MappedInputManager::Button::Up}, movePrevious);
+    buttonNavigator.onContinuous({MappedInputManager::Button::Down, MappedInputManager::Button::Down}, pageNext);
+    buttonNavigator.onContinuous({MappedInputManager::Button::Up, MappedInputManager::Button::Up}, pagePrevious);
   } else {
     buttonNavigator.onNextRelease(moveNext);
     buttonNavigator.onPreviousRelease(movePrevious);

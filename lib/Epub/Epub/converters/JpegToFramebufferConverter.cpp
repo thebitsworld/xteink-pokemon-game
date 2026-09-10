@@ -377,11 +377,12 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
     return false;
   }
 
-  const bool valid = validateAndStoreDimensions(jpeg->getWidth(), jpeg->getHeight(), out, "JPEG");
+  out.width = jpeg->getWidth();
+  out.height = jpeg->getHeight();
 
   jpeg->close();
   delete jpeg;
-  return valid;
+  return true;
 }
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
@@ -409,14 +410,21 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     return false;
   }
 
-  ImageDimensions sourceDimensions;
-  if (!validateAndStoreDimensions(jpeg->getWidth(), jpeg->getHeight(), sourceDimensions, "JPEG")) {
+  int srcWidth = jpeg->getWidth();
+  int srcHeight = jpeg->getHeight();
+
+  if (srcWidth <= 0 || srcHeight <= 0) {
+    LOG_ERR("JPG", "Invalid JPEG dimensions: %dx%d", srcWidth, srcHeight);
     jpeg->close();
     delete jpeg;
     return false;
   }
-  const int srcWidth = sourceDimensions.width;
-  const int srcHeight = sourceDimensions.height;
+
+  if (!validateImageDimensions(srcWidth, srcHeight, "JPEG", MAX_JPEG_SOURCE_WIDTH)) {
+    jpeg->close();
+    delete jpeg;
+    return false;
+  }
 
   bool isProgressive = jpeg->getJPEGType() == JPEG_MODE_PROGRESSIVE;
   if (isProgressive) {

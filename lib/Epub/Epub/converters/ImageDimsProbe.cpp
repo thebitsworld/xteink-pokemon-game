@@ -132,6 +132,10 @@ size_t ImageDimsProbe::write(const uint8_t* data, const size_t len) {
 }
 
 bool ImageDimsProbe::getDimensions(ImageDimensions& out) const {
-  return state == State::Done &&
-         ImageToFramebufferDecoder::validateAndStoreDimensions(width, height, out, "image header");
+  if (state != State::Done || width == 0 || height == 0 || width > INT16_MAX || height > INT16_MAX) {
+    return false;
+  }
+  out.width = static_cast<int16_t>(width);
+  out.height = static_cast<int16_t>(height);
+  return true;
 }
