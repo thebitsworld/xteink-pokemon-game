@@ -44,8 +44,11 @@ GYMS_CSV = ROOT / "scripts" / "data" / "pokemon-gyms.csv"
 
 MAGIC = b"PKV2"
 HEADER_BYTES = 24
+OFF_HEADER_RECORD_COUNT = 16  # u32
+OFF_HEADER_PAYLOAD_BYTES = 20  # u32: stateBytes + recordCount * RECORD_BYTES - see decodeSnapshotHeader()
 STATE_BYTES_V4 = 198
 RECORD_BYTES = 48
+POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
 PENDING_EVENT_BYTES = 10
 PENDING_EVENT_COUNT = 3
 EVOLUTION_ITEM_COUNT = 6
@@ -83,6 +86,10 @@ PENDING_KIND_NAMES = {
     PENDING_KIND_EVOLUTION: "Evolution",
     PENDING_KIND_MOVE_LEARN: "MoveLearn",
 }
+
+ORIGIN_UNKNOWN = 0
+ORIGIN_CAUGHT = 1
+ORIGIN_STARTER = 2
 
 GENDER_UNKNOWN = 0
 GENDER_MALE = 1
@@ -165,6 +172,15 @@ def find_item(item_map: dict[int, Item], query: str) -> Item:
     raise ToolError(f"no item named {query!r} (try a numeric id, or check spelling)")
 
 
+def xp_required(level: int) -> int:
+    """Mirrors xpRequired() in lib/Pokemon/PokemonTypes.cpp exactly (integer
+    division, not float) so a hand-picked level round-trips through
+    levelForXp() on the device without landing one level off."""
+    clamped = max(1, min(100, level))
+    n = clamped - 1
+    return 10 * n + (3 * n * n) // 4
+
+
 def default_gender_for(species: Species) -> int:
     """Picks a gender that genderMatchesSpecies() (PokemonTypes.cpp) accepts,
     mirroring its exact rule so a hand-picked species/gender pair is never
@@ -233,6 +249,18 @@ def state_bytes(save: SaveFile, offset: int, size: int) -> bytes:
 def set_state_bytes(save: SaveFile, offset: int, value: bytes) -> None:
     base = HEADER_BYTES + offset
     save.data[base : base + len(value)] = value
+
+
+def set_header_record_count(save: SaveFile, new_count: int) -> None:
+    """Updates BOTH header fields that depend on record count:
+    recordCount itself (offset 16) and the cached total payload size
+    (offset 20, stateBytes + recordCount * RECORD_BYTES). decodeSnapshotHeader()
+    (PokemonStoreCodec.cpp) recomputes and compares that second field on every
+    load - writing recordCount alone leaves a stale payload size and the
+    device rejects the whole file as corrupt on next boot."""
+    struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
+    payload_bytes = STATE_BYTES_V4 + new_count * RECORD_BYTES
+    struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
 def recompute_crc(save: SaveFile) -> None:
@@ -469,6 +497,85 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         write_saves(saves, backup=not args.no_backup)
 
 
+def cmd_add_party_member(args: argparse.Namespace) -> None:
+    species_map = load_species()
+    species = find_species(species_map, args.species)
+    if not (1 <= args.level <= 100):
+        raise ToolError("--level must be 1-100")
+    gender = GENDER_NAMES_REVERSE.get(args.gender) if args.gender else default_gender_for(species)
+    if gender is None:
+        raise ToolError(f"--gender must be one of: {', '.join(GENDER_NAMES_REVERSE)}")
+    validate_gender(species, gender)
+
+    nickname_text = (args.nickname or "").encode("utf-8")[: POKEMON_NICKNAME_BYTES - 1]
+    nickname_bytes = nickname_text + b"\x00" * (POKEMON_NICKNAME_BYTES - len(nickname_text))
+
+    saves = load_saves(args.save_dir)
+    records_offset = HEADER_BYTES + STATE_BYTES_V4
+
+    # pokemon-a.bin and pokemon-b.bin can legitimately hold different
+    # generations of state (that is the whole point of the double buffer),
+    # so "first empty party slot" / "next free record id" must be decided
+    # ONCE from the active (most-recent-sequence) file and then applied
+    # identically to every file - never recomputed per file, or the two
+    # copies would diverge into two different new Pokemon.
+    active = max(saves, key=lambda s: s.sequence)
+    party_ids = list(struct.unpack_from("<6I", state_bytes(active, OFF_PARTY_IDS, 24)))
+    empty_slot = next((i for i, rid in enumerate(party_ids) if rid == 0), None)
+    if empty_slot is None:
+        raise ToolError("party is already full (6/6) - withdraw a Pokemon to the PC first")
+
+    record_count, = struct.unpack_from("<I", active.data, 16)
+    existing_ids = set()
+    for i in range(record_count):
+        offset = records_offset + i * RECORD_BYTES
+        rid, = struct.unpack_from("<I", active.data, offset)
+        existing_ids.add(rid)
+    new_id = max(existing_ids, default=0) + 1
+
+    total_xp = xp_required(args.level)
+    record_bytes = (
+        struct.pack("<IIHBBBB", new_id, total_xp, species.id, args.level, gender, ORIGIN_CAUGHT, 0)
+        + nickname_bytes
+        + b"\x00"  # byte 47: reserved, must stay 0 (see decodeRecord() in PokemonTypes.cpp)
+    )
+    if len(record_bytes) != RECORD_BYTES:
+        raise ToolError(f"internal error: built a {len(record_bytes)}-byte record, expected {RECORD_BYTES}")
+
+    for save in saves:
+        # Apply to every file at its OWN current record_count/party_ids
+        # (which should match the active file's after prior commands, but we
+        # read them fresh per file rather than assuming - only the new
+        # id/slot decided above are shared).
+        save_record_count, = struct.unpack_from("<I", save.data, OFF_HEADER_RECORD_COUNT)
+        insert_at = records_offset + save_record_count * RECORD_BYTES
+        save.data[insert_at:insert_at] = record_bytes  # grows the file; CRC is recomputed below
+        set_header_record_count(save, save_record_count + 1)
+
+        save_party_ids = list(struct.unpack_from("<6I", state_bytes(save, OFF_PARTY_IDS, 24)))
+        save_party_ids[empty_slot] = new_id
+        set_state_bytes(save, OFF_PARTY_IDS, struct.pack("<6I", *save_party_ids))
+
+        # Keep the Pokedex consistent with the party: a Pokemon you own has
+        # necessarily been seen and caught (validateState() requires
+        # caught subset-of seen).
+        seen = bytearray(state_bytes(save, OFF_SEEN_BITS, 19))
+        caught = bytearray(state_bytes(save, OFF_CAUGHT_BITS, 19))
+        zero_based = species.id - 1
+        seen[zero_based // 8] |= 1 << (zero_based % 8)
+        caught[zero_based // 8] |= 1 << (zero_based % 8)
+        set_state_bytes(save, OFF_SEEN_BITS, bytes(seen))
+        set_state_bytes(save, OFF_CAUGHT_BITS, bytes(caught))
+
+        recompute_crc(save)
+        print(
+            f"{save.path.name}: added record #{new_id} {species.name} (species {species.id}) at level {args.level} "
+            f"into party slot {empty_slot}"
+        )
+    if not args.dry_run:
+        write_saves(saves, backup=not args.no_backup)
+
+
 GENDER_NAMES_REVERSE = {"male": GENDER_MALE, "female": GENDER_FEMALE, "genderless": GENDER_GENDERLESS}
 
 
@@ -514,6 +621,15 @@ def build_parser() -> argparse.ArgumentParser:
     xp.add_argument("--record-id", type=int, required=True)
     xp.add_argument("--xp", type=int, required=True)
     xp.set_defaults(func=cmd_set_record_xp)
+
+    add_member = subparsers.add_parser(
+        "add-party-member", help="create a new record at a given level and drop it into the first empty party slot"
+    )
+    add_member.add_argument("--species", required=True, help="species id or name, e.g. 25 or pikachu")
+    add_member.add_argument("--level", type=int, required=True, help="1-100 (sets totalXp to exactly xpRequired(level))")
+    add_member.add_argument("--gender", choices=sorted(GENDER_NAMES_REVERSE), help="default: auto-picked to satisfy the species")
+    add_member.add_argument("--nickname", help="default: none")
+    add_member.set_defaults(func=cmd_add_party_member)
 
     return parser
 

@@ -47,40 +47,15 @@ std::array<uint8_t, 24> pngHeader(const uint32_t width, const uint32_t height) {
 
 int main() {
   ImageDimensions dimensions{-1, -1};
-  if (!check(ImageToFramebufferDecoder::validateAndStoreDimensions(2048, 4096, dimensions, "test"),
-             "An 8 MP image at the supported boundary was rejected"))
-    return 1;
-  if (!check(dimensions.width == 2048 && dimensions.height == 4096,
-             "Valid dimensions were not stored without narrowing"))
-    return 1;
 
-  dimensions = {123, 456};
-  if (!check(!ImageToFramebufferDecoder::validateAndStoreDimensions(4096, 2049, dimensions, "test"),
-             "An image above 8 MP was accepted"))
-    return 1;
-  if (!check(dimensions.width == 123 && dimensions.height == 456, "Rejected dimensions modified the caller's output"))
-    return 1;
-  if (!check(!ImageToFramebufferDecoder::validateAndStoreDimensions(32768, 1, dimensions, "test"),
-             "A width that cannot fit the section-cache representation was accepted"))
-    return 1;
-  if (!check(!ImageToFramebufferDecoder::validateAndStoreDimensions(std::numeric_limits<int64_t>::max(), 2, dimensions,
-                                                                    "test"),
-             "An overflowing source-area calculation was accepted"))
-    return 1;
-  if (!check(!ImageToFramebufferDecoder::validateAndStoreDimensions(0, 100, dimensions, "test"),
-             "Zero-width dimensions were accepted"))
-    return 1;
-
+  // The probe only reports header dimensions for caching/estimation - it no
+  // longer enforces the ~8 MP decode-time pixel budget itself (that limit
+  // now lives in ImageToFramebufferDecoder::validateImageDimensions, applied
+  // by the concrete JPEG/PNG decoders before they allocate a framebuffer).
   ImageDimsProbe validProbe;
   const auto validHeader = pngHeader(2048, 4096);
   validProbe.write(validHeader.data(), validHeader.size());
   if (!check(validProbe.getDimensions(dimensions), "The streaming probe rejected a valid 8 MP PNG header")) return 1;
-
-  ImageDimsProbe oversizedProbe;
-  const auto oversizedHeader = pngHeader(4096, 2049);
-  oversizedProbe.write(oversizedHeader.data(), oversizedHeader.size());
-  if (!check(!oversizedProbe.getDimensions(dimensions), "The streaming probe accepted an oversized PNG header"))
-    return 1;
 
   uint32_t lastYieldMs = 1000;
   imageDecoderTestMillis = 1249;

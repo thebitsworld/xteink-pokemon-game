@@ -171,11 +171,13 @@ def _write_deterministic_zip(source: Path, archive: Path) -> None:
 
 
 def build_public_release(source: Path, firmware: Path, notice: Path, version: str,
-                         output: Path) -> tuple[Path, Path, Path]:
+                         output: Path, device_name: str = "x3") -> tuple[Path, Path, Path]:
     source = source.resolve()
     firmware = firmware.resolve()
     notice = notice.resolve()
     clean_version = normalize_version(version)
+    if VERSION_PATTERN.fullmatch(device_name) is None:
+        raise ValueError("invalid device name")
     if not firmware.is_file() or firmware.stat().st_size == 0:
         raise ValueError("firmware is missing or empty")
     if not notice.is_file():
@@ -183,8 +185,8 @@ def build_public_release(source: Path, firmware: Path, notice: Path, version: st
 
     assets = validate_art(source, allow_extra=True)
     output.mkdir(parents=True, exist_ok=True)
-    firmware_asset = output / f"xteink-pokemon-x3-firmware-v{clean_version}.bin"
-    full_zip = output / f"xteink-pokemon-x3-full-v{clean_version}.zip"
+    firmware_asset = output / f"xteink-pokemon-{device_name}-firmware-v{clean_version}.bin"
+    full_zip = output / f"xteink-pokemon-{device_name}-full-v{clean_version}.zip"
     release_sums = output / "SHA256SUMS.txt"
     shutil.copy2(firmware, firmware_asset)
 
@@ -208,11 +210,16 @@ def build_public_release(source: Path, firmware: Path, notice: Path, version: st
         _write_deterministic_zip(staging, full_zip)
 
     verify_archive(full_zip, firmware_asset, notice)
-    release_sums.write_text(
-        f"{sha256(full_zip)}  {full_zip.name}\n"
-        f"{sha256(firmware_asset)}  {firmware_asset.name}\n",
-        encoding="ascii",
-    )
+    new_lines = [f"{sha256(full_zip)}  {full_zip.name}", f"{sha256(firmware_asset)}  {firmware_asset.name}"]
+    new_names = {full_zip.name, firmware_asset.name}
+    existing_lines = []
+    if release_sums.is_file():
+        existing_lines = [
+            line
+            for line in release_sums.read_text(encoding="ascii").splitlines()
+            if line and line.partition("  ")[2] not in new_names
+        ]
+    release_sums.write_text("\n".join(existing_lines + new_lines) + "\n", encoding="ascii")
     return full_zip, firmware_asset, release_sums
 
 
@@ -300,9 +307,10 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--notice", type=Path, default=Path("RIGHTS_AND_ATTRIBUTION.md"))
     parser.add_argument("--version", required=True)
+    parser.add_argument("--name", default="x3", help="Device label used in the artifact filenames (default: x3)")
     args = parser.parse_args()
     full_zip, firmware_asset, sums = build_public_release(
-        args.source_pack, args.firmware, args.notice, args.version, args.output
+        args.source_pack, args.firmware, args.notice, args.version, args.output, args.name
     )
     print(full_zip)
     print(firmware_asset)

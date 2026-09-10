@@ -21,6 +21,8 @@ class Epub {
   std::string tocNcxItem;
   // the nav file (EPUB 3)
   std::string tocNavItem;
+  // the guide TOC page (EPUB 2)
+  std::string tocGuideItem;
   // where is the EPUBfile?
   std::string filepath;
   // the base path for items in the EPUB file
@@ -112,7 +114,7 @@ class Epub {
   static bool hasCache(const std::string& filepath, const std::string& cacheDir);
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false,
-            XLocationLoadMode xLocationLoadMode = XLocationLoadMode::Immediate);
+            XLocationLoadMode xLocationLoadMode = XLocationLoadMode::Immediate, bool cacheCumulativeSpineSizes = false);
   // Loads optional stable-page and source-spine metadata after a Skip-mode open.
   // Failure leaves normal size-based progress available.
   bool loadXLocations();
@@ -164,6 +166,7 @@ class Epub {
   int getTocItemsCount() const;
   int getSpineIndexForTocIndex(int tocIndex) const;
   int getTocIndexForSpineIndex(int spineIndex) const;
+  bool isNavigationDocumentSpine(int spineIndex, bool* scanSucceeded = nullptr) const;
   size_t getCumulativeSpineItemSize(int spineIndex) const;
   int getSpineIndexForTextReference() const;
 

@@ -73,10 +73,28 @@ bool areWordsVisuallyAttached(const WordRef& previousWord, const WordRef& word) 
   return previousWord.x <= word.x + word.w + 2;
 }
 
+std::string selectedWordText(const ClipWordStore& wordStore, const WordRef& word,
+                             const SelectionBounds* selectionBounds) {
+  const bool isFirstBound = selectionBounds && word.pageIdx == selectionBounds->firstPageIdx &&
+                            word.pageWordIndex == selectionBounds->firstPageWordOrdinal;
+  const bool isLastBound = selectionBounds && word.pageIdx == selectionBounds->lastPageIdx &&
+                           word.pageWordIndex == selectionBounds->lastPageWordOrdinal;
+  if (!selectionBounds || (!isFirstBound && !isLastBound)) {
+    return cleanWordText(wordStore.text(word));
+  }
+
+  const size_t textLength = word.textLength;
+  const size_t begin = isFirstBound ? std::min<size_t>(selectionBounds->firstWordByteOffset, textLength) : 0;
+  const size_t end = isLastBound ? std::min<size_t>(selectionBounds->lastWordByteEndOffset, textLength) : textLength;
+  if (end < begin) return {};
+  return cleanWordText(std::string(wordStore.text(word) + begin, end - begin));
+}
+
 }  // namespace
 
 ClippingResult build(const ClipWordStore& wordStore, const uint16_t* wordOrder, const int fromOrder, const int toOrder,
-                     const int totalOrder, const int startPageInSection, const int sectionPageCount) {
+                     const int totalOrder, const int startPageInSection, const int sectionPageCount,
+                     const SelectionBounds* selectionBounds) {
   const auto& words = wordStore.words;
   std::string text;
   text.reserve(256);
@@ -101,12 +119,13 @@ ClippingResult build(const ClipWordStore& wordStore, const uint16_t* wordOrder, 
 
   for (int orderIdx = fromOrder; orderIdx <= toOrder; ++orderIdx) {
     const WordRef& word = words[wordOrder[orderIdx]];
-    const auto wordText = stripTrailingInsertedHyphen(cleanWordText(wordStore.text(word)), word.endsWithInsertedHyphen);
+    const auto wordText =
+        stripTrailingInsertedHyphen(selectedWordText(wordStore, word, selectionBounds), word.endsWithInsertedHyphen);
     if (wordText.empty()) {
       continue;
     }
     const WordRef* previousWord = orderIdx > fromOrder ? &words[wordOrder[orderIdx - 1]] : nullptr;
-    const auto prevClean = previousWord ? cleanWordText(wordStore.text(*previousWord)) : std::string{};
+    const auto prevClean = previousWord ? selectedWordText(wordStore, *previousWord, selectionBounds) : std::string{};
     const bool joinsInsertedHyphen =
         previousWord && previousWord->endsWithInsertedHyphen && !prevClean.empty() && prevClean.back() == '-';
     if (joinsInsertedHyphen) {
@@ -147,7 +166,8 @@ ClippingResult build(const ClipWordStore& wordStore, const uint16_t* wordOrder, 
   anchorCount = 0;
   for (int orderIdx = toOrder; orderIdx >= fromOrder && anchorCount < ANCHOR_WORDS; --orderIdx) {
     const WordRef& word = words[wordOrder[orderIdx]];
-    const auto wordText = stripTrailingInsertedHyphen(cleanWordText(wordStore.text(word)), word.endsWithInsertedHyphen);
+    const auto wordText =
+        stripTrailingInsertedHyphen(selectedWordText(wordStore, word, selectionBounds), word.endsWithInsertedHyphen);
     endAnchor = endAnchor.empty() ? wordText : wordText + ' ' + endAnchor;
     anchorCount++;
   }
@@ -176,7 +196,8 @@ ClippingResult build(const ClipWordStore& wordStore, const uint16_t* wordOrder, 
   if (midEnd > toOrder) midEnd = toOrder;
   for (int orderIdx = midStart; orderIdx <= midEnd; ++orderIdx) {
     const WordRef& word = words[wordOrder[orderIdx]];
-    const auto wordText = stripTrailingInsertedHyphen(cleanWordText(wordStore.text(word)), word.endsWithInsertedHyphen);
+    const auto wordText =
+        stripTrailingInsertedHyphen(selectedWordText(wordStore, word, selectionBounds), word.endsWithInsertedHyphen);
     if (!midText.empty()) midText += ' ';
     midText += wordText;
   }

@@ -355,6 +355,12 @@ PokemonActivity::PokemonActivity(GfxRenderer& renderer, MappedInputManager& mapp
 
 void PokemonActivity::onEnter() {
   Activity::onEnter();
+  // Pokemon is portrait-only by design - force it on entry the same way
+  // NearbyBookTransferActivity/SettingsActivity/SleepActivity do, so a
+  // device left in landscape by the reader (or, in the simulator, by
+  // CROSSINK_SIMULATOR_POKEMON_LANDSCAPE) never shows the unsupported
+  // landscape layout.
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   app_.setTheme(uiThemeTokens(uiTarget_));
   app_.on(ACTION_ROW, &PokemonActivity::onRow, this);
   loadInitialScreen();
@@ -1514,9 +1520,38 @@ void PokemonActivity::loop() {
     activate();
     return;
   }
+  // Screen::Message has no list/grid to route a tap into (logicalCount() is
+  // 0), so without this it could only be dismissed by the physical Confirm
+  // button or by leaving via the header's Back tap - not by tapping the
+  // message itself, unlike every other screen. wasScreenTapped() is a no-op
+  // stub on CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
+  if (screen_ == Screen::Message) {
+    int x = 0, y = 0;
+    if (mappedInput.wasScreenTapped(x, y)) {
+      activate();
+      return;
+    }
+  }
   const int count = logicalCount();
   if (count <= 0) return;
   if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves) {
+    // These two screens bypass buildList()/fui::list() entirely (they draw
+    // their own 2-column grid - see renderBattleMenu()/renderBattleMoveMenu()),
+    // so the generic app_.route() touch dispatch above never sees them. Hit-
+    // test each cell using the exact same rect the render functions draw
+    // into (battleGridCellRect()), so a tap can never land on a cell the
+    // drawing doesn't agree with. wasTapInRect() is a no-op stub on
+    // CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
+    if (mappedInput.hasTouchHardware()) {
+      for (int index = 0; index < count; ++index) {
+        const Rect cell = battleGridCellRect(index);
+        if (mappedInput.wasTapInRect(cell.x, cell.y, cell.width, cell.height)) {
+          selected_ = index;
+          activate();
+          return;
+        }
+      }
+    }
     // 2-column grid (renderBattleMenu()/renderBattleMoveMenu()) instead of a
     // single-column list: Left/Right step through in reading order same as
     // everywhere else; Up/Down jump by BATTLE_MENU_COLUMNS to move within
@@ -1963,9 +1998,19 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   const bool bottomAnchored = screen_ == Screen::Event || screen_ == Screen::BattleBalls;
   if (bottomAnchored) top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rowCount_ * rowHeight_ - 8;
   listBounds_ = Rect{8, top, renderer.getScreenWidth() - 16, rowCount_ * rowHeight_};
-  screen.setContentMargin(
-      fui::Insets{static_cast<int16_t>(listBounds_.y), 8,
-                  static_cast<int16_t>(renderer.getScreenHeight() - listBounds_.y - listBounds_.height), 8});
+  // setContentMargin() insets from frame_.safeRect() (the screen already
+  // shrunk by the device's top/bottom viewable margin), not from the raw
+  // screen - see Screen::setContentMargin()/insetClamped() in FreeInkApp.h.
+  // listBounds_ above is computed in raw-screen coordinates, so passing it
+  // straight through double-applies the viewable margin (once here, once
+  // inside safeRect()) and silently clips the last row. Subtract the same
+  // margin back out here so the resulting content rect matches listBounds_
+  // exactly.
+  int viewableTop = 0, viewableRight = 0, viewableBottom = 0, viewableLeft = 0;
+  renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
+  screen.setContentMargin(fui::Insets{
+      static_cast<int16_t>(listBounds_.y - viewableTop), 8,
+      static_cast<int16_t>(renderer.getScreenHeight() - listBounds_.y - listBounds_.height - viewableBottom), 8});
   fui::ListProps props;
   props.items = rows_.data();
   props.count = static_cast<uint16_t>(std::max(0, rowCount_));
@@ -2251,6 +2296,23 @@ int PokemonActivity::battleMenuTop() const {
   return renderer.getScreenHeight() - metrics.buttonHintsHeight - rows * BATTLE_MENU_ROW_HEIGHT - 8;
 }
 
+// Shared by renderBattleMenu()/renderBattleMoveMenu() (what gets drawn) and
+// loop()'s touch hit-test (what gets tapped) - computed once here so the two
+// can never drift apart.
+Rect PokemonActivity::battleGridCellRect(int index) const {
+  const int width = renderer.getScreenWidth();
+  constexpr int margin = 8;
+  constexpr int gap = 8;
+  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
+  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
+  const int menuTop = battleMenuTop();
+  const int row = index / BATTLE_MENU_COLUMNS;
+  const int column = index % BATTLE_MENU_COLUMNS;
+  const int x = margin + column * (buttonWidth + gap);
+  const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+  return Rect{x, y, buttonWidth, buttonHeight};
+}
+
 // Screen::Battle's FIGHT/BALL/BAG/SWITCH/RUN menu as a 2-column button grid
 // instead of the generic single-column list - halves the vertical space the
 // menu needs (5 commands for a wild encounter used to mean 5 stacked rows,
@@ -2259,19 +2321,14 @@ int PokemonActivity::battleMenuTop() const {
 void PokemonActivity::renderBattleMenu() {
   const int count = logicalCount();
   if (count <= 0) return;
-  const int width = renderer.getScreenWidth();
-  constexpr int margin = 8;
-  constexpr int gap = 8;
-  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
-  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
-  const int menuTop = battleMenuTop();
   const bool isGym = gymChallengeIndex_ != 0;
 
   for (int index = 0; index < count; ++index) {
-    const int row = index / BATTLE_MENU_COLUMNS;
-    const int column = index % BATTLE_MENU_COLUMNS;
-    const int x = margin + column * (buttonWidth + gap);
-    const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+    const Rect cell = battleGridCellRect(index);
+    const int x = cell.x;
+    const int y = cell.y;
+    const int buttonWidth = cell.width;
+    const int buttonHeight = cell.height;
 
     const char* label;
     if (index == 0) {
@@ -2314,20 +2371,15 @@ void PokemonActivity::renderBattleMenu() {
 void PokemonActivity::renderBattleMoveMenu() {
   const int count = battlePlayerMoveCount();
   if (count <= 0) return;
-  const int width = renderer.getScreenWidth();
-  constexpr int margin = 8;
-  constexpr int gap = 8;
-  constexpr int buttonHeight = BATTLE_MENU_ROW_HEIGHT - 8;
   constexpr int textPad = 10;
   constexpr int nameToPpGap = 8;
-  const int buttonWidth = (width - 2 * margin - gap * (BATTLE_MENU_COLUMNS - 1)) / BATTLE_MENU_COLUMNS;
-  const int menuTop = battleMenuTop();
 
   for (int index = 0; index < count; ++index) {
-    const int row = index / BATTLE_MENU_COLUMNS;
-    const int column = index % BATTLE_MENU_COLUMNS;
-    const int x = margin + column * (buttonWidth + gap);
-    const int y = menuTop + row * BATTLE_MENU_ROW_HEIGHT;
+    const Rect cell = battleGridCellRect(index);
+    const int x = cell.x;
+    const int y = cell.y;
+    const int buttonWidth = cell.width;
+    const int buttonHeight = cell.height;
 
     const uint8_t moveId = battlePlayer_.moves[index].moveId;
     const pokemon::MoveData* move = pokemon::moveData(moveId);
@@ -2363,18 +2415,6 @@ void PokemonActivity::renderBattleHud() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
   const int width = renderer.getScreenWidth();
-  constexpr int spriteW = 120;  // fixed hero-art asset size; GfxRenderer never upscales bitmaps
-  constexpr int spriteH = 90;
-  constexpr int sideMargin = 24;
-  constexpr int panelWidth = 220;  // narrower than the old full-width box
-  constexpr int panelHeight = 92;  // and taller, so it reads less like a thin bar
-  constexpr int spriteGapMin = 16;
-  constexpr int messageGap = 12;
-  constexpr int messageHeight = 160;  // fixed - tall enough to word-wrap 2 log lines without overflowing
-  constexpr int barHeight = 12;
-  constexpr int dotSize = 12;
-  constexpr int dotGap = 6;
-  constexpr int dotRowHeight = dotSize + 8;
 
   const int hudTop = contentTop;
   // Screen::Battle/BattleMoves compute their own menu top (battleMenuTop(),
@@ -2386,6 +2426,50 @@ void PokemonActivity::renderBattleHud() {
   // listBounds_ for it using its own item count).
   const int hudBottom =
       (screen_ == Screen::Battle || screen_ == Screen::BattleMoves ? battleMenuTop() : listBounds_.y) - 12;
+  const int available = hudBottom - hudTop;
+
+  // The classic two-row diagonal layout below (opponent zone stacked above
+  // player zone, each a fixed-size sprite + HP panel) needs roughly
+  // 2*112px for the two zones plus a legible message box - comfortable in
+  // portrait, where `available` is 400+px. Neither X3 nor X4 Pro comes
+  // anywhere close to that in LANDSCAPE: screen height drops to 528/480
+  // respectively, and after the header and the FIGHT/BAG/SWITCH/RUN menu
+  // eat into it, both land around ~170px available (measured directly:
+  // X4 Pro simulator gives hudTop=96 hudBottom=268, i.e. available=172) -
+  // not enough room for even ONE stacked pair of full-size zones, let alone
+  // two. Below this threshold, use a compact side-by-side layout instead:
+  // opponent's HP panel in the left half, player's in the right half,
+  // sharing a single row with smaller sprites/panels/message box, rather
+  // than silently overlapping (confirmed via an actual landscape
+  // screenshot before this fix - the two panels and the message box all
+  // drew on top of each other).
+  constexpr int classicZoneContentHeight = 112;  // spriteH(90) vs dotRowHeight(20)+panelHeight(92)
+  constexpr int classicMinRequired = 2 * classicZoneContentHeight + 12 /* messageGap */ + 70 /* min message */ + 16;
+  const bool compact = available < classicMinRequired;
+
+  const int spriteW = compact ? 64 : 120;  // fixed-AR hero-art asset (4:3); GfxRenderer downscales to fit, never upscales
+  const int spriteH = compact ? 48 : 90;
+  const int sideMargin = compact ? 12 : 24;
+  const int dotSize = compact ? 8 : 12;
+  const int dotGap = compact ? 4 : 6;
+  const int dotRowHeight = dotSize + (compact ? 4 : 8);
+  // Compact panels sit between their side's sprite (touching the outer
+  // screen edge) and the screen's horizontal center, so both panels/sprites
+  // fit side by side within their own half - see the position math below.
+  constexpr int compactSpriteGap = 8;
+  constexpr int compactCenterGap = 8;
+  const int halfWidth = width / 2;
+  const int panelWidth = compact ? (halfWidth - sideMargin - spriteW - compactSpriteGap - compactCenterGap) : 220;
+  // Compact mode allocates its own row height directly from `available`
+  // (clamped to a legible range) instead of the classic fixed 92px, then
+  // gives whatever's left over to the message box - avoids the circular
+  // "panel needs message's leftover, message needs panel's leftover" trap.
+  const int compactRowHeight = std::clamp(static_cast<int>(available * 0.6), 60, 110);
+  const int panelHeight = compact ? std::max(40, compactRowHeight - dotRowHeight) : 92;
+  constexpr int spriteGapMin = 16;
+  constexpr int messageGap = 12;
+  const int messageHeight = compact ? std::max(36, available - compactRowHeight - messageGap) : 160;
+  const int barHeight = compact ? 10 : 12;
 
   // Compact box: name/nickname + level on top; below that, the HP bar with
   // its "cur/max" text right after it (and status past that) vertically
@@ -2474,37 +2558,64 @@ void PokemonActivity::renderBattleHud() {
     if (alive) playerAliveMask |= (1U << i);
   }
 
-  // Each zone's height is whichever is taller: the fixed-size sprite, or the
-  // dot row + HP panel stacked above it - the panel can outgrow the sprite
-  // once it carries a name line again, so this can't assume the sprite wins.
-  const int zoneContentHeight = std::max(spriteH, dotRowHeight + panelHeight);
-
-  // The message box is now a fixed height pinned to the bottom instead of
-  // soaking up whatever was left over, so the gap between the two zones
-  // absorbs the freed space instead - keeping the battlefield (sprites + HP
-  // boxes) the biggest thing on screen rather than a mostly-empty text box.
-  const int messageY = hudBottom - messageHeight;
-  const int zoneGap = std::max(spriteGapMin, messageY - messageGap - hudTop - 2 * zoneContentHeight);
-
-  const int opponentSpriteX = width - sideMargin - spriteW;
-  const int opponentSpriteY = hudTop;
-  const int opponentPanelX = sideMargin;
-  drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + panelWidth);
-  drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight);
-  pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
-                                 Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
-
-  const int playerSpriteX = sideMargin;
-  const int playerZoneTop = hudTop + zoneContentHeight + zoneGap;
-  const int playerSpriteY = playerZoneTop;
-  const int playerPanelX = width - sideMargin - panelWidth;
-  drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + panelWidth);
   const bool playerHasRecord = battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount;
   const char* playerNickname = playerHasRecord ? snapshot_.party[battlePartySlot_].nickname.data() : "";
   const char* playerName = playerNickname[0] == '\0' ? speciesName(battlePlayer_.speciesId) : playerNickname;
-  drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight);
-  pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
-                                 Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
+
+  int messageY;
+  if (compact) {
+    // Single row, opponent's panel+sprite in the left half and player's in
+    // the right half - each sprite touches its half's outer screen edge, its
+    // panel fills the rest of that half toward the center gap (see
+    // panelWidth's formula above).
+    const int rowTop = hudTop;
+    const int oppSpriteX = sideMargin;
+    const int oppPanelX = sideMargin + spriteW + compactSpriteGap;
+    const int spriteY = rowTop + dotRowHeight + std::max(0, (panelHeight - spriteH) / 2);
+    drawDots(opponentCount, opponentAliveMask, rowTop, oppPanelX + panelWidth);
+    drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), oppPanelX, rowTop + dotRowHeight);
+    pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
+                                   Rect{oppSpriteX, spriteY, spriteW, spriteH});
+
+    const int playerPanelX = halfWidth + compactCenterGap;
+    const int playerSpriteX = width - sideMargin - spriteW;
+    drawDots(snapshot_.partyCount, playerAliveMask, rowTop, playerPanelX + panelWidth);
+    drawPanel(battlePlayer_, playerName, playerPanelX, rowTop + dotRowHeight);
+    pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
+                                   Rect{playerSpriteX, spriteY, spriteW, spriteH});
+    messageY = hudBottom - messageHeight;
+  } else {
+    // Each zone's height is whichever is taller: the fixed-size sprite, or
+    // the dot row + HP panel stacked above it - the panel can outgrow the
+    // sprite once it carries a name line again, so this can't assume the
+    // sprite wins.
+    const int zoneContentHeight = std::max(spriteH, dotRowHeight + panelHeight);
+
+    // The message box is a fixed height pinned to the bottom instead of
+    // soaking up whatever was left over, so the gap between the two zones
+    // absorbs the freed space instead - keeping the battlefield (sprites +
+    // HP boxes) the biggest thing on screen rather than a mostly-empty text
+    // box.
+    messageY = hudBottom - messageHeight;
+    const int zoneGap = std::max(spriteGapMin, messageY - messageGap - hudTop - 2 * zoneContentHeight);
+
+    const int opponentSpriteX = width - sideMargin - spriteW;
+    const int opponentSpriteY = hudTop;
+    const int opponentPanelX = sideMargin;
+    drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + panelWidth);
+    drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight);
+    pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true,
+                                   Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
+
+    const int playerSpriteX = sideMargin;
+    const int playerZoneTop = hudTop + zoneContentHeight + zoneGap;
+    const int playerSpriteY = playerZoneTop;
+    const int playerPanelX = width - sideMargin - panelWidth;
+    drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + panelWidth);
+    drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight);
+    pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
+                                   Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
+  }
 
   if (messageY < hudTop) return;  // shouldn't happen at any supported screen size, but never draw a negative-size box
   const int messageX = sideMargin;
@@ -2520,9 +2631,9 @@ void PokemonActivity::renderBattleHud() {
   // too WIDE reflows onto a second line rather than losing its tail; the
   // combined line budget is still capped to what messageHeight can hold, so
   // the box itself never overflows.
-  constexpr int textTopPad = 18;
-  constexpr int textBottomPad = 12;
-  constexpr int lineSpacing = 26;
+  const int textTopPad = compact ? 6 : 18;
+  const int textBottomPad = compact ? 4 : 12;
+  const int lineSpacing = compact ? 20 : 26;
   const int maxLines = std::max(1, (messageHeight - textTopPad - textBottomPad) / lineSpacing);
   std::vector<std::string> lines;
   const char* segmentStart = battleLog_;

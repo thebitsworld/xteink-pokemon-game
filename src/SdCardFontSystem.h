@@ -5,6 +5,8 @@
 
 #include <atomic>
 
+#include "ReaderFontSizeStep.h"
+
 class GfxRenderer;
 
 struct DictionaryFontActivation {
@@ -48,7 +50,7 @@ class SdCardFontSystem {
   int resolveFontId(const char* familyName, uint8_t pointSize) const;
 
   /// Change the reader font size using the active SD family when one is selected.
-  bool changeReaderFontSize(bool larger);
+  bool changeReaderFontSize(bool larger, FontSizeStepMode mode = FontSizeStepMode::Wrap);
 
   /// Convert a pre-point-size SD font slot into the exact installed size.
   /// Used while reading legacy per-book reader settings.

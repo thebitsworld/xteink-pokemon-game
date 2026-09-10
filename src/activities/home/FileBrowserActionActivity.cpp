@@ -40,6 +40,12 @@ void FileBrowserActionActivity::finishCancelled() {
 
 void FileBrowserActionActivity::loop() {
   if (ignoreTouchRelease) {
+    // The caller may suppress the long-press tap before opening us. Clear that
+    // one-shot suppression while consuming the opening contact, so it cannot
+    // discard the user's first deliberate option tap.
+    int touchX = 0;
+    int touchY = 0;
+    (void)mappedInput.wasScreenTapped(touchX, touchY);
     if (mappedInput.wasScreenTouchReleased()) {
       ignoreTouchRelease = false;
     }

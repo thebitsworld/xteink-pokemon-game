@@ -10,3 +10,7 @@ inline unsigned long millis() { return imageDecoderTestMillis; }
 inline void delay(const unsigned long milliseconds) {
   if (milliseconds == 1) imageDecoderTestDelayCalls++;
 }
+
+inline void vTaskDelay(const unsigned long ticks) {
+  if (ticks == 1) imageDecoderTestDelayCalls++;
+}

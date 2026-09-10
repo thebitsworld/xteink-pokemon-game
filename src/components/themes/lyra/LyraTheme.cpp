@@ -387,7 +387,7 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
       renderer.fillRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
       renderer.drawRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, 1, cornerRadius, true, true, false,
                                false, true);
-    } else {
+    } else if (labels[i] != nullptr) {
       // Clear the previous full-sized hint before drawing the inactive marker.
       // Dictionary chaining can otherwise leave its old label visible.
       renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);

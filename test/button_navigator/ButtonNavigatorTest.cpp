@@ -14,6 +14,13 @@ uint32_t currentTimeMs = 0;
 
 void countCallback() { callbackCount++; }
 
+// Buttons is a fixed 2-slot array (no heap allocation - see
+// nextReleaseDoesNotAllocateForItsButtonList below), so a caller that only
+// cares about one button must repeat it in both slots. Leaving the second
+// slot to value-initialize would silently become Button::Back (enum value
+// 0), matching a Back release the caller never asked for - this is exactly
+// the workaround real callers (FileBrowserActivity, RecentBooksGridActivity)
+// use, so this test pins that pattern as the actual safe usage.
 bool singleButtonReleaseDoesNotAlsoMatchBack() {
   MappedInputManager input;
   ButtonNavigator navigator;
@@ -21,7 +28,7 @@ bool singleButtonReleaseDoesNotAlsoMatchBack() {
   ButtonNavigator::setMappedInputManager(input);
   input.setReleased(MappedInputManager::Button::Back, true);
 
-  navigator.onRelease({MappedInputManager::Button::Left}, countCallback);
+  navigator.onRelease({MappedInputManager::Button::Left, MappedInputManager::Button::Left}, countCallback);
 
   return callbackCount == 0;
 }

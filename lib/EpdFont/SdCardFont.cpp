@@ -11,7 +11,6 @@
 #include <memory>
 
 #include "EpdFontFamily.h"
-#include "ResidentGlyphUnion.h"
 
 static_assert(sizeof(EpdGlyph) == 16, "EpdGlyph must be 16 bytes to match .cpfont file layout");
 static_assert(sizeof(EpdUnicodeInterval) == 12, "EpdUnicodeInterval must be 12 bytes to match .cpfont file layout");
@@ -232,7 +231,16 @@ void SdCardFont::applyKernLigaturePointers(PerStyle& s, EpdFontData& data, const
   // kern matrix is never resident — see PerStyle::miniKernMatrix comment.
   data.kernLeftClasses = includeKerning ? s.miniKernLeftClasses : nullptr;
   data.kernRightClasses = includeKerning ? s.miniKernRightClasses : nullptr;
+  // .cpfont files map packed class tables and a dense matrix. Explicitly clear
+  // the built-in-only representation because getKerning() selects by pointer.
+  data.kernLeftCodepoints = nullptr;
+  data.kernLeftClassIds = nullptr;
+  data.kernRightCodepoints = nullptr;
+  data.kernRightClassIds = nullptr;
   data.kernMatrix = includeKerning ? s.miniKernMatrix : nullptr;
+  data.kernRowOffsets = nullptr;
+  data.kernSparseCols = nullptr;
+  data.kernSparseValues = nullptr;
   data.kernLeftEntryCount = includeKerning ? s.miniKernLeftEntryCount : 0;
   data.kernRightEntryCount = includeKerning ? s.miniKernRightEntryCount : 0;
   data.kernLeftClassCount = includeKerning ? s.miniKernLeftClassCount : 0;
@@ -934,41 +942,53 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
     }
   }
 
-  // Preserve resident glyphs when a second string (commonly the status-bar
-  // title) expands this style's working set. Replacing the mini arena here
-  // makes the page and status bar evict one another and repeat SD reads.
+  // Preserve the glyphs already resident in the mini arena when rebuilding.
+  // A page body and its CJK status-bar title are warmed separately; replacing
+  // the arena made each pass evict the other and repeat SD reads forever.
+  // Bound the union to MAX_PAGE_GLYPHS so the retained render cache remains
+  // within the same memory ceiling as a single dense page.
+  std::unique_ptr<uint32_t[]> unionCps;
   if (s.miniGlyphCount > 0 && s.miniIntervalCount > 0 && ESP.getFreeHeap() < MINI_RETAIN_MIN_FREE_HEAP) {
-    const uint32_t unionUpperBound = s.miniGlyphCount + cpCount;
-    const uint32_t averageBitmapBytes = s.miniBitmapUsed > 0 ? s.miniBitmapUsed / s.miniGlyphCount : 64U;
-    const uint32_t estimatedArenaBytes =
-        unionUpperBound * (static_cast<uint32_t>(sizeof(EpdGlyph)) + averageBitmapBytes);
+    const uint32_t unionMaxCount = s.miniGlyphCount + cpCount;
+    const uint32_t avgBitmapBytes =
+        (s.miniBitmapUsed > 0 && s.miniGlyphCount > 0) ? s.miniBitmapUsed / s.miniGlyphCount : 64;
+    const uint32_t estimatedArenaBytes = unionMaxCount * (static_cast<uint32_t>(sizeof(EpdGlyph)) + avgBitmapBytes);
     constexpr uint32_t UNION_PRESSURE_HEADROOM = 12U * 1024U;
     if (estimatedArenaBytes + UNION_PRESSURE_HEADROOM > ESP.getFreeHeap()) {
       freeStyleMiniData(s);
     }
   }
-
-  std::unique_ptr<uint32_t[]> unionCodepoints;
   if (s.miniGlyphCount > 0 && s.miniIntervalCount > 0) {
-    const uint32_t unionUpperBound = s.miniGlyphCount + cpCount;
-    // One entry beyond the retained-cache ceiling proves that the complete
-    // union is too large. Worst case is 513 * 4 = 2052 temporary bytes: too
-    // large for a task stack, while shared static scratch would be unsafe.
-    const uint32_t scratchCapacity = std::min<uint32_t>(unionUpperBound, MAX_PAGE_GLYPHS + 1U);
-    unionCodepoints = makeUniqueNoThrow<uint32_t[]>(scratchCapacity);
-    if (!unionCodepoints) {
-      LOG_DBG("SDCF", "Skipping resident glyph union: failed to allocate %u bytes",
-              scratchCapacity * static_cast<uint32_t>(sizeof(uint32_t)));
-    } else {
-      uint32_t unionCount = 0;
-      const auto mergeResult =
-          ResidentGlyphUnion::mergeSorted(s.miniIntervals, s.miniIntervalCount, codepoints, cpCount,
-                                          unionCodepoints.get(), scratchCapacity, unionCount);
-      if (mergeResult == ResidentGlyphUnion::MergeResult::Success && unionCount <= MAX_PAGE_GLYPHS) {
-        // A full resident mini cannot be downgraded by a metadata-only request.
+    const uint32_t unionMax = s.miniGlyphCount + cpCount;
+    unionCps.reset(new (std::nothrow) uint32_t[unionMax]);
+    if (unionCps) {
+      uint32_t count = 0;
+      uint32_t intervalIndex = 0;
+      uint32_t intervalCodepoint = s.miniIntervals[0].first;
+      bool intervalActive = true;
+      uint32_t requestIndex = 0;
+      while ((intervalActive || requestIndex < cpCount) && count < unionMax) {
+        uint32_t next;
+        if (intervalActive && (requestIndex >= cpCount || intervalCodepoint <= codepoints[requestIndex])) {
+          next = intervalCodepoint;
+          if (requestIndex < cpCount && codepoints[requestIndex] == intervalCodepoint) requestIndex++;
+          if (intervalCodepoint < s.miniIntervals[intervalIndex].last) {
+            intervalCodepoint++;
+          } else if (++intervalIndex < s.miniIntervalCount) {
+            intervalCodepoint = s.miniIntervals[intervalIndex].first;
+          } else {
+            intervalActive = false;
+          }
+        } else {
+          next = codepoints[requestIndex++];
+        }
+        unionCps[count++] = next;
+      }
+      if (!intervalActive && requestIndex >= cpCount && count <= MAX_PAGE_GLYPHS) {
+        // A full resident mini cannot be replaced with metadata-only entries.
         metadataOnly = metadataOnly && s.miniMetadataOnly;
-        codepoints = unionCodepoints.get();
-        cpCount = unionCount;
+        codepoints = unionCps.get();
+        cpCount = count;
       }
     }
   }

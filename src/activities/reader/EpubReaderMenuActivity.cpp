@@ -1,13 +1,10 @@
 #include "EpubReaderMenuActivity.h"
 
-#include <Arduino.h>
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
-#include <Memory.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 
 #include "ClippingStore.h"
@@ -21,6 +18,7 @@
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
+#include "components/icons/touchscreenStateIcons.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -69,13 +67,13 @@ struct ReaderLayoutSettingsSnapshot {
   uint8_t lineHeightPercent;
   uint8_t wordSpacing;
   uint8_t orientation;
-  uint8_t screenMargin;
+  uint8_t screenMarginVertical;
+  uint8_t screenMarginHorizontal;
   uint8_t publisherPageNumbers;
   uint8_t paragraphAlignment;
   uint8_t embeddedStyle;
   uint8_t hyphenationEnabled;
   uint8_t textAntiAliasing;
-  uint8_t readerDarkMode;
   uint8_t imageRendering;
   uint8_t extraParagraphSpacing;
   uint8_t forceParagraphIndents;
@@ -85,38 +83,60 @@ struct ReaderLayoutSettingsSnapshot {
   // Indexing method is a build policy, not a layout input. A mode-only change
   // keeps the live section/parser and takes effect when the next chapter opens.
   char sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName)] = {};
-
-  bool operator==(const ReaderLayoutSettingsSnapshot& other) const {
-    return fontFamily == other.fontFamily && readerFontPointSize == other.readerFontPointSize &&
-           lineHeightPercent == other.lineHeightPercent && wordSpacing == other.wordSpacing &&
-           orientation == other.orientation && screenMargin == other.screenMargin &&
-           publisherPageNumbers == other.publisherPageNumbers && paragraphAlignment == other.paragraphAlignment &&
-           embeddedStyle == other.embeddedStyle && hyphenationEnabled == other.hyphenationEnabled &&
-           textAntiAliasing == other.textAntiAliasing && readerDarkMode == other.readerDarkMode &&
-           imageRendering == other.imageRendering && extraParagraphSpacing == other.extraParagraphSpacing &&
-           forceParagraphIndents == other.forceParagraphIndents && bionicReadingEnabled == other.bionicReadingEnabled &&
-           guideReadingEnabled == other.guideReadingEnabled && epubRenderMode == other.epubRenderMode &&
-           std::strncmp(sdFontFamilyName, other.sdFontFamilyName, sizeof(sdFontFamilyName)) == 0;
-  }
-  bool operator!=(const ReaderLayoutSettingsSnapshot& other) const { return !(*this == other); }
 };
 
 ReaderLayoutSettingsSnapshot captureReaderLayoutSettings() {
   ReaderLayoutSettingsSnapshot snapshot{
-      SETTINGS.fontFamily,           SETTINGS.readerFontPointSize,   SETTINGS.lineHeightPercent,
-      SETTINGS.wordSpacing,          SETTINGS.orientation,           SETTINGS.screenMargin,
-      SETTINGS.publisherPageNumbers, SETTINGS.paragraphAlignment,    SETTINGS.embeddedStyle,
-      SETTINGS.hyphenationEnabled,   SETTINGS.textAntiAliasing,      SETTINGS.readerDarkMode,
-      SETTINGS.imageRendering,       SETTINGS.extraParagraphSpacing, SETTINGS.forceParagraphIndents,
-      SETTINGS.bionicReadingEnabled, SETTINGS.guideReadingEnabled,   SETTINGS.epubRenderMode,
+      SETTINGS.fontFamily,
+      SETTINGS.readerFontPointSize,
+      SETTINGS.lineHeightPercent,
+      SETTINGS.wordSpacing,
+      SETTINGS.orientation,
+      SETTINGS.screenMarginVertical,
+      SETTINGS.screenMarginHorizontal,
+      SETTINGS.publisherPageNumbers,
+      SETTINGS.paragraphAlignment,
+      SETTINGS.embeddedStyle,
+      SETTINGS.hyphenationEnabled,
+      SETTINGS.textAntiAliasing,
+      SETTINGS.imageRendering,
+      SETTINGS.extraParagraphSpacing,
+      SETTINGS.forceParagraphIndents,
+      SETTINGS.bionicReadingEnabled,
+      SETTINGS.guideReadingEnabled,
+      SETTINGS.epubRenderMode,
   };
   std::strncpy(snapshot.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(snapshot.sdFontFamilyName) - 1);
   snapshot.sdFontFamilyName[sizeof(snapshot.sdFontFamilyName) - 1] = '\0';
   return snapshot;
 }
 
-bool haveReaderLayoutSettingsChanged(const ReaderLayoutSettingsSnapshot& before) {
-  return before != captureReaderLayoutSettings();
+ReaderSettingsChangeMask classifyReaderSettingsChange(const ReaderLayoutSettingsSnapshot& before,
+                                                      const ReaderLayoutSettingsSnapshot& after) {
+  ReaderSettingsChangeMask changeMask = ReaderSettingsChangeMask::None;
+
+  if (before.textAntiAliasing != after.textAntiAliasing) {
+    changeMask = changeMask | ReaderSettingsChangeMask::NonLayout;
+  }
+  if (before.orientation != after.orientation) {
+    changeMask = changeMask | ReaderSettingsChangeMask::Orientation;
+  }
+  if (before.fontFamily != after.fontFamily || before.readerFontPointSize != after.readerFontPointSize ||
+      before.lineHeightPercent != after.lineHeightPercent || before.wordSpacing != after.wordSpacing ||
+      before.screenMarginVertical != after.screenMarginVertical ||
+      before.screenMarginHorizontal != after.screenMarginHorizontal ||
+      before.publisherPageNumbers != after.publisherPageNumbers ||
+      before.paragraphAlignment != after.paragraphAlignment || before.embeddedStyle != after.embeddedStyle ||
+      before.hyphenationEnabled != after.hyphenationEnabled ||
+      before.extraParagraphSpacing != after.extraParagraphSpacing ||
+      before.forceParagraphIndents != after.forceParagraphIndents ||
+      before.bionicReadingEnabled != after.bionicReadingEnabled ||
+      before.guideReadingEnabled != after.guideReadingEnabled || before.imageRendering != after.imageRendering ||
+      before.epubRenderMode != after.epubRenderMode ||
+      std::strncmp(before.sdFontFamilyName, after.sdFontFamilyName, sizeof(before.sdFontFamilyName)) != 0) {
+    changeMask = changeMask | ReaderSettingsChangeMask::Relayout;
+  }
+  return changeMask;
 }
 
 void drawBookmarkTabIcon(const GfxRenderer& renderer, int x, int y, const bool foregroundBlack = true) {
@@ -144,11 +164,11 @@ Rect readerMenuHeaderActionRect(const Rect& header, const ThemeMetrics& metrics)
 
 Rect readerMenuHeaderActionTouchRect(const Rect& header, const Rect& actionRect) {
   const int touchWidth = std::min(headerActionTouchSize, header.width);
-  const int touchHeight = std::min(headerActionTouchSize, header.height);
-  // Keep the expanded target clear of the right-side battery reserve. The
-  // visual icon stays centered in actionRect; only the tappable area grows.
-  return Rect{actionRect.x + actionRect.width - touchWidth, actionRect.y + actionRect.height - touchHeight, touchWidth,
-              touchHeight};
+  const int touchX = actionRect.x + actionRect.width - touchWidth;
+  // The title reserves the space left of touchX. Treat the remaining header
+  // corner, including the non-interactive battery area, as Home so the icon is
+  // easy to hit without changing its visual placement.
+  return Rect{touchX, header.y, header.x + header.width - touchX, header.height};
 }
 
 void drawSdkIcon(fui::GfxRendererTarget& target, const freeink::Icon& icon, const int x, const int y,
@@ -177,15 +197,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     ReaderOptionsActivity::DictionaryFontChangedCallback dictionaryFontChangedCallback,
     void* dictionaryFontChangedContext)
     : Activity("EpubReaderMenu", renderer, mappedInput),
-      menuItems(buildReaderMenuItems({
-          .hasFootnotes = hasFootnotes,
-          .hasDictionary = hasDictionary,
-          .hasBookmarks = hasBookmarks,
-          .hasClippings = hasClippings,
-          .isCurrentPageBookmarked = isCurrentPageBookmarked,
-          .isBookCompleted = isBookCompleted,
-          .showReadingPaceReset = showReadingPaceReset,
-      })),
+      menuItems(buildMenuItems(hasFootnotes, hasBookmarks, hasClippings, isCurrentPageBookmarked, isBookCompleted,
+                               showReadingPaceReset, hasDictionary)),
       title(title),
       pendingOrientation(currentOrientation),
       currentPage(currentPage),
@@ -213,6 +226,58 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
   }
 }
 
+EpubReaderMenuActivity::TabMenuItems EpubReaderMenuActivity::buildMenuItems(
+    bool hasFootnotes, bool hasBookmarks, bool hasClippings, bool isCurrentPageBookmarked, bool isBookCompleted,
+    bool showReadingPaceReset, bool hasDictionary) {
+  TabMenuItems items;
+  auto& mainItems = items[MAIN_TAB_INDEX];
+  auto& bookmarkItems = items[BOOKMARKS_TAB_INDEX];
+  auto& settingsItems = items[SETTINGS_TAB_INDEX];
+
+  mainItems.reserve(9 + (hasFootnotes ? 1u : 0u) + (hasDictionary ? 2u : 0u));
+  bookmarkItems.reserve(9 + (hasBookmarks ? 2u : 0u) + (hasClippings ? 1u : 0u));
+  settingsItems.reserve(6);
+
+  if (hasFootnotes) {
+    mainItems.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
+  }
+  if (hasDictionary) {
+    mainItems.push_back({MenuAction::LOOKUP, StrId::STR_LOOKUP});
+    mainItems.push_back({MenuAction::LOOKUP_HISTORY, StrId::STR_LOOKUP_HISTORY});
+  }
+  mainItems.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
+  mainItems.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
+  mainItems.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_INTERVAL_SECONDS});
+  mainItems.push_back({MenuAction::READING_STATS, StrId::STR_READING_STATS});
+  mainItems.push_back({MenuAction::READER_OPTIONS, StrId::STR_READER_OPTIONS});
+  bookmarkItems.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
+  if (hasClippings) {
+    bookmarkItems.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
+  }
+  bookmarkItems.push_back(
+      {MenuAction::BOOKMARK_TOGGLE, isCurrentPageBookmarked ? StrId::STR_REMOVE_BOOKMARK : StrId::STR_ADD_BOOKMARK});
+  if (hasBookmarks) {
+    bookmarkItems.push_back({MenuAction::VIEW_BOOKMARKS, StrId::STR_VIEW_BOOKMARKS});
+    bookmarkItems.push_back({MenuAction::DELETE_BOOKMARKS, StrId::STR_DELETE_BOOKMARKS});
+  }
+  bookmarkItems.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
+  bookmarkItems.push_back({MenuAction::NEARBY_POSITION_SYNC, StrId::STR_NEARBY_POSITION_SYNC});
+  bookmarkItems.push_back({MenuAction::SEND_NEARBY_BOOK, StrId::STR_SEND_NEARBY_BOOK});
+  bookmarkItems.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
+  bookmarkItems.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
+
+  settingsItems.push_back({MenuAction::SET_BOOK_DICTIONARY, StrId::STR_BOOK_DICTIONARY});
+  settingsItems.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
+  settingsItems.push_back({MenuAction::DELETE_STATS, StrId::STR_DELETE_BOOK_STATS});
+  if (showReadingPaceReset) {
+    settingsItems.push_back({MenuAction::RESET_READING_PACE, StrId::STR_RESET_READING_PACE});
+  }
+  settingsItems.push_back({MenuAction::CONTROLS_OPTIONS, StrId::STR_CAT_CONTROLS});
+  settingsItems.push_back(
+      {MenuAction::TOGGLE_COMPLETED, isBookCompleted ? StrId::STR_MARK_UNFINISHED : StrId::STR_MARK_FINISHED});
+  return items;
+}
+
 void EpubReaderMenuActivity::dictionaryFontChangedForMenu(void* ctx, const char* familyName, const uint8_t pointSize) {
   auto* self = static_cast<EpubReaderMenuActivity*>(ctx);
   if (!self) return;
@@ -238,16 +303,8 @@ void EpubReaderMenuActivity::dictionaryFontChangedForMenu(void* ctx, const char*
   }
 }
 
-const ReaderMenuItemList& EpubReaderMenuActivity::activeMenuItems() const {
-  switch (activeTab) {
-    case MenuTab::Main:
-      return menuItems.main;
-    case MenuTab::Bookmarks:
-      return menuItems.bookmarks;
-    case MenuTab::Settings:
-      return menuItems.settings;
-  }
-  return menuItems.main;
+const std::vector<EpubReaderMenuActivity::MenuItem>& EpubReaderMenuActivity::activeMenuItems() const {
+  return menuItems[activeTabIndex()];
 }
 
 void EpubReaderMenuActivity::focusTabRow() {
@@ -268,9 +325,15 @@ void EpubReaderMenuActivity::moveActiveTab(const bool forward) {
 void EpubReaderMenuActivity::finishCancelled() {
   ActivityResult result;
   result.isCancelled = true;
-  result.data = MenuResult{-1, pendingOrientation, settingsChanged};
+  result.data = makeMenuResult(-1);
   setResult(std::move(result));
   finish();
+}
+
+MenuResult EpubReaderMenuActivity::makeMenuResult(const int action) const {
+  MenuResult result{action, pendingOrientation, settingsChanged};
+  result.changeMask = changeMask;
+  return result;
 }
 
 bool EpubReaderMenuActivity::activateSelectedItem() {
@@ -280,7 +343,7 @@ bool EpubReaderMenuActivity::activateSelectedItem() {
   }
 
   const auto& items = activeMenuItems();
-  if (selectedIndex >= static_cast<int>(items.count)) {
+  if (selectedIndex >= static_cast<int>(items.size())) {
     focusTabRow();
     requestUpdate();
     return true;
@@ -303,87 +366,65 @@ bool EpubReaderMenuActivity::activateSelectedItem() {
 
   if (selectedAction == MenuAction::READER_OPTIONS) {
     const auto before = captureReaderLayoutSettings();
-    auto readerOptions = makeUniqueNoThrow<ReaderOptionsActivity>(
-        renderer, mappedInput, saveReaderSettingsCallback, saveReaderSettingsContext, saveGlobalSettingsCallback,
-        saveGlobalSettingsContext, beginGlobalSettingsEditCallback, beginGlobalSettingsEditContext,
-        endGlobalSettingsEditCallback, endGlobalSettingsEditContext, stablePageNumbersAvailable,
-        dictionaryFontFamilyName, dictionaryFontPointSize, hasDictionaryFontOverride, dictionaryFontChangedForMenu,
-        this);
-    if (!readerOptions) {
-      LOG_ERR("RMENU", "OOM: ReaderOptionsActivity (size=%u free=%u maxAlloc=%u)",
-              static_cast<unsigned>(sizeof(ReaderOptionsActivity)), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-      GUI.drawPopup(renderer, tr(STR_MEMORY_ERROR));
-      renderer.displayBuffer();
-      delay(1000);
-      requestUpdate();
-      return true;
-    }
-    startActivityForResult(std::move(readerOptions), [this, before](const ActivityResult& result) {
-      settingsChanged = settingsChanged || haveReaderLayoutSettingsChanged(before);
-      pendingOrientation = SETTINGS.orientation;  // sync in case orientation changed
-      if (result.isCancelled) {
-        finishCancelled();
-        return;
-      }
-      requestUpdate();
-    });
+    startActivityForResult(std::make_unique<ReaderOptionsActivity>(
+                               renderer, mappedInput, saveReaderSettingsCallback, saveReaderSettingsContext,
+                               saveGlobalSettingsCallback, saveGlobalSettingsContext, beginGlobalSettingsEditCallback,
+                               beginGlobalSettingsEditContext, endGlobalSettingsEditCallback,
+                               endGlobalSettingsEditContext, stablePageNumbersAvailable, dictionaryFontFamilyName,
+                               dictionaryFontPointSize, hasDictionaryFontOverride, dictionaryFontChangedForMenu, this),
+                           [this, before](const ActivityResult& result) {
+                             const ReaderSettingsChangeMask changed =
+                                 classifyReaderSettingsChange(before, captureReaderLayoutSettings());
+                             if (changed != ReaderSettingsChangeMask::None) {
+                               settingsChanged = true;
+                               changeMask = changeMask | changed;
+                             }
+                             pendingOrientation = SETTINGS.orientation;  // sync in case orientation changed
+                             if (result.isCancelled) {
+                               finishCancelled();
+                               return;
+                             }
+                             requestUpdate();
+                           });
     return true;
   }
 
   if (selectedAction == MenuAction::CONTROLS_OPTIONS) {
-    auto controlsOptions = makeUniqueNoThrow<ControlsOptionsActivity>(renderer, mappedInput);
-    if (!controlsOptions) {
-      LOG_ERR("RMENU", "OOM: ControlsOptionsActivity (size=%u free=%u maxAlloc=%u)",
-              static_cast<unsigned>(sizeof(ControlsOptionsActivity)), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-      GUI.drawPopup(renderer, tr(STR_MEMORY_ERROR));
-      renderer.displayBuffer();
-      delay(1000);
-      requestUpdate();
-      return true;
-    }
-    startActivityForResult(std::move(controlsOptions), [this](const ActivityResult&) {
-      ActivityResult result;
-      result.isCancelled = true;
-      result.data = MenuResult{-1, pendingOrientation, settingsChanged};
-      setResult(std::move(result));
-      finish();
-    });
+    startActivityForResult(std::make_unique<ControlsOptionsActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) {
+                             ActivityResult result;
+                             result.isCancelled = true;
+                             result.data = makeMenuResult(-1);
+                             setResult(std::move(result));
+                             finish();
+                           });
     return true;
   }
 
   if (selectedAction == MenuAction::VIEW_CLIPPINGS) {
-    auto clippingList = makeUniqueNoThrow<EpubReaderClippingListActivity>(renderer, mappedInput);
-    if (!clippingList) {
-      LOG_ERR("RMENU", "OOM: EpubReaderClippingListActivity (size=%u free=%u maxAlloc=%u)",
-              static_cast<unsigned>(sizeof(EpubReaderClippingListActivity)), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-      GUI.drawPopup(renderer, tr(STR_MEMORY_ERROR));
-      renderer.displayBuffer();
-      delay(1000);
-      requestUpdate();
-      return true;
-    }
-    startActivityForResult(std::move(clippingList), [this](const ActivityResult& result) {
-      if (result.isCancelled) {
-        requestUpdate();
-        return;
-      }
+    startActivityForResult(std::make_unique<EpubReaderClippingListActivity>(renderer, mappedInput),
+                           [this](const ActivityResult& result) {
+                             if (result.isCancelled) {
+                               requestUpdate();
+                               return;
+                             }
 
-      const auto* clipping = std::get_if<ClippingJumpResult>(&result.data);
-      if (clipping == nullptr) {
-        requestUpdate();
-        return;
-      }
+                             const auto* clipping = std::get_if<ClippingJumpResult>(&result.data);
+                             if (clipping == nullptr) {
+                               requestUpdate();
+                               return;
+                             }
 
-      ClippingJumpResult menuResult = *clipping;
-      menuResult.orientation = pendingOrientation;
-      menuResult.settingsChanged = settingsChanged;
-      setResult(std::move(menuResult));
-      finish();
-    });
+                             ClippingJumpResult menuResult = *clipping;
+                             menuResult.orientation = pendingOrientation;
+                             menuResult.settingsChanged = settingsChanged;
+                             setResult(std::move(menuResult));
+                             finish();
+                           });
     return true;
   }
 
-  setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation, settingsChanged});
+  setResult(makeMenuResult(static_cast<int>(selectedAction)));
   finish();
   return true;
 }
@@ -398,7 +439,7 @@ bool EpubReaderMenuActivity::handleTouchInput() {
       return true;
     }
     if (mappedInput.hasTouchHardware() && tabIndex == static_cast<int>(TOUCH_HOME_ICON_INDEX)) {
-      setResult(MenuResult{static_cast<int>(MenuAction::GO_HOME), pendingOrientation, settingsChanged});
+      setResult(makeMenuResult(static_cast<int>(MenuAction::GO_HOME)));
       finish();
       return true;
     }
@@ -415,7 +456,7 @@ bool EpubReaderMenuActivity::handleTouchInput() {
 void EpubReaderMenuActivity::onRowEvent(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<EpubReaderMenuActivity*>(user);
   const auto& items = self->activeMenuItems();
-  if (self->optionPopup.isActive() || event.value < 0 || event.value >= static_cast<int16_t>(items.count)) return;
+  if (self->optionPopup.isActive() || event.value < 0 || event.value >= static_cast<int16_t>(items.size())) return;
   self->selectedIndex = event.value;
   self->app.clearTapFlash();
   self->activateSelectedItem();
@@ -462,7 +503,8 @@ void EpubReaderMenuActivity::drawIconTabBar(const Rect rect, const bool drawBott
     }
 #if CROSSINK_APP_CAP_TOUCH
     else {
-      drawSdkIcon(uiTarget, SETTINGS.disableReaderTouchscreen ? icon_pointer_off_24 : icon_pointer_24, iconX, iconY);
+      drawSdkIcon(uiTarget, SETTINGS.disableReaderTouchscreen ? icon_device_tablet_off_24 : icon_device_tablet_24,
+                  iconX, iconY);
     }
 #endif
   }
@@ -474,11 +516,10 @@ void EpubReaderMenuActivity::onEnter() {
   uiReady = false;
   visibleRows = 1;
   topIndex = 0;
-  app.setTheme(uiThemeTokens(uiTarget));
+  applySharedUiTheme(app, uiTarget);
   app.on(ACTION_ROW, &EpubReaderMenuActivity::onRowEvent, this);
   app.setScreen(&EpubReaderMenuActivity::menuScreen, this);
   requestUpdate();
-  LOG_DBG("RMENU", "Entered reader menu: free=%u maxAlloc=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 void EpubReaderMenuActivity::onExit() {
@@ -507,7 +548,7 @@ void EpubReaderMenuActivity::loop() {
 
   // A home-key long press toggles the reader menu: the same hold that opens it
   // closes it. The SDK fires the long event once per hold, so the opening hold
-  // (still down as the menu appears) does not immediately re-close it — only a
+  // (still down as the menu appears) does not immediately re-close it, only a
   // fresh press-and-hold does.
   if (mappedInput.wasReaderMenuHold()) {
     finishCancelled();
@@ -530,7 +571,7 @@ void EpubReaderMenuActivity::loop() {
 
   // Swipes scroll the viewport; the selection stays put (it may scroll
   // off-screen) and button navigation pulls the view back to it.
-  const int menuCount = static_cast<int>(activeMenuItems().count);
+  const int menuCount = static_cast<int>(activeMenuItems().size());
   const auto swipe = mappedInput.wasSwipe();
   if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
     const int delta = swipe == MappedInputManager::SwipeDir::Up ? visibleRows : -visibleRows;
@@ -589,27 +630,27 @@ void EpubReaderMenuActivity::buildMenuScreen(UiApp::ScreenType& screen) {
                                       static_cast<int16_t>(renderer.getScreenWidth() - (safe.x + safe.width)),
                                       static_cast<int16_t>(contentBottom), static_cast<int16_t>(safe.x)});
 
-  const ReaderMenuItemList& activeItems = activeMenuItems();
-  autoTurnValue[0] = '\0';
-  for (uint8_t i = 0; i < activeItems.count; ++i) {
+  const auto& activeItems = activeMenuItems();
+  std::vector<std::string> values(activeItems.size());
+  std::vector<fui::ListItem> items;
+  items.reserve(activeItems.size());
+  for (size_t i = 0; i < activeItems.size(); i++) {
     const auto& menuItem = activeItems[i];
-    fui::ListItem& item = uiListItems[i];
-    item = {};
+    fui::ListItem item;
     item.label = I18N.get(menuItem.labelId);
     if (menuItem.action == MenuAction::ROTATE_SCREEN) {
       item.value = I18N.get(orientationLabels[pendingOrientation]);
     } else if (menuItem.action == MenuAction::AUTO_PAGE_TURN) {
-      if (autoPageTurnActive) {
-        std::snprintf(autoTurnValue, sizeof(autoTurnValue), "%u", static_cast<unsigned>(autoPageTurnIntervalSeconds));
-        item.value = autoTurnValue;
-      }
+      if (autoPageTurnActive) values[i] = std::to_string(autoPageTurnIntervalSeconds);
+      item.value = values[i].empty() ? nullptr : values[i].c_str();
     }
-    item.actionValue = static_cast<int16_t>(i);
+    item.actionValue = static_cast<int16_t>(items.size());
+    items.push_back(item);
   }
 
   fui::ListProps props;
-  props.items = uiListItems.data();
-  props.count = activeItems.count;
+  props.items = items.data();
+  props.count = static_cast<uint16_t>(items.size());
   props.selectedIndex = static_cast<int16_t>(selectedIndex);
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
@@ -618,7 +659,7 @@ void EpubReaderMenuActivity::buildMenuScreen(UiApp::ScreenType& screen) {
   props.labelText.maxLines = 2;
   const auto rows = configureUiList(props, screen.theme(), screen.body());
   visibleRows = rows > 0 ? rows : 1;
-  topIndex = scrollListBy(topIndex, 0, visibleRows, static_cast<int>(activeItems.count));  // clamp to range
+  topIndex = scrollListBy(topIndex, 0, visibleRows, static_cast<int>(activeItems.size()));  // clamp to range
   props.topIndex = static_cast<uint16_t>(topIndex);
   screen.list(props);
 }
@@ -650,17 +691,16 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   }
 
   // Progress summary
-  char progressLine[96]{};
+  std::string progressLine;
   if (totalPages > 0) {
-    std::snprintf(progressLine, sizeof(progressLine), "%s%d/%d%s%s%d%%", tr(STR_CHAPTER_PREFIX), currentPage,
-                  totalPages, tr(STR_PAGES_SEPARATOR), tr(STR_BOOK_PREFIX), bookProgressPercent);
-  } else {
-    std::snprintf(progressLine, sizeof(progressLine), "%s%d%%", tr(STR_BOOK_PREFIX), bookProgressPercent);
+    progressLine = std::string(tr(STR_CHAPTER_PREFIX)) + std::to_string(currentPage) + "/" +
+                   std::to_string(totalPages) + std::string(tr(STR_PAGES_SEPARATOR));
   }
+  progressLine += std::string(tr(STR_BOOK_PREFIX)) + std::to_string(bookProgressPercent) + "%";
   GUI.drawSubHeader(renderer,
                     Rect{screen.x, screen.y + metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput),
                          screen.width, metrics.tabBarHeight},
-                    progressLine);
+                    progressLine.c_str());
 
   const int tabBarY = tabsAtBottom ? screen.y + screen.height - tabBarHeight
                                    : screen.y + metrics.topPadding +
@@ -673,7 +713,8 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   uiReady = true;
 
   const auto confirmLabel = selectedIndex < 0 ? tr(STR_NEXT_FIELD) : tr(STR_SELECT);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
 
   renderer.displayBuffer();

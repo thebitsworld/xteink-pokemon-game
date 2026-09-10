@@ -41,6 +41,12 @@ class PersistableStoreBase {
 
   bool resaveRequested = false;
 
+  // Tracks whether this store has had a load attempted, including attempts
+  // that fail because the file is missing or unreadable. This is a per-store
+  // lifecycle marker, not synchronization: ensureLoaded() must not be used to
+  // make arbitrary cross-task access to a store safe.
+  mutable bool loadAttempted_ = false;
+
  public:
   // Public so non-store JSON files (e.g. per-book bookmarks) can reuse them
   // instead of instantiating serializeJson/deserializeJson in their own TU —
@@ -93,6 +99,14 @@ class PersistableStore : public PersistableStoreBase {
   PersistableStore(const PersistableStore&) = delete;
   PersistableStore& operator=(const PersistableStore&) = delete;
 
+  // Load the store once before a caller uses it. The load attempt is marked by
+  // loadFromFile() before any file or JSON work begins, so fromJson() can call
+  // guarded mutators without recursively reloading the store.
+  void ensureLoaded() const {
+    if (loadAttempted_) return;
+    const_cast<T*>(static_cast<const T*>(this))->loadFromFile();
+  }
+
   static T& getInstance() {
     static T instance;
     return instance;
@@ -106,6 +120,7 @@ class PersistableStore : public PersistableStoreBase {
   }
 
   bool loadFromFile() {
+    loadAttempted_ = true;
     bool ok;
     bool doResave;
     {

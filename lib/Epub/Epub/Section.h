@@ -68,11 +68,14 @@ class Section {
   bool buildComplete_ = false;
   bool lastImagesWereSuppressed_ = false;
   bool lastLayoutAbortedForLowMemory_ = false;
+  uint16_t imageEstimateViewportHeight_ = 0;
+  uint32_t protectedImageUnits_ = 0;
   // Pages laid out by the active build. Distinct from pageCount, which is the pages
   // available to read and may include a loaded partial file's pages.
   uint16_t builtPageCount_ = 0;
   bool partial_ = false;
   uint16_t partialPageCount_ = 0;
+  uint32_t partialProtectedImageUnits_ = 0;
   uint32_t partialBytesConsumed_ = 0;
   uint32_t partialTotalBytes_ = 0;
   std::string activeBuildTmpSectionPath_;
@@ -154,6 +157,12 @@ class Section {
 
   // Get the page count from the section cache file without fully loading it.
   std::optional<uint16_t> getCachedPageCount() const;
+
+  // Image units already protected by laid-out pages, and the non-image units
+  // projected through the section's XHTML byte density. Both accessors are
+  // allocation-free and are used by grouped-chapter progress estimates.
+  uint64_t estimatedProtectedImageUnits() const;
+  uint64_t estimatedNonImageProjectionUnits() const;
 
   // Look up the page number for a synthetic paragraph index from XPath p[N].
   // Checks the active incremental build before falling back to the committed cache.

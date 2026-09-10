@@ -1,5 +1,6 @@
 #include "SdCardFontRegistry.h"
 
+#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -213,7 +214,16 @@ bool SdCardFontRegistry::discover() {
 
   // Hidden root is scanned first so it wins on name collisions, matching the
   // sleep-folder pattern (/.sleep preferred over /sleep).
-  if (!scanRoot(FONTS_DIR_HIDDEN, families_) || !scanRoot(FONTS_DIR_VISIBLE, families_)) {
+  char hiddenRoot[16];
+  char visibleRoot[16];
+  const char* hiddenPath = FsHelpers::resolveRootDirectoryIgnoreCase(FONTS_DIR_HIDDEN, hiddenRoot, sizeof(hiddenRoot))
+                               ? hiddenRoot
+                               : FONTS_DIR_HIDDEN;
+  const char* visiblePath =
+      FsHelpers::resolveRootDirectoryIgnoreCase(FONTS_DIR_VISIBLE, visibleRoot, sizeof(visibleRoot))
+          ? visibleRoot
+          : FONTS_DIR_VISIBLE;
+  if (!scanRoot(hiddenPath, families_) || !scanRoot(visiblePath, families_)) {
     discoveryFailed_ = true;
     clear();
     LOG_ERR("SDREG", "Font discovery stopped after an out-of-memory directory scan");

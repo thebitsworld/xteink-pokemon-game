@@ -302,32 +302,19 @@ int SdCardFontSystem::resolveFontId(const char* familyName, uint8_t /*pointSize*
   return manager_.getFontId(familyName);
 }
 
-bool SdCardFontSystem::changeReaderFontSize(const bool larger) {
+bool SdCardFontSystem::changeReaderFontSize(const bool larger, const FontSizeStepMode mode) {
   refreshIfDirty();
 
   if (SETTINGS.sdFontFamilyName[0] != '\0') {
     const auto* family = registry_.findFamily(SETTINGS.sdFontFamilyName);
     if (family) {
       const auto sizes = family->availableSizes();
-      if (sizes.size() > 1) {
-        uint8_t current = 0;
-        while (current + 1 < sizes.size() && sizes[current] < SETTINGS.readerFontPointSize) ++current;
-        if (sizes[current] != SETTINGS.readerFontPointSize && current > 0 &&
-            SETTINGS.readerFontPointSize - sizes[current - 1] <= sizes[current] - SETTINGS.readerFontPointSize) {
-          --current;
-        }
-        if (larger) {
-          current = static_cast<uint8_t>((current + 1) % sizes.size());
-        } else {
-          current = current == 0 ? static_cast<uint8_t>(sizes.size() - 1) : static_cast<uint8_t>(current - 1);
-        }
-        SETTINGS.readerFontPointSize = sizes[current];
-        return true;
-      }
+      if (changeReaderFontSizeStep(sizes.data(), sizes.size(), SETTINGS.readerFontPointSize, larger, mode)) return true;
+      if (sizes.size() > 0) return false;
     }
   }
 
-  return SETTINGS.changeReaderFontSize(larger);
+  return SETTINGS.changeReaderFontSize(larger, mode);
 }
 
 uint8_t SdCardFontSystem::resolveLegacySizeStep(const char* familyName, const uint8_t sizeStep) {
@@ -395,7 +382,18 @@ DictionaryFontActivation SdCardFontSystem::activateDictionaryFont(GfxRenderer& r
             afterCacheRelease.maxAllocHeap);
   }
 
-  const auto heap = MemoryBudget::snapshot();
+  auto heap = MemoryBudget::snapshot();
+  if (!MemoryBudget::hasHeapForDictionarySdFont(heap)) {
+    // The reader family itself is also disposable for a dictionary swap. Retry
+    // after releasing it so its font data does not cause a false low-memory
+    // fallback.
+    const auto beforeReaderUnload = heap;
+    if (!manager_.currentFamilyName().empty()) manager_.unloadAll(renderer);
+    loadedFontPointSize_ = 0;
+    heap = MemoryBudget::snapshot();
+    LOG_DBG("SDFS", "Released reader font before dictionary swap retry: free=%u->%u maxAlloc=%u->%u",
+            beforeReaderUnload.freeHeap, heap.freeHeap, beforeReaderUnload.maxAllocHeap, heap.maxAllocHeap);
+  }
   if (!MemoryBudget::hasHeapForDictionarySdFont(heap)) {
     LOG_ERR("SDFS", "Low heap for dictionary font swap (%u free, %u max alloc, need %u/%u); using reader font",
             heap.freeHeap, heap.maxAllocHeap, MemoryBudget::DICTIONARY_SD_FONT_MIN_FREE,

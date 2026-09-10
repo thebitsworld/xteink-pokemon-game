@@ -1,4 +1,8 @@
 #pragma once
 
-#define LOG_DBG(...) ((void)0)
-#define LOG_ERR(...) ((void)0)
+template <typename... Args>
+inline void fontCacheManagerTestLog(const Args&...) {}
+
+#define LOG_ERR(...) fontCacheManagerTestLog(__VA_ARGS__)
+#define LOG_INF(...) fontCacheManagerTestLog(__VA_ARGS__)
+#define LOG_DBG(...) fontCacheManagerTestLog(__VA_ARGS__)

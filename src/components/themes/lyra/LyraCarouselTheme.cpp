@@ -626,10 +626,10 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
 void LyraCarouselTheme::registerButtonMenuTouchTargets(const GfxRenderer& renderer, int buttonCount) const {
   if (buttonCount <= 0) return;
   const MenuLayoutMetrics metrics = computeMenuLayout(renderer, buttonCount);
+  const Rect touchRect = buttonMenuTouchRect(renderer, buttonCount);
   for (int i = 0; i < buttonCount; ++i) {
-    TouchRegistry::getInstance().add(
-        Rect{i * metrics.tileW, metrics.labelY, metrics.tileW, metrics.rowY + metrics.tileH - metrics.labelY}, i,
-        TouchRegistry::Item);
+    TouchRegistry::getInstance().add(Rect{i * metrics.tileW, touchRect.y, metrics.tileW, touchRect.height}, i,
+                                     TouchRegistry::Item);
   }
 }
 
@@ -639,6 +639,12 @@ Rect LyraCarouselTheme::homeAccessoryRect(const GfxRenderer& renderer, const int
   const int bottom = std::max(0, menu.labelY - bottomGap);
   const int safeHeight = std::clamp(height, 0, bottom);
   return Rect{0, bottom - safeHeight, renderer.getScreenWidth(), safeHeight};
+}
+
+Rect LyraCarouselTheme::buttonMenuTouchRect(const GfxRenderer& renderer, const int buttonCount) {
+  if (buttonCount <= 0) return Rect{0, 0, 0, 0};
+  const MenuLayoutMetrics metrics = computeMenuLayout(renderer, buttonCount);
+  return Rect{0, metrics.labelY, renderer.getScreenWidth(), metrics.rowY + metrics.tileH - metrics.labelY};
 }
 
 void LyraCarouselTheme::drawButtonMenuSelectionOverlay(const GfxRenderer& renderer, int buttonCount, int selectedIndex,

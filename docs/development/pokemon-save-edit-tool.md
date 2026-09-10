@@ -74,6 +74,20 @@ Directly sets `totalXp` for one Pokémon record (party or PC) by `record-id` (se
 python3 scripts/dev/edit_pokemon_save.py set-record-xp --record-id 1 --xp 5000
 ```
 
+### `add-party-member`
+Creates a brand-new record at an exact level and drops it into the first empty party slot. Useful for quickly filling out a 6-member party to test battles, TM/HM compatibility, evolutions, etc. without waiting on real encounters.
+
+```sh
+python3 scripts/dev/edit_pokemon_save.py add-party-member --species pikachu --level 20
+```
+
+- `--species` — numeric id or species name
+- `--level` — 1-100; `totalXp` is set to exactly `xpRequired(level)` so it round-trips through the device's `levelForXp()` without landing a level off
+- `--gender` (`female`/`genderless`/`male`) — default: auto-picked to satisfy the species
+- `--nickname` — default: none
+
+Fails if the party already has 6 members. Also marks the species as seen and caught in the Pokédex, since a Pokémon you own must be both. HP/PP for a newly-added member come out full the moment it's used (no battle-store entry exists yet), unless you also run `reset-battle-store` to be certain a stale entry for a reused record id isn't picked up first.
+
 ## More examples via `--help`
 
 ```sh

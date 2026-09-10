@@ -2,8 +2,187 @@
 
 Context notes for Claude in a later session (or on another machine) to continue this work without rediscovering everything from scratch. This file is NOT official project documentation — it's just a handoff notebook, and can be cleaned up/deleted once the in-progress work is done.
 
+## New work in progress: Xteink X4 Pro support (started 2026-09-10)
+
+Branch: **`feat/X4Pro-support`**. Full 5-phase plan, hardware findings, measured flash
+numbers, and per-phase "definition of done" all live in:
+
+👉 **[docs/development/pokemon-x4pro-roadmap.md](docs/development/pokemon-x4pro-roadmap.md)**
+— read this before writing any code for X4 Pro. It's written so a session with zero prior
+context can pick up exactly one phase (1: merge upstream CrossInk v1.5.1-rc-6; 2: add the
+`pokemon-x4-pro` PlatformIO env; 3: touch support for the whole Pokémon UI, since X4 Pro has
+no physical d-pad; 4: layout fixes for the 800×480 panel, mainly the Battle HUD's tight
+vertical budget; 5: release packaging) and execute it independently.
+
+**Phase 1 is done** (merge commit `414958d8` + fixup commit `ec666a15`). Turned out a
+prepared remote branch `origin/upstream-history` already carried real CrossInk history back
+through `v1.5.0`, so a `git replace --graft` onto its tip (not `v1.5.0` directly, a closer
+match) gave a genuine 3-way merge instead of the ~630-file conflict a naive
+`--allow-unrelated-histories` merge would have produced — only 61 files actually conflicted.
+The graft itself was removed after the merge commit landed (no longer needed - the merge
+commit's second parent is a real, permanent link to upstream now). A second round of ~10
+fixes was needed after the merge *looked* clean (built the 61-conflict resolution fine) but
+several files where this fork's now-abandoned pre-squash experiment and upstream both edited
+non-overlapping hunks had silently combined into code that doesn't compile or doesn't match
+either side's real intent — git can't flag that as a conflict, only building/testing catches
+it. See the roadmap doc's Phase 1 section for the full list (API drift in
+GfxRenderer/ImageToFramebufferDecoder/ButtonNavigator, a missing build flag, a stale
+simulator SDK pin, host-vs-ESP32 `char` signedness, two orphaned tests) — one item worth
+flagging on its own: **a real navigation bug already in upstream's own v1.5.1-rc-6 tag**
+(confirmed byte-identical, not something this merge introduced) where a single-button
+`Buttons{X}` release/press handler also silently fires on Back, in `FileBrowserActivity.cpp`
+and `RecentBooksGridActivity.cpp` — worked around locally, but worth reporting upstream.
+
+Confirmed green: `pio run -e pokemon-x3` (**Flash 93.1%, 439,232 B free** — down from
+97.0%/185,216 B pre-merge, a big unplanned win from upstream's font compression work), the
+native suite (**333/333**), and the X3 simulator smoke run (boots, runs the full script
+including Pokémon, exits clean).
+
+**Phase 2 is done** (commit `2ce2a09e`): added `[env:pokemon-x4-pro]` and
+`[env:pokemon-x4-pro-simulator]` to `platformio.ini`. Both built clean on the first try - no
+fixes needed. `pio run -e pokemon-x4-pro`: Flash 92.7%, 478,320 B free. Simulator boots and
+runs clean. `pokemon-x3` re-verified unaffected.
+
+**Phase 3 is in progress** (commit `e8ab0693`, part 1 of the roadmap's 4 steps): added touch
+to `Screen::Battle`/`Screen::BattleMoves` (the 2-column button grids drawn by
+`renderBattleMenu()`/`renderBattleMoveMenu()`, which bypass `fui::list()` entirely and so
+never got touch from the shared dispatch) via a new shared `battleGridCellRect()` helper +
+`mappedInput.wasTapInRect()` hit-test in `loop()` - same pattern already used by
+`FontDownloadActivity`/`TouchHeaderBackButton` for custom-drawn buttons. Also added
+tap-to-dismiss for `Screen::Message` via `wasScreenTapped()` (previously only leavable by the
+header's Back tap or the physical Confirm button). Both APIs are constexpr no-op stubs under
+`CAP_TOUCH=0`, confirmed via `check_app_touch_gate.py` still passing on `pokemon-x3`. 19/19
+native tests pass; both `pokemon-x3` and `pokemon-x4-pro` build clean, flash unchanged; both
+simulators boot and run the (button-driven) Pokemon smoke script clean.
+
+**Phase 3 step 3 (list-screen touch audit) is now covered for the core screens** (commit
+`1d69ea03`): added `buildPokemonTouchInputScript()` to `SimulatorSmokeTest.cpp`, auto-selected
+when `mappedInputManager.hasTouchHardware()` is true. It walks
+Menu -> Party -> Actions -> Summary -> Pokedex -> PokedexDetail -> PC using real tap
+coordinates (each row's actual on-screen position, same formula as
+`PokemonActivity::listTop()`/`rowHeightForScreen()`) plus a tap on the header's Back button.
+Run it with **both** `CROSSINK_SIMULATOR_SMOKE_TEST=1` and `CROSSINK_SIMULATOR_START_POKEMON=1`
+set (the first flag alone only starts the Pokemon activity manually with no scripted input at
+all - easy to miss, cost real time to discover this session) against
+`pokemon-x4-pro-simulator`, with `fs_/.crosspoint/pokemon-{a,b}.bin` deleted first for a truly
+fresh onboarding state. Confirmed: "Simulator smoke test passed".
+
+**Extended further** (commit `c387b648`): the touch script now also walks Moveset (Actions row
+1), all 4 Bag category rows (Evolution/Medicine/Balls/Machine - Balls doubles as coverage for
+the `Screen::Message` tap-to-dismiss path, via a new `tapCenter()` helper using
+`wasScreenTapped()`), and GymList/Badges (entered and left without activating a row, since
+selecting a gym starts a real battle). All confirmed via `pokemon-x4-pro-simulator`:
+"Simulator smoke test passed".
+
+**Phase 3 is now fully done** (commit `8b98b5f4`): added `buildPokemonBattleTouchInputScript()`
+covering the last 4 screens - `ItemTarget`, `BattleSwitch`, `BattleBag`, `BattleBalls` - which
+only exist inside an active battle. Selected via a new `CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH`
+env var. Requires pre-seeding the save first (simulator closed) so `loadInitialScreen()` opens
+`Screen::Event` directly instead of onboarding:
+
+```sh
+python3 scripts/dev/edit_pokemon_save.py add-party-member --species pikachu --level 20
+python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --level 5
+python3 scripts/dev/edit_pokemon_save.py reset-battle-store
+export PATH="$HOME/.platformio/penv/bin:$PATH"
+CROSSINK_SIMULATOR_SMOKE_TEST=1 CROSSINK_SIMULATOR_START_POKEMON=1 \
+  CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH=1 \
+  pio run -e pokemon-x4-pro-simulator -t run_simulator
+```
+
+Taps: Event's Catch row -> Battle -> FIGHT (BattleMoves - the first automated verification of
+the Part 1 battle-grid touch hit-test itself, never actually script-driven until now) -> BAG
+(BattleBag -> the starter's free Potion -> ItemTarget, applied to the active combatant) ->
+SWITCH (BattleSwitch -> the pre-seeded second party member, high-level enough that the
+opponent's Stage-18 free hit for switching can't faint it) -> BALL (BattleBalls, view-only -
+not thrown, to avoid catch-RNG ending the battle nondeterministically).
+`verifyPokemonSmokeState()` is skipped in this mode (the save is deliberately not the fresh
+single-starter state it checks for). Confirmed via art-loading log lines (Pidgey/Charmander/
+Pikachu sprites requested at each expected transition): "Simulator smoke test passed".
+**Every screen in the original list-screen audit is now covered.**
+
+**Pre-existing bug found while testing this - now fixed** (commit `afa7a891`): running the
+*button*-driven `buildPokemonInputScript()` the correct way (fresh save +
+`CROSSINK_SIMULATOR_SMOKE_TEST=1`, apparently never actually combined like this before) used
+to fail before reaching `Screen::Pc`. Root cause: a smoke-test script bug dating back to
+Stage 10 (`pokemon-battle-roadmap.md`), when Down/Up became a full-page jump and Right/Left
+became the single-row step. The script still used 3x Down intending to step 3 rows into
+Pokedex (151 rows) to reach the caught starter - but Down jumps a whole page (9 rows) there,
+landing 3 pages later on an unseen species; `activate()` correctly no-ops on that, so
+`PokedexDetail` silently never opened, and every following step operated one screen "behind"
+its assumption until a stray Back landed on `Screen::Menu` itself and correctly exited the
+whole activity. Not a `PokemonActivity` bug at all - confirmed present on commit `1ab5f17d`
+(before any Phase 1/3 work) via a throwaway `git worktree`. Fixed by using Right for the two
+row-landing sequences, keeping one intentional single Down where only "paging doesn't crash"
+was being tested. Verified via the art-loading log lines (`heroes/004.bmp` and
+`pokedex/portrait/004.bmp` genuinely requested, proving detail really opened) -
+`pokemon-simulator-X3` now reaches "Simulator smoke test passed" end to end on a fresh save.
+
+**Important touch-test infrastructure bug found and fixed** (commit `bfedd33a`): while trying
+to visually confirm Pokedex detail's portrait layout, discovered that the touch script's
+`tapBack()` (tap the header's Back button) computed its coordinate as
+`header.x + header.width - iconRect.width / 2` (the right edge) - but
+`TouchHeaderBackButton::layout()`/`draw()` actually place the back icon at the header's
+**left** edge (`iconRect.x == header.x`, title text follows to its right - visible in every
+"< Title" screenshot taken this session). The touchRect is only 68px wide, nowhere near the
+right edge on a 480-800px header, so every scripted `tapBack()` landed outside any real
+tappable element and silently did nothing. Confirmed via a `loop()`-level trace: `onRow()`
+fired for the first 3 forward taps (Menu->Party->Actions->Summary) and then never again for
+the rest of the run - every later step (Back, Pokedex, Bag, GymList, Badges...) kept landing
+on the unreachable coordinate, leaving `screen_` stuck on Summary for good.
+`assertActivity()` only checks the activity name, not the screen, so "Simulator smoke test
+passed" never caught this - the render step labels logged were just strings, not proof the
+screen actually changed. Ruled out the just-added force-portrait `onEnter()` change as the
+cause by temporarily disabling it and reproducing the identical freeze. Fixed by using
+`iconRect.x + iconRect.width / 2` instead. Re-verified end to end with hard evidence (not
+just labels): the full non-battle touch script now reaches every screen for real
+(`pokedex/portrait/004.bmp` genuinely requested for Pokedex Detail), the battle touch script
+(also using `tapBack()`) still passes, and `pokemon-x3`'s button-driven script (a different,
+unaffected code path) still passes. **Not fixed, out of scope**:
+`buildFileBrowserInputScript()` (pre-existing, not written this session) has the identical
+`header.x + header.width - ...` pattern for its own header-shortcut tap - worth checking
+separately if that test also silently no-ops.
+
+**Phase 4 scope decision (2026-09-10): Pokemon is portrait-only, on both X3 and X4 Pro -
+landscape is explicitly out of scope for now, to revisit later.** Before this was decided,
+some landscape investigation already happened and is worth knowing about if landscape work
+resumes:
+- **Landscape was confirmed broken on both devices** (commit `b2f4d920`): measured on the X4
+  Pro simulator, the Battle HUD had only ~172px available for the whole battlefield+message
+  box in landscape (vs. 400+px in portrait) - a screenshot confirmed the two HP panels and
+  the message box all drew on top of each other and the FIGHT/BAG/SWITCH/RUN menu. X3
+  landscape computes to essentially the same ~173px available, so it was equally broken,
+  just never actually looked at before this session.
+- **A fix was written and verified** (still in the code, see below): `renderBattleHud()`
+  computes `available` up front and switches to a compact side-by-side layout below a
+  threshold (opponent's panel left half, player's right half, one row instead of two,
+  smaller sprites, a shorter message box). Confirmed via landscape screenshots on both
+  devices: no more overlap, Party/Summary also looked fine in landscape without any changes.
+- **Then landscape was ruled out of scope**, so (commit `d4c46297`) `PokemonActivity::onEnter()`
+  now force-sets `Portrait` orientation unconditionally - the same convention already used by
+  `NearbyBookTransferActivity`/`SettingsActivity`/`SleepActivity` - so a device left in
+  landscape by the reader (or the `CROSSINK_SIMULATOR_POKEMON_LANDSCAPE` simulator test flag)
+  never shows the game in an unsupported orientation. Verified: the simulator with that flag
+  set still passes the portrait-tuned touch script end to end, proving the override actually
+  takes effect (if it didn't, portrait-computed tap coordinates would land on the wrong rows).
+  **The compact Battle HUD layout is therefore currently unreachable in normal play** - left
+  in place rather than reverted, since it's already implemented and verified, ready to use
+  if/when landscape support is picked back up.
+
+**Phase 4's remaining scope is now just portrait**, on both devices. This is largely already
+covered: Phase 1's row-clipping fix and the generic width/height-derived layout formulas
+(listTop()/rowHeightForScreen()/etc.) apply uniformly, and X4 Pro portrait (480x800) is
+actually *roomier* than X3 portrait (528x792) on the tight axis, not tighter - so no
+X4-Pro-specific portrait shrinking has been needed anywhere so far. Nothing further is known
+to be broken in portrait; if picking this up again, a final portrait-only pass over Battle,
+Party, Summary, Pokédex detail on the X4 Pro simulator (already spot-checked and clean) would
+close this out before Phase 5.
+
+Then Phase 5 (release).
+
 ## Recent fixes (2026-09-10)
 
+- **Every Pokemon list screen was clipping its last row** (`95179ecc`, reported by the user as "the TM/HM row is missing" then corrected to "every menu screen is missing its last row, with a scrollbar now showing"): `buildList()`'s `screen.setContentMargin()` call computed its margin in raw-screen coordinates, but `Screen::setContentMargin()` insets from `frame_.safeRect()` (already shrunk by the device's 9px/3px top/bottom viewable margin) - so the margin got double-applied, silently shrinking the list's content rect by 12px below what `listBounds_` (`rowCount_ * rowHeight_`) promised, dropping exactly one row. Predates X4 Pro work entirely - traced to upstream's `v1.5.1-rc-6` merge (`414958d8`), which newly wired `safeArea` into that clamp; X3 was affected before any X4-Pro-specific change. Fixed by subtracting the same viewable margin back out in `buildList()`. Verified visually via a simulator screenshot (`ScreenshotUtil::takeScreenshot()`, temporarily hooked into `renderFocused()` then removed) showing all 8 Menu rows with no scrollbar. Also fixed a related bug found while testing this: `scripts/dev/edit_pokemon_save.py`'s `add-party-member` bumped the save header's `recordCount` without updating the cached `payloadBytes` field, which `decodeSnapshotHeader()` independently checks on load - caused a real "save file corrupt" error (`a1089ade`).
 - **Fainted Pokemon now require Revive/Max Revive** (`72ef328b`): `useConsumable()` previously let a plain Potion/Full Restore/status cure/PP restore quietly act on a fainted Pokemon (`currentHp == 0`). Fixed: those items now require `currentHp > 0` and return `NotApplicable` otherwise; only Revive/Max Revive (item ids 15/16) can act on a fainted one, restoring 50%/100% of max HP (their `effectValue` now read as a percentage for these two ids specifically) rather than curing status. No UI changes needed — both Bag and BattleBag paths already surface `NotApplicable` with a message. 19/19 tests pass (added `UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequiresRevive`). Flash 6,354,239 B/97.0%, 185,216 B free.
 - **Wi-Fi OTA update pointed at the wrong repo** (`9952a2c5`): `pokemon-x3` never overrode `CROSSINK_OTA_RELEASE_URL`, so "Check for Update" silently pulled firmware from upstream `uxjulia/CrossInk` (matching asset name `firmware-x3-x4.bin`), which would flash a Pokemon-less build. Fixed by overriding the URL to this fork's own releases in that environment only.
 

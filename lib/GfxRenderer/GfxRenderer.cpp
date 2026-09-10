@@ -935,6 +935,10 @@ bool GfxRenderer::isPixelBlack(const int x, const int y) const {
 }
 
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
+  if (textClipActive_ && (x < textClipLeft_ || x >= textClipRight_ || y < textClipTop_ || y >= textClipBottom_)) {
+    return;
+  }
+
   int phyX = 0;
   int phyY = 0;
 
@@ -1077,6 +1081,20 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
                                    const EpdFontFamily::Style style, const BidiUtils::BidiBaseDir baseDir) const {
   const int x = (getScreenWidth() - getTextWidth(fontId, text, style, baseDir)) / 2;
   drawText(fontId, x, y, text, black, style, baseDir);
+}
+
+void GfxRenderer::beginTextClip(const int x, const int y, const int width, const int height) const {
+  assert(!textClipActive_ && "nested GfxRenderer text clips are not supported");
+  textClipActive_ = true;
+  textClipLeft_ = x;
+  textClipTop_ = y;
+  textClipRight_ = x + std::max(0, width);
+  textClipBottom_ = y + std::max(0, height);
+}
+
+void GfxRenderer::endTextClip() const {
+  assert(textClipActive_ && "GfxRenderer text clip ended without begin");
+  textClipActive_ = false;
 }
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
@@ -1471,10 +1489,16 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   // Clip in logical space.
   const int screenW = getScreenWidth();
   const int screenH = getScreenHeight();
-  const int lx0 = std::max(0, x);
-  const int ly0 = std::max(0, y);
-  const int lx1 = std::min(screenW, x + width);
-  const int ly1 = std::min(screenH, y + height);
+  int lx0 = std::max(0, x);
+  int ly0 = std::max(0, y);
+  int lx1 = std::min(screenW, x + width);
+  int ly1 = std::min(screenH, y + height);
+  if (textClipActive_) {
+    lx0 = std::max(lx0, textClipLeft_);
+    ly0 = std::max(ly0, textClipTop_);
+    lx1 = std::min(lx1, textClipRight_);
+    ly1 = std::min(ly1, textClipBottom_);
+  }
   if (lx0 >= lx1 || ly0 >= ly1) return;
 
   // Rotate the two opposing logical corners into physical-framebuffer space.
@@ -1958,12 +1982,13 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
   }
 }
 
-bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
-                             const float cropX, const float cropY, const BitmapBwPolicy bwPolicy) const {
-  if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
+void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
+                             const float cropX, const float cropY) const {
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
-    return drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
+    drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
+    return;
   }
 
   float scale = 1.0f;
@@ -1993,18 +2018,16 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   }
 
   BitmapScratchLock scratchLock(*this);
-  if (!scratchLock.isLocked()) return false;
+  if (!scratchLock.isLocked()) return;
 
   // Calculate output row size (2 bits per pixel, packed into bytes)
   // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
   if (!ensureBitmapScratchBuffers(outputRowSize, bitmap.getRowBytes())) {
-    return false;
+    return;
   }
   auto* outputRow = bitmapScratchOutputRow_;
   auto* rowBytes = bitmapScratchRowBytes_;
-  const bool useBwDither = renderMode == BW && bwPolicy == BitmapBwPolicy::DitherNativeGray;
-  int lastDitherScreenY = -1;
 
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
     // The BMP's (0, 0) is the bottom-left corner (if the height is positive, top-left if negative).
@@ -2020,7 +2043,7 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
-      return false;
+      return;
     }
 
     if (screenY < 0) {
@@ -2031,14 +2054,6 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       // Skip the row if it's outside the crop area
       continue;
     }
-
-    // Downscaling can map several source rows to the same display row. For
-    // dithered 1-bit output, sampling it once avoids accumulating every dark
-    // source pixel into an artificially black destination pixel.
-    if (useBwDither && screenY == lastDitherScreenY) continue;
-    if (useBwDither) lastDitherScreenY = screenY;
-
-    int lastDitherScreenX = -1;
 
     for (int bmpX = cropPixX; bmpX < bitmap.getWidth() - cropPixX; bmpX++) {
       int screenX = bmpX - cropPixX;
@@ -2052,14 +2067,11 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       if (screenX < 0) {
         continue;
       }
-      if (useBwDither && screenX == lastDitherScreenX) continue;
-      if (useBwDither) lastDitherScreenX = screenX;
 
       const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
-      if (renderMode == BW) {
-        const bool drawBlack = useBwDither ? ditherNativeGrayTo1Bit(val, screenX, screenY) == 0 : val < 3;
-        if (drawBlack) drawPixel(screenX, screenY);
+      if (renderMode == BW && val < 3) {
+        drawPixel(screenX, screenY);
       } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
         drawPixel(screenX, screenY, false);
       } else if (renderMode == GRAYSCALE_LSB && val == 1) {
@@ -2067,10 +2079,15 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       }
     }
   }
-  return true;
+
+  const int sourceWidth = bitmap.getWidth() - cropPixX * 2;
+  const int sourceHeight = bitmap.getHeight() - cropPixY * 2;
+  const int renderedWidth = isScaled ? static_cast<int>(std::floor((sourceWidth - 1) * scale)) + 1 : sourceWidth;
+  const int renderedHeight = isScaled ? static_cast<int>(std::floor((sourceHeight - 1) * scale)) + 1 : sourceHeight;
+  preserveImagePolarity(x, y, renderedWidth, renderedHeight);
 }
 
-bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
+void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
                                  const int maxHeight) const {
   float scale = 1.0f;
   bool isScaled = false;
@@ -2084,12 +2101,12 @@ bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
   }
 
   BitmapScratchLock scratchLock(*this);
-  if (!scratchLock.isLocked()) return false;
+  if (!scratchLock.isLocked()) return;
 
   // For 1-bit BMP, output is still 2-bit packed (for consistency with readNextRow)
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
   if (!ensureBitmapScratchBuffers(outputRowSize, bitmap.getRowBytes())) {
-    return false;
+    return;
   }
   auto* outputRow = bitmapScratchOutputRow_;
   auto* rowBytes = bitmapScratchRowBytes_;
@@ -2098,7 +2115,7 @@ bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
     // Read rows sequentially using readNextRow
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from 1-bit bitmap", bmpY);
-      return false;
+      return;
     }
 
     // Calculate screen Y based on whether BMP is top-down or bottom-up
@@ -2131,7 +2148,17 @@ bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
       // White pixels (val == 3) are not drawn (leave background)
     }
   }
-  return true;
+
+  const int renderedWidth =
+      isScaled ? static_cast<int>(std::floor((bitmap.getWidth() - 1) * scale)) + 1 : bitmap.getWidth();
+  const int renderedHeight =
+      isScaled ? static_cast<int>(std::floor((bitmap.getHeight() - 1) * scale)) + 1 : bitmap.getHeight();
+  preserveImagePolarity(x, y, renderedWidth, renderedHeight);
+}
+
+void GfxRenderer::preserveImagePolarity(const int x, const int y, const int width, const int height) const {
+  if (renderMode != BW || !display.isInverted() || _stripActive) return;
+  invertRect(x, y, width, height);
 }
 
 void GfxRenderer::drawPerspectiveBitmap(const Bitmap& bitmap, const int x, const int y, const int w, const int hL,
@@ -2189,6 +2216,14 @@ void GfxRenderer::drawPerspectiveBitmap(const Bitmap& bitmap, const int x, const
           drawPixel(screenX, screenY, false);
         }
       }
+    }
+  }
+
+  if (renderMode == BW && display.isInverted() && !_stripActive) {
+    for (int dx = 0; dx < w; ++dx) {
+      const int colH = (w == 1) ? hL : (hL + (hR - hL) * dx / (w - 1));
+      const int colTop = (hMax - colH) / 2;
+      invertRect(x + dx, y + colTop, 1, colH);
     }
   }
 }
@@ -2865,18 +2900,6 @@ int GfxRenderer::getTextHeight(const int fontId) const {
     return 0;
   }
   return fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
-}
-
-int GfxRenderer::getTextPixelHeight(const int fontId, const char* text, const EpdFontFamily::Style style) const {
-  const int resolvedFontId = resolveTextFontId(fontId, text, style);
-  const auto fontIt = fontMap.find(resolvedFontId);
-  if (fontIt == fontMap.end()) {
-    LOG_ERR("GFX", "Font %d not found", resolvedFontId);
-    return 0;
-  }
-
-  const EpdFontData* fontData = fontIt->second.getData(style);
-  return fontData->ascender - fontData->descender;
 }
 
 void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y, const char* text, const bool black,

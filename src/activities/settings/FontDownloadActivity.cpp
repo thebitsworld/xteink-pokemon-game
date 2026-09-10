@@ -33,6 +33,21 @@ namespace {
 
 constexpr fui::ActionId ACTION_ROW = 1;
 
+Rect downloadCancelButtonRect(const GfxRenderer& renderer, const ThemeMetrics& metrics,
+                              const int downloadAttemptTotal) {
+  constexpr int kButtonHeight = 44;
+  constexpr int kMaxButtonWidth = 240;
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int centerY = (pageHeight - lineHeight) / 2;
+  const int barY = centerY + (downloadAttemptTotal > 1 ? lineHeight : metrics.verticalSpacing);
+  const int width = std::min(kMaxButtonWidth, pageWidth - metrics.contentSidePadding * 2);
+  const int y = std::min(barY + metrics.progressBarHeight + lineHeight + metrics.verticalSpacing,
+                         pageHeight - metrics.buttonHintsHeight - kButtonHeight - metrics.verticalSpacing);
+  return Rect{(pageWidth - width) / 2, y, width, kButtonHeight};
+}
+
 constexpr int FONT_DOWNLOAD_MAX_ATTEMPTS = 3;
 constexpr int FONT_MANIFEST_MAX_ATTEMPTS = 5;
 constexpr uint32_t FONT_DOWNLOAD_RETRY_DELAY_MS = 500;
@@ -131,6 +146,34 @@ void FontDownloadActivity::onRowEvent(const fui::ActionEvent& event, void* user)
   self->activateSelected();  // ends with requestUpdateAndWait itself
 }
 
+bool FontDownloadActivity::pollCancelInput(const bool includeDownloadScreenButton) {
+  if (cancelRequested_) return true;
+
+  mappedInput.update();
+  if (mappedInput.wasHomeGesture()) {
+    goHomeRequested_ = true;
+    cancelRequested_ = true;
+  }
+  if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
+      mappedInput.wasPressed(MappedInputManager::Button::Back) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    cancelRequested_ = true;
+  }
+  if (mappedInput.hasTouchHardware()) {
+    if (TouchHeaderBackButton::wasTapped(mappedInput, renderer)) {
+      cancelRequested_ = true;
+    }
+    if (includeDownloadScreenButton) {
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const Rect cancelButton = downloadCancelButtonRect(renderer, metrics, downloadAttemptTotal_);
+      if (mappedInput.wasTapInRect(cancelButton.x, cancelButton.y, cancelButton.width, cancelButton.height)) {
+        cancelRequested_ = true;
+      }
+    }
+  }
+  return cancelRequested_;
+}
+
 // --- Lifecycle ---
 
 void FontDownloadActivity::onEnter() {
@@ -144,7 +187,7 @@ void FontDownloadActivity::onEnter() {
   uiReady_ = false;
   visibleRows_ = 1;
   topIndex_ = 0;
-  app_.setTheme(uiThemeTokens(uiTarget_));
+  applySharedUiTheme(app_, uiTarget_);
   app_.on(ACTION_ROW, &FontDownloadActivity::onRowEvent, this);
   app_.setScreen(&FontDownloadActivity::listScreen, this);
   WiFi.mode(WIFI_STA);
@@ -159,7 +202,7 @@ void FontDownloadActivity::onExit() {
     WiFi.disconnect(false);
     delay(30);
     if (fontsChanged_) {
-      silentRestart();
+      silentRestartAfterNetwork();
     } else {
       WiFi.mode(WIFI_OFF);
     }
@@ -221,22 +264,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   // every read-loop iteration, and we re-check it between retry attempts so the
   // retry delays do not swallow the press.
   HttpDownloader::DownloadOptions manifestOptions;
-  manifestOptions.shouldCancel = [this]() {
-    if (cancelRequested_) {
-      return true;
-    }
-    mappedInput.update();
-    if (mappedInput.wasHomeGesture()) {
-      goHomeRequested_ = true;
-      cancelRequested_ = true;
-    }
-    if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Back) ||
-        mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      cancelRequested_ = true;
-    }
-    return cancelRequested_;
-  };
+  manifestOptions.shouldCancel = [this]() { return pollCancelInput(false); };
   // The font list is fetched again after individual updates. Release registry
   // memory on every manifest load, not only when entering Manage Fonts.
   sdFontSystem.releaseForNetwork(renderer);
@@ -757,26 +785,11 @@ void FontDownloadActivity::downloadFamily(ManifestFamily& family) {
     HttpDownloader::DownloadOptions downloadOptions;
     downloadOptions.preservePartial = true;
     downloadOptions.resumePartial = true;
-    // Poll the Cancel (Back) button from shouldCancel, which HttpDownloader
-    // checks at the top of every read-loop iteration. The progress callback is
-    // throttled to every 64KB / 250ms, so polling input there dropped quick
-    // taps and forced the user to press Cancel repeatedly.
-    downloadOptions.shouldCancel = [this]() {
-      if (cancelRequested_) {
-        return true;
-      }
-      mappedInput.update();
-      if (mappedInput.wasHomeGesture()) {
-        goHomeRequested_ = true;
-        cancelRequested_ = true;
-      }
-      if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
-          mappedInput.wasPressed(MappedInputManager::Button::Back) ||
-          mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-        cancelRequested_ = true;
-      }
-      return cancelRequested_;
-    };
+    // Poll Back and the touch Cancel controls from shouldCancel, which
+    // HttpDownloader checks at the top of every read-loop iteration. The
+    // progress callback is throttled to every 64KB / 250ms, so polling input
+    // there dropped quick taps and forced the user to press Cancel repeatedly.
+    downloadOptions.shouldCancel = [this]() { return pollCancelInput(true); };
     HttpDownloader::DownloadError result = HttpDownloader::HTTP_ERROR;
     for (int attempt = 1; attempt <= FONT_DOWNLOAD_MAX_ATTEMPTS; ++attempt) {
       {
@@ -1294,8 +1307,9 @@ void FontDownloadActivity::render(RenderLock&&) {
                                : isSelectedFamilyDeletable()    ? tr(STR_DELETE)
                                : isUpdateAllRow(selectedIndex_) ? tr(STR_UPDATE)
                                                                 : tr(STR_DOWNLOAD);
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, families_.empty() ? "" : tr(STR_DIR_UP),
-                                              families_.empty() ? "" : tr(STR_DIR_DOWN));
+    const auto labels =
+        mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), confirmLabel,
+                              families_.empty() ? "" : tr(STR_DIR_UP), families_.empty() ? "" : tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state_ == DOWNLOADING) {
     const char* familyName = activeDownloadFamilyName_.empty() ? "" : activeDownloadFamilyName_.c_str();
@@ -1320,35 +1334,37 @@ void FontDownloadActivity::render(RenderLock&&) {
         Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
         static_cast<int>(progress * 100), 100);
 
+    if (mappedInput.hasTouchHardware()) {
+      const Rect cancelButton = downloadCancelButtonRect(renderer, metrics, downloadAttemptTotal_);
+      renderer.fillRoundedRect(cancelButton.x, cancelButton.y, cancelButton.width, cancelButton.height, 6,
+                               Color::White);
+      renderer.drawRoundedRect(cancelButton.x, cancelButton.y, cancelButton.width, cancelButton.height, 1, 6, true);
+      const int textY = cancelButton.y + (cancelButton.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+      renderer.drawCenteredText(UI_10_FONT_ID, textY, tr(STR_CANCEL));
+    }
+
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state_ == COMPLETE) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state_ == ERROR) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
                               EpdFontFamily::BOLD);
-    const int messageWidth = pageWidth - metrics.contentSidePadding * 2;
+    const Rect textArea{metrics.contentSidePadding, 0, pageWidth - metrics.contentSidePadding * 2, pageHeight};
     int messageY = centerY + metrics.verticalSpacing;
     if (!errorMessage_.empty()) {
-      const auto messageLines = renderer.wrappedText(SMALL_FONT_ID, errorMessage_.c_str(), messageWidth, 2);
-      const int smallLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-      for (const auto& line : messageLines) {
-        renderer.drawCenteredText(SMALL_FONT_ID, messageY, line.c_str());
-        messageY += smallLineHeight + 2;
-      }
+      messageY += UITheme::drawCenteredWrappedText(renderer, textArea, SMALL_FONT_ID, messageY, errorMessage_.c_str(),
+                                                   2, true, EpdFontFamily::REGULAR, 2) +
+                  2;
     }
     if (!errorHint_.empty()) {
-      const auto hintLines = renderer.wrappedText(SMALL_FONT_ID, errorHint_.c_str(), messageWidth, 2);
-      const int smallLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
       messageY += metrics.verticalSpacing / 2;
-      for (const auto& line : hintLines) {
-        renderer.drawCenteredText(SMALL_FONT_ID, messageY, line.c_str());
-        messageY += smallLineHeight + 2;
-      }
+      UITheme::drawCenteredWrappedText(renderer, textArea, SMALL_FONT_ID, messageY, errorHint_.c_str(), 2, true,
+                                       EpdFontFamily::REGULAR, 2);
     }
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 

@@ -13,6 +13,7 @@
 #include <ZipFile.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -105,8 +106,9 @@ void normalizeThumbDimensions(int& width, int& height) {
   }
 }
 
-std::unique_ptr<BookMetadataCache> makeBookMetadataCacheNoThrow(const std::string& cachePath) {
-  auto cache = makeUniqueNoThrow<BookMetadataCache>(cachePath);
+std::unique_ptr<BookMetadataCache> makeBookMetadataCacheNoThrow(const std::string& cachePath,
+                                                                const bool cacheCumulativeSpineSizes) {
+  auto cache = makeUniqueNoThrow<BookMetadataCache>(cachePath, cacheCumulativeSpineSizes);
   if (!cache) {
     LOG_ERR("EBP", "OOM: BookMetadataCache (%u free, %u max alloc)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   }
@@ -244,6 +246,118 @@ class CoverImageRefScanner final : public Print {
     }
   }
 };
+
+class ContentsDocumentScanner final : public Print {
+ public:
+  bool isContentsDocument() const { return contentsDocument; }
+
+  size_t write(const uint8_t data) override { return write(&data, 1); }
+
+  size_t write(const uint8_t* buffer, const size_t size) override {
+    for (size_t index = 0; index < size; index++) {
+      if (scannedBytes >= kMaxScanBytes || contentsDocument) return index;
+      consume(static_cast<char>(buffer[index]));
+      scannedBytes++;
+    }
+    return size;
+  }
+
+ private:
+  static constexpr size_t kMaxScanBytes = 8 * 1024;
+  static constexpr size_t kMaxTagLength = 192;
+  static constexpr size_t kMaxLabelLength = 64;
+
+  char tag[kMaxTagLength] = {};
+  char label[kMaxLabelLength] = {};
+  size_t tagLength = 0;
+  size_t labelLength = 0;
+  size_t scannedBytes = 0;
+  bool insideTag = false;
+  bool collectingLabel = false;
+  bool contentsDocument = false;
+
+  static bool hasTocTypeAttribute(const char* tag) {
+    for (const char* attr = tag; (attr = std::strstr(attr, "type")) != nullptr; attr += 4) {
+      const char preceding = attr == tag ? ' ' : attr[-1];
+      if (preceding != ' ' && preceding != '\t' && preceding != '\r' && preceding != '\n' && preceding != ':') {
+        continue;
+      }
+      const char* value = attr + 4;
+      while (std::isspace(static_cast<unsigned char>(*value))) value++;
+      if (*value++ != '=') continue;
+      while (std::isspace(static_cast<unsigned char>(*value))) value++;
+      const char quote = *value == '\'' || *value == '\"' ? *value++ : '\0';
+      if (std::strncmp(value, "toc", 3) != 0) continue;
+      const char terminator = value[3];
+      if ((quote && terminator == quote) ||
+          (!quote && (terminator == '\0' || std::isspace(static_cast<unsigned char>(terminator))))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void clearLabel() {
+    labelLength = 0;
+    label[0] = '\0';
+  }
+
+  void appendLabel(const char c) {
+    if (labelLength + 1 >= kMaxLabelLength) return;
+    const unsigned char byte = static_cast<unsigned char>(c);
+    if (std::isspace(byte)) {
+      if (labelLength == 0 || label[labelLength - 1] == ' ') return;
+      label[labelLength++] = ' ';
+    } else {
+      label[labelLength++] = static_cast<char>(std::tolower(byte));
+    }
+    label[labelLength] = '\0';
+  }
+
+  void finishTag() {
+    tag[tagLength] = '\0';
+    const char* name = tag;
+    while (*name == ' ' || *name == '\t' || *name == '\r' || *name == '\n') name++;
+    const bool closing = *name == '/';
+    if (closing) name++;
+    const bool title = std::strncmp(name, "title", 5) == 0 && (name[5] == '\0' || std::isspace(name[5]));
+    const bool heading =
+        name[0] == 'h' && (name[1] == '1' || name[1] == '2') && (name[2] == '\0' || std::isspace(name[2]));
+
+    if (!closing && (std::strstr(name, "doc-toc") || hasTocTypeAttribute(name))) {
+      contentsDocument = true;
+    }
+    if (!closing && (title || heading)) {
+      collectingLabel = true;
+      clearLabel();
+    } else if (closing && (title || heading)) {
+      while (labelLength > 0 && label[labelLength - 1] == ' ') label[--labelLength] = '\0';
+      if (std::strcmp(label, "contents") == 0 || std::strcmp(label, "table of contents") == 0) {
+        contentsDocument = true;
+      }
+      collectingLabel = false;
+    }
+  }
+
+  void consume(const char c) {
+    if (insideTag) {
+      if (c == '>') {
+        finishTag();
+        tagLength = 0;
+        insideTag = false;
+      } else if (tagLength + 1 < kMaxTagLength) {
+        tag[tagLength++] = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      return;
+    }
+    if (c == '<') {
+      insideTag = true;
+      tagLength = 0;
+    } else if (collectingLabel) {
+      appendLabel(c);
+    }
+  }
+};
 }  // namespace
 
 Epub::Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
@@ -375,6 +489,10 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
 
   if (!opfParser.tocNavPath.empty()) {
     tocNavItem = opfParser.tocNavPath;
+  }
+
+  if (!opfParser.guideTocPageHref.empty()) {
+    tocGuideItem = opfParser.guideTocPageHref;
   }
 
   if (collectCssFiles && !opfParser.cssFiles.empty()) {
@@ -651,10 +769,11 @@ Epub::CssParseStatus Epub::parseCssFiles(const bool forceRebuild) const {
 }
 
 // load in the meta data for the epub file
-bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, const XLocationLoadMode xLocationLoadMode) {
+bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, const XLocationLoadMode xLocationLoadMode,
+                const bool cacheCumulativeSpineSizes) {
   lastLoadFailure = OpenFailure::InvalidOrUnreadable;
   // Initialize spine/TOC cache
-  bookMetadataCache = makeBookMetadataCacheNoThrow(cachePath);
+  bookMetadataCache = makeBookMetadataCacheNoThrow(cachePath, cacheCumulativeSpineSizes);
   if (!bookMetadataCache) {
     lastLoadFailure = OpenFailure::OutOfMemory;
     return false;
@@ -705,7 +824,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, const XLoc
         bookMetadataCache.reset();
         const CssParseStatus cssStatus = parseCssFiles(forceCssRebuild);
         releaseCssFileList();
-        bookMetadataCache = makeBookMetadataCacheNoThrow(cachePath);
+        bookMetadataCache = makeBookMetadataCacheNoThrow(cachePath, cacheCumulativeSpineSizes);
         if (!bookMetadataCache) {
           lastLoadFailure = OpenFailure::OutOfMemory;
           return false;
@@ -835,7 +954,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, const XLoc
   }
 
   // Reload the cache from disk so it's in the correct state
-  bookMetadataCache = makeBookMetadataCacheNoThrow(cachePath);
+  bookMetadataCache = makeBookMetadataCacheNoThrow(cachePath, cacheCumulativeSpineSizes);
   if (!bookMetadataCache) {
     lastLoadFailure = OpenFailure::OutOfMemory;
     return false;
@@ -1576,6 +1695,25 @@ int Epub::getTocItemsCount() const {
   }
 
   return bookMetadataCache->getTocCount();
+}
+
+bool Epub::isNavigationDocumentSpine(const int spineIndex, bool* const scanSucceeded) const {
+  if (scanSucceeded) *scanSucceeded = false;
+  if (spineIndex < 0 || spineIndex >= getSpineItemsCount()) {
+    return false;
+  }
+  const std::string& href = getSpineItem(spineIndex).href;
+  if (href == tocNavItem || href == tocGuideItem) {
+    if (scanSucceeded) *scanSucceeded = true;
+    return true;
+  }
+
+  ContentsDocumentScanner scanner;
+  if (!readItemContentsToStream(href, scanner, 512, /*allowEarlyStop=*/true)) {
+    return false;
+  }
+  if (scanSucceeded) *scanSucceeded = true;
+  return scanner.isContentsDocument();
 }
 
 // work out the section index for a toc index
