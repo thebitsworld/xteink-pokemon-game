@@ -730,11 +730,23 @@ class SimulatorSmokeTest {
     addTap(MappedInputManager::Button::Down);
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Pokemon Pokedex", 4));
-    for (int i = 0; i < 3; ++i) addTap(MappedInputManager::Button::Down);
+    // Right/Left step one row at a time; Down/Up jump a full page (Stage 10 -
+    // see PokemonActivity::loop()). Pokedex has 151 rows, far more than fit
+    // on one page, so Down here would jump by a whole page each press and
+    // land on an unseen (still "???") species a long way past the starter -
+    // activate() correctly no-ops on those, silently leaving every following
+    // step operating on the wrong screen. Use Right to land exactly on
+    // index 3 (species 4, Charmander - the caught/seen starter), which
+    // activate() actually opens.
+    for (int i = 0; i < 3; ++i) addTap(MappedInputManager::Button::Right);
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Pokemon Pokedex Detail", 4));
     addTap(MappedInputManager::Button::Back);
-    for (int i = 0; i < 3; ++i) addTap(MappedInputManager::Button::Down);
+    // A single Down here (unlike above) is intentional and safe: it's the
+    // real page-jump this button performs, landing on some unseen species a
+    // page forward - fine since nothing here calls Confirm on it, this step
+    // only checks that paging through Pokedex doesn't crash.
+    addTap(MappedInputManager::Button::Down);
     inputScript.push_back(render("Pokemon Pokedex Second Page", 4));
     inputScript.push_back(assertActivity("Pokemon"));
 
