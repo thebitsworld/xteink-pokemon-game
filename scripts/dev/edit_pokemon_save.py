@@ -44,6 +44,8 @@ GYMS_CSV = ROOT / "scripts" / "data" / "pokemon-gyms.csv"
 
 MAGIC = b"PKV2"
 HEADER_BYTES = 24
+OFF_HEADER_RECORD_COUNT = 16  # u32
+OFF_HEADER_PAYLOAD_BYTES = 20  # u32: stateBytes + recordCount * RECORD_BYTES - see decodeSnapshotHeader()
 STATE_BYTES_V4 = 198
 RECORD_BYTES = 48
 POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
@@ -247,6 +249,18 @@ def state_bytes(save: SaveFile, offset: int, size: int) -> bytes:
 def set_state_bytes(save: SaveFile, offset: int, value: bytes) -> None:
     base = HEADER_BYTES + offset
     save.data[base : base + len(value)] = value
+
+
+def set_header_record_count(save: SaveFile, new_count: int) -> None:
+    """Updates BOTH header fields that depend on record count:
+    recordCount itself (offset 16) and the cached total payload size
+    (offset 20, stateBytes + recordCount * RECORD_BYTES). decodeSnapshotHeader()
+    (PokemonStoreCodec.cpp) recomputes and compares that second field on every
+    load - writing recordCount alone leaves a stale payload size and the
+    device rejects the whole file as corrupt on next boot."""
+    struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
+    payload_bytes = STATE_BYTES_V4 + new_count * RECORD_BYTES
+    struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
 def recompute_crc(save: SaveFile) -> None:
@@ -533,10 +547,10 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
         # (which should match the active file's after prior commands, but we
         # read them fresh per file rather than assuming - only the new
         # id/slot decided above are shared).
-        save_record_count, = struct.unpack_from("<I", save.data, 16)
+        save_record_count, = struct.unpack_from("<I", save.data, OFF_HEADER_RECORD_COUNT)
         insert_at = records_offset + save_record_count * RECORD_BYTES
         save.data[insert_at:insert_at] = record_bytes  # grows the file; CRC is recomputed below
-        struct.pack_into("<I", save.data, 16, save_record_count + 1)
+        set_header_record_count(save, save_record_count + 1)
 
         save_party_ids = list(struct.unpack_from("<6I", state_bytes(save, OFF_PARTY_IDS, 24)))
         save_party_ids[empty_slot] = new_id
