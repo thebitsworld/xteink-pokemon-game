@@ -43,8 +43,25 @@ including Pokémon, exits clean).
 fixes needed. `pio run -e pokemon-x4-pro`: Flash 92.7%, 478,320 B free. Simulator boots and
 runs clean. `pokemon-x3` re-verified unaffected.
 
-Next: Phase 3 (touch support for the whole Pokémon UI - mandatory, X4 Pro has no physical
-d-pad) — not started yet.
+**Phase 3 is in progress** (commit `e8ab0693`, part 1 of the roadmap's 4 steps): added touch
+to `Screen::Battle`/`Screen::BattleMoves` (the 2-column button grids drawn by
+`renderBattleMenu()`/`renderBattleMoveMenu()`, which bypass `fui::list()` entirely and so
+never got touch from the shared dispatch) via a new shared `battleGridCellRect()` helper +
+`mappedInput.wasTapInRect()` hit-test in `loop()` - same pattern already used by
+`FontDownloadActivity`/`TouchHeaderBackButton` for custom-drawn buttons. Also added
+tap-to-dismiss for `Screen::Message` via `wasScreenTapped()` (previously only leavable by the
+header's Back tap or the physical Confirm button). Both APIs are constexpr no-op stubs under
+`CAP_TOUCH=0`, confirmed via `check_app_touch_gate.py` still passing on `pokemon-x3`. 19/19
+native tests pass; both `pokemon-x3` and `pokemon-x4-pro` build clean, flash unchanged; both
+simulators boot and run the (button-driven) Pokemon smoke script clean.
+
+**Not done yet in Phase 3**: step 2 (confirm `Summary`/`PokedexDetail` are fully touch-leavable
+- likely already fine via `TouchHeaderBackButton`, just needs a check) and step 3 (audit every
+`fui::list()`-based screen - Party, PC, Bag + sub-categories, Pokédex, Moveset, GymList,
+Badges, ItemTarget, BattleSwitch, BattleBag, BattleBalls - under real touch clicks on the X4
+Pro simulator; the smoke test script is button-driven only, so this still needs either a
+touch-scripted extension to `SimulatorSmokeTest.cpp` or manual mouse-driven verification).
+Then Phase 4 (800×480 layout fixes) and Phase 5 (release).
 
 ## Recent fixes (2026-09-10)
 
