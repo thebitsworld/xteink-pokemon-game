@@ -81,14 +81,22 @@ boot - more plumbing than the rest of the audit needed). Manual verification is 
 substitute here since the underlying `fui::list()` touch mechanism is already proven across
 every other screen.
 
-**Pre-existing bug found while testing this (not caused by this session's work, not fixed
-yet)**: running the *button*-driven `buildPokemonInputScript()` the same correct way (fresh
-save + `CROSSINK_SIMULATOR_SMOKE_TEST=1`, apparently never actually combined like this
-before) fails - two Down page-jumps on `Screen::Menu` (8 items, likely all fitting on one
-"page") land somewhere unexpected and the Pokemon activity exits to Home before reaching
-`Screen::Pc`. Confirmed present on commit `1ab5f17d` (before any Phase 1/3 work) via a
-throwaway `git worktree`, so it's a real latent bug in `ButtonNavigator`'s page-jump math or
-`PokemonActivity`'s Menu-reentry state, not a regression - worth a dedicated look later.
+**Pre-existing bug found while testing this - now fixed** (commit `afa7a891`): running the
+*button*-driven `buildPokemonInputScript()` the correct way (fresh save +
+`CROSSINK_SIMULATOR_SMOKE_TEST=1`, apparently never actually combined like this before) used
+to fail before reaching `Screen::Pc`. Root cause: a smoke-test script bug dating back to
+Stage 10 (`pokemon-battle-roadmap.md`), when Down/Up became a full-page jump and Right/Left
+became the single-row step. The script still used 3x Down intending to step 3 rows into
+Pokedex (151 rows) to reach the caught starter - but Down jumps a whole page (9 rows) there,
+landing 3 pages later on an unseen species; `activate()` correctly no-ops on that, so
+`PokedexDetail` silently never opened, and every following step operated one screen "behind"
+its assumption until a stray Back landed on `Screen::Menu` itself and correctly exited the
+whole activity. Not a `PokemonActivity` bug at all - confirmed present on commit `1ab5f17d`
+(before any Phase 1/3 work) via a throwaway `git worktree`. Fixed by using Right for the two
+row-landing sequences, keeping one intentional single Down where only "paging doesn't crash"
+was being tested. Verified via the art-loading log lines (`heroes/004.bmp` and
+`pokedex/portrait/004.bmp` genuinely requested, proving detail really opened) -
+`pokemon-simulator-X3` now reaches "Simulator smoke test passed" end to end on a fresh save.
 
 Then Phase 4 (800×480 layout fixes) and Phase 5 (release).
 
