@@ -799,6 +799,15 @@ class SimulatorSmokeTest {
       inputScript.push_back(touchDown(backX, backY));
       inputScript.push_back(touchRelease(backX, backY));
     };
+    // Screen::Message (e.g. the BagBalls info popup below) has no header
+    // Back button of its own reason to leave via - it's dismissed by tapping
+    // the message body itself (wasScreenTapped() in loop()), so use a plain
+    // center-of-screen tap for those instead of tapBack().
+    const int centerY = renderer.getScreenHeight() / 2;
+    const auto tapCenter = [&] {
+      inputScript.push_back(touchDown(centerX, centerY));
+      inputScript.push_back(touchRelease(centerX, centerY));
+    };
 
     // Menu row 0 = Party.
     tapRow(0, 64);
@@ -816,6 +825,14 @@ class SimulatorSmokeTest {
 
     tapBack();
     inputScript.push_back(render("Pokemon Actions Restored via touch", 4));
+
+    // Actions row 1 = Moveset (collectionActions() always appends it
+    // second, right after Summary).
+    tapRow(1, 64);
+    inputScript.push_back(render("Pokemon Moveset via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Actions Restored 2 via touch", 4));
+
     tapBack();
     inputScript.push_back(render("Pokemon Party Restored via touch", 4));
     tapBack();
@@ -841,6 +858,65 @@ class SimulatorSmokeTest {
     // screen showing the empty-state message, per buildUi()).
     tapRow(2, 64);
     inputScript.push_back(render("Pokemon Empty PC via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    tapBack();
+    inputScript.push_back(render("Pokemon Menu Restored 3 via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // Menu row 4 = Bag (a category-select screen: Evolution/Medicine/
+    // Balls/Machine, in that row order - see activate()'s Screen::Bag case).
+    tapRow(4, 64);
+    inputScript.push_back(render("Pokemon Bag via touch", 4));
+
+    // Row 0 = Evolution stones (empty on a fresh save).
+    tapRow(0, 64);
+    inputScript.push_back(render("Pokemon Bag Evolution via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Bag Restored via touch", 4));
+
+    // Row 1 = Medicine (empty on a fresh save).
+    tapRow(1, 64);
+    inputScript.push_back(render("Pokemon Bag Medicine via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Bag Restored 2 via touch", 4));
+
+    // Row 2 = Balls - createStarter() grants 10 Poke Balls, so this is
+    // non-empty; tapping the one owned row opens a view-only info message
+    // (Screen::Message) instead of doing anything, which doubles as
+    // coverage for the Message tap-to-dismiss path added alongside the
+    // Battle grid touch support.
+    tapRow(2, 64);
+    inputScript.push_back(render("Pokemon Bag Balls via touch", 4));
+    tapRow(0, 64);
+    inputScript.push_back(render("Pokemon Bag Balls Info via touch", 4));
+    tapCenter();
+    inputScript.push_back(render("Pokemon Bag Balls Restored via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Bag Restored 3 via touch", 4));
+
+    // Row 3 = Machine (TM/HM, empty on a fresh save).
+    tapRow(3, 64);
+    inputScript.push_back(render("Pokemon Bag Machine via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Bag Restored 4 via touch", 4));
+
+    tapBack();
+    inputScript.push_back(render("Pokemon Menu Restored 4 via touch", 4));
+    inputScript.push_back(assertActivity("Pokemon"));
+
+    // Menu row 5 = Gym Battle (GymList) - view only, deliberately not
+    // tapping a gym row since that would launch a real battle.
+    tapRow(5, 64);
+    inputScript.push_back(render("Pokemon Gym List via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Menu Restored 5 via touch", 4));
+
+    // Menu row 6 = Badges - view only, same reasoning.
+    tapRow(6, 64);
+    inputScript.push_back(render("Pokemon Badges via touch", 4));
+    tapBack();
+    inputScript.push_back(render("Pokemon Menu Restored 6 via touch", 4));
     inputScript.push_back(assertActivity("Pokemon"));
 
     LOG_INF("SMOKE", "Running Pokemon touch input script");
