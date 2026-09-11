@@ -406,14 +406,15 @@ void PokemonActivity::setScreen(const Screen screen, const int selected) {
 bool PokemonActivity::isListScreen() const {
   // Screen::Battle/BattleMoves/Menu/Bag draw their own 2-column button grids
   // (renderBattleMenu()/renderBattleMoveMenu()/renderMenuGrid()/
-  // renderBagGrid()) instead of the generic single-column list - see the
-  // comments there. Screen::Pc deliberately stays a single-column list (with
-  // a species icon per row, see artRows below) - a grid there left the
-  // screen looking too empty per user feedback, so only Bag/Menu kept the
-  // grid treatment.
+  // renderBagGrid()) instead of the generic single-column list, and
+  // Screen::PcOrder draws a single-column button variant (renderPcOrderButtons())
+  // - see the comments there. Screen::Pc itself deliberately stays a
+  // single-column list (with a species icon per row, see artRows below) - a
+  // grid there left the screen looking too empty per user feedback, so only
+  // Bag/Menu/PcOrder kept the button treatment.
   return screen_ != Screen::Summary && screen_ != Screen::PokedexDetail && screen_ != Screen::Message &&
          screen_ != Screen::Battle && screen_ != Screen::BattleMoves && screen_ != Screen::Menu &&
-         screen_ != Screen::Bag;
+         screen_ != Screen::Bag && screen_ != Screen::PcOrder;
 }
 
 int PokemonActivity::logicalCount() const {
@@ -1676,6 +1677,30 @@ void PokemonActivity::loop() {
     });
     return;
   }
+  if (screen_ == Screen::PcOrder) {
+    // Same reasoning as Menu/Bag above - bypasses buildList()/fui::list()
+    // (see isListScreen()). A single column, so Up/Down/Left/Right all just
+    // step by 1 through the 3 entries (no column math needed).
+    if (mappedInput.hasTouchHardware()) {
+      for (int index = 0; index < count; ++index) {
+        const Rect cell = buttonGridCellRect(index, 1);
+        if (mappedInput.wasTapInRect(cell.x, cell.y, cell.width, cell.height)) {
+          selected_ = index;
+          activate();
+          return;
+        }
+      }
+    }
+    const auto movePcOrder = [this](const int next) {
+      selected_ = next;
+      requestUpdate();
+    };
+    navigator_.onPressAndContinuous(ButtonNavigator::getNextButtons(),
+                                    [this, count, &movePcOrder] { movePcOrder((selected_ + 1) % count); });
+    navigator_.onPressAndContinuous(ButtonNavigator::getPreviousButtons(),
+                                    [this, count, &movePcOrder] { movePcOrder((selected_ - 1 + count) % count); });
+    return;
+  }
   const int perPage = rowsPerPage();
   // Swipe up/down pages through long lists (Bag, Pokedex, PC box...) the same
   // way the physical Up/Down buttons already do below - the touch-only X4
@@ -1899,6 +1924,10 @@ void PokemonActivity::buildRows() {
         rows_[local].subtitle = values_[local].data();
         break;
       }
+      // Unreachable in practice: isListScreen() excludes Screen::PcOrder (it
+      // draws its own single-column button list via renderPcOrderButtons(),
+      // which has its own copy of these same 3 labels - see the comment
+      // there).
       case Screen::PcOrder:
         row(local, index == 0   ? tr(STR_POKEMON_CATCH_DATE)
                    : index == 1 ? tr(STR_POKEMON_NUMBER)
@@ -2394,6 +2423,10 @@ void PokemonActivity::renderFocused() {
     renderBagGrid();
     return;
   }
+  if (screen_ == Screen::PcOrder) {
+    renderPcOrderButtons();
+    return;
+  }
   if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
     renderBattleHud();
     if (screen_ == Screen::Battle) renderBattleMenu();
@@ -2485,15 +2518,15 @@ int PokemonActivity::buttonGridTop() const { return listTop(); }
 // relative to the current page (0-based within whatever is on screen right
 // now) - Menu/Bag never paginate, so this is just the global index for
 // them.
-Rect PokemonActivity::buttonGridCellRect(int index) const {
+Rect PokemonActivity::buttonGridCellRect(int index, int columns) const {
   const int width = renderer.getScreenWidth();
   constexpr int margin = 8;
   constexpr int gap = 8;
   constexpr int buttonHeight = MENU_GRID_ROW_HEIGHT - 8;
-  const int buttonWidth = (width - 2 * margin - gap * (MENU_GRID_COLUMNS - 1)) / MENU_GRID_COLUMNS;
+  const int buttonWidth = (width - 2 * margin - gap * (columns - 1)) / columns;
   const int top = buttonGridTop();
-  const int row = index / MENU_GRID_COLUMNS;
-  const int column = index % MENU_GRID_COLUMNS;
+  const int row = index / columns;
+  const int column = index % columns;
   const int x = margin + column * (buttonWidth + gap);
   const int y = top + row * MENU_GRID_ROW_HEIGHT;
   return Rect{x, y, buttonWidth, buttonHeight};
@@ -2549,6 +2582,21 @@ void PokemonActivity::renderBagGrid() {
                         : index == 2 ? tr(STR_POKEMON_BAG_BALLS)
                                      : tr(STR_POKEMON_BAG_MACHINES);
     drawGridButton(buttonGridCellRect(index), index == selected_, label);
+  }
+}
+
+// PC Box's sort picker (Catch Date/Number/Alphabetical) as the same button
+// style, but a single column - only 3 entries, and full-width buttons read
+// better than a 2-column grid for this short a list. Bypasses buildList()
+// entirely (see isListScreen()); loop() has a matching navigation branch.
+void PokemonActivity::renderPcOrderButtons() {
+  const int count = logicalCount();
+  if (count <= 0) return;
+  for (int index = 0; index < count; ++index) {
+    const char* label = index == 0   ? tr(STR_POKEMON_CATCH_DATE)
+                        : index == 1 ? tr(STR_POKEMON_NUMBER)
+                                     : tr(STR_POKEMON_ALPHABETICAL);
+    drawGridButton(buttonGridCellRect(index, 1), index == selected_, label);
   }
 }
 
