@@ -105,6 +105,10 @@ struct PageTextLine {
   int clipHeight = 0;
   int lineHeight = 0;
   bool isTableText = false;
+  // Identifies a logical table column within this page layout. Normal text and
+  // unsupported table shapes use the sentinel, so their selection behavior is
+  // unchanged.
+  uint16_t tableSelection = UINT16_MAX;
 };
 
 using PageTextLineVisitor = bool (*)(const PageTextLine& line, void* context);
@@ -166,8 +170,13 @@ class Page {
     if (footnotes.empty()) {
       footnotes.reserve(INITIAL_FOOTNOTE_RESERVE);
     }
-    footnotes.emplace_back();
-    footnote_cache::assign(footnotes.back(), number, href, linkId);
+    FootnoteEntry entry;
+    std::strncpy(entry.number, number, sizeof(entry.number) - 1);
+    entry.number[sizeof(entry.number) - 1] = '\0';
+    std::strncpy(entry.href, href, sizeof(entry.href) - 1);
+    entry.href[sizeof(entry.href) - 1] = '\0';
+    entry.linkId = linkId;
+    footnotes.push_back(entry);
   }
 
   void addPublisherPageMarker(const char* label, const int yPos) {
@@ -201,6 +210,8 @@ class Page {
     return std::any_of(elements.begin(), elements.end(),
                        [](const std::unique_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
   }
+
+  void prepareImageCaches() const;
 
   bool hasImagesNeedingDecode() const {
     return std::any_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& element) {

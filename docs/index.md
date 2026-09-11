@@ -14,7 +14,7 @@ A lightweight, reading-powered Pokémon companion for the Xteink X3, built on Cr
 
 ## CrossInk reference
 
-The remaining documents are inherited CrossInk reader documentation. X3-specific installation and Pokémon instructions above take precedence for this project.
+The remaining documents are inherited CrossInk reader documentation. Installation and Pokémon instructions above take precedence for this project.
 
 - [Touch Navigation](./touch-navigation.md)
 - [User Guide](./user-guide.md)

@@ -5,6 +5,7 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <WiFi.h>
 
 #include <algorithm>
 #include <cctype>
@@ -146,7 +147,7 @@ std::string formatCompactDuration(const uint32_t seconds) {
 
 void drawSystemVersionFooter(const GfxRenderer& renderer, const int pageWidth, const int pageHeight,
                              const ThemeMetrics& metrics) {
-  const std::string label = CROSSINK_PRODUCT_NAME " " CROSSINK_VERSION;
+  const std::string label = "CrossInk " CROSSINK_VERSION;
   const int maxWidth = pageWidth - systemVersionFooterSideMargin * 2;
   const int bottomLineY =
       pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing - systemVersionFooterBottomInset;
@@ -336,7 +337,7 @@ void SettingsActivity::rebuildSettingsLists() {
   const size_t expectedControlsCount = controlsParentBaseCount - (hasTouch ? 1u : 0u) + (hasHomeKey ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
-                                       (hasSettingByName(allSettings, StrId::STR_PAGE_TURN) ? 1u : 0u);
+                                       (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   const size_t expectedFrontButtonCount = hasTouch ? 0u : controlsFrontButtonCount;
   const size_t expectedSideButtonCount = controlsSideButtonBaseCount + (hasTouch ? 1u : 0u);
 #else
@@ -346,7 +347,7 @@ void SettingsActivity::rebuildSettingsLists() {
   const size_t expectedControlsCount = controlsParentBaseCount + (gpio.hasHomeKey() ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
-                                       (hasSettingByName(allSettings, StrId::STR_PAGE_TURN) ? 1u : 0u);
+                                       (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   constexpr size_t expectedFrontButtonCount = controlsFrontButtonCount;
   constexpr size_t expectedSideButtonCount = controlsSideButtonBaseCount;
 #endif
@@ -639,7 +640,6 @@ void SettingsActivity::openLanguagePicker() {
 
     SETTINGS.language = langIndex;
     SETTINGS.saveToFile();
-    rebuildSettingsLists();
     requestUpdate();
   });
   requestUpdate();
@@ -730,26 +730,6 @@ void SettingsActivity::onEnter() {
 
   // Trigger first update
   requestUpdate();
-}
-
-void SettingsActivity::selectCategory(const int categoryIndex) {
-  selectedCategoryIndex = categoryIndex;
-  switch (selectedCategoryIndex) {
-    case 0:
-      currentSettings = &displaySettings;
-      break;
-    case 1:
-      currentSettings = &readerSettings;
-      break;
-    case 2:
-      currentSettings = &controlsSettings;
-      break;
-    case 3:
-      currentSettings = &systemSettings;
-      break;
-  }
-  settingsCount = static_cast<int>(currentSettings->size());
-  topIndex = 0;
 }
 
 void SettingsActivity::onTabEvent(const fui::ActionEvent& event, void* user) {
@@ -1089,7 +1069,18 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::Network:
-        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
+        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false),
+                               [](const ActivityResult&) {
+                                 SETTINGS.saveToFile();
+                                 // Settings only manages credentials; no parent needs the connection.
+                                 // Cancelled selections already stop WiFi in the picker.
+                                 if (WiFi.getMode() == WIFI_MODE_NULL) return;
+                                 WiFi.disconnect(false);
+                                 delay(30);
+                                 if (!WiFi.mode(WIFI_OFF)) {
+                                   LOG_ERR("SET", "Failed to stop WiFi after network settings");
+                                 }
+                               });
         break;
       case SettingAction::BackupStats:
         startActivityForResult(std::make_unique<BackupStatsActivity>(renderer, mappedInput), resultHandler);
