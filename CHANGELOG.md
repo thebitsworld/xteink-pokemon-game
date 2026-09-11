@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-12
+
+### Fixed
+
+- The in-app Wi-Fi "Check for Update" never detected a newer release on either device - the firmware's own version had not been set correctly since the last few releases, so it always compared as up to date. New releases from this one onward will be detected correctly.
+- The Settings screen's version line said "CrossInk" instead of "Xteink Pokemon".
+
 ## [0.4.0] - 2026-09-11
 
 ### Added
