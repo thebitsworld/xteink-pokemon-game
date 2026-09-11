@@ -10,9 +10,12 @@ Handoff plan for bringing the Pokémon game to the Xteink X4 Pro, alongside the 
 X3/X4 build. Written so any session (this one or a fresh one, on any machine) can pick up
 exactly one phase and execute it without needing the rest of this conversation's context.
 
-Working branch: **`feat/X4Pro-support`**. Read the whole document before starting; each
-phase below states its own prerequisites and its own "done" criteria — check those before
-touching anything.
+**All 5 phases are done and merged to `main`** (via `feat/X4Pro-support`, merge commit
+`6db52b9f`), released starting at `v0.3.0` (2026-09-10) and confirmed on physical X4 Pro
+hardware (`7ddfc760`). This document is kept as a historical record and as the template for
+any *next* new-device port — read a phase's own section for what actually happened and why,
+rather than treating anything here as still-pending work. For the project's current overall
+status, see `CLAUDE.md`'s "Current status" section and `CHANGELOG.md`.
 
 ---
 
@@ -534,15 +537,27 @@ nothing clipped, no overlap, selection marker fully visible.
 
 ## Phase 5 — Release
 
-**Status:** Not started
+**Status:** Done (commits `0f42ca1f`, `2afa7705`, `ab7b94af`, `d9d6b56b` — released as
+`v0.3.0`, tag `9656361d`/`4f2da6b7` note superseded by later `v1.5.1` naming, see below)
 
-**Prerequisites:** Phases 1-4 done and each individually verified. Ideally also real X4 Pro
-hardware acceptance (see the note at the very end of this doc) before calling this
-"stable," but the build/packaging work itself doesn't require hardware.
+Both `scripts/build_pokemon_release.py` and `scripts/package_pokemon_v2_release.py` were
+made device-aware (took a `--device`/equivalent argument rather than assuming X3), producing
+`firmware-x4-pro*.bin` alongside the existing `firmware-x3-x4*.bin`. `README.md`/
+`docs/installation.md` updated to list X4 Pro as supported, with an explicit warning that
+the two firmware files are not interchangeable. `CHANGELOG.md` `[0.3.0]` entry added.
 
-**Goal:** A GitHub Release carrying both firmware assets, documented for end users.
+**Since this phase, releasing got fully automated** (commits `861ac776`, `bc4c9b33`,
+`8f9762ca`, `v0.3.1`): pushing a `v*.*.*` tag now builds both device firmwares (each in its
+own CI job, after `8f9762ca` fixed disk exhaustion from building both in one job), packages
+firmware-only assets + checksums, and publishes a GitHub Release using the matching
+`CHANGELOG.md` section as its notes automatically. Asset names later changed from
+`xteink-pokemon-x3-*` to `xteink-pokemon-x3-x4-*` (`v0.3.1`) to make explicit both X3 and X4
+share the one build. Manual `build_pokemon_release.py` invocation (the steps below) is now
+only needed for a local test build, not for a real release.
 
-**Steps:**
+<details>
+<summary>Original steps (kept for reference / local test builds)</summary>
+
 
 1. Build both environments and run the existing release packaging script for each:
    ```sh
@@ -572,9 +587,20 @@ files at the repo root — see `.gitignore`/existing convention, do not commit b
 release ready for the user's manual review and publish. Do not publish/push anything
 without the user's explicit go-ahead in that session.
 
+</details>
+
 ---
 
 ## Real-hardware acceptance (separate from the phases above)
+
+**Status:** Done (commit `7ddfc760`, 2026-09-10). `README.md`/`docs/installation.md` now
+say both X3 and X4 Pro are "confirmed working on physical hardware" (previously X4 Pro said
+"physical-device acceptance is still pending" — that caveat is gone). This confirms the game
+itself works end to end on a real X4 Pro device; it does not by itself mean every item in
+the checklist below (frontlight, fuel gauge, crash-report absence, etc.) was individually
+re-verified with a written record — treat this as **"shipped and working," not** a completed
+paper checklist. If a future regression is suspected, redo the specific checklist item on
+real hardware rather than assuming.
 
 Only a physical X4 Pro can verify: touch responsiveness and the capacitive Home key, SDMMC
 SD-card read reliability for artwork, dual-channel frontlight, battery/fuel-gauge reporting,

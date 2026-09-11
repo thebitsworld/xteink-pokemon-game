@@ -2,341 +2,91 @@
 
 Context notes for Claude in a later session (or on another machine) to continue this work without rediscovering everything from scratch. This file is NOT official project documentation — it's just a handoff notebook, and can be cleaned up/deleted once the in-progress work is done.
 
-## New work in progress: Xteink X4 Pro support (started 2026-09-10)
+## Current status (as of 2026-09-12 — read this first)
 
-Branch: **`feat/X4Pro-support`**. Full 5-phase plan, hardware findings, measured flash
-numbers, and per-phase "definition of done" all live in:
-
-👉 **[docs/development/pokemon-x4pro-roadmap.md](docs/development/pokemon-x4pro-roadmap.md)**
-— read this before writing any code for X4 Pro. It's written so a session with zero prior
-context can pick up exactly one phase (1: merge upstream CrossInk v1.5.1-rc-6; 2: add the
-`pokemon-x4-pro` PlatformIO env; 3: touch support for the whole Pokémon UI, since X4 Pro has
-no physical d-pad; 4: layout fixes for the 800×480 panel, mainly the Battle HUD's tight
-vertical budget; 5: release packaging) and execute it independently.
-
-**Phase 1 is done** (merge commit `414958d8` + fixup commit `ec666a15`). Turned out a
-prepared remote branch `origin/upstream-history` already carried real CrossInk history back
-through `v1.5.0`, so a `git replace --graft` onto its tip (not `v1.5.0` directly, a closer
-match) gave a genuine 3-way merge instead of the ~630-file conflict a naive
-`--allow-unrelated-histories` merge would have produced — only 61 files actually conflicted.
-The graft itself was removed after the merge commit landed (no longer needed - the merge
-commit's second parent is a real, permanent link to upstream now). A second round of ~10
-fixes was needed after the merge *looked* clean (built the 61-conflict resolution fine) but
-several files where this fork's now-abandoned pre-squash experiment and upstream both edited
-non-overlapping hunks had silently combined into code that doesn't compile or doesn't match
-either side's real intent — git can't flag that as a conflict, only building/testing catches
-it. See the roadmap doc's Phase 1 section for the full list (API drift in
-GfxRenderer/ImageToFramebufferDecoder/ButtonNavigator, a missing build flag, a stale
-simulator SDK pin, host-vs-ESP32 `char` signedness, two orphaned tests) — one item worth
-flagging on its own: **a real navigation bug already in upstream's own v1.5.1-rc-6 tag**
-(confirmed byte-identical, not something this merge introduced) where a single-button
-`Buttons{X}` release/press handler also silently fires on Back, in `FileBrowserActivity.cpp`
-and `RecentBooksGridActivity.cpp` — worked around locally, but worth reporting upstream.
-
-Confirmed green: `pio run -e pokemon-x3` (**Flash 93.1%, 439,232 B free** — down from
-97.0%/185,216 B pre-merge, a big unplanned win from upstream's font compression work), the
-native suite (**333/333**), and the X3 simulator smoke run (boots, runs the full script
-including Pokémon, exits clean).
-
-**Phase 2 is done** (commit `2ce2a09e`): added `[env:pokemon-x4-pro]` and
-`[env:pokemon-x4-pro-simulator]` to `platformio.ini`. Both built clean on the first try - no
-fixes needed. `pio run -e pokemon-x4-pro`: Flash 92.7%, 478,320 B free. Simulator boots and
-runs clean. `pokemon-x3` re-verified unaffected.
-
-**Phase 3 is in progress** (commit `e8ab0693`, part 1 of the roadmap's 4 steps): added touch
-to `Screen::Battle`/`Screen::BattleMoves` (the 2-column button grids drawn by
-`renderBattleMenu()`/`renderBattleMoveMenu()`, which bypass `fui::list()` entirely and so
-never got touch from the shared dispatch) via a new shared `battleGridCellRect()` helper +
-`mappedInput.wasTapInRect()` hit-test in `loop()` - same pattern already used by
-`FontDownloadActivity`/`TouchHeaderBackButton` for custom-drawn buttons. Also added
-tap-to-dismiss for `Screen::Message` via `wasScreenTapped()` (previously only leavable by the
-header's Back tap or the physical Confirm button). Both APIs are constexpr no-op stubs under
-`CAP_TOUCH=0`, confirmed via `check_app_touch_gate.py` still passing on `pokemon-x3`. 19/19
-native tests pass; both `pokemon-x3` and `pokemon-x4-pro` build clean, flash unchanged; both
-simulators boot and run the (button-driven) Pokemon smoke script clean.
-
-**Phase 3 step 3 (list-screen touch audit) is now covered for the core screens** (commit
-`1d69ea03`): added `buildPokemonTouchInputScript()` to `SimulatorSmokeTest.cpp`, auto-selected
-when `mappedInputManager.hasTouchHardware()` is true. It walks
-Menu -> Party -> Actions -> Summary -> Pokedex -> PokedexDetail -> PC using real tap
-coordinates (each row's actual on-screen position, same formula as
-`PokemonActivity::listTop()`/`rowHeightForScreen()`) plus a tap on the header's Back button.
-Run it with **both** `CROSSINK_SIMULATOR_SMOKE_TEST=1` and `CROSSINK_SIMULATOR_START_POKEMON=1`
-set (the first flag alone only starts the Pokemon activity manually with no scripted input at
-all - easy to miss, cost real time to discover this session) against
-`pokemon-x4-pro-simulator`, with `fs_/.crosspoint/pokemon-{a,b}.bin` deleted first for a truly
-fresh onboarding state. Confirmed: "Simulator smoke test passed".
-
-**Extended further** (commit `c387b648`): the touch script now also walks Moveset (Actions row
-1), all 4 Bag category rows (Evolution/Medicine/Balls/Machine - Balls doubles as coverage for
-the `Screen::Message` tap-to-dismiss path, via a new `tapCenter()` helper using
-`wasScreenTapped()`), and GymList/Badges (entered and left without activating a row, since
-selecting a gym starts a real battle). All confirmed via `pokemon-x4-pro-simulator`:
-"Simulator smoke test passed".
-
-**Phase 3 is now fully done** (commit `8b98b5f4`): added `buildPokemonBattleTouchInputScript()`
-covering the last 4 screens - `ItemTarget`, `BattleSwitch`, `BattleBag`, `BattleBalls` - which
-only exist inside an active battle. Selected via a new `CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH`
-env var. Requires pre-seeding the save first (simulator closed) so `loadInitialScreen()` opens
-`Screen::Event` directly instead of onboarding:
-
-```sh
-python3 scripts/dev/edit_pokemon_save.py add-party-member --species pikachu --level 20
-python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --level 5
-python3 scripts/dev/edit_pokemon_save.py reset-battle-store
-export PATH="$HOME/.platformio/penv/bin:$PATH"
-CROSSINK_SIMULATOR_SMOKE_TEST=1 CROSSINK_SIMULATOR_START_POKEMON=1 \
-  CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH=1 \
-  pio run -e pokemon-x4-pro-simulator -t run_simulator
-```
-
-Taps: Event's Catch row -> Battle -> FIGHT (BattleMoves - the first automated verification of
-the Part 1 battle-grid touch hit-test itself, never actually script-driven until now) -> BAG
-(BattleBag -> the starter's free Potion -> ItemTarget, applied to the active combatant) ->
-SWITCH (BattleSwitch -> the pre-seeded second party member, high-level enough that the
-opponent's Stage-18 free hit for switching can't faint it) -> BALL (BattleBalls, view-only -
-not thrown, to avoid catch-RNG ending the battle nondeterministically).
-`verifyPokemonSmokeState()` is skipped in this mode (the save is deliberately not the fresh
-single-starter state it checks for). Confirmed via art-loading log lines (Pidgey/Charmander/
-Pikachu sprites requested at each expected transition): "Simulator smoke test passed".
-**Every screen in the original list-screen audit is now covered.**
-
-**Pre-existing bug found while testing this - now fixed** (commit `afa7a891`): running the
-*button*-driven `buildPokemonInputScript()` the correct way (fresh save +
-`CROSSINK_SIMULATOR_SMOKE_TEST=1`, apparently never actually combined like this before) used
-to fail before reaching `Screen::Pc`. Root cause: a smoke-test script bug dating back to
-Stage 10 (`pokemon-battle-roadmap.md`), when Down/Up became a full-page jump and Right/Left
-became the single-row step. The script still used 3x Down intending to step 3 rows into
-Pokedex (151 rows) to reach the caught starter - but Down jumps a whole page (9 rows) there,
-landing 3 pages later on an unseen species; `activate()` correctly no-ops on that, so
-`PokedexDetail` silently never opened, and every following step operated one screen "behind"
-its assumption until a stray Back landed on `Screen::Menu` itself and correctly exited the
-whole activity. Not a `PokemonActivity` bug at all - confirmed present on commit `1ab5f17d`
-(before any Phase 1/3 work) via a throwaway `git worktree`. Fixed by using Right for the two
-row-landing sequences, keeping one intentional single Down where only "paging doesn't crash"
-was being tested. Verified via the art-loading log lines (`heroes/004.bmp` and
-`pokedex/portrait/004.bmp` genuinely requested, proving detail really opened) -
-`pokemon-simulator-X3` now reaches "Simulator smoke test passed" end to end on a fresh save.
-
-**Important touch-test infrastructure bug found and fixed** (commit `bfedd33a`): while trying
-to visually confirm Pokedex detail's portrait layout, discovered that the touch script's
-`tapBack()` (tap the header's Back button) computed its coordinate as
-`header.x + header.width - iconRect.width / 2` (the right edge) - but
-`TouchHeaderBackButton::layout()`/`draw()` actually place the back icon at the header's
-**left** edge (`iconRect.x == header.x`, title text follows to its right - visible in every
-"< Title" screenshot taken this session). The touchRect is only 68px wide, nowhere near the
-right edge on a 480-800px header, so every scripted `tapBack()` landed outside any real
-tappable element and silently did nothing. Confirmed via a `loop()`-level trace: `onRow()`
-fired for the first 3 forward taps (Menu->Party->Actions->Summary) and then never again for
-the rest of the run - every later step (Back, Pokedex, Bag, GymList, Badges...) kept landing
-on the unreachable coordinate, leaving `screen_` stuck on Summary for good.
-`assertActivity()` only checks the activity name, not the screen, so "Simulator smoke test
-passed" never caught this - the render step labels logged were just strings, not proof the
-screen actually changed. Ruled out the just-added force-portrait `onEnter()` change as the
-cause by temporarily disabling it and reproducing the identical freeze. Fixed by using
-`iconRect.x + iconRect.width / 2` instead. Re-verified end to end with hard evidence (not
-just labels): the full non-battle touch script now reaches every screen for real
-(`pokedex/portrait/004.bmp` genuinely requested for Pokedex Detail), the battle touch script
-(also using `tapBack()`) still passes, and `pokemon-x3`'s button-driven script (a different,
-unaffected code path) still passes. **Not fixed, out of scope**:
-`buildFileBrowserInputScript()` (pre-existing, not written this session) has the identical
-`header.x + header.width - ...` pattern for its own header-shortcut tap - worth checking
-separately if that test also silently no-ops.
-
-**Phase 4 scope decision (2026-09-10): Pokemon is portrait-only, on both X3 and X4 Pro -
-landscape is explicitly out of scope for now, to revisit later.** Before this was decided,
-some landscape investigation already happened and is worth knowing about if landscape work
-resumes:
-- **Landscape was confirmed broken on both devices** (commit `b2f4d920`): measured on the X4
-  Pro simulator, the Battle HUD had only ~172px available for the whole battlefield+message
-  box in landscape (vs. 400+px in portrait) - a screenshot confirmed the two HP panels and
-  the message box all drew on top of each other and the FIGHT/BAG/SWITCH/RUN menu. X3
-  landscape computes to essentially the same ~173px available, so it was equally broken,
-  just never actually looked at before this session.
-- **A fix was written and verified** (still in the code, see below): `renderBattleHud()`
-  computes `available` up front and switches to a compact side-by-side layout below a
-  threshold (opponent's panel left half, player's right half, one row instead of two,
-  smaller sprites, a shorter message box). Confirmed via landscape screenshots on both
-  devices: no more overlap, Party/Summary also looked fine in landscape without any changes.
-- **Then landscape was ruled out of scope**, so (commit `d4c46297`) `PokemonActivity::onEnter()`
-  now force-sets `Portrait` orientation unconditionally - the same convention already used by
-  `NearbyBookTransferActivity`/`SettingsActivity`/`SleepActivity` - so a device left in
-  landscape by the reader (or the `CROSSINK_SIMULATOR_POKEMON_LANDSCAPE` simulator test flag)
-  never shows the game in an unsupported orientation. Verified: the simulator with that flag
-  set still passes the portrait-tuned touch script end to end, proving the override actually
-  takes effect (if it didn't, portrait-computed tap coordinates would land on the wrong rows).
-  **The compact Battle HUD layout is therefore currently unreachable in normal play** - left
-  in place rather than reverted, since it's already implemented and verified, ready to use
-  if/when landscape support is picked back up.
-
-**Phase 4's remaining scope is now just portrait**, on both devices. This is largely already
-covered: Phase 1's row-clipping fix and the generic width/height-derived layout formulas
-(listTop()/rowHeightForScreen()/etc.) apply uniformly, and X4 Pro portrait (480x800) is
-actually *roomier* than X3 portrait (528x792) on the tight axis, not tighter - so no
-X4-Pro-specific portrait shrinking has been needed anywhere so far. Nothing further is known
-to be broken in portrait; if picking this up again, a final portrait-only pass over Battle,
-Party, Summary, Pokédex detail on the X4 Pro simulator (already spot-checked and clean) would
-close this out before Phase 5.
-
-Then Phase 5 (release).
-
-## Recent fixes (2026-09-10)
-
-- **Every Pokemon list screen was clipping its last row** (`95179ecc`, reported by the user as "the TM/HM row is missing" then corrected to "every menu screen is missing its last row, with a scrollbar now showing"): `buildList()`'s `screen.setContentMargin()` call computed its margin in raw-screen coordinates, but `Screen::setContentMargin()` insets from `frame_.safeRect()` (already shrunk by the device's 9px/3px top/bottom viewable margin) - so the margin got double-applied, silently shrinking the list's content rect by 12px below what `listBounds_` (`rowCount_ * rowHeight_`) promised, dropping exactly one row. Predates X4 Pro work entirely - traced to upstream's `v1.5.1-rc-6` merge (`414958d8`), which newly wired `safeArea` into that clamp; X3 was affected before any X4-Pro-specific change. Fixed by subtracting the same viewable margin back out in `buildList()`. Verified visually via a simulator screenshot (`ScreenshotUtil::takeScreenshot()`, temporarily hooked into `renderFocused()` then removed) showing all 8 Menu rows with no scrollbar. Also fixed a related bug found while testing this: `scripts/dev/edit_pokemon_save.py`'s `add-party-member` bumped the save header's `recordCount` without updating the cached `payloadBytes` field, which `decodeSnapshotHeader()` independently checks on load - caused a real "save file corrupt" error (`a1089ade`).
-- **Fainted Pokemon now require Revive/Max Revive** (`72ef328b`): `useConsumable()` previously let a plain Potion/Full Restore/status cure/PP restore quietly act on a fainted Pokemon (`currentHp == 0`). Fixed: those items now require `currentHp > 0` and return `NotApplicable` otherwise; only Revive/Max Revive (item ids 15/16) can act on a fainted one, restoring 50%/100% of max HP (their `effectValue` now read as a percentage for these two ids specifically) rather than curing status. No UI changes needed — both Bag and BattleBag paths already surface `NotApplicable` with a message. 19/19 tests pass (added `UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequiresRevive`). Flash 6,354,239 B/97.0%, 185,216 B free.
-- **Wi-Fi OTA update pointed at the wrong repo** (`9952a2c5`): `pokemon-x3` never overrode `CROSSINK_OTA_RELEASE_URL`, so "Check for Update" silently pulled firmware from upstream `uxjulia/CrossInk` (matching asset name `firmware-x3-x4.bin`), which would flash a Pokemon-less build. Fixed by overriding the URL to this fork's own releases in that environment only.
+- **Version `v0.4.0`**, on `main`, working tree clean. `main` is the only branch anyone should be working from right now — every feature branch below has already been merged in and none are currently active.
+- **Everything already shipped**, newest first:
+  - **`v0.4.0`** (2026-09-11): CrossInk engine synced to upstream **v1.5.1** (Quick Lock, custom boot screens, configurable page-turn gestures, tap-to-hide status bar, EPUB table rendering, a batch of touch/sleep/EPUB reliability fixes). Plus, unrelated to the CrossInk sync: swipe up/down paging for long lists on touch devices, real PokeAPI sprites decorating Battle/Bag/Badges, and the Pokémon main menu/Bag category picker/PC Box sort screen redrawn as button grids instead of plain text lists.
+  - **`v0.3.1`** (2026-09-11): releases are now fully automated — pushing a `v*.*.*` tag builds both device firmwares in CI and publishes a GitHub Release with `CHANGELOG.md`'s matching section as the notes. Physical-hardware confirmation for X3 **and** X4 (not just X4 Pro).
+  - **`v0.3.0`** (2026-09-10): **Xteink X4 Pro is a fully supported device** — full touch UI, portrait-only by design, confirmed on physical hardware (`7ddfc760`). Full writeup: [docs/development/pokemon-x4pro-roadmap.md](docs/development/pokemon-x4pro-roadmap.md) (all 5 phases done — the doc's own top line says so, don't skim past it as if it were still a live plan).
+  - **`v0.2.0`** and earlier: the full turn-based battle system (gyms, Elite Four, catching, moves/TM/HM, items) — see [docs/development/pokemon-battle-roadmap.md](docs/development/pokemon-battle-roadmap.md).
+  - **Full detail for all of the above, in the proper end-user changelog format, is in [CHANGELOG.md](CHANGELOG.md).** That file, not this one, is the authoritative record of what shipped in each version — prefer it over the historical narrative kept further down in this file.
+- **No known open TODOs in code** — `grep -rn "TODO\|FIXME"` across `lib/Pokemon/`, `src/pokemon/`, `src/activities/pokemon/`, `src/components/pokemon/` returns nothing (checked 2026-09-12).
+- **This machine (as of 2026-09-12) has none of the dev toolchain set up**: no `python`/`python3`, no PlatformIO, no `node`, and the `freeink-sdk`/`assets/tabler-icons` submodules are **not checked out** (`git submodule status` shows both with a `-` prefix). The "Quick build recipe" section below was written and verified on a *different*, Linux machine — its paths (`/home/vutq/...`) and assumptions (`~/.platformio/penv/bin` already populated) do not apply here as-is. Before attempting any build on this machine: install Python 3 and PlatformIO, run `git submodule update --init --recursive`, and expect first-run toolchain downloads to take a while. Don't assume the recipe's exact commands work unmodified on Windows/PowerShell — verify each step.
+- **Standing conventions, still in force**: don't push to `origin` or publish a release without the user's explicit go-ahead in that session (release automation now exists via tag push, but *creating and pushing* the tag is still the user's call, not something to do autonomously). Commit code changes and doc/roadmap updates as separate commits. Only format newly-authored code with clang-format — never blanket-reformat pre-existing CrossInk files.
 
 ## What this project is
 
-This is a fork of **CrossInk** (ESP32-C3 firmware for the Xteink X3/X4 e-ink reader), extended with a **Pokémon game module** — Pokémon leveling up based on real reading time (not pure grinding). See [docs/pokemon-game.md](docs/pokemon-game.md) (user-facing doc) and [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) (detailed technical doc — **read this one first** to understand the game mechanics).
+This is a fork of **CrossInk** (ESP32-C3/S3 firmware for the Xteink X3/X4/X4 Pro e-ink readers), extended with a **Pokémon game module** — Pokémon leveling up based on real reading time (not pure grinding). See [docs/pokemon-game.md](docs/pokemon-game.md) (user-facing doc) and [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) (detailed technical doc — **read this one first** to understand the game mechanics).
 
-## Background surveyed (session 2026-09-04)
+## Historical narrative (superseded by CHANGELOG.md — kept for implementation detail, not for current status)
 
-1. **Read the entire Pokémon module in depth** (`lib/Pokemon/*`, `src/pokemon/*`, `src/activities/pokemon/*`) and explained the mechanics in detail: anti-cheat reading-time measurement (`PokemonTracker`), the XP/encounter/item/evolution loop (`PokemonGame.cpp::applyCreditedMinutes`), double-buffer + CRC storage (`PokemonStore`). All of it was written up in [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md).
-2. **Important gameplay finding**: `bookProgressPercent` (used to gate wild-encounter rarity/level) is the % progress through the **book currently being read**, not cumulative total reading time/pages → reading many short books reaches a high % faster, yielding better encounters for the same amount of real reading time compared to reading one long book. This may be worth rebalancing if desired.
-3. **Successfully set up the build environment**:
-   - PlatformIO is installed at `~/.platformio/penv/bin/pio` but **is not in the shell's default PATH** — must `export PATH="$HOME/.platformio/penv/bin:$PATH"` before running `pio`.
-   - The `freeink-sdk` submodule **was not initialized at the start of the session** (empty directory) → must run `git submodule update --init --recursive` before building (otherwise it fails with `PackageException: Can not create a symbolic link`).
-4. **Ran real builds of `pio run -e pokemon-x3` and `pio run -e default` to measure size** — real numbers (not estimates):
+Everything below this point describes work session-by-session, at a level of detail the end-user `CHANGELOG.md` deliberately doesn't carry (exact commits, flash-byte deltas, false starts, the reasoning behind a design choice). It is **all done and shipped** as of `v0.4.0` — none of it is "in progress." Use it when you need to know *why* something is built the way it is or *which commit* touched it; use `CHANGELOG.md` and the two roadmap docs when you just need to know *what currently exists*.
 
-   | Build | Flash used | % | Free in OTA slot (6.25MB) |
-   |---|---|---|---|
-   | `default` (no Pokémon) | 6,259,237 B | 95.5% | 280,208 B |
-   | `pokemon-x3` (with Pokémon) | 6,303,483 B | 96.2% | 235,968 B |
+### Xteink X4 Pro support (shipped `v0.3.0`–`v0.3.1`, 2026-09-10/11)
 
-   - Static RAM usage is only 17.7% (327,680 bytes total) — **not the bottleneck**.
-   - **Flash is the real bottleneck**: only ~230KB of headroom remains before `scripts/check_firmware_size.py` (the post-build check in `platformio.ini`) fails the build.
-   - The Pokémon module currently costs only ~43KB of flash (because artwork lives on the SD card, not bundled into the firmware).
-5. **Changed the git remote `origin`** from `https://github.com/padge01/xteink-pokemon-game.git` to `https://github.com/thebitsworld/xteink-pokemon-game.git` per the user's request. Successfully ran `git fetch origin` (the repo exists and is reachable), but **had not yet checked whether the new remote differs from the current code** (the local `main` branch was still tracking the old configuration, nothing merged/rebased yet).
-6. **Created a technical doc**: [docs/development/pokemon-mechanics.md](docs/development/pokemon-mechanics.md) — committed (`aaec0c59` on `main`).
+Built on `feat/X4Pro-support`, merged to `main` at `6db52b9f`. The full 5-phase plan, hardware findings (SDK already supported the device; the two real risks were the missing common git ancestor with upstream CrossInk, and the hand-drawn Battle menus having no touch hit-regions), measured flash numbers per phase, and the complete session-by-session log (merge conflicts and their fixes, the touch-hit-test implementation, the smoke-test-script bugs found and fixed along the way, the landscape-vs-portrait scope decision) all live in **[docs/development/pokemon-x4pro-roadmap.md](docs/development/pokemon-x4pro-roadmap.md)** — every phase section states its own final status and result inline, so read it there rather than expecting a duplicate of that log here.
 
-## Git state
+One thing surfaced during this work worth flagging on its own since it's not this fork's bug: **a real navigation bug in upstream CrossInk's own `v1.5.1-rc-6` tag** (confirmed byte-identical, not introduced by this merge) where a single-button `Buttons{X}` release/press handler also silently fires on Back, in `FileBrowserActivity.cpp` and `RecentBooksGridActivity.cpp`. Worked around locally; worth reporting upstream if that hasn't happened yet.
 
-- `main` has commit `aaec0c59` (mechanics doc + CLAUDE.md) — **not yet pushed** because this machine had no working GitHub credentials at the time (`gh` not installed, SSH key `~/.ssh/id_ed25519` not registered with GitHub, no HTTPS credential helper).
-- Remote `origin` was changed to `https://github.com/thebitsworld/xteink-pokemon-game.git`. `git fetch` succeeded, but **the remote had not yet been diffed against local**.
-- Working on the `feat/pokemon-battle-system` branch (branched off `main`).
-- Run `git status` to see exactly what's uncommitted.
+### Newer feature work after X4 Pro shipped, before the v1.5.1 sync (2026-09-11, all merged to `main`)
 
-## Work in progress: the Pokémon battle system
+Four small feature branches, each merged individually, none documented anywhere except their own commit messages and the `CHANGELOG.md` `[0.4.0]` entry until now:
 
-Being built on the **`feat/pokemon-battle-system`** branch. The full plan, technical constraints, design decisions with rationale, and stage-by-stage task list all live in:
+- **`feat/pokeapi-sprite-decor`** (`efca8c0f`): Battle now shows your own Pokémon from behind using real PokeAPI sprites (matching the classic games' perspective); Bag, Battle Bag, and Badges show an icon before each item/badge name instead of text-only rows. Follow-up fix (`e46006df`): `BattleSwitch`'s name text and HP bar were drawing on top of the icon.
+- **`feat/touch-swipe-scroll`** (`adc4bdc9`): swipe up/down now pages through long lists (Bag, Pokédex, PC Box, reader menus) on touch-only devices (X4 Pro), matching what the physical Up/Down buttons already did on X3.
+- **`feat/pokemon-menu-grid`** (`ea1890d1`): the Pokémon main menu and Bag category picker now render as 2-column button grids instead of plain text lists (`f649a402`). PC Box was tried as a grid too (`d2cc29ae`) but reverted back to a single-column list with icons after review, fixing a name-truncation bug along the way (`3f07c262`); its sort picker did become single-column buttons (`e6503ba3`).
+- **Release pipeline hardening**, alongside the above: `fix/pokedex-detail-touch-back` (`707c2910`) added a touch-only back affordance to the Pokédex detail card, which deliberately skips the standard header to maximize card size — reuses the header's own back-button hit-region. Then release automation itself landed: tag-push-triggered CI builds (`861ac776`), OTA-compatible asset naming + failure diagnostics (`bc4c9b33`), and splitting each device into its own CI job after the combined job started exhausting CI disk space (`8f9762ca`).
 
-👉 **[docs/development/pokemon-battle-roadmap.md](docs/development/pokemon-battle-roadmap.md)** — read this before writing any code.
+### CrossInk upstream sync to v1.5.1 (shipped `v0.4.0`, 2026-09-11)
 
-Scope: level-based move learning (real Red data), items + TM/HM drops from reading, full turn-based battling with status effects, catching Pokémon with 4 ball types, 8 gyms + Elite Four in order, a badges screen.
+`feat/crossink-v1.5.1` merged tag `v1.5.1` of `uxjulia/CrossInk` (`39acaa1b`), then merged to `main` (`503fffe8`). This is a real upstream sync (not the ancestor-graft trick Phase 1 of the X4 Pro work needed — by this point `main` already had genuine shared history with upstream from that earlier merge), bringing in Quick Lock, custom boot screens, configurable page-turn gestures, tap-to-hide status bar, EPUB table rendering, and assorted reliability fixes. See `CHANGELOG.md`'s `[v1.5.1] - 2026-09-10` section (CrossInk's own changelog, reproduced there) for the complete upstream list.
 
-**Progress**: **All 8 stages of the original battle roadmap are done**, plus **Stages 9-28 beyond the original roadmap** (commits `b4d21f31`, `eff18d13`, `f1ff1bd2`, `da111328`, `18a0eeca`, `a989d161`, `2f420118`, `5f496ad6`, `ddef31b0`, `62fd5028`, `194601a0`, `7605de43`, `060d272f`, `2fc7af7a`, `a554d92f`, `c3998aa9`, `22bb4638`, `5b9d24d2`, `19268f61`, `f2187062`, `ebb7e9fd`, `4d4f6bbb`, `950d72ce`, `9d433ad0`, `05b623ed`, `491411e7`, `0477355e`, `470120d1`, `9b12bae6`, `188b005d`, `719fd9e2`, `e1233cd8`, `e7c0968e`, `02fe4a15`, `6a014052`, `b808335d`, `d278b161`, `f0b49554`, `77c33495`, `fe283cb3`, `0cb2a666`, `db8e87c8`, `5ba48e7d`, `60625f11`, `9109663b`, `8b980ea0`, `566840ee`, `8c07b6b4`, `0d08f619`, `4a08c436`, `26e0b4e1`, `7b600718`, `9174a992`, `5f1d4dde`, `cbbe4ff3`, `ffa78e48`, `b7902acc`, `ca4ed277`, `94dfa6c7` on `feat/pokemon-battle-system`). **Pushing is currently done manually by the user** — this machine had no working GitHub credentials (see "Git state" above), don't attempt to push again unless asked to.
+### Fixes worth knowing the root cause of
 
-**Session stopping point (2026-09-09, most recent — user said "ok, stop here")**: after Stage 18 finished (see the detailed writeup below), work continued through the remaining 3 planned stages and then a long chain of Stages 19-28 driven by real playtest feedback:
-- **Stage 19 (`f0b49554` + follow-up `fe283cb3`)**: `Screen::BagBalls` to view ball counts outside of battle (view-only, no actions). Follow-up per feedback: **hide zero-count items from every bag menu** (Evolution/Medicine/Balls/TM-HM outside battle + BattleBag/BattleBalls mid-battle) — added `ownedSlotAt()`/`ownedSlotCount()` mapping "the Nth owned item" back to its real position; `bagItemIdAt()`/`bagItemCount()` now take `bagCounts` to filter while iterating. Along the way fixed a bug this same change introduced: the evolution-stone icon was drawn wrong once indices no longer lined up after filtering.
-- **Stage 19.5 (`db8e87c8`, off-roadmap, per feedback)**: long notification text (`Screen::Message`) and the battle log overflowed the screen in portrait — fixed by using `renderer.wrappedText()` (real word-wrap) instead of `centered()`/`truncatedText()` (no auto-wrapping); increased `messageHeight` 90→160 for the extra space.
-- **Stage 20 (`60625f11`+`9109663b`, expanded into a general-purpose tool per the user's request)**: `scripts/dev/edit_pokemon_save.py` — a Python CLI to patch the simulator's save file, with `dump`/`reset-battle-store`/`reset-gym-progress`/`queue-encounter`/`set-bag-item`/`set-record-xp` subcommands. Fully self-tested on a real save, confirmed valid CRC + a clean simulator boot after writing. **This tool is ready to use in future sessions** — no need to re-derive the binary-patch/CRC32 technique each time a save needs editing, just call this tool. Full usage guide (every command + examples): [docs/development/pokemon-save-edit-tool.md](docs/development/pokemon-save-edit-tool.md).
-- **Stage 21 (`8b980ea0`) → later superseded by Stage 22**: first attempt at fixing ball drop rates by rolling the category first, then the item (`CATEGORY_DROP_WEIGHTS`). The user judged it **"still not right"** — correctly, because the real root cause wasn't the split ratio but that **every category was still competing for exactly one drop slot per hour**. This whole mechanism was removed in Stage 22.
-- **Stage 22 (`8c07b6b4`, per the user's request: "4 independent collection tracks")**: fully split into **4 tracks with independent schedules**, so tuning one no longer affects the others.
-  - **Ball**: 1 ball per encounter check (every 15 min) = **4 balls/hour = 2.18 balls per Pokémon encounter** (encounters ~1.84/hour, each catch costs 2-3 balls). **Does not create a `PendingEvent`** — granted straight into the bag, because at this cadence balls would overflow the 3-slot queue and get dropped exactly when needed most. Ball type unlocks progressively with reading progress: <50% Poké only, ≥50% adds Great, ≥75% adds Ultra, ≥95% adds Master — Master only drops while at 0 balls.
-  - **Medicine** (Medicine+StatusCure+PPRestore+Candy combined, matching the Bag screen exactly): 1/2 per hour = 1 item/2 hours.
-  - **TM/HM**: 1/3 per hour = 1 per 3 hours.
-  - **Evolution stones**: unchanged (1/20 + pity at 19 + priority for the stone currently needed) = 1 stone per ~12.4 hours. The only change: the fallback when nobody needs a stone right now now only widens within the Stone group, instead of spilling out to all 83 items — that spillover was exactly what was starving the ball supply.
-  - No changes to the save format/`PendingEvent`/CSV. Updated 10 existing tests + 3 new tests. 19/19 passing. Flash **6,352,731 B/96.9%, 200,869 B free**. Every balance number sits neatly near the top of `PokemonGame.cpp`, so retuning is cheap.
-- **Stage 23 (`0d08f619` doc + `4a08c436` code, per user request after discussing concrete numbers)**: the user judged Stage 22 "still not right" (a hard-coded 4 balls/hour, no real drop probability). After several rounds of Monte Carlo simulation and discussion, settled on: **Ball at 3/5 odds + a pity guarantee after 3 misses** (~2.47 balls/hour) — the same "N misses guarantees a hit" formula as encounters, now sharing a new `rollPityGate()` helper (refactoring encounters/evolution-stones into this helper too, cutting duplication). **Medicine at 2/5 + pity after 3 misses** on the 15-minute cadence (no longer hourly) — StatusCure/PPRestore internal weight reduced to 1/3 (new `medicineItemWeight()` helper, applied only at roll time, doesn't touch the CSV) so Medicine/HP items make up ~70.5% of that track instead of ~46%. **TM/HM uses the same 2/5+pity3 formula** (all 55 types complete in ~207h instead of ~1183h). **Evolution stones unchanged**, per the original request. **Save format v3(195B)→v4(198B)**: added 3 `u8` fields (`ballMisses`/`medicineMisses`/`machineMisses`), automatic zero-fill migration, updated `docs/file-formats.md` + `edit_pokemon_save.py`. Rewrote most of `PokemonGameTest.cpp` (many tests can now hit the pity guarantee on all 4 tracks simultaneously and compete for the 3-slot queue — added a `findEventOfKind()` helper so tests don't assume a fixed slot position). 19/19 tests pass. Flash **6,353,021 B/96.9%, 200,579 B free**, +290 B.
+- **Every Pokemon list screen was clipping its last row** (`95179ecc`, reported by the user as "the TM/HM row is missing" then corrected to "every menu screen is missing its last row, with a scrollbar now showing"): `buildList()`'s `screen.setContentMargin()` call computed its margin in raw-screen coordinates, but `Screen::setContentMargin()` insets from `frame_.safeRect()` (already shrunk by the device's 9px/3px top/bottom viewable margin) - so the margin got double-applied, silently shrinking the list's content rect by 12px below what `listBounds_` (`rowCount_ * rowHeight_`) promised, dropping exactly one row. Predates X4 Pro work entirely - traced to upstream's `v1.5.1-rc-6` merge (`414958d8`), which newly wired `safeArea` into that clamp; X3 was affected before any X4-Pro-specific change. Fixed by subtracting the same viewable margin back out in `buildList()`. Also fixed a related bug found while testing this: `scripts/dev/edit_pokemon_save.py`'s `add-party-member` bumped the save header's `recordCount` without updating the cached `payloadBytes` field, which `decodeSnapshotHeader()` independently checks on load - caused a real "save file corrupt" error (`a1089ade`).
+- **Fainted Pokemon now require Revive/Max Revive** (`72ef328b`): `useConsumable()` previously let a plain Potion/Full Restore/status cure/PP restore quietly act on a fainted Pokemon (`currentHp == 0`). Fixed: those items now require `currentHp > 0` and return `NotApplicable` otherwise; only Revive/Max Revive (item ids 15/16) can act on a fainted one, restoring 50%/100% of max HP (their `effectValue` now read as a percentage for these two ids specifically) rather than curing status.
+- **Wi-Fi OTA update pointed at the wrong repo** (`9952a2c5`): `pokemon-x3` never overrode `CROSSINK_OTA_RELEASE_URL`, so "Check for Update" silently pulled firmware from upstream `uxjulia/CrossInk` (matching asset name `firmware-x3-x4.bin`), which would flash a Pokemon-less build. Fixed by overriding the URL to this fork's own releases in that environment (and, since, in `pokemon-x4-pro` too).
 
-- **Stage 24 (`26e0b4e1`, per playtest feedback)**: the `Screen::BattleMoves` screen (choosing a move on FIGHT) with a Pokémon that knows all 4 moves overlapped the battle log box — the old single-column list (4 rows × 64px) didn't fit the space the HUD left for it. Switched to a 2-column grid like the Battle menu (new `renderBattleMoveMenu()`, bypassing `fui::list()`, reusing `battleMenuTop()` since `logicalCount()` already returns the correct move count for this screen) — down to 2 rows, no more overlap. Each button: bold move name on the top row (`truncatedText()` guards against long names), PP "cur/max" on the bottom row, unbold, right-aligned — the device only has 2 fonts (`UI_10`/`UI_12`), no smaller font available, so "PP smaller" is achieved via weight+secondary position rather than font size. 19/19 tests pass. Flash **6,353,495 B/96.9%, 200,105 B free**, +474 B.
+### The Pokémon battle system (shipped `v0.2.0`, 2026-09-09, built on `feat/pokemon-battle-system`)
 
-- **Stage 24 (`26e0b4e1` + follow-up fix `7b600718`, per feedback)**: `Screen::BattleMoves` (choosing a FIGHT move) with a Pokémon that knows all 4 moves overlapped the log box — switched to a 2-column grid like the Battle menu (new `renderBattleMoveMenu()`, reusing `battleMenuTop()`). Second fix per follow-up feedback "PP is nearly falling out of its box": changed from 2 rows (name/PP) to **a single row, vertically centered**, name on the left + PP on the right on the same row. Flash **6,353,533 B/96.9%**.
-- **Stage 25 (`9174a992`, per user request)**: `createStarter()` now grants 10 Poké Balls + 1 Potion (set directly on `bagCounts`). Full HP/PP was already correct beforehand (`peekBattleMoves()` auto-synthesizes it when there's no existing battle entry).
-- **Stage 26 (`5f1d4dde`, per feedback)**: a Pokémon with only 1-2 moves caused the entire battle HUD (not just the move-select screen) to stretch/shift noticeably compared to a full set of 4 moves, because `battleMenuTop()` anchored on the **actual** `battlePlayerMoveCount()`. Fixed: on `Screen::BattleMoves`, `battleMenuTop()` now always computes a fixed `BATTLE_MOVE_SLOTS` (2 rows) regardless of how many moves are known — the HUD keeps a constant size, only the number of buttons shown changes. Flash **6,353,555 B/96.9%, 200,045 B free** (measured together with Stage 25).
+The full plan, technical constraints (flash budget, save-format append-only rules, the 48-byte `PokemonRecord` limit, i18n cost), design decisions with rationale, and a stage-by-stage task list (33+ stages, well beyond the original 8-stage roadmap, driven by real playtest feedback) all live in **[docs/development/pokemon-battle-roadmap.md](docs/development/pokemon-battle-roadmap.md)** — read that doc, not this section, for the detailed log. It covers: level-based move learning, items/TM/HM drops from reading, full turn-based battling with 6 status effects, catching with 4 ball types, 8 gyms + Elite Four in order, a Moveset management screen, switching mid-battle, using items mid-battle, and the Settings/Reset-Game screen (which also clears the auxiliary battle-data file so a reset game never inherits a previous playthrough's leftover HP/status).
 
-- **Stage 27 (`cbbe4ff3`, per feedback)**: the Party list layout was "a bit ugly" — the name/level/gender line drawn by `fui::list` (anchored on its own `sidePadding`, x≈+104) and the HP bar line drawn by custom code (anchored on the icon, x≈+5) didn't line up. Fixed by dropping `fui::list`'s own text for Party/ItemTarget-when-showing-HP and hand-drawing both lines in `renderPartyRowHealth()` (added a `drawNameLine` flag) — line 1: bold name + right-aligned "Lv.N M/F", line 2: HP bar+HP/HP+status, both sharing the same X margin after the icon, vertically centered within the block. Gender abbreviated to "M"/"F" (no ♂/♀ glyph in the current font). `BattleSwitch` (which shares the same bar-drawing function, different case) kept unchanged via `drawNameLine=false`. Species icon switched to vertical centering via `pokemonCenteredOffset()` instead of a fixed offset+2. Flash **6,353,991 B/97.0%, 199,609 B free**, +436 B.
+**Constraints that are still load-bearing today** (i.e. still true post-v1.5.1-sync, still worth checking before touching save format or flash-sensitive code):
+1. `PokemonState` can only be appended to **after byte 115** (`PokemonStore.cpp` hardcodes an offset for `sequence` before that point).
+2. **Do not** widen `PokemonRecord` beyond 48 bytes — battle data (HP/PP/status/moveset) lives in a separate, double-buffered auxiliary file (`pokemon-battle-{a,b}.bin`).
+3. Move/item names **do not** go through i18n (the per-language offset-table cost, and `gen_i18n.py --strip-unused` doesn't scan generated headers) — they're plain C strings in a generated header instead.
+4. After editing anything under `lib/I18n/translations/*.yaml`, an incremental `pio run` can report "up to date" without actually rebuilding the generated i18n object — force a clean rebuild of that env before trusting behavior or flash numbers.
 
-- **Stage 27 fixes 2-4 (`ffa78e48`,`b7902acc`,`ca4ed277`, per feedback with screenshots)**: the HP bar stretched too long + the selection arrow (`fui::list`'s `SelectionMarker::Triangle`) overlapped the bar/text. The real root cause: `markerInset` (86) placed the marker right AFTER the icon (only 1px away), a gap that already existed on **every** artwork-list screen, only exposed once Party drew a large bar right after the icon. Per the user's own proposed fix, changed the reading order **globally** (`pokemonListPresentation()`) to **marker → icon → text**: `markerInset` 86→4 (the arrow gets its own reserved space at the row's left edge), the icon moved to `ROW_ICON_X=24` (new constant, shared by every list icon), `sidePadding` 104→112. Bar capped at `maxBarW=130`. The user confirmed "looks good" after fix 4.
-- **Stage 28 (`94dfa6c7`, per user request)**: asked "what does the reset-Pokémon button do" → discovered a bug: `reset()` never cleared `pokemon-battle-{a,b}.bin`, so after a reset, the new Pokémon (which always restarts IDs from 1) could read stale HP/PP/moveset/status from the previous playthrough. As requested: added a new `Screen::Settings` (Menu trimmed to 8 entries), moved "Show on Home Screen" + renamed "Reset Pokémon"→"**Reset Game**" into it; added `PokemonBattleStore::reset()` (writes an empty state via the existing `writeState()`), `PokemonService::reset()` now also calls it (best-effort). Added a test confirming a fresh starter doesn't inherit old HP/status. Flash **6,354,251 B/97.0%, 199,349 B free**.
-
-Working tree is clean, everything committed to `feat/pokemon-battle-system`, ready for the user to push manually — **the session was stopped as requested** ("ok, stop here, save progress, commit to prepare for push"). **Visually confirmed**: Stage 19.5 (text wrap), Stage 27 (Party layout, after 4 rounds of fixes). Stages 21/22 were superseded by the following round of discussion (no separate confirmation needed). **Not yet visually confirmed, prioritize confirming at the start of the next session if the user keeps playing**: Stage 23 (Ball/Medicine/TM-HM drop rates — the constants sit conveniently at the top of `PokemonGame.cpp` if they need adjusting), Stage 24 (move name/PP layout), Stage 25 (starter gift), Stage 26 (HUD doesn't shift with fewer moves), Stage 28 (new Settings screen + Reset Game, clearing the battle store too) — nothing known to be broken or in progress, just no playtest feedback yet.
-
-**Stage 18 (using items mid-battle — original commit `719fd9e2` + 6 rounds of fixes/expansion driven by real feedback, off-roadmap)**: summarizing this whole stage in one place since its shape changed repeatedly through successive feedback:
-1. `719fd9e2`: added `Screen::BattleBag` + a "BAG" button to the Battle menu, reusing the existing `useConsumable()`/`consumeBagItem()`, syncing `battlePlayer_` (RAM) from `peekBattleMoves()` after use (since `useConsumable()` only writes to disk by `recordId`, it never touches the combatant currently running in RAM).
-2. `e1233cd8`: fixed the BattleBag list (up to 17 items) overflowing onto the HUD — removed it from the "bottom-anchored, overlays the HUD" group (that group is only safe with ≤4 rows), used a full-screen top-anchored list instead.
-3. `e7c0968e`: after picking an item, must now show the party list to **choose a target** (no longer auto-applied straight to the Pokémon currently fighting, as in the first version) — added `BagCategory::BattleMedicine`, reusing the existing `Screen::ItemTarget`.
-4. `02fe4a15`: the `ItemTarget` screen, when picking a target for a consumable, now shows the HP bar/text/status — `itemTargetShowsHealth()`/`showsPartyHealthRows()`.
-5. `6a014052`: **switching Pokémon or using an item mid-battle now costs a real turn** (reversing the "free" simplification from Stage 13) — the engine adds `stepOpponentOnlyTurn()` (no Speed comparison needed, since switching/items always resolve first per real Gen 1 rules), `PokemonService::resolveOpponentOnlyTurn()` wrapper. `Screen::BattleSwitch` also got HP bar/text/status added at the same time.
-6. `b808335d`: the Battle menu switched to a **2-column grid** (`renderBattleMenu()`, hand-drawn, no longer via `fui::list()`) — both saving screen space as requested, and fixing an overflow that BAG had introduced by pushing the menu up to 5 rows.
-7. `d278b161`: fixed one more bug that came with the 2-column version — the FIGHT screen (`BattleMoves`) overlapped the HUD because `hudBottom` was mistakenly using the `Screen::Battle`-specific function for `BattleMoves` too.
-
-Final flash after all of this: **6,350,777 B/96.9%, 188,672 B free**. **Fully visually confirmed** — the user said "looks good" after fix round 7.
-
-**Plan awaiting implementation** (written 2026-09-09, not yet touched) — read the **"Next 3-stage plan (Stages 18-20)"** section at the end of the roadmap before starting:
-- **Stage 19**: add `Screen::BagBalls` to **view** the count of the 4 ball types outside of battle (balls currently have nowhere to be viewed outside `Screen::BattleBalls` while actually catching). The "balls drop through reading" and "balls don't work in gym battles" parts **already exist, already confirmed via code** — no changes needed, just rebuild and confirm.
-- **Stage 20**: a Python script to directly patch `fs_/.crosspoint/pokemon-{a,b}.bin` (simulator) to pre-insert a `PendingEventKind::Encounter` (valid offsets/rules documented in detail in the roadmap), to let catch-screen testing happen immediately without waiting to read long enough. **Done manually once in the 2026-09-09 session** (not via the official script — hand-inserted 3 Pidgey/Rattata/Caterpie encounters into `fs_/.crosspoint/pokemon-{a,b}.bin` to test the catch screen) but not yet turned into a reusable script under `scripts/dev/` as planned — if needed again, either repeat it by hand the same way or write the official script at that time.
-
-**Stage 17 (live-Pokémon dots in Battle + HP bar for Party/Summary, commit `470120d1` + 2 follow-up fixes `9b12bae6`/`188b005d`, off-roadmap — feedback after playtesting Stage 16)**: shrank the HP box in Battle (dropped the species name at first, then added it back per feedback — see the 2 fixes below), added a row of dots above each box showing how many Pokémon are still alive — filled dot=alive, hollow dot+X=fainted (using `fillRoundedRect`/`drawRoundedRect` with cornerRadius=size/2, since `GfxRenderer` has no dedicated circle-drawing API); the opponent's count comes from `gymTeamFor()`+`gymChallengeTeamProgress_` in gym battles (1 dot for a wild encounter), the player's from `snapshot_.partyCount` via `peekBattleMoves()`. `Screen::Party` rows got taller (64→96px, only for this screen via a new `rowHeightForScreen()`) to fit an HP bar+text+status strip at the bottom of each row (new `renderPartyRowHealth()`). `Screen::Summary` got an extra HP bar+text line below the Number/Level/Gender line. **Fix 1** (`9b12bae6`): re-added the name/nickname to the HP box (mistakenly dropped in the first version), `panelHeight` 50→72, along with fixing a `zoneContentHeight` bug that came with it (a taller panel than the sprite needs its content area recalculated). **Fix 2** (`188b005d`): narrowed the HP box horizontally + made it taller vertically (`panelWidth` fixed at 220, `panelHeight` 72→92), HP bar+text merged onto one row and vertically centered within the box, the battle log box switched to a fixed 90px height (previously it took up all remaining space) to free up room — the freed space went into the gap between the two combat zones. Only touched `PokemonActivity.cpp/.h`. Final flash **6,346,287 B/96.8%, 193,168 B free**. **Fully visually confirmed** — the user said "looks good" after fix 2.
-
-**Stage 16 (redesigned the Battle screen in the Pokémon Red style, commit `0477355e`, off-roadmap — the user said "the battle screen looks bad")**: `renderBattleHud()` fully rewritten using Red's classic diagonal layout — opponent name/level/HP box in the top-left + opponent art in the top-right; player art in the bottom-left + player name/level/HP box in the bottom-right. Rounded boxes (`drawRoundedRect`), an "HP" label before the health bar. Coordinates computed dynamically against `listBounds_.y` (the top of the FIGHT/BALL/SWITCH/RUN menu) so it auto-adapts when `rowCount_` changes (3 rows for gym vs. 4 for wild). Added a separate rounded log dialog box above the menu, left-aligned text. Added an opening line "Go, X!"/"leader sent out X!" (previously the screen was blank until the first turn) — one new i18n key `STR_POKEMON_SENT_OUT`. Only touched `PokemonActivity.cpp`+`english.yaml`. Flash **6,345,083 B/96.8%, 194,368 B free**, +1,010 B. This initial layout was refined further in Stage 17 (2 follow-up fixes) based on real feedback.
-
-**Stage 15 (double-buffer for `pokemon-battle.bin`, commit `491411e7`, off-roadmap — the user pointed out that a Stage-3 assumption had turned out wrong)**: the auxiliary file holding battle HP/PP/moveset was designed in Stage 3 to **not** need double-buffering because it was "100% reconstructible from level+learnset" — but since Stages 7/11/12 (automatic move learning, the active Moveset screen for learning/forgetting, teaching TM/HM), **moveset is now a real player choice**, no longer derivable from level alone. Changed the single `pokemon-battle.bin` file into 2 alternating files `pokemon-battle-{a,b}.bin`, matching `PokemonStore`'s (main save) exact philosophy: always write targeting the currently-inactive file, read it back to verify, then switch the active pointer — the active file is never touched directly, so a single crashed write never loses the other good copy. The codec gained a 10-byte header (magic+version+entryCount+sequence). Automatic migration from the old single file (not deleted, kept as a fallback). The public API (`load/findEntry/upsertEntry/removeEntry`) is unchanged, so `PokemonService` and the 40+ existing tests needed no changes. Flash **6,344,073 B/96.8%, 195,376 B free**, +1,518 B. 19/19 tests pass (added tests for falling back when one file is corrupt, staying safe when both are corrupt, a failed write never touching the active file, and migration preserving already-taught moves).
-
-**Stage 14 (restored full gym/Elite Four team sizes, commit `9d433ad0`+`05b623ed`, off-roadmap)**: reversed the Stage-12 decision to "trim gym teams to 2-3 Pokémon for e-ink refresh cost" — per user request, every gym/Elite Four now uses the real Pokémon Red team composition (Giovanni/Lorelei/Bruno/Agatha/Lance all have 5 Pokémon each). Rewrote `scripts/data/pokemon-gyms.csv` entirely, `MAX_GYM_TEAM_SIZE` 3→5. Species/move ids cross-checked by a script reading the CSV directly, not from memory. Along the way fixed a bug: Bruno's team had wrongly assigned Hitmonchan's species (107) with Hitmonlee's moveset — now both Hitmon species appear correctly as two separate members with their real movesets. No UI changes needed (`enterGymBattle()` already loops dynamically over `team.size()`). Flash **6,342,555 B/96.8%, 196,896 B free**, +104 B. 19/19 tests pass.
-
-**Stage 13 (switching Pokémon mid-battle, commit `950d72ce`, off-roadmap)**: gym battles/wild catches now only lose when **the entire party is out of HP** or the player actively RUNs — no longer an instant loss the moment the first party Pokémon faints. `Screen::Battle` gained "Switch" → `Screen::BattleSwitch` (new) to pick another Pokémon still alive; fainting mid-battle while the party has survivors still forces a switch (can't cancel with Back). A deliberate simplification: switching costs no turn (doesn't simulate "the opponent gets a free hit while you switch" as in the real game — that would require changing the `stepBattle()` engine to implement this rule properly). Only touched `PokemonActivity.cpp/.h`. Flash **6,342,451 B/96.8%, 196,992 B free**, +1,556 B. 19/19 tests pass.
-
-**Stage 12 (fixed 4 issues from Stage-11 playtesting, commit `5b9d24d2`, bugfix `f2187062`)**: (1) gym leaders/Elite Four now use real Pokémon Red movesets — fetched page by page from Bulbapedia via WebFetch, not guessed; `GymTeamMember` gained a `moves` field, `setupBattleOpponent()` now takes `fixedMoves` instead of always deriving them from the learnset; also fixed 5 wrong Elite Four levels along the way. (2) TM/HM now correctly filters by type — wired the existing (but previously unused) `canLearnViaMachine()` into `teachMove()`. (3) The Moveset screen gained "Forget" (clears a slot outright, can't clear the last move); a full TM moveset no longer hard-blocks — opens `Screen::TmReplaceSlot` to pick which slot to replace. (4) Opponent AI (`chooseOpponentMove()`) became less mechanical: 1/4 of turns weighs every move with remaining PP, and ties in effectiveness score pick randomly instead of always the first slot — combined with (1), this resolved "Onix only ever uses one move". Flash **6,340,863 B/96.8%, 198,592 B free**, +4,882 B. 19/19 tests pass (added a 12-seed AI-randomness test + gym-moveset assertions). Full detail in the "Stage 12" section at the end of the roadmap.
-
-**Stage 11 (moveset management screen, commit `a554d92f`, off-roadmap — user feedback that there was no active way to swap moves once all 4 slots were full)**: `Party > Actions > Moves` (new, `CollectionAction::Moveset`) opens `Screen::Moveset` (view the 4 move slots) → select a slot → `Screen::MovesetPick` (every move in the learnset not yet known, at or below the current level) → learns it into the chosen slot via the new `PokemonService::learnMoveIntoSlot()`. Differs from the 2 existing flows: TM (Stage 9) doesn't allow replacing when full, and auto MoveLearn (Stage 7) only appears right at level-up — Moveset allows active swapping any time. Flash **6,335,981 B/96.7%, 203,472 B free**, +1,316 B.
-
-**Stage 10 (move names on TM/HM + side-button page jumps, commit `060d272f`, off-roadmap)**: Bag>TM-HM now shows "TM01 - Mega Punch" instead of just "TM01". `PokemonActivity::loop()` now splits the 2 side buttons (Up/Down) = jump 1 page (`ButtonNavigator::nextPageIndex`/`previousPageIndex`, already existed) from the 2 front buttons (Left/Right) = row-by-row as before — applies to every list screen, not just Bag. Only touched `PokemonActivity.cpp`, no changes to service/storage. Flash **6,334,665 B/96.7%, 204,784 B free**, +672 B.
-
-**Stage 9 (Bag categorization, commit `194601a0`, off-roadmap — requested by the user after simulator playtesting)**: `Screen::Bag` is now a category-select screen (Evolution/Medicine/TM-HM) instead of one merged list. New `Screen::BagMedicine` + `PokemonService::useConsumable()` — **a genuinely new feature**: previously Potions/status cures/PP restores/Candy couldn't be used at all, only evolution stones and TMs. Deliberate simplifications: PPRestore heals every move slot (no Ether/Elixir distinction, since the data has no distinguishing field); Candy raises level but doesn't auto-check for evolution (caught on the next reading tick). Flash **6,333,993 B/96.6%, 205,456 B free**, +1,488 B. 19/19 tests pass, plus 5 new tests for useConsumable. Full detail in the "Stage 9"/"Stage 10" sections at the end of the roadmap.
-
-**Remaining non-code work** — 2 items only a real human/device can verify (see roadmap Stage-8 section for detail):
-1. Interactive playtesting on a real GUI simulator (encounter wild → battle → catch → view a 4-move Summary → use a TM → fight a gym → Badges → Elite Four) — this build machine has no virtual screen/input.
-2. Testing on a real X3 device (e-ink refresh speed, tight heap) — see [pokemon-x3-build-and-flash.md](docs/development/pokemon-x3-build-and-flash.md).
-
-**Stage 8 (wrap-up, commit `ddef31b0`)**: i18n audit done (no new keys needed, the 65 "never used" ones are a pre-existing baseline). `clang-format`: this machine has no `clang-format-21` (what CI uses), only v22.1.3 (bundled with the VSCode cpptools extension) — **only manually formatted this branch's own new code** (Stages 0-7), left the original CrossInk code untouched to avoid drifting away from formatting that had already passed real CI (v21). Clean build across 3 envs: `default` 6,261,393 B/95.5%; `pokemon-x3` **6,332,505 B/96.6%, 206,944 B free**; simulator runs successfully. **Total flash cost across all 8 stages: +29,022 B** vs. the 6,303,483 B baseline before starting — cheaper than the initial ~45-65KB estimate.
-
-**Stage 7 (4-move Summary + move learning + teaching TM, commit `5f496ad6`)**: `PendingEventKind::MoveLearn` (declared since Stage 3, never used until now) is now genuinely generated on level-up once the moveset is full (an empty slot auto-learns without asking). Summary shows the 4 moves via `peekBattleMoves()` (a pure read, no SD write). Bag expanded to include 55 Machine items to teach TM/HM (`teachMove()`) — **deliberate simplification**: using a TM with a full moveset has no picker to choose which slot to replace (it just errors, without consuming the TM), unlike the automatic MoveLearn flow above (which DOES have a picker). Flash **6,332,505 B / 96.6%, 206,944 B free (~202KB)**, +2,890 B vs. Stage 6. 34/34 PokemonServiceTest tests, 19/19 total native suite. **Test-writing gotcha**: crediting a large jump in minutes in a single call can cross an encounter/item threshold (15/60 min) too, letting another event steal a pending-event slot — always leave `totalXp` exactly 1 XP short and then `creditMinutes(1,...)` when a test needs to cross exactly one specific level threshold.
-
-**Stage 6 (Gym List + Badges UI, commit `2f420118`)**: `Screen::GymList`/`Badges` + 2 new menu entries. Selecting an unlocked gym actually enters a real battle (reusing the 3 Battle screens from Stage 5, no BALL button, the opponent sends out its whole team of 2-3 one after another, only marks `markGymDefeated` after winning all of them). The linear unlock logic was consolidated into one shared function `pokemon::gymProgressFor()` used by both the service and the UI. Flash **6,329,615 B / 96.6%, 209,840 B free (~205KB)**, +2,816 B vs. Stage 5. 19/19 tests pass.
-
-**Stage 5 (Battle + catching UI, commit `a989d161`)**: 3 screens `Battle`/`BattleMoves`/`BattleBalls` (not 4 — dropped `BattleBag`, the engine had no mechanism yet for using items mid-battle) wired into the existing Catch button. Flash **6,326,799 B / 96.5%, 212,656 B free (~208KB)**. 19/19 tests pass. **Important gotcha found in this stage (still applies to every later stage)**: after editing `lib/I18n/translations/*.yaml`, an incremental `pio run` can report "up to date" WITHOUT rebuilding `I18nStrings.o` (SCons doesn't track it through the `pre:` generator hook) → the linker uses the old object with the old `StrId` enum layout, silently mislooking-up strings with no build error. **Always `rm -rf .pio/build/<env>` after editing a yaml file under `lib/I18n/translations/`** before trusting build numbers. Full detail in the Stage-5 section of the roadmap.
-
-- Stage 0: source data — `scripts/data/pokemon-{stats,moves,learnsets,tmhm}.csv` from PokeAPI (151/165/989/3037 rows) + hand-written `pokemon-gyms.csv` (8 gyms + 4 Elite Four).
-- Stage 1: 5 C++ generators producing headers into `$BUILD_DIR/generated/pokemon`, plus a hand-written struct in `lib/Pokemon/PokemonBattleTypes.h` + 5 accessor `.cpp` files.
-- Stage 2: `lib/Pokemon/PokemonBattle.h/.cpp` (pure engine: damage, 6 status effects, catching) + `lib/Pokemon/PokemonTypeChart.cpp` (hand-written 18×18 type chart). Fixed one real data bug: PokeAPI's `ailment_chance=0` for a Status move means "always 100%", not "never".
-- Stage 3: save format v3 (`bagCounts[77]` + `battleProgress` appended after byte 115) + auxiliary file `/.crosspoint/pokemon-battle.bin` (`PokemonBattleStoreCodec` + `PokemonBattleStore`, no double-buffer since it was 100% reconstructible at the time). New `PendingEventKind::MoveLearn`.
-- Stage 4: `PokemonService` gained `consumeBagItem`/`markGymDefeated`/`loadBattleEntry`/`saveBattleEntry` + HP/PP recovery while reading in `creditMinutes()`. `createItem()` (PokemonGame.cpp) switched to weighted selection across 83 items — the **only** change touching PokemonGame.cpp.
-- **Flash**: Stage 1/2 = 6,303,587 B (data/engine no one calls yet, linker strips it all) → Stage 3 = 6,304,033 B (+446, state genuinely changed) → **Stage 4 = 6,314,621 B (96.4%, 224,832 B free ≈ 220KB), +10,588 B** because the service now actually calls into the full data tables. This is the first real cost milestone, exactly as the roadmap predicted.
-- 19/19 native Pokémon tests pass, 25/25 in `PokemonServiceTest` (`cd test && ctest -R Pokemon`, needs PlatformIO's bundled cmake: `export PATH="$HOME/.platformio/packages/tool-cmake/bin:$PATH"` since the machine has no system cmake).
-- **Couldn't run the simulator yet**: the machine lacks `libsdl2-dev`, couldn't install it because `sudo` needs interactive auth (unavailable in this non-interactive environment). If a later session has interactive sudo access, `sudo apt-get install -y libsdl2-dev` then `pio run -e pokemon-simulator-X3 -t run_simulator` to verify real runtime behavior.
-- **Note for Stage 5+ (UI)**: the firmware builds fine at this point but **no screen uses the new API yet** — the service layer is ready but invisible to the player until UI (Stages 5-7) wires into it.
-
-**Four constraints most likely to cause breakage** (detail in the roadmap):
-1. Flash has only ~230KB left — remeasure after each stage.
-2. `PokemonState` can only be appended to **after byte 115** (`PokemonStore.cpp:265` hardcodes offset 108 for `sequence`).
-3. **Do not** widen `PokemonRecord` beyond 48 bytes — battle data lives in a separate auxiliary file (`pokemon-battle-{a,b}.bin`, double-buffered since Stage 15 because moveset is no longer reconstructible once TM/Moveset screens existed; HP/PP/status are still reconstructible).
-4. Move/item names **do not** go through i18n (the offset table times 28 languages + `strip_unused` doesn't scan `$BUILD_DIR`).
-
-## Quick build recipe (verified working this session)
+## Quick build recipe (verified on a Linux dev machine — re-verify before trusting on this one)
 
 ```sh
 export PATH="$HOME/.platformio/penv/bin:$PATH"
-cd /home/vutq/project/xteink-pokemon-game
-git submodule update --init --recursive   # only needed if freeink-sdk is empty
-pio run -e pokemon-x3    # Pokémon-enabled firmware, for X3/X4
-pio run -e default       # base firmware, no Pokémon — for size comparison
-pio run -e simulator      # simulator build (fast iteration, no device needed)
+cd /home/vutq/project/xteink-pokemon-game    # <- adjust to wherever this checkout actually lives
+git submodule update --init --recursive      # required here - freeink-sdk/tabler-icons aren't checked out
+pio run -e pokemon-x3        # Pokémon-enabled firmware, X3/X4 (ESP32-C3)
+pio run -e pokemon-x4-pro    # Pokémon-enabled firmware, X4 Pro (ESP32-S3)
+pio run -e default           # base firmware, no Pokémon — for size comparison
+pio run -e pokemon-simulator-X3        # X3 simulator build (fast iteration, no device needed)
+pio run -e pokemon-x4-pro-simulator    # X4 Pro simulator build
 ```
 
-Real Flash/RAM numbers appear at the end of the build log (`RAM:`, `Flash:` percentages) and in the `check_firmware_size.py` output.
+Real Flash/RAM numbers appear at the end of the build log (`RAM:`, `Flash:` percentages) and in the `check_firmware_size.py` output. Last confirmed numbers (2026-09-10, pre-`v1.5.1` sync, likely different now — remeasure): `pokemon-x3` 93.1% flash / 439,232 B free; `pokemon-x4-pro` 92.7% / 478,320 B free.
 
 ### Running the native test suite (much faster than a firmware build, no device needed)
 
-This machine has **no system `cmake`**, but PlatformIO bundles one:
+PlatformIO bundles its own `cmake` if the machine has no system one:
 
 ```sh
 export PATH="$HOME/.platformio/penv/bin:$HOME/.platformio/packages/tool-cmake/bin:$PATH"
-cd /home/vutq/project/xteink-pokemon-game/test
+cd test
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # fetches googletest on first run, takes a bit
 cmake --build build -j4                          # builds every target (or --target <Name> for one)
 cd build && ctest -R "Pokemon" --output-on-failure
 ```
 
-`test/build/` is already in `.gitignore` (`build` — line 11).
+Last confirmed count (2026-09-10, right after the `v1.5.1-rc-6` merge): **333/333** passing. `test/build/` is already in `.gitignore`.
+
+### Simulator touch-testing tools (added during the X4 Pro work, still available)
+
+`src/simulator/SimulatorSmokeTest.cpp` has scripted button- and touch-driven walkthroughs of the whole Pokémon UI, gated by env vars (`CROSSINK_SIMULATOR_SMOKE_TEST`, `CROSSINK_SIMULATOR_START_POKEMON`, `CROSSINK_SIMULATOR_POKEMON_BATTLE_TOUCH`, `CROSSINK_SIMULATOR_POKEMON_LANDSCAPE`) — see the X4 Pro roadmap doc's Phase 3 section for exact invocation and what each script covers. `scripts/dev/edit_pokemon_save.py` (full guide: [docs/development/pokemon-save-edit-tool.md](docs/development/pokemon-save-edit-tool.md)) can pre-seed a save (queue an encounter, add a party member, reset the battle store, etc.) so these scripts don't have to wait on real reading time.
