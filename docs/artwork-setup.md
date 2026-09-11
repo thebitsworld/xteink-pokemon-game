@@ -156,8 +156,8 @@ unsafe archive paths, firmware mismatches, and manifest/checksum mismatches. It
 produces:
 
 ```text
-xteink-pokemon-x3-full-v0.1.0.zip
-xteink-pokemon-x3-firmware-v0.1.0.bin
+xteink-pokemon-x3-x4-full-v0.1.0.zip
+xteink-pokemon-x3-x4-firmware-v0.1.0.bin
 SHA256SUMS.txt
 ```
 

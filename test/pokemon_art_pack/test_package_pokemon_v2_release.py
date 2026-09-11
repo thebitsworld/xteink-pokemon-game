@@ -104,9 +104,9 @@ class PokemonArtPackTest(unittest.TestCase):
                 source, firmware, notice, "0.1.0-RC", root / "dist"
             )
 
-            self.assertEqual(full_zip.name, "xteink-pokemon-x3-full-v0.1.0-RC.zip")
+            self.assertEqual(full_zip.name, "xteink-pokemon-x3-x4-full-v0.1.0-RC.zip")
             self.assertEqual(
-                firmware_asset.name, "xteink-pokemon-x3-firmware-v0.1.0-RC.bin"
+                firmware_asset.name, "xteink-pokemon-x3-x4-firmware-v0.1.0-RC.bin"
             )
             self.assertEqual(sums.name, "SHA256SUMS.txt")
             self.assertEqual(firmware_asset.read_bytes(), b"tested firmware")
@@ -145,16 +145,16 @@ class PokemonArtPackTest(unittest.TestCase):
             notice.write_bytes(b"rights and credits\n")
 
             x3_zip, x3_firmware, sums = PACKAGE.build_public_release(
-                source, firmware, notice, "0.3.0", root / "dist", "x3"
+                source, firmware, notice, "0.3.0", root / "dist", "x3-x4"
             )
             x4_zip, x4_firmware, sums_again = PACKAGE.build_public_release(
                 source, firmware, notice, "0.3.0", root / "dist", "x4-pro"
             )
 
             self.assertEqual(sums, sums_again)
-            self.assertEqual(x3_zip.name, "xteink-pokemon-x3-full-v0.3.0.zip")
+            self.assertEqual(x3_zip.name, "xteink-pokemon-x3-x4-full-v0.3.0.zip")
             self.assertEqual(x4_zip.name, "xteink-pokemon-x4-pro-full-v0.3.0.zip")
-            self.assertEqual(x3_firmware.name, "xteink-pokemon-x3-firmware-v0.3.0.bin")
+            self.assertEqual(x3_firmware.name, "xteink-pokemon-x3-x4-firmware-v0.3.0.bin")
             self.assertEqual(x4_firmware.name, "xteink-pokemon-x4-pro-firmware-v0.3.0.bin")
 
             expected_lines = {

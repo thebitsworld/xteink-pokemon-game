@@ -171,7 +171,7 @@ def _write_deterministic_zip(source: Path, archive: Path) -> None:
 
 
 def build_public_release(source: Path, firmware: Path, notice: Path, version: str,
-                         output: Path, device_name: str = "x3") -> tuple[Path, Path, Path]:
+                         output: Path, device_name: str = "x3-x4") -> tuple[Path, Path, Path]:
     source = source.resolve()
     firmware = firmware.resolve()
     notice = notice.resolve()
@@ -307,7 +307,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--notice", type=Path, default=Path("RIGHTS_AND_ATTRIBUTION.md"))
     parser.add_argument("--version", required=True)
-    parser.add_argument("--name", default="x3", help="Device label used in the artifact filenames (default: x3)")
+    parser.add_argument("--name", default="x3-x4", help="Device label used in the artifact filenames (default: x3-x4)")
     args = parser.parse_args()
     full_zip, firmware_asset, sums = build_public_release(
         args.source_pack, args.firmware, args.notice, args.version, args.output, args.name

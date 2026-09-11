@@ -1,0 +1,112 @@
+name: Release
+
+# Fires only on an explicit tag push (e.g. `git tag v0.4.0 && git push origin v0.4.0`),
+# never on an ordinary merge to main - cutting a release stays a deliberate act, and
+# the maintainer is expected to have already written the matching CHANGELOG.md
+# section and completed physical-device acceptance (see docs/release-checklist.md)
+# before pushing the tag.
+#
+# This only automates the firmware-only assets: a versioned copy of each device's
+# firmware (xteink-pokemon-x3-x4-firmware-v<version>.bin,
+# xteink-pokemon-x4-pro-firmware-v<version>.bin), a version-less "-latest.bin" alias
+# of each (so README.md/docs/installation.md can link straight to
+# .../releases/latest/download/<alias-name> and always get the current build), and
+# SHA256SUMS.txt. The full-install ZIP needs the Pokemon artwork pack, which is
+# deliberately not committed to this repository (see docs/release-checklist.md) -
+# build and upload it to the same release by hand with
+# scripts/package_pokemon_v2_release.py when needed, same as before.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          # Do not cache PlatformIO's Python virtual environment. It is tied to
+          # the runner's Python and can become invalid when restored elsewhere.
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: ${{ runner.os }}-platformio-py3.14-core6.1.19-release-${{ hashFiles('platformio.ini', 'platformio.local.example.ini') }}
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Build pokemon-x3 (X3/X4) firmware
+        run: pio run -e pokemon-x3
+
+      - name: Build pokemon-x4-pro firmware
+        run: pio run -e pokemon-x4-pro
+
+      - name: Package firmware assets
+        id: package
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          cp .pio/build/pokemon-x3/firmware-x3-x4.bin \
+            "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin"
+          cp .pio/build/pokemon-x4-pro/firmware-x4-pro.bin \
+            "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
+          # Version-less alias copies of the same two files. Every release
+          # (this workflow always runs on a real version tag) re-uploads
+          # these under the exact same fixed name, so
+          # /releases/latest/download/<alias-name> always resolves to
+          # whatever this workflow most recently published - the stable
+          # per-device links in README.md/docs/installation.md rely on this.
+          cp .pio/build/pokemon-x3/firmware-x3-x4.bin \
+            dist/xteink-pokemon-x3-x4-firmware-latest.bin
+          cp .pio/build/pokemon-x4-pro/firmware-x4-pro.bin \
+            dist/xteink-pokemon-x4-pro-firmware-latest.bin
+          (cd dist && sha256sum ./*.bin | sed 's#\./##' > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        run: |
+          set -euo pipefail
+          python3 scripts/extract_changelog_section.py \
+            --changelog CHANGELOG.md \
+            --version "${{ steps.package.outputs.version }}" \
+            > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ github.ref_name }}" \
+            "dist/xteink-pokemon-x3-x4-firmware-v${{ steps.package.outputs.version }}.bin" \
+            "dist/xteink-pokemon-x4-pro-firmware-v${{ steps.package.outputs.version }}.bin" \
+            dist/xteink-pokemon-x3-x4-firmware-latest.bin \
+            dist/xteink-pokemon-x4-pro-firmware-latest.bin \
+            dist/SHA256SUMS.txt \
+            --title "${{ github.ref_name }}" \
+            --notes-file release-notes.md

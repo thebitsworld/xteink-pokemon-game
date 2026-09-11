@@ -3,6 +3,39 @@
 Use this checklist for one exact commit and one exact firmware binary. A check
 performed on another build is not evidence for the release candidate.
 
+## Automated firmware release
+
+Pushing a tag matching `v*.*.*` (e.g. `git tag v0.4.0 && git push origin v0.4.0`)
+triggers `.github/workflows/release.yml`, which builds `pokemon-x3` and
+`pokemon-x4-pro`, packages `xteink-pokemon-x3-x4-firmware-v<version>.bin`,
+`xteink-pokemon-x4-pro-firmware-v<version>.bin`, a version-less
+`-latest.bin` alias of each (so README.md/docs/installation.md can link
+directly to `.../releases/latest/download/xteink-pokemon-<device>-firmware-latest.bin`
+and always get the current build), and `SHA256SUMS.txt`. It extracts the
+matching `## [<version>]` section from `CHANGELOG.md` via
+`scripts/extract_changelog_section.py`, and publishes a GitHub Release with
+those assets and that changelog section as the release notes.
+
+If a firmware-only asset is ever published by hand instead of through this
+workflow, re-upload the same two `-latest.bin` aliases to that release too -
+the stable per-device download links depend on every release consistently
+carrying them.
+
+This only automates the two firmware-only assets. It does **not** run the full
+release checklist below, and it does **not** build the full-install ZIP - that
+needs the Pokémon artwork pack, which is deliberately not committed to this
+repository (see "Full-install artwork and packaging" below). Build and upload
+the full ZIP to the same release by hand with
+`scripts/package_pokemon_v2_release.py` when needed, same as before.
+
+Before pushing the tag:
+- `CHANGELOG.md` must already have a `## [<version>]` section (without a
+  leading `v`) - the workflow fails loudly if it doesn't find one, rather than
+  publishing a release with empty notes.
+- Physical-device acceptance (see "Physical X3 acceptance" below) should
+  already be complete. The workflow has no way to gate on this - tagging is
+  the deliberate "yes, ship it" action, same as it was for a manual release.
+
 ## Repository
 
 - [ ] The release commit is identified.

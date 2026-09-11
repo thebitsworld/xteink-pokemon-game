@@ -7,21 +7,33 @@ nav_order: 2
 
 ## Supported devices
 
-**Xteink X3** and **Xteink X4 Pro**. Do not install this build on a Sticky or another device.
+**Xteink X3**, **Xteink X4**, and **Xteink X4 Pro**. Do not install this build on a Sticky or
+another device.
 
-X4 Pro support (touch-only UI, portrait orientation) is new as of this release, confirmed
-working on physical hardware.
+Confirmed working on physical hardware for all three, including both locked and unlocked
+devices. X4 Pro support (touch-only UI, portrait orientation) is new as of this release.
 
-**X3 and X4 Pro firmware are not interchangeable.** They target different chips (ESP32-C3 vs.
-ESP32-S3) — installing the wrong one will not boot. Always match the asset name
-(`xteink-pokemon-x3-*` or `xteink-pokemon-x4-pro-*`) to your device.
+**X3/X4 and X4 Pro firmware are not interchangeable.** They target different chips (ESP32-C3
+vs. ESP32-S3) — installing the wrong one will not boot. Always match the asset name
+(`xteink-pokemon-x3-x4-*` or `xteink-pokemon-x4-pro-*`) to your device.
 
 Download the current package from the [GitHub releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases).
 
+## Which asset for my device
+
+| Device | Full-install ZIP (first install) | Firmware-only (already installed once) |
+| --- | --- | --- |
+| X3 / X4 | matching version on the [releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases) — `xteink-pokemon-x3-x4-full-v<version>.zip` | [Download latest X3/X4 firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x3-x4-firmware-latest.bin) |
+| X4 Pro | matching version on the [releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases) — `xteink-pokemon-x4-pro-full-v<version>.zip` | [Download latest X4 Pro firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-pro-firmware-latest.bin) |
+
+The firmware-only links always fetch the newest release for that device — no need to hunt
+through the releases page for the right file. Only use them once `/pokemon/` artwork is
+already on the SD card; a first-time install still needs the full ZIP (see below).
+
 ## Full installation
 
-1. Download the ZIP that matches your device: `xteink-pokemon-x3-full-v<version>.zip` for X3,
-   or `xteink-pokemon-x4-pro-full-v<version>.zip` for X4 Pro.
+1. Download the ZIP that matches your device: `xteink-pokemon-x3-x4-full-v<version>.zip` for
+   X3/X4, or `xteink-pokemon-x4-pro-full-v<version>.zip` for X4 Pro.
 2. Extract the ZIP. Do not copy the ZIP file itself to the SD card.
 3. Power off the device and put its SD card in the computer.
 4. Back up any `/.crosspoint/pokemon*.bin` files if present. Earlier `pokemon-v2-a.bin` and `pokemon-v2-b.bin` saves migrate automatically.
@@ -38,7 +50,7 @@ The full ZIP contains the firmware and required artwork. It contains no Pokémon
 
 Use this only when `/pokemon/` is already installed at the SD-card root. If the artwork is still under `/.crosspoint/pokemon/`, install the full ZIP once instead.
 
-1. Download the firmware that matches your device: `xteink-pokemon-x3-firmware-v<version>.bin`
+1. Download the firmware that matches your device: `xteink-pokemon-x3-x4-firmware-v<version>.bin`
    or `xteink-pokemon-x4-pro-firmware-v<version>.bin`.
 2. Leave the SD card inside the device and open **File Transfer**.
 3. Open the address displayed by the device in a browser.
