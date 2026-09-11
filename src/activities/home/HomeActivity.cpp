@@ -2043,6 +2043,26 @@ void HomeActivity::loop() {
     }
 
     const int menuCount = getMenuItemCount();
+
+    // A tall "continue reading" cover thumbnail shrinks how many menu rows
+    // fit on screen (BaseTheme::drawButtonMenu's pageItems), which can push
+    // an item (e.g. Settings, the last one) onto a second page - one only
+    // reachable today via the physical Up/Down buttons stepping the
+    // selection into it one row at a time (drawButtonMenu recomputes which
+    // page to show purely from selectorIndex, so there's no separate "page"
+    // state to jump). Swiping mirrors that same one-row-at-a-time step, so a
+    // touch-only device (X4 Pro) has an equivalent way in, not a faster one.
+    // wasSwipe() is a constexpr no-op returning SwipeDir::None on
+    // CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+      selectorIndex = swipe == MappedInputManager::SwipeDir::Up
+                          ? ButtonNavigator::nextIndex(selectorIndex, menuCount)
+                          : ButtonNavigator::previousIndex(selectorIndex, menuCount);
+      requestUpdate();
+      return;
+    }
+
     buttonNavigator.onNext([this, menuCount] {
       selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
       requestUpdate();

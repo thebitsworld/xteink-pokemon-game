@@ -1585,6 +1585,22 @@ void PokemonActivity::loop() {
     return;
   }
   const int perPage = rowsPerPage();
+  // Swipe up/down pages through long lists (Bag, Pokedex, PC box...) the same
+  // way the physical Up/Down buttons already do below - the touch-only X4
+  // Pro otherwise has no way to page through a list longer than one screen.
+  // Swipe up moves forward (same direction as the physical Down button),
+  // swipe down moves backward, matching the scroll convention used
+  // elsewhere (e.g. NetworkModeSelectionActivity's list). wasSwipe() is a
+  // constexpr no-op returning SwipeDir::None on CAP_TOUCH=0 builds (X3), so
+  // this compiles to nothing there.
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+    selected_ = swipe == MappedInputManager::SwipeDir::Up
+                    ? ButtonNavigator::nextPageIndex(selected_, count, perPage)
+                    : ButtonNavigator::previousPageIndex(selected_, count, perPage);
+    requestUpdate();
+    return;
+  }
   const auto move = [this, count](const int next) {
     selected_ = next;
     requestUpdate();
