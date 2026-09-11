@@ -28,7 +28,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_release(firmware: Path, version: str, output: Path, device_name: str = "x3") -> tuple[Path, Path]:
+def build_release(firmware: Path, version: str, output: Path, device_name: str = "x3-x4") -> tuple[Path, Path]:
     if not firmware.is_file() or firmware.stat().st_size == 0:
         raise ValueError("firmware is missing or empty")
 
@@ -60,7 +60,7 @@ def main() -> None:
     parser.add_argument("--firmware", type=Path, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--name", default="x3", help="Device label used in the artifact filename (default: x3)")
+    parser.add_argument("--name", default="x3-x4", help="Device label used in the artifact filename (default: x3-x4)")
     args = parser.parse_args()
 
     binary, checksums = build_release(args.firmware, args.version, args.output, args.name)

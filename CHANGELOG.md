@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-11
+
+### Added
+
+- Releases now build and publish automatically: pushing a `v*.*.*` tag builds both firmware environments, packages the firmware-only assets and checksums, and publishes a GitHub Release using the matching `CHANGELOG.md` section as its notes.
+- README and the installation guide now link directly to the always-current firmware download for each device, instead of pointing at the releases page.
+- Confirmed working on physical hardware on Xteink X3 and X4 (in addition to X4 Pro), including both locked and unlocked devices.
+
+### Changed
+
+- Firmware-only and full-install asset names for X3/X4 changed from `xteink-pokemon-x3-*` to `xteink-pokemon-x3-x4-*`, making explicit that the same build is shared by both devices.
+
+### Fixed
+
+- The Pokédex detail card (the full-bleed artwork view) had no way back on touch-only devices, since it deliberately skips the standard header to maximize card size. Added a touch-only back affordance reusing the header's own back-button hit-region, so X4 Pro can leave the screen without a physical button.
+
 ## [0.3.0] - 2026-09-10
 
 ### Added
