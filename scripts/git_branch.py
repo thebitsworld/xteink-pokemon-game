@@ -127,6 +127,17 @@ def get_crossink_version(project_dir):
     return config.get('crossink', 'version')
 
 
+def get_pokemon_version(project_dir):
+    config = _read_ini(project_dir)
+    if not config.has_option('pokemon', 'version'):
+        warn(
+            'No [pokemon] version in platformio.ini or platformio.local.ini; '
+            'build version will be "0.0.0"'
+        )
+        return '0.0.0'
+    return config.get('pokemon', 'version')
+
+
 def get_release_candidate_version(project_dir):
     short_hash = os.environ.get('CROSSINK_RC_HASH') or get_git_short_hash(project_dir)
     base_version = re.sub(r'-RC$', '', get_crossink_version(project_dir), flags=re.IGNORECASE)
@@ -234,6 +245,32 @@ def inject_version(env):
             ('CROSSINK_VERSION', f'\\"{version_string}\\"'),
         ])
         print(f'CrossInk RC build version: {version_string}')
+
+    elif pioenv in {'pokemon-x3', 'pokemon-x4-pro'}:
+        # This fork's own release versioning (see [pokemon] in
+        # platformio.ini), independent of the upstream CrossInk engine
+        # version - these two environments are the only ones actually
+        # shipped as Pokemon firmware, and the device's own Wi-Fi "Check for
+        # Update" (src/network/OtaUpdater.cpp) compares this value against
+        # the tag_name of this fork's own GitHub releases. Previously these
+        # two pioenv values matched none of the branches above, so no
+        # CROSSINK_VERSION define was ever appended and AppVersion.h's
+        # "#ifndef CROSSINK_VERSION -> dev" fallback shipped in every real
+        # release build - a bare "dev" fails to parse as a version at all,
+        # so isUpdateNewer() always returned false and the device could
+        # never detect a newer release.
+        release_version = os.environ.get('CROSSINK_RELEASE_VERSION')
+        if release_version:
+            version_string = sanitize_version_component(release_version.lstrip('v'))
+            print(f'Pokemon production build version: {version_string}')
+        else:
+            base_version = get_pokemon_version(project_dir)
+            branch = get_git_branch(project_dir)
+            version_string = f'{base_version}-dev+{branch}'
+            print(f'Pokemon dev build version: {version_string}')
+        env.Append(CPPDEFINES=[
+            ('CROSSINK_VERSION', f'\\"{version_string}\\"'),
+        ])
 
 
 # PlatformIO/SCons entry point — Import and env are SCons builtins injected at runtime.

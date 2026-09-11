@@ -74,6 +74,12 @@ jobs:
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
       - name: Build pokemon-x3 (X3/X4) firmware
+        env:
+          # Bakes this release's own version into CROSSINK_VERSION (see
+          # scripts/git_branch.py) so the device's Wi-Fi "Check for Update"
+          # can actually compare against future release tags. Without this,
+          # the build falls back to a dev version and never detects updates.
+          CROSSINK_RELEASE_VERSION: ${{ github.ref_name }}
         run: pio run -e pokemon-x3
 
       - name: Verify build output
@@ -116,6 +122,9 @@ jobs:
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
       - name: Build pokemon-x4-pro firmware
+        env:
+          # See the matching comment on the pokemon-x3 build step above.
+          CROSSINK_RELEASE_VERSION: ${{ github.ref_name }}
         run: pio run -e pokemon-x4-pro
 
       - name: Verify build output
