@@ -20,6 +20,7 @@
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
+#include "components/icons/touchHeaderIcons.h"
 #include "components/pokemon/PokemonArt.h"
 #include "fontIds.h"
 
@@ -2056,6 +2057,36 @@ void PokemonActivity::renderFocused() {
       LOG_INF("SMOKE", "Pokemon Pokedex detail card rendered");
     }
 #endif
+    // Touch-only devices (X4 Pro) have no physical Back button, so the
+    // full-bleed card needs its own visible way out. loop() already checks
+    // TouchHeaderBackButton::wasTapped() unconditionally every frame (its
+    // hit-region doesn't depend on what's actually drawn), so this only
+    // needs to draw *something* tappable there - reusing the exact same
+    // header/icon rect keeps the drawn spot and the tappable spot from ever
+    // drifting apart. A filled rounded backdrop keeps the chevron legible
+    // over busy artwork instead of relying on the icon's own contrast.
+    if (mappedInput.hasTouchHardware()) {
+      const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
+      const auto backLayout = TouchHeaderBackButton::layout(header);
+      constexpr int pad = 6;
+      const int backdropX = backLayout.iconRect.x - pad;
+      const int backdropY = backLayout.iconRect.y - pad;
+      const int backdropW = backLayout.iconRect.width + 2 * pad;
+      const int backdropH = backLayout.iconRect.height + 2 * pad;
+      renderer.fillRoundedRect(backdropX, backdropY, backdropW, backdropH, backdropH / 2, Color::White);
+      renderer.drawRoundedRect(backdropX, backdropY, backdropW, backdropH, 2, backdropH / 2, true);
+      const int iconX = backLayout.iconRect.x + (backLayout.iconRect.width - TouchHeaderBackButton::ICON_SIZE) / 2;
+      const int iconY = backLayout.iconRect.y + (backLayout.iconRect.height - TouchHeaderBackButton::ICON_SIZE) / 2;
+      // Draw via the same fui target/bitmap path TouchHeaderBackButton::draw()
+      // uses (not the lower-level GfxRenderer::drawIcon(), which renders this
+      // particular icon rotated 90 degrees for reasons not worth chasing here).
+      auto target = makeUiTarget(renderer);
+      target.bitmap(
+          fui::Rect{static_cast<int16_t>(iconX), static_cast<int16_t>(iconY),
+                    static_cast<int16_t>(TouchHeaderBackButton::ICON_SIZE),
+                    static_cast<int16_t>(TouchHeaderBackButton::ICON_SIZE)},
+          fui::bitmapFromIcon(icon_back_32), fui::BitmapMode::Center);
+    }
     return;
   }
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
