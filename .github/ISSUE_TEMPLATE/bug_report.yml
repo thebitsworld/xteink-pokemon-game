@@ -1,12 +1,26 @@
 name: Bug report
-description: Report a reproducible problem on an Xteink X3
+description: Report a reproducible problem on an Xteink X3 or X4 Pro
 title: "[Bug] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        This project supports the Xteink X3 only. Back up both Pokémon save files before reproducing storage or reset problems. Do not attach copyrighted books or Pokémon artwork.
+        Thanks for taking the time to report this bug! Please fill out the details below. Back up both Pokémon save files before reproducing storage or reset problems. Do not attach copyrighted books or Pokémon artwork.
+
+  - type: dropdown
+    id: device-type
+    attributes:
+      label: Device
+      description: Which device is this affecting?
+      options:
+        - "--- Select ---"
+        - X4
+        - X3
+        - X4 Pro
+        - Seeed Sticky
+    validations:
+      required: true
 
   - type: input
     id: version

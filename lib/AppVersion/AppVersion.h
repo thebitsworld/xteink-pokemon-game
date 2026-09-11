@@ -14,6 +14,14 @@
 #endif
 #endif
 
+#ifndef CROSSINK_GIT_SHA
+#define CROSSINK_GIT_SHA "unknown"
+#endif
+
+#ifndef CROSSINK_GIT_DIRTY
+#define CROSSINK_GIT_DIRTY "unknown"
+#endif
+
 #ifndef CROSSINK_BUILD_ENV
 #define CROSSINK_BUILD_ENV "unknown"
 #endif

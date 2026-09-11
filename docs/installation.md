@@ -19,6 +19,13 @@ vs. ESP32-S3) — installing the wrong one will not boot. Always match the asset
 
 Download the current package from the [GitHub releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases).
 
+## USB Drive
+
+On X4 Pro, choose `Home > File Transfer > USB Drive` to expose the SD card to
+your computer. Eject the drive from the computer before disconnecting it; the
+reader restarts to Home when the drive is safely ejected or the cable is
+removed.
+
 ## Which asset for my device
 
 | Device | Full-install ZIP (first install) | Firmware-only (already installed once) |

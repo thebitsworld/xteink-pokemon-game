@@ -59,7 +59,7 @@ enum class ReaderDrawerCatalogItem : uint8_t {
   DictionaryFont,
   Spacing,
   TextAa,
-  Bionic,
+  Focus,
   GuideDots,
   Margins,
   Orientation,
@@ -122,7 +122,7 @@ constexpr ReaderDrawerCatalog makeReaderDrawerCatalog(const ReaderDrawerAvailabi
   font.add(ReaderDrawerCatalogItem::DictionaryFont);
   font.add(ReaderDrawerCatalogItem::Spacing);
   font.add(ReaderDrawerCatalogItem::TextAa);
-  font.add(ReaderDrawerCatalogItem::Bionic);
+  font.add(ReaderDrawerCatalogItem::Focus);
   font.add(ReaderDrawerCatalogItem::GuideDots);
 
   auto& layout = catalog[static_cast<size_t>(ReaderDrawerTab::Layout)];
@@ -148,8 +148,10 @@ constexpr ReaderDrawerCatalog makeReaderDrawerCatalog(const ReaderDrawerAvailabi
 
   auto& location = catalog[static_cast<size_t>(ReaderDrawerTab::Location)];
   location.add(ReaderDrawerCatalogItem::BookmarkToggle);
-  if (available.hasBookmarks) location.add(ReaderDrawerCatalogItem::ViewBookmarks);
-  if (available.hasBookmarks) location.add(ReaderDrawerCatalogItem::DeleteBookmarks);
+  if (available.hasBookmarks) {
+    location.add(ReaderDrawerCatalogItem::ViewBookmarks);
+    location.add(ReaderDrawerCatalogItem::DeleteBookmarks);
+  }
   location.add(ReaderDrawerCatalogItem::SaveClipping);
   if (available.hasClippings) location.add(ReaderDrawerCatalogItem::ViewClippings);
   location.add(ReaderDrawerCatalogItem::Screenshot);
@@ -234,7 +236,7 @@ struct ReaderSettingsDraft {
   uint8_t orientation = 0;
   uint8_t paragraphAlignment = 0;
   uint8_t textAntiAliasing = 0;
-  uint8_t bionicReadingEnabled = 0;
+  uint8_t focusReadingEnabled = 0;
   uint8_t guideReadingEnabled = 0;
   uint8_t hyphenationEnabled = 0;
   uint8_t publisherPageNumbers = 0;
