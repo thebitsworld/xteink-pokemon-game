@@ -59,8 +59,9 @@ Before pushing the tag:
 - [ ] The source revisions match `docs/third-party-assets.md`.
 - [ ] `scripts/generate_pokemon_icon_art.py` completed locally.
 - [ ] `scripts/generate_pokemon_pokedex_art.py` completed locally.
-- [ ] The canonical local artwork directory contains all 614 required one-bit
-      BMPs with the documented dimensions.
+- [ ] The canonical local artwork directory contains all 850 required one-bit
+      BMPs with the documented dimensions (614 species/item/Pokédex art + 151
+      back sprites + 77 bag item icons + 8 badge icons).
 - [ ] `scripts/package_pokemon_v2_release.py` accepted the complete local pack
       and included `RIGHTS_AND_ATTRIBUTION.md`.
 - [ ] The full archive contains `update.bin`, the visible `pokemon/` folder, the

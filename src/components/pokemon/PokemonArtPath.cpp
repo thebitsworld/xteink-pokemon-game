@@ -43,6 +43,15 @@ const char* pokemonSpeciesArtPath(const uint16_t speciesId, const bool hero, cha
                                   static_cast<unsigned>(speciesId)));
 }
 
+const char* pokemonSpeciesBackArtPath(const uint16_t speciesId, char* output, const size_t outputSize) {
+  if (output == nullptr || outputSize == 0) return nullptr;
+  output[0] = '\0';
+  if (speciesId == 0 || speciesId > KANTO_SPECIES_COUNT) return nullptr;
+  return finishPath(output, outputSize,
+                    std::snprintf(output, outputSize, "/pokemon/heroes/back/%03u.bmp",
+                                  static_cast<unsigned>(speciesId)));
+}
+
 const char* pokemonPokedexArtPath(const uint16_t speciesId, const bool landscape, char* output,
                                   const size_t outputSize) {
   if (output == nullptr || outputSize == 0) return nullptr;
@@ -61,6 +70,25 @@ const char* pokemonItemArtPath(const EvolutionItem item, const bool hero, char* 
   return finishPath(
       output, outputSize,
       std::snprintf(output, outputSize, hero ? "/pokemon/heroes/items/%s.bmp" : "/pokemon/items/%s.bmp", slug));
+}
+
+const char* pokemonBagItemArtPath(const uint8_t itemId, char* output, const size_t outputSize) {
+  if (output == nullptr || outputSize == 0) return nullptr;
+  output[0] = '\0';
+  // Evolution items (ids 1-EVOLUTION_ITEM_COUNT) use pokemonItemArtPath()'s
+  // slug-based path instead - this covers only the bag items (Ball/Medicine/
+  // StatusCure/Candy/PPRestore/Machine).
+  if (itemId <= EVOLUTION_ITEM_COUNT || itemId > POKEMON_ITEM_ID_MAX) return nullptr;
+  return finishPath(output, outputSize,
+                    std::snprintf(output, outputSize, "/pokemon/items/%03u.bmp", static_cast<unsigned>(itemId)));
+}
+
+const char* pokemonBadgeArtPath(const uint8_t gymIndex, char* output, const size_t outputSize) {
+  if (output == nullptr || outputSize == 0) return nullptr;
+  output[0] = '\0';
+  if (gymIndex == 0 || gymIndex > 8U) return nullptr;
+  return finishPath(output, outputSize,
+                    std::snprintf(output, outputSize, "/pokemon/badges/%02u.bmp", static_cast<unsigned>(gymIndex)));
 }
 
 }  // namespace pokemon

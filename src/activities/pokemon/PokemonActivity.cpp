@@ -1995,7 +1995,9 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
-                       screen_ == Screen::Pokedex;
+                       screen_ == Screen::Pokedex || screen_ == Screen::BagBalls || screen_ == Screen::BagMedicine ||
+                       screen_ == Screen::BagMachine || screen_ == Screen::BattleBag ||
+                       screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
   int top = listTop();
   rowHeight_ = rowHeightForScreen();
   // BattleBalls stays bottom-anchored, overlaid on the still-visible battle
@@ -2628,8 +2630,7 @@ void PokemonActivity::renderBattleHud() {
     const int playerSpriteX = width - sideMargin - spriteW;
     drawDots(snapshot_.partyCount, playerAliveMask, rowTop, playerPanelX + panelWidth);
     drawPanel(battlePlayer_, playerName, playerPanelX, rowTop + dotRowHeight);
-    pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
-                                   Rect{playerSpriteX, spriteY, spriteW, spriteH});
+    pokemon::drawPokemonSpeciesBackArt(renderer, battlePlayer_.speciesId, Rect{playerSpriteX, spriteY, spriteW, spriteH});
     messageY = hudBottom - messageHeight;
   } else {
     // Each zone's height is whichever is taller: the fixed-size sprite, or
@@ -2660,8 +2661,8 @@ void PokemonActivity::renderBattleHud() {
     const int playerPanelX = width - sideMargin - panelWidth;
     drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + panelWidth);
     drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight);
-    pokemon::drawPokemonSpeciesArt(renderer, battlePlayer_.speciesId, true,
-                                   Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
+    pokemon::drawPokemonSpeciesBackArt(renderer, battlePlayer_.speciesId,
+                                      Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
   }
 
   if (messageY < hudTop) return;  // shouldn't happen at any supported screen size, but never draw a negative-size box
@@ -2708,7 +2709,9 @@ void PokemonActivity::renderBattleHud() {
 void PokemonActivity::renderRowArt() {
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
-                       screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch;
+                       screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
+                       screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
+                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
   if (!artRows) return;
   const int start = pageStart();
   for (int local = 0; local < rowCount_; ++local) {
@@ -2735,6 +2738,22 @@ void PokemonActivity::renderRowArt() {
     const int evolutionSlot = screen_ == Screen::BagEvolution
                                   ? ownedSlotAt(static_cast<size_t>(start + local), snapshot_.state.itemCounts)
                                   : -1;
+    // Same row->item-id mapping buildRows() uses for these screens - see the
+    // matching cases there (BagBalls/BattleBalls share the fixed 4-slot ball
+    // range; BagMedicine/BagMachine/BattleBag walk the full item table by
+    // category via bagItemIdAt()).
+    uint8_t bagItemId = 0;
+    if (screen_ == Screen::BagBalls || screen_ == Screen::BattleBalls) {
+      const int slot = ownedSlotAt(static_cast<size_t>(start + local),
+                                   std::span<const uint8_t>(snapshot_.state.bagCounts).first(4));
+      if (slot >= 0) bagItemId = static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + slot);
+    } else if (screen_ == Screen::BagMedicine) {
+      bagItemId = bagItemIdAt(static_cast<size_t>(start + local), snapshot_.state.bagCounts, isMedicineCategory);
+    } else if (screen_ == Screen::BagMachine) {
+      bagItemId = bagItemIdAt(static_cast<size_t>(start + local), snapshot_.state.bagCounts, isMachineCategory);
+    } else if (screen_ == Screen::BattleBag) {
+      bagItemId = bagItemIdAt(static_cast<size_t>(start + local), snapshot_.state.bagCounts, isBattleUsableCategory);
+    }
     if (screen_ == Screen::BagEvolution && evolutionSlot >= 0) {
       // No icon assets exist for TM/HM/potions/etc - only the 6 evolution
       // stones (BagEvolution's rows) have art to draw here. Zero-count
@@ -2745,6 +2764,19 @@ void PokemonActivity::renderRowArt() {
                                   Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, itemSize),
                                        rowY + pokemon::pokemonCenteredOffset(rowHeight_, itemSize), itemSize, itemSize},
                                   false);
+    } else if (bagItemId != 0) {
+      constexpr int itemSize = 32;
+      pokemon::drawPokemonBagItemArt(
+          renderer, bagItemId,
+          Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, itemSize),
+               rowY + pokemon::pokemonCenteredOffset(rowHeight_, itemSize), itemSize, itemSize});
+    } else if (screen_ == Screen::Badges) {
+      const auto gymIndex = static_cast<uint8_t>(start + local + 1);
+      constexpr int badgeSize = 32;
+      pokemon::drawPokemonBadgeArt(
+          renderer, gymIndex,
+          Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, badgeSize),
+               rowY + pokemon::pokemonCenteredOffset(rowHeight_, badgeSize), badgeSize, badgeSize});
     } else if (speciesId != 0) {
       // The 40x30 menu files are intentionally native-sized and GfxRenderer
       // does not upscale. Use the same approved icon's 120x90 presentation

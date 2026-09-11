@@ -26,6 +26,41 @@ disclaims responsibility for clearing third-party rights. The CC0 declaration
 therefore must not be represented as this project's permission to redistribute
 the Pokémon images.
 
+## Player back sprites
+
+The local pack uses the original-151 `sprites/pokemon/back/` files from
+[PokeAPI Sprites](https://github.com/PokeAPI/sprites), the same revision
+`4bc9d60186fe2e499ee2f3d4d1b796806cb99a67` as the species icons above. Only
+the player's own Pokémon uses this art in the Battle screen (the opponent
+keeps the front-facing "hero" art), matching the real games.
+
+The same CC0-with-Pokémon-IP-caveat disclaimer as "Species icons" applies:
+PokeAPI Sprites' CC0 declaration covers its own repository, not the
+underlying Pokémon artwork it displays.
+
+## Bag item icons
+
+The local pack uses the `sprites/items/` files from PokeAPI Sprites, the same
+pinned revision as above, for every bag item (Ball/Medicine/StatusCure/
+Candy/PPRestore/Machine - see `scripts/data/pokemon-items.csv`). Most items
+map to a file with their own name (`poke-ball.png`, `potion.png`, ...). TMs
+have no per-number icon in that repository - only one icon per move type
+(`tm-<type>.png`), matching how the actual games present TMs; every TM of a
+given type therefore shares one icon here too. HMs use their own numbered
+files (`hm01.png`-`hm05.png`).
+
+Same disclaimer as above: PokeAPI Sprites' licence covers its repository, not
+the underlying artwork's Pokémon IP ownership.
+
+## Badge icons
+
+The local pack uses the `sprites/badges/` files from PokeAPI Sprites, the
+same pinned revision, numbered `1.png` through `8.png` for the 8 Kanto gym
+badges in order (Boulder, Cascade, Thunder, Rainbow, Soul, Marsh, Volcano,
+Earth).
+
+Same disclaimer as above.
+
 ## Evolution-stone icons
 
 The local pack uses Moon, Fire, Thunder, Water, and Leaf Stone files from
@@ -63,12 +98,16 @@ The offline tools create only the files needed by the X3:
 
 - Species icons: one-bit 40×30 BMPs.
 - Large species presentation art: one-bit 120×90 BMPs.
+- Player back sprites: one-bit 120×90 BMPs.
 - Stone icons: one-bit 32×32 BMPs.
 - Large stone presentation art: one-bit 64×64 BMPs.
+- Bag item icons (ids 007-083): one-bit 32×32 BMPs.
+- Badge icons (8 Kanto gyms): one-bit 32×32 BMPs.
 - Pokédex cards: one-bit 472×708 portrait and 288×432 landscape BMPs.
 
-The validator accepts IDs 001–151 and the five named evolution stones. Eggs,
-later-generation Pokémon, extra BMPs, and incorrectly sized files are rejected.
+The validator accepts IDs 001–151, the five named evolution stones, bag item
+ids 007-083, and badge ids 01-08. Eggs, later-generation Pokémon, extra BMPs,
+and incorrectly sized files are rejected.
 The public ZIP contains only this generated tree, the tested firmware, internal
 checksums, and [the rights notice](../RIGHTS_AND_ATTRIBUTION.md). It contains no
 Pokémon saves, books, reader settings, caches, or sleep-screen files.
