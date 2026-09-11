@@ -110,11 +110,9 @@ class PokemonActivity final : public Activity {
   Rect battleGridCellRect(int index) const;
   void renderMenuGrid();
   void renderBagGrid();
-  void renderPcGrid();
   int buttonGridTop() const;
   Rect buttonGridCellRect(int index) const;
-  void drawGridButton(const Rect& cell, bool selected, const char* line1, const char* line2 = nullptr);
-  int pcGridCapacity() const;
+  void drawGridButton(const Rect& cell, bool selected, const char* label);
   int battlePlayerMoveCount() const;
   // Stage 13: which party members can currently fight (BattleRecordEntry's
   // currentHp > 0, via the read-only peekBattleMoves - no battle-store
