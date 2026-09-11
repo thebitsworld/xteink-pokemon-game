@@ -53,6 +53,37 @@ leaf-stone.png
 
 The Link Cable deliberately has no icon.
 
+### Back sprites (Battle screen, player only)
+
+Use the same [PokeAPI Sprites](https://github.com/PokeAPI/sprites) revision as
+species icons, `4bc9d60186fe2e499ee2f3d4d1b796806cb99a67`.
+
+The required files are:
+
+```text
+sprites/pokemon/back/1.png
+...
+sprites/pokemon/back/151.png
+```
+
+### Bag item icons
+
+Use the same PokeAPI Sprites revision, folder `sprites/items/`. Every bag item
+(Ball/Medicine/StatusCure/Candy/PPRestore) maps to its own file by name (e.g.
+`poke-ball.png`, `potion.png`); every TM maps to `tm-<type>.png` (PokeAPI has
+no per-TM-number icon - real games share one icon per move type, and this
+project does the same); every HM maps to its own numbered file (`hm01.png`
+through `hm05.png`). `scripts/generate_pokemon_icon_art.py` works out which
+file each item needs from `scripts/data/pokemon-items.csv` and
+`pokemon-moves.csv` - just point it at a folder containing the whole
+`sprites/items/` directory.
+
+### Badge icons
+
+Use the same PokeAPI Sprites revision, folder `sprites/badges/`, files
+`1.png` through `8.png` - the 8 Kanto gym badges in order (Boulder, Cascade,
+Thunder, Rainbow, Soul, Marsh, Volcano, Earth).
+
 ### Pokédex cards
 
 The original X3 card set was shared by dmellok/xDaftTurtle in
@@ -101,17 +132,26 @@ Run from the repository root:
 python scripts/generate_pokemon_icon_art.py \
   --pokemon-source pokemon-art-source/pokeapi-sprites/sprites/pokemon/versions/generation-vii/icons \
   --item-source pokemon-art-source/pokesprite/icons/evo-item \
+  --pokemon-back-source pokemon-art-source/pokeapi-sprites/sprites/pokemon/back \
+  --bag-item-source pokemon-art-source/pokeapi-sprites/sprites/items \
+  --badge-source pokemon-art-source/pokeapi-sprites/sprites/badges \
   --output pokemon-art-output
 ```
+
+`--pokemon-back-source`, `--bag-item-source`, and `--badge-source` are optional
+- omit any of them to skip generating that category (e.g. if you only have the
+original species/stone sources on hand).
 
 This produces one-bit BMPs without contacting the network:
 
 ```text
 pokemon-art-output/
 ├── sprites/             # 001.bmp–151.bmp, 40×30
-├── heroes/              # 001.bmp–151.bmp, 120×90
-├── items/               # five stones, 32×32
-└── heroes/items/        # five stones, 64×64
+├── heroes/              # 001.bmp–151.bmp, 120×90 (front, used for the opponent in battle)
+├── heroes/back/         # 001.bmp–151.bmp, 120×90 (back, used for the player in battle)
+├── items/               # five stones (32×32) + ids 007.bmp–083.bmp (32×32, every bag item)
+├── heroes/items/        # five stones, 64×64
+└── badges/              # 01.bmp–08.bmp, 32×32, the 8 Kanto gym badges in order
 ```
 
 ## 4. Convert Pokédex cards
@@ -173,8 +213,10 @@ paths are:
 ```text
 /pokemon/sprites/
 /pokemon/heroes/
+/pokemon/heroes/back/
 /pokemon/items/
 /pokemon/heroes/items/
+/pokemon/badges/
 /pokemon/pokedex/portrait/
 /pokemon/pokedex/landscape/
 /pokemon/manifest.json

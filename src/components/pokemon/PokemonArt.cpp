@@ -50,6 +50,12 @@ bool drawPokemonSpeciesArt(const GfxRenderer& renderer, const uint16_t speciesId
   return drawPath(renderer, pokemonSpeciesArtPath(speciesId, hero, path, sizeof(path)), bounds, fallback);
 }
 
+bool drawPokemonSpeciesBackArt(const GfxRenderer& renderer, const uint16_t speciesId, const Rect bounds,
+                               const bool fallback) {
+  char path[64]{};
+  return drawPath(renderer, pokemonSpeciesBackArtPath(speciesId, path, sizeof(path)), bounds, fallback);
+}
+
 bool drawPokemonPokedexArt(const GfxRenderer& renderer, const uint16_t speciesId, const bool landscape,
                            const Rect bounds, const bool fallback) {
   char path[64]{};
@@ -62,6 +68,18 @@ bool drawPokemonItemArt(const GfxRenderer& renderer, const EvolutionItem item, c
   const char* pathValue = pokemonItemArtPath(item, hero, path, sizeof(path));
   if (pathValue == nullptr && item == EvolutionItem::LinkCable) return false;
   return drawPath(renderer, pathValue, bounds, fallback);
+}
+
+bool drawPokemonBagItemArt(const GfxRenderer& renderer, const uint8_t itemId, const Rect bounds,
+                          const bool fallback) {
+  char path[64]{};
+  return drawPath(renderer, pokemonBagItemArtPath(itemId, path, sizeof(path)), bounds, fallback);
+}
+
+bool drawPokemonBadgeArt(const GfxRenderer& renderer, const uint8_t gymIndex, const Rect bounds,
+                         const bool fallback) {
+  char path[64]{};
+  return drawPath(renderer, pokemonBadgeArtPath(gymIndex, path, sizeof(path)), bounds, fallback);
 }
 
 }  // namespace pokemon
