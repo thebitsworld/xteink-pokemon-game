@@ -22,6 +22,14 @@ name: Release
 # "-<anything>.bin") when scanning the GitHub Releases API for the device's own
 # in-app "Check for Update" over Wi-Fi. None of the public xteink-pokemon-* names
 # match that, so OTA would otherwise silently find no compatible asset.
+#
+# Each firmware builds in its OWN job (its own runner/VM), matching ci.yml's
+# per-environment matrix - a first (cold-cache) run of this workflow found that
+# building both pokemon-x3 (ESP32-C3/riscv32 toolchain) and pokemon-x4-pro
+# (ESP32-S3/xtensa toolchain, plus a much larger Arduino-ESP32 libs bundle) inside
+# ONE job/runner exhausted the runner's disk mid-build, silently losing the first
+# build's output before the packaging step ran. Splitting into separate jobs gives
+# each build its own disk budget, same as ci.yml already does successfully.
 on:
   push:
     tags:
@@ -35,7 +43,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build-x3-x4:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -60,7 +68,7 @@ jobs:
           path: |
             ~/.platformio/packages
             ~/.platformio/platforms
-          key: ${{ runner.os }}-platformio-py3.14-core6.1.19-release-${{ hashFiles('platformio.ini', 'platformio.local.example.ini') }}
+          key: ${{ runner.os }}-platformio-py3.14-core6.1.19-release-pokemon-x3-${{ hashFiles('platformio.ini', 'platformio.local.example.ini') }}
 
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
@@ -68,8 +76,72 @@ jobs:
       - name: Build pokemon-x3 (X3/X4) firmware
         run: pio run -e pokemon-x3
 
+      - name: Verify build output
+        run: test -s .pio/build/pokemon-x3/firmware-x3-x4.bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-x3-x4
+          path: .pio/build/pokemon-x3/firmware-x3-x4.bin
+          if-no-files-found: error
+
+  build-x4-pro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          # Do not cache PlatformIO's Python virtual environment. It is tied to
+          # the runner's Python and can become invalid when restored elsewhere.
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: ${{ runner.os }}-platformio-py3.14-core6.1.19-release-pokemon-x4-pro-${{ hashFiles('platformio.ini', 'platformio.local.example.ini') }}
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
       - name: Build pokemon-x4-pro firmware
         run: pio run -e pokemon-x4-pro
+
+      - name: Verify build output
+        run: test -s .pio/build/pokemon-x4-pro/firmware-x4-pro.bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-x4-pro
+          path: .pio/build/pokemon-x4-pro/firmware-x4-pro.bin
+          if-no-files-found: error
+
+  release:
+    needs: [build-x3-x4, build-x4-pro]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: firmware-x3-x4
+          path: build/pokemon-x3
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: firmware-x4-pro
+          path: build/pokemon-x4-pro
 
       - name: Package firmware assets
         id: package
@@ -78,11 +150,11 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist
 
-          x3_x4_src=.pio/build/pokemon-x3/firmware-x3-x4.bin
-          x4_pro_src=.pio/build/pokemon-x4-pro/firmware-x4-pro.bin
+          x3_x4_src=build/pokemon-x3/firmware-x3-x4.bin
+          x4_pro_src=build/pokemon-x4-pro/firmware-x4-pro.bin
           for src in "$x3_x4_src" "$x4_pro_src"; do
             if [ ! -f "$src" ]; then
-              echo "::error::expected build output missing: $src"
+              echo "::error::expected downloaded artifact missing: $src"
               ls -la "$(dirname "$src")" || true
               exit 1
             fi
