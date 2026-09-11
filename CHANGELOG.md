@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-11
+
+### Added
+
+- The underlying CrossInk engine is now based on upstream release v1.5.1, bringing Quick Lock (temporarily disable buttons/touchscreen while keeping the screen visible), custom boot screens, independently configurable Next Page/Previous Page touch gestures, a tap-to-hide status bar, EPUB tables rendered as real columns, and a large batch of reliability fixes across touch input, sleep/wake, and EPUB/XTC reading - see the `[v1.5.1] - 2026-09-10` section further down in this file for CrossInk's own full changelog for that release.
+- Swipe up/down now pages through long lists (Bag, Pokédex, PC Box, and reader menus) on touch-only devices, matching the physical Up/Down buttons.
+- Battle screens now show your own Pokémon from behind, matching the classic games, using real sprites from PokeAPI. Bag, Battle Bag, and the Badges list now show an icon before each item/badge name instead of text only.
+- The Pokémon main menu, Bag category picker, and PC Box sort screen now render as button-style screens instead of plain text lists.
+
+### Fixed
+
+- The Switch screen mid-battle no longer draws the Pokémon's name and HP bar on top of its icon.
+- Long Pokémon nicknames in the PC Box list are no longer cut off.
+
 ## [0.3.1] - 2026-09-11
 
 ### Added
