@@ -165,6 +165,30 @@ class PokemonIconArtGeneratorTest(unittest.TestCase):
                     self.assertEqual(image.mode, "1")
                     self.assertEqual(image.size, (32, 32))
 
+    def test_builds_thirteen_trainer_portraits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trainer_source = root / "trainers"
+            for slug in GENERATOR.TRAINER_SLUGS:
+                write_rgba_icon(trainer_source / f"{slug}.png", (32, 32))
+
+            GENERATOR.build_trainers(trainer_source, root / "output")
+
+            for gym_index in range(1, 14):
+                with Image.open(root / f"output/trainers/{gym_index:02}.bmp") as image:
+                    self.assertEqual(image.mode, "1")
+                    self.assertEqual(image.size, (32, 32))
+
+    def test_rejects_a_missing_trainer_portrait(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trainer_source = root / "trainers"
+            for slug in GENERATOR.TRAINER_SLUGS[:-1]:
+                write_rgba_icon(trainer_source / f"{slug}.png", (32, 32))
+
+            with self.assertRaises(ValueError):
+                GENERATOR.build_trainers(trainer_source, root / "output")
+
     def test_rejects_a_missing_species_icon(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

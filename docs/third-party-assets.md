@@ -61,6 +61,19 @@ Earth).
 
 Same disclaimer as above.
 
+## Trainer portraits
+
+The local pack uses the Red/Blue trainer sprites from
+[Pokémon Database](https://pokemondb.net/red-blue/gymleaders-elitefour),
+one PNG per Gym Leader, Elite Four member, and the Champion (Blue) - 13 files
+in total, shown before each name in the Gym Battle list.
+
+Pokémon Database does not state a licence allowing this project to rehost
+these files. Complete X3 installation releases include the adapted portraits
+with direct credit to Pokémon Database and the same documented removal or
+credit-correction process as the other community-sourced art on this page
+(see [Rights and attribution](../RIGHTS_AND_ATTRIBUTION.md)).
+
 ## Evolution-stone icons
 
 The local pack uses Moon, Fire, Thunder, Water, and Leaf Stone files from
@@ -103,11 +116,13 @@ The offline tools create only the files needed by the X3:
 - Large stone presentation art: one-bit 64×64 BMPs.
 - Bag item icons (ids 007-083): one-bit 32×32 BMPs.
 - Badge icons (8 Kanto gyms): one-bit 32×32 BMPs.
+- Trainer portraits (8 Gym Leaders + 4 Elite Four + the Champion): one-bit
+  32×32 BMPs.
 - Pokédex cards: one-bit 472×708 portrait and 288×432 landscape BMPs.
 
 The validator accepts IDs 001–151, the five named evolution stones, bag item
-ids 007-083, and badge ids 01-08. Eggs, later-generation Pokémon, extra BMPs,
-and incorrectly sized files are rejected.
+ids 007-083, badge ids 01-08, and trainer ids 01-13. Eggs, later-generation
+Pokémon, extra BMPs, and incorrectly sized files are rejected.
 The public ZIP contains only this generated tree, the tested firmware, internal
 checksums, and [the rights notice](../RIGHTS_AND_ATTRIBUTION.md). It contains no
 Pokémon saves, books, reader settings, caches, or sleep-screen files.

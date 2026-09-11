@@ -84,6 +84,28 @@ Use the same PokeAPI Sprites revision, folder `sprites/badges/`, files
 `1.png` through `8.png` - the 8 Kanto gym badges in order (Boulder, Cascade,
 Thunder, Rainbow, Soul, Marsh, Volcano, Earth).
 
+### Trainer portraits
+
+Use [Pokémon Database's Red/Blue trainer page](https://pokemondb.net/red-blue/gymleaders-elitefour).
+Save each of the 13 portraits (8 Gym Leaders, 4 Elite Four members, and the
+Champion) under these exact filenames:
+
+```text
+brock.png
+misty.png
+lt-surge.png
+erika.png
+koga.png
+sabrina.png
+blaine.png
+giovanni.png
+lorelei.png
+bruno.png
+agatha.png
+lance.png
+blue.png
+```
+
 ### Pokédex cards
 
 The original X3 card set was shared by dmellok/xDaftTurtle in
@@ -135,12 +157,13 @@ python scripts/generate_pokemon_icon_art.py \
   --pokemon-back-source pokemon-art-source/pokeapi-sprites/sprites/pokemon/back \
   --bag-item-source pokemon-art-source/pokeapi-sprites/sprites/items \
   --badge-source pokemon-art-source/pokeapi-sprites/sprites/badges \
+  --trainer-source pokemon-art-source/trainers \
   --output pokemon-art-output
 ```
 
-`--pokemon-back-source`, `--bag-item-source`, and `--badge-source` are optional
-- omit any of them to skip generating that category (e.g. if you only have the
-original species/stone sources on hand).
+`--pokemon-back-source`, `--bag-item-source`, `--badge-source`, and
+`--trainer-source` are optional - omit any of them to skip generating that
+category (e.g. if you only have the original species/stone sources on hand).
 
 This produces one-bit BMPs without contacting the network:
 
@@ -151,7 +174,8 @@ pokemon-art-output/
 ├── heroes/back/         # 001.bmp–151.bmp, 120×90 (back, used for the player in battle)
 ├── items/               # five stones (32×32) + ids 007.bmp–083.bmp (32×32, every bag item)
 ├── heroes/items/        # five stones, 64×64
-└── badges/              # 01.bmp–08.bmp, 32×32, the 8 Kanto gym badges in order
+├── badges/              # 01.bmp–08.bmp, 32×32, the 8 Kanto gym badges in order
+└── trainers/            # 01.bmp–13.bmp, 32×32, the 8 Gym Leaders + 4 Elite Four + the Champion
 ```
 
 ## 4. Convert Pokédex cards
@@ -217,6 +241,7 @@ paths are:
 /pokemon/items/
 /pokemon/heroes/items/
 /pokemon/badges/
+/pokemon/trainers/
 /pokemon/pokedex/portrait/
 /pokemon/pokedex/landscape/
 /pokemon/manifest.json

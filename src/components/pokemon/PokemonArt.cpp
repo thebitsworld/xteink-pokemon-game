@@ -82,6 +82,12 @@ bool drawPokemonBadgeArt(const GfxRenderer& renderer, const uint8_t gymIndex, co
   return drawPath(renderer, pokemonBadgeArtPath(gymIndex, path, sizeof(path)), bounds, fallback);
 }
 
+bool drawPokemonTrainerArt(const GfxRenderer& renderer, const uint8_t gymIndex, const Rect bounds,
+                          const bool fallback) {
+  char path[64]{};
+  return drawPath(renderer, pokemonTrainerArtPath(gymIndex, path, sizeof(path)), bounds, fallback);
+}
+
 }  // namespace pokemon
 
 #endif

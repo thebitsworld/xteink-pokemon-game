@@ -194,6 +194,39 @@ void gymsAreOrderedAndEliteFourCarriesNoBadge() {
   CHECK(pokemon::gymTeamFor(11).size() == 5);  // Agatha
   CHECK(pokemon::gymTeamFor(12).size() == 5);  // Lance
 
+  // The Champion (Blue) - added after the Elite Four, always the last entry.
+  CHECK(pokemon::CHAMPION_GYM_INDEX == pokemon::GYM_COUNT);
+  const pokemon::GymData* champion = pokemon::gymData(pokemon::CHAMPION_GYM_INDEX);
+  CHECK(champion != nullptr);
+  if (champion != nullptr) {
+    CHECK(std::string_view(champion->leaderName) == "Blue");
+    CHECK(champion->badgeName[0] == '\0');  // no badge for the Champion, same as Elite Four
+  }
+  const std::span<const pokemon::GymTeamMember> championTeam = pokemon::gymTeamFor(pokemon::CHAMPION_GYM_INDEX);
+  CHECK(championTeam.size() == 6);
+  if (championTeam.size() == 6) {
+    CHECK(championTeam[0].speciesId == 18 && championTeam[0].level == 61);  // Pidgeot
+    CHECK(championTeam[4].speciesId == 130 && championTeam[4].level == 63);  // Gyarados
+  }
+
+  // championFinalSlotFor(): the real games send out the evolution that
+  // counters the player's own starter for the Champion's final slot.
+  CHECK(pokemon::championFinalSlotFor(1).speciesId == 6);   // Bulbasaur -> Charizard
+  CHECK(pokemon::championFinalSlotFor(2).speciesId == 6);   // Ivysaur -> Charizard
+  CHECK(pokemon::championFinalSlotFor(3).speciesId == 6);   // Venusaur -> Charizard
+  CHECK(pokemon::championFinalSlotFor(4).speciesId == 9);   // Charmander -> Blastoise
+  CHECK(pokemon::championFinalSlotFor(5).speciesId == 9);   // Charmeleon -> Blastoise
+  CHECK(pokemon::championFinalSlotFor(6).speciesId == 9);   // Charizard -> Blastoise
+  CHECK(pokemon::championFinalSlotFor(7).speciesId == 3);   // Squirtle -> Venusaur
+  CHECK(pokemon::championFinalSlotFor(8).speciesId == 3);   // Wartortle -> Venusaur
+  CHECK(pokemon::championFinalSlotFor(9).speciesId == 3);   // Blastoise -> Venusaur
+  CHECK(pokemon::championFinalSlotFor(25).speciesId == 6);  // Pikachu (no rival response) -> falls back Charizard
+  for (uint8_t starter : {static_cast<uint8_t>(1), static_cast<uint8_t>(4), static_cast<uint8_t>(7)}) {
+    const pokemon::GymTeamMember slot = pokemon::championFinalSlotFor(starter);
+    CHECK(slot.level == 65);
+    for (const uint8_t moveId : slot.moves) CHECK(moveId >= 1 && moveId <= pokemon::MOVE_COUNT);
+  }
+
   for (uint8_t gymIndex = 1; gymIndex <= pokemon::GYM_COUNT; ++gymIndex) {
     const std::span<const pokemon::GymTeamMember> team = pokemon::gymTeamFor(gymIndex);
     CHECK(team.size() >= 1 && team.size() <= pokemon::MAX_GYM_TEAM_SIZE);

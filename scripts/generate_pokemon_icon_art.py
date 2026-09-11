@@ -18,6 +18,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 ITEMS = ("moon-stone", "fire-stone", "thunder-stone", "water-stone", "leaf-stone")
 
+# The 8 Gym Leaders + 4 Elite Four members + the Champion, in the same
+# challenge order as scripts/data/pokemon-gyms.csv - the slug pokemondb.net
+# uses for each trainer's portrait file, e.g. https://pokemondb.net/red-blue/
+# gymleaders-elitefour (img.pokemondb.net/sprites/trainers/red-blue/<slug>.png).
+TRAINER_SLUGS = (
+    "brock", "misty", "lt-surge", "erika", "koga", "sabrina", "blaine", "giovanni",
+    "lorelei", "bruno", "agatha", "lance", "blue",
+)
+
 # Ids 7-83: every non-evolution bag item (Ball/Medicine/StatusCure/Candy/
 # PPRestore/Machine) - see scripts/data/pokemon-items.csv. Evolution items
 # (ids 1-6) keep using the separate --item-source/ITEMS pipeline above,
@@ -81,6 +90,14 @@ def badge_source(root: Path, gym_index: int) -> Path:
     candidate = root / f"{gym_index}.png"
     if not candidate.is_file():
         raise ValueError(f"missing badge icon {gym_index}")
+    return candidate
+
+
+def trainer_source(root: Path, gym_index: int) -> Path:
+    slug = TRAINER_SLUGS[gym_index - 1]
+    candidate = root / f"{slug}.png"
+    if not candidate.is_file():
+        raise ValueError(f"missing trainer portrait {gym_index} ({slug}.png)")
     return candidate
 
 
@@ -167,6 +184,15 @@ def build_badges(badge_source_root: Path, output: Path, gym_count: int = 8) -> N
         )
 
 
+def build_trainers(trainer_source_root: Path, output: Path, trainer_count: int = len(TRAINER_SLUGS)) -> None:
+    for gym_index in range(1, trainer_count + 1):
+        save_bmp(
+            trainer_source(trainer_source_root, gym_index),
+            output / "trainers" / f"{gym_index:02}.bmp",
+            (32, 32),
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -200,6 +226,13 @@ def main() -> None:
         help="Local folder containing PokeAPI Sprites' sprites/badges/ PNGs, numbered 1.png-8.png for "
         "the 8 Kanto gyms in order - optional, skips badge icon generation if omitted",
     )
+    parser.add_argument(
+        "--trainer-source",
+        type=Path,
+        help="Local folder containing the 13 Gym Battle trainer portraits (see TRAINER_SLUGS for the "
+        "expected <slug>.png filenames, matching pokemondb.net's Red/Blue trainer page) - optional, "
+        "skips trainer portrait generation if omitted",
+    )
     args = parser.parse_args()
     output = args.output.resolve()
     build_icons(args.pokemon_source.resolve(), args.item_source.resolve(), output)
@@ -209,6 +242,8 @@ def main() -> None:
         build_bag_item_icons(args.bag_item_source.resolve(), output)
     if args.badge_source is not None:
         build_badges(args.badge_source.resolve(), output)
+    if args.trainer_source is not None:
+        build_trainers(args.trainer_source.resolve(), output)
     print(f"Generated species and item artwork in {output}")
 
 

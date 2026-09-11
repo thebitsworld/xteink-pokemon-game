@@ -36,6 +36,10 @@ def expected_art() -> dict[Path, tuple[int, int]]:
     # The 8 Kanto gym badges, in order.
     for gym_index in range(1, 9):
         files[Path("badges") / f"{gym_index:02}.bmp"] = (32, 32)
+    # The 8 Gym Leaders + 4 Elite Four members + the Champion, in challenge
+    # order (see scripts/data/pokemon-gyms.csv / TRAINER_SLUGS).
+    for gym_index in range(1, 14):
+        files[Path("trainers") / f"{gym_index:02}.bmp"] = (32, 32)
     return files
 
 

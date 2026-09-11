@@ -13,5 +13,6 @@ const char* pokemonPokedexArtPath(uint16_t speciesId, bool landscape, char* outp
 const char* pokemonItemArtPath(EvolutionItem item, bool hero, char* output, size_t outputSize);
 const char* pokemonBagItemArtPath(uint8_t itemId, char* output, size_t outputSize);
 const char* pokemonBadgeArtPath(uint8_t gymIndex, char* output, size_t outputSize);
+const char* pokemonTrainerArtPath(uint8_t gymIndex, char* output, size_t outputSize);
 
 }  // namespace pokemon

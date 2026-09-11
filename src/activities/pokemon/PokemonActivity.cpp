@@ -768,7 +768,18 @@ void PokemonActivity::advanceGymOpponentOrFinish() {
   const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
   ++gymChallengeTeamProgress_;
   if (gymChallengeTeamProgress_ < team.size()) {
-    const auto& next = team[gymChallengeTeamProgress_];
+    pokemon::GymTeamMember next = team[gymChallengeTeamProgress_];
+    if (gymChallengeIndex_ == pokemon::CHAMPION_GYM_INDEX && gymChallengeTeamProgress_ == team.size() - 1) {
+      // The Champion's final slot sends out the evolution that counters
+      // the player's own starter in the real games - see
+      // championFinalSlotFor(). recordId 1 is always the starter
+      // (createStarter() hardcodes it), so this is a plain lookup rather
+      // than tracking a separate "starter species" field.
+      pokemon::PokemonRecord starterRecord{};
+      if (service_.readRecord(1, starterRecord) == pokemon::ServiceStatus::Ok) {
+        next = pokemon::championFinalSlotFor(starterRecord.speciesId);
+      }
+    }
     setupBattleOpponent(next.speciesId, next.level, next.moves);
     const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
     snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
@@ -2095,6 +2106,8 @@ void PokemonActivity::buildRows() {
         char label[40];
         if (gymIndex <= 8U) {
           snprintf(label, sizeof(label), "%s", gym == nullptr ? "?" : gym->leaderName);
+        } else if (gymIndex == pokemon::CHAMPION_GYM_INDEX) {
+          snprintf(label, sizeof(label), "%s - %s", tr(STR_POKEMON_CHAMPION), gym == nullptr ? "?" : gym->leaderName);
         } else {
           snprintf(label, sizeof(label), "%s - %s", tr(STR_POKEMON_ELITE_FOUR), gym == nullptr ? "?" : gym->leaderName);
         }
@@ -2129,7 +2142,8 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
                        screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
-                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
+                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges ||
+                       screen_ == Screen::GymList;
   int top = listTop();
   rowHeight_ = rowHeightForScreen();
   // BattleBalls stays bottom-anchored, overlaid on the still-visible battle
@@ -2949,7 +2963,8 @@ void PokemonActivity::renderRowArt() {
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
                        screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
-                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
+                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges ||
+                       screen_ == Screen::GymList;
   if (!artRows) return;
   const int start = pageStart();
   for (int local = 0; local < rowCount_; ++local) {
@@ -3015,6 +3030,13 @@ void PokemonActivity::renderRowArt() {
           renderer, gymIndex,
           Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, badgeSize),
                rowY + pokemon::pokemonCenteredOffset(rowHeight_, badgeSize), badgeSize, badgeSize});
+    } else if (screen_ == Screen::GymList) {
+      const auto gymIndex = static_cast<uint8_t>(start + local + 1);
+      constexpr int trainerSize = 32;
+      pokemon::drawPokemonTrainerArt(
+          renderer, gymIndex,
+          Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, trainerSize),
+               rowY + pokemon::pokemonCenteredOffset(rowHeight_, trainerSize), trainerSize, trainerSize});
     } else if (speciesId != 0) {
       // The 40x30 menu files are intentionally native-sized and GfxRenderer
       // does not upscale. Use the same approved icon's 120x90 presentation

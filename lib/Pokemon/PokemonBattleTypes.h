@@ -10,8 +10,12 @@ namespace pokemon {
 
 constexpr uint8_t MOVE_COUNT = 165;
 constexpr uint8_t ITEM_COUNT = 83;
-constexpr uint8_t GYM_COUNT = 12;         // 8 gyms + 4 Elite Four, in challenge order
-constexpr uint8_t MAX_GYM_TEAM_SIZE = 5;  // full real Pokemon Red teams (Giovanni/Lorelei/Bruno/Agatha/Lance)
+constexpr uint8_t GYM_COUNT = 13;  // 8 gyms + 4 Elite Four + the Champion (Blue), in challenge order
+// The Champion is always the last entry - see gymProgressFor()'s Champion
+// branch and PokemonActivity's dynamic final-slot substitution.
+constexpr uint8_t CHAMPION_GYM_INDEX = GYM_COUNT;
+constexpr uint8_t MAX_GYM_TEAM_SIZE = 6;  // full real Pokemon Red teams: Giovanni/Lorelei/Bruno/Agatha/Lance
+                                          // have 5, the Champion (Blue) has 6
 // Mirrors PokemonBattle.h's BATTLE_MOVE_SLOTS (this header can't include
 // that one - PokemonBattle.h includes this header, not the reverse). Kept
 // in sync via the static_assert alongside BATTLE_MOVE_SLOTS's definition.
@@ -127,10 +131,21 @@ enum class GymProgress : uint8_t {
 
 // Pure read of a battleProgress bitfield (PokemonState::battleProgress):
 // gym N (1-8) requires gyms 1..N-1 already defeated; an Elite Four member
-// (9-GYM_COUNT) requires all 8 gym bits set. Shared by
+// (9-12) requires all 8 gym bits set; the Champion (CHAMPION_GYM_INDEX)
+// additionally requires all 4 Elite Four bits set. Shared by
 // PokemonService::markGymDefeated (the mutating check) and the UI's gym
 // list display (read-only) so the unlock rule lives in exactly one place.
 GymProgress gymProgressFor(uint16_t battleProgress, uint8_t gymIndex);
 std::span<const GymTeamMember> gymTeamFor(uint8_t gymIndex);
+
+// The Champion's team (gymTeamFor(CHAMPION_GYM_INDEX)) bakes in a fixed
+// species for its final (6th) slot in the generated data, but the real
+// games send out the evolution that counters the player's own starter -
+// Charizard/Blastoise/Venusaur depending on whether the player started with
+// Bulbasaur/Charmander/Squirtle. Returns the correct substitute for that
+// slot given the player's starter species (any species not in one of those
+// three lines - including this project's added Pikachu starter, which the
+// original games have no rival response for - falls back to Charizard).
+GymTeamMember championFinalSlotFor(uint16_t starterSpeciesId);
 
 }  // namespace pokemon

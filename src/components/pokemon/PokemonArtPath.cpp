@@ -91,4 +91,15 @@ const char* pokemonBadgeArtPath(const uint8_t gymIndex, char* output, const size
                     std::snprintf(output, outputSize, "/pokemon/badges/%02u.bmp", static_cast<unsigned>(gymIndex)));
 }
 
+const char* pokemonTrainerArtPath(const uint8_t gymIndex, char* output, const size_t outputSize) {
+  if (output == nullptr || outputSize == 0) return nullptr;
+  output[0] = '\0';
+  // 13 = GYM_COUNT (8 gyms + 4 Elite Four + the Champion) - this file avoids
+  // depending on PokemonBattleTypes.h, matching pokemonBadgeArtPath()'s own
+  // hardcoded "8U" above.
+  if (gymIndex == 0 || gymIndex > 13U) return nullptr;
+  return finishPath(output, outputSize,
+                    std::snprintf(output, outputSize, "/pokemon/trainers/%02u.bmp", static_cast<unsigned>(gymIndex)));
+}
+
 }  // namespace pokemon
