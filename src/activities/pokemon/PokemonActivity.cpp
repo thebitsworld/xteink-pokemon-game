@@ -1995,9 +1995,9 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
-                       screen_ == Screen::Pokedex || screen_ == Screen::BagBalls || screen_ == Screen::BagMedicine ||
-                       screen_ == Screen::BagMachine || screen_ == Screen::BattleBag ||
-                       screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
+                       screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
+                       screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
+                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
   int top = listTop();
   rowHeight_ = rowHeightForScreen();
   // BattleBalls stays bottom-anchored, overlaid on the still-visible battle
@@ -2872,7 +2872,14 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
     hpTextY = line2Top;
     statusY = line2Top;
   } else {
-    barX = listBounds_.x + ROW_ICON_X;
+    // BattleSwitch (the only caller with drawNameLine=false): the generic
+    // list widget already draws this row's own name/level/gender text
+    // starting at x=112 (pokemonListPresentation()'s artwork sidePadding),
+    // clearing the 80px-wide species icon at ROW_ICON_X - this HP bar/status
+    // strip sits on the row's second line, so it needs the same left edge,
+    // not the icon's. Reusing ROW_ICON_X here drew the bar directly over the
+    // icon's bottom edge.
+    barX = listBounds_.x + 112;
     barY = rowY + rowHeight_ - 22;
     hpTextY = barY - 3;
     statusY = barY - 3;
