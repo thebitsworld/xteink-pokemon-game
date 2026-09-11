@@ -60,15 +60,18 @@ const char* genderText(const pokemon::Gender gender) {
   return "";
 }
 
-// Compact "M"/"F" for the Party/ItemTarget row's name/level/gender line
-// (renderPartyRowHealth()) - the traditional ♂/♀ glyphs aren't in this
+// Compact glyph for the Party/ItemTarget row's name/level/gender line
+// (renderPartyRowHealth()) - the traditional ♂/♀ symbols weren't in this
 // device's font (a fixed Latin/Hebrew/Arabic subset baked in at build time),
-// so a single letter is the closest available to a "symbol" without
-// regenerating that font asset. Genderless/Unknown has nothing meaningful to
-// show, matching genderText()'s own "" for Unknown.
+// so this used to fall back to "M"/"F". Both glyphs were added to the small
+// shared ui_symbols_10 fallback font (already used for the power icon) from
+// the existing NotoSansSymbols source, so the real symbols render now at
+// UI_10/UI_12 alike - see lib/EpdFont/builtinFonts/ui_symbols_10.h's
+// generation comment. Genderless/Unknown has nothing meaningful to show,
+// matching genderText()'s own "" for Unknown.
 const char* genderAbbrev(const pokemon::Gender gender) {
-  if (gender == pokemon::Gender::Male) return "M";
-  if (gender == pokemon::Gender::Female) return "F";
+  if (gender == pokemon::Gender::Male) return "♂";
+  if (gender == pokemon::Gender::Female) return "♀";
   return "";
 }
 
