@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Added
+
+- Gym Battle now includes the Champion (Blue), the final challenge after all 8 Gym Leaders and the Elite Four - previously the Champion was missing entirely. His team uses his real Pokémon Red roster, including sending out the evolution that counters your own starter for his final Pokémon, just like the original games.
+- The Gym Battle list now shows a portrait of each Gym Leader, Elite Four member, and the Champion before their name.
+
 ## [0.4.1] - 2026-09-12
 
 ### Fixed
