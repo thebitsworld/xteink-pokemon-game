@@ -404,11 +404,13 @@ void PokemonActivity::setScreen(const Screen screen, const int selected) {
 }
 
 bool PokemonActivity::isListScreen() const {
-  // Screen::Battle/BattleMoves/Menu draw their own 2-column button grids
-  // (renderBattleMenu()/renderBattleMoveMenu()/renderMenuGrid()) instead of
-  // the generic single-column list - see the comments there.
+  // Screen::Battle/BattleMoves/Menu/Bag/Pc draw their own 2-column button
+  // grids (renderBattleMenu()/renderBattleMoveMenu()/renderMenuGrid()/
+  // renderBagGrid()/renderPcGrid()) instead of the generic single-column
+  // list - see the comments there.
   return screen_ != Screen::Summary && screen_ != Screen::PokedexDetail && screen_ != Screen::Message &&
-         screen_ != Screen::Battle && screen_ != Screen::BattleMoves && screen_ != Screen::Menu;
+         screen_ != Screen::Battle && screen_ != Screen::BattleMoves && screen_ != Screen::Menu &&
+         screen_ != Screen::Bag && screen_ != Screen::Pc;
 }
 
 int PokemonActivity::logicalCount() const {
@@ -1598,7 +1600,7 @@ void PokemonActivity::loop() {
     // CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
     if (mappedInput.hasTouchHardware()) {
       for (int index = 0; index < count; ++index) {
-        const Rect cell = menuGridCellRect(index);
+        const Rect cell = buttonGridCellRect(index);
         if (mappedInput.wasTapInRect(cell.x, cell.y, cell.width, cell.height)) {
           selected_ = index;
           activate();
@@ -1628,6 +1630,91 @@ void PokemonActivity::loop() {
         if (prev >= count) prev -= MENU_GRID_COLUMNS;  // last row is short a column
       }
       moveMenu(prev);
+    });
+    return;
+  }
+  if (screen_ == Screen::Bag) {
+    // Same reasoning as the Menu grid above - bypasses buildList()/
+    // fui::list() (see isListScreen()). Always exactly 4 entries (one page),
+    // so the same column-wrap Up/Down as Menu, no pagination needed (unlike
+    // Pc below).
+    if (mappedInput.hasTouchHardware()) {
+      for (int index = 0; index < count; ++index) {
+        const Rect cell = buttonGridCellRect(index);
+        if (mappedInput.wasTapInRect(cell.x, cell.y, cell.width, cell.height)) {
+          selected_ = index;
+          activate();
+          return;
+        }
+      }
+    }
+    const auto moveBag = [this](const int next) {
+      selected_ = next;
+      requestUpdate();
+    };
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Right},
+                                    [this, count, &moveBag] { moveBag((selected_ + 1) % count); });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Left},
+                                    [this, count, &moveBag] { moveBag((selected_ - 1 + count) % count); });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Down}, [this, count, &moveBag] {
+      int next = selected_ + MENU_GRID_COLUMNS;
+      if (next >= count) next = selected_ % MENU_GRID_COLUMNS;  // wrap to this column's top row
+      moveBag(next);
+    });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Up}, [this, count, &moveBag] {
+      int prev = selected_ - MENU_GRID_COLUMNS;
+      if (prev < 0) {
+        const int column = selected_ % MENU_GRID_COLUMNS;
+        const int lastRowStart = ((count - 1) / MENU_GRID_COLUMNS) * MENU_GRID_COLUMNS;
+        prev = lastRowStart + column;
+        if (prev >= count) prev -= MENU_GRID_COLUMNS;  // last row is short a column
+      }
+      moveBag(prev);
+    });
+    return;
+  }
+  if (screen_ == Screen::Pc) {
+    // Unlike Menu/Bag (always one page), Pc can hold far more than
+    // rowsPerPage() Pokemon - reuses the exact page-jump convention every
+    // other paginated list screen uses below (Up/Down/swipe jump a full
+    // page, Left/Right step one cell in reading order; pcGridCapacity() is
+    // just rowsPerPage(), see its comment for why it isn't doubled for 2
+    // columns). Only the touch hit-test differs, since Pc draws 2-column
+    // grid cells here instead of single-row rects.
+    const int start = pageStart();
+    if (mappedInput.hasTouchHardware()) {
+      for (int local = 0; local < rowCount_; ++local) {
+        const Rect cell = buttonGridCellRect(local);
+        if (mappedInput.wasTapInRect(cell.x, cell.y, cell.width, cell.height)) {
+          selected_ = start + local;
+          activate();
+          return;
+        }
+      }
+    }
+    const int perPage = pcGridCapacity();
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+      selected_ = swipe == MappedInputManager::SwipeDir::Up
+                      ? ButtonNavigator::nextPageIndex(selected_, count, perPage)
+                      : ButtonNavigator::previousPageIndex(selected_, count, perPage);
+      requestUpdate();
+      return;
+    }
+    const auto movePc = [this](const int next) {
+      selected_ = next;
+      requestUpdate();
+    };
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Right},
+                                    [this, count, &movePc] { movePc(ButtonNavigator::nextIndex(selected_, count)); });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Left}, [this, count, &movePc] {
+      movePc(ButtonNavigator::previousIndex(selected_, count));
+    });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Down}, [this, count, perPage, &movePc] {
+      movePc(ButtonNavigator::nextPageIndex(selected_, count, perPage));
+    });
+    navigator_.onPressAndContinuous({MappedInputManager::Button::Up}, [this, count, perPage, &movePc] {
+      movePc(ButtonNavigator::previousPageIndex(selected_, count, perPage));
     });
     return;
   }
@@ -1854,6 +1941,9 @@ void PokemonActivity::buildRows() {
                    : index == 1 ? tr(STR_POKEMON_NUMBER)
                                 : tr(STR_POKEMON_ALPHABETICAL));
         break;
+      // Unreachable in practice: isListScreen() excludes Screen::Bag (it
+      // draws its own 2-column grid via renderBagGrid(), which has its own
+      // copy of these same 4 labels - see the comment there).
       case Screen::Bag:
         row(local, index == 0   ? tr(STR_POKEMON_BAG_EVOLUTION)
                    : index == 1 ? tr(STR_POKEMON_BAG_MEDICINE)
@@ -2043,8 +2133,9 @@ void PokemonActivity::buildRows() {
 void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   buildRows();
   const auto& metrics = UITheme::getInstance().getMetrics();
+  // Screen::Pc never reaches buildList() any more - see isListScreen().
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
-                       screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
+                       screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
                        screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
                        screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
@@ -2101,7 +2192,18 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
 }
 
 void PokemonActivity::buildUi(UiApp::ScreenType& screen) {
-  if (isListScreen()) buildList(screen);
+  if (isListScreen()) {
+    buildList(screen);
+  } else if (screen_ == Screen::Pc) {
+    // Pc's grid still needs buildRows()'s Screen::Pc case to run - not for
+    // the labels_/rows_ it populates (there's no fui::list() to hand them
+    // to), but for its side effect: service_.readPcPage() into pcPage_/
+    // pcCount_, and rowCount_. renderPcGrid() then reads labels_/values_
+    // directly. Menu/Bag don't need this - their grids build their labels
+    // inline from fixed, always-in-RAM constants (see renderMenuGrid()/
+    // renderBagGrid()).
+    buildRows();
+  }
 }
 
 void PokemonActivity::renderFocused() {
@@ -2337,6 +2439,14 @@ void PokemonActivity::renderFocused() {
     renderMenuGrid();
     return;
   }
+  if (screen_ == Screen::Bag) {
+    renderBagGrid();
+    return;
+  }
+  if (screen_ == Screen::Pc) {
+    renderPcGrid();
+    return;
+  }
   if (screen_ == Screen::Battle || screen_ == Screen::BattleMoves || screen_ == Screen::BattleBalls) {
     renderBattleHud();
     if (screen_ == Screen::Battle) renderBattleMenu();
@@ -2416,36 +2526,72 @@ Rect PokemonActivity::battleGridCellRect(int index) const {
   return Rect{x, y, buttonWidth, buttonHeight};
 }
 
-int PokemonActivity::menuGridTop() const { return listTop(); }
+// Shared top anchor for every top-anchored 2-column button grid on this
+// activity (Menu/Bag/Pc) - unlike the Battle grid (battleMenuTop()), which
+// anchors to the bottom to leave room for the HUD above it, these screens
+// have nothing above the grid, so it just starts at the normal list top.
+int PokemonActivity::buttonGridTop() const { return listTop(); }
 
-// Shared by renderMenuGrid() (what gets drawn) and loop()'s touch hit-test
-// (what gets tapped) - computed once here so the two can never drift apart,
-// same reasoning as battleGridCellRect().
-Rect PokemonActivity::menuGridCellRect(int index) const {
+// Shared by every renderXxxGrid() (what gets drawn) and loop()'s touch
+// hit-test (what gets tapped) - computed once here so the two can never
+// drift apart, same reasoning as battleGridCellRect(). `index` is always
+// relative to the current page (0-based within whatever is on screen right
+// now) - Menu/Bag never paginate, and Pc's own touch/render code already
+// subtracts pageStart() before calling this (see renderPcGrid()/loop()'s
+// Screen::Pc block).
+Rect PokemonActivity::buttonGridCellRect(int index) const {
   const int width = renderer.getScreenWidth();
   constexpr int margin = 8;
   constexpr int gap = 8;
   constexpr int buttonHeight = MENU_GRID_ROW_HEIGHT - 8;
   const int buttonWidth = (width - 2 * margin - gap * (MENU_GRID_COLUMNS - 1)) / MENU_GRID_COLUMNS;
-  const int menuTop = menuGridTop();
+  const int top = buttonGridTop();
   const int row = index / MENU_GRID_COLUMNS;
   const int column = index % MENU_GRID_COLUMNS;
   const int x = margin + column * (buttonWidth + gap);
-  const int y = menuTop + row * MENU_GRID_ROW_HEIGHT;
+  const int y = top + row * MENU_GRID_ROW_HEIGHT;
   return Rect{x, y, buttonWidth, buttonHeight};
+}
+
+// One button cell's chrome (filled when selected, outlined otherwise) plus
+// either a single centered bold line, or two centered lines stacked
+// vertically (bold on top, regular below) when line2 is non-null - used by
+// Pc's grid for "name" + "Lv N  Gender" without needing a second font size
+// (the device only has 2 fonts total, see renderBattleMoveMenu()'s comment).
+void PokemonActivity::drawGridButton(const Rect& cell, bool selected, const char* line1, const char* line2) {
+  if (selected) {
+    renderer.fillRoundedRect(cell.x, cell.y, cell.width, cell.height, 6, Color::Black);
+  } else {
+    renderer.drawRoundedRect(cell.x, cell.y, cell.width, cell.height, 2, 6, true);
+  }
+  if (line2 == nullptr) {
+    const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, line1, EpdFontFamily::BOLD);
+    const int textX = cell.x + std::max(0, (cell.width - textWidth) / 2);
+    const int textY = cell.y + std::max(0, (cell.height - renderer.getLineHeight(UI_12_FONT_ID)) / 2);
+    renderer.drawText(UI_12_FONT_ID, textX, textY, line1, !selected, EpdFontFamily::BOLD);
+    return;
+  }
+  const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
+  const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
+  const int topY = cell.y + std::max(0, (cell.height - lineHeight1 - lineHeight2) / 2);
+  const int width1 = renderer.getTextWidth(UI_12_FONT_ID, line1, EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, cell.x + std::max(0, (cell.width - width1) / 2), topY, line1, !selected,
+                    EpdFontFamily::BOLD);
+  const int width2 = renderer.getTextWidth(UI_10_FONT_ID, line2);
+  renderer.drawText(UI_10_FONT_ID, cell.x + std::max(0, (cell.width - width2) / 2), topY + lineHeight1, line2,
+                    !selected);
 }
 
 // The top-level Pokemon menu (Party/Pokedex/PC Box/PC Sort/Bag/Gym Battle/
 // Badges/Settings) as a 2-column button grid instead of the generic
 // single-column list - same shape/style as renderBattleMenu(), just
-// top-anchored (menuGridTop() == listTop()) since there's no HUD above it to
-// leave room for. Bypasses buildList() entirely (see isListScreen());
+// top-anchored (buttonGridTop() == listTop()) since there's no HUD above it
+// to leave room for. Bypasses buildList() entirely (see isListScreen());
 // loop() has a matching grid-aware navigation branch.
 void PokemonActivity::renderMenuGrid() {
   const int count = logicalCount();
   if (count <= 0) return;
   for (int index = 0; index < count; ++index) {
-    const Rect cell = menuGridCellRect(index);
     const char* label = index == 0   ? tr(STR_POKEMON_PARTY)
                         : index == 1 ? tr(STR_POKEDEX)
                         : index == 2 ? tr(STR_POKEMON_PC_BOX)
@@ -2454,16 +2600,58 @@ void PokemonActivity::renderMenuGrid() {
                         : index == 5 ? tr(STR_POKEMON_GYM_BATTLE)
                         : index == 6 ? tr(STR_POKEMON_BADGES)
                                      : tr(STR_POKEMON_SETTINGS);
-    const bool selected = index == selected_;
-    if (selected) {
-      renderer.fillRoundedRect(cell.x, cell.y, cell.width, cell.height, 6, Color::Black);
-    } else {
-      renderer.drawRoundedRect(cell.x, cell.y, cell.width, cell.height, 2, 6, true);
-    }
-    const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
-    const int textX = cell.x + std::max(0, (cell.width - textWidth) / 2);
-    const int textY = cell.y + std::max(0, (cell.height - renderer.getLineHeight(UI_12_FONT_ID)) / 2);
-    renderer.drawText(UI_12_FONT_ID, textX, textY, label, !selected, EpdFontFamily::BOLD);
+    drawGridButton(buttonGridCellRect(index), index == selected_, label);
+  }
+}
+
+// Bag's category picker (Evolution/Medicine/Balls/Machine) as the same
+// 2-column button grid style, matching the user's follow-up request after
+// the Menu grid landed. Always exactly 4 entries, one page - no pagination
+// needed (unlike Pc below). Bypasses buildList() entirely (see
+// isListScreen()); loop() has a matching grid-aware navigation branch.
+void PokemonActivity::renderBagGrid() {
+  const int count = logicalCount();
+  if (count <= 0) return;
+  for (int index = 0; index < count; ++index) {
+    const char* label = index == 0   ? tr(STR_POKEMON_BAG_EVOLUTION)
+                        : index == 1 ? tr(STR_POKEMON_BAG_MEDICINE)
+                        : index == 2 ? tr(STR_POKEMON_BAG_BALLS)
+                                     : tr(STR_POKEMON_BAG_MACHINES);
+    drawGridButton(buttonGridCellRect(index), index == selected_, label);
+  }
+}
+
+// How many Pc grid cells (name+level buttons) fit on one page: deliberately
+// just rowsPerPage() - NOT rowsPerPage() * MENU_GRID_COLUMNS. rowsPerPage()
+// is already clamped to ROW_CAPACITY (10), the fixed size of the labels_/
+// values_/rows_ arrays buildRows() writes into; a 2-column page holding
+// twice that many items per page would overflow those arrays (buildRows()
+// writes rows_[local] for local up to rowCount_-1). Since a 2-column grid
+// needs only half as many physical rows to show the same rowsPerPage() worth
+// of items, this trades away the chance to show more per page in exchange
+// for reusing the exact same page-capacity invariant every other list
+// screen already relies on - simplest and safest given the shared buffers.
+int PokemonActivity::pcGridCapacity() const { return rowsPerPage(); }
+
+// Pc (PC Box) as the same 2-column button grid style. Reuses buildRows()'s
+// existing Screen::Pc case (see buildUi()) purely for its data-fetch side
+// effect (service_.readPcPage()) and labels_/values_ population - pageStart()/
+// buildRows() are unchanged from every other list screen (still plain
+// rowsPerPage(), see pcGridCapacity()'s comment for why), so
+// labels_[local]/values_[local] already hold exactly this page's worth of
+// "name" / "Lv N  Gender" pairs, just displayed 2-per-row instead of 1. No
+// icons (unlike the
+// single-column Pc list, which draws a species icon via renderRowArt()) -
+// deliberately kept text-only, matching Menu/Bag's grid buttons, since an
+// icon-covered menu was already tried and rejected by the user (see
+// project-pokemon-menu-icons in memory).
+void PokemonActivity::renderPcGrid() {
+  for (int local = 0; local < rowCount_; ++local) {
+    const char* name = labels_[local].data();
+    const std::string truncatedName =
+        renderer.truncatedText(UI_12_FONT_ID, name, buttonGridCellRect(local).width - 12, EpdFontFamily::BOLD);
+    drawGridButton(buttonGridCellRect(local), local == selected_ - pageStart(), truncatedName.c_str(),
+                  values_[local].data());
   }
 }
 
@@ -2812,8 +3000,12 @@ void PokemonActivity::renderBattleHud() {
 }
 
 void PokemonActivity::renderRowArt() {
+  // Screen::Pc no longer reaches here - it draws its own text-only 2-column
+  // grid (renderPcGrid()) instead of the generic single-column list, so
+  // there's no listBounds_/rowHeight_-based row position left to draw an
+  // icon at (see isListScreen()).
   const bool artRows = screen_ == Screen::Starter || screen_ == Screen::Party || screen_ == Screen::Move ||
-                       screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
+                       screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
                        screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
                        screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges;
