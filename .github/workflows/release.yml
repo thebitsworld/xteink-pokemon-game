@@ -15,6 +15,13 @@ name: Release
 # deliberately not committed to this repository (see docs/release-checklist.md) -
 # build and upload it to the same release by hand with
 # scripts/package_pokemon_v2_release.py when needed, same as before.
+#
+# Also uploads each firmware unrenamed (firmware-x3-x4.bin, firmware-x4-pro.bin) -
+# src/network/OtaUpdater.cpp's isMatchingFirmwareAssetName() only accepts an asset
+# literally named "firmware-<CROSSINK_FIRMWARE_DEVICE_TYPE>.bin" (or that stem plus
+# "-<anything>.bin") when scanning the GitHub Releases API for the device's own
+# in-app "Check for Update" over Wi-Fi. None of the public xteink-pokemon-* names
+# match that, so OTA would otherwise silently find no compatible asset.
 on:
   push:
     tags:
@@ -67,23 +74,39 @@ jobs:
       - name: Package firmware assets
         id: package
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          cp .pio/build/pokemon-x3/firmware-x3-x4.bin \
-            "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin"
-          cp .pio/build/pokemon-x4-pro/firmware-x4-pro.bin \
-            "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
+
+          x3_x4_src=.pio/build/pokemon-x3/firmware-x3-x4.bin
+          x4_pro_src=.pio/build/pokemon-x4-pro/firmware-x4-pro.bin
+          for src in "$x3_x4_src" "$x4_pro_src"; do
+            if [ ! -f "$src" ]; then
+              echo "::error::expected build output missing: $src"
+              ls -la "$(dirname "$src")" || true
+              exit 1
+            fi
+          done
+
+          cp "$x3_x4_src" "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin"
+          cp "$x4_pro_src" "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
+
           # Version-less alias copies of the same two files. Every release
           # (this workflow always runs on a real version tag) re-uploads
           # these under the exact same fixed name, so
           # /releases/latest/download/<alias-name> always resolves to
           # whatever this workflow most recently published - the stable
           # per-device links in README.md/docs/installation.md rely on this.
-          cp .pio/build/pokemon-x3/firmware-x3-x4.bin \
-            dist/xteink-pokemon-x3-x4-firmware-latest.bin
-          cp .pio/build/pokemon-x4-pro/firmware-x4-pro.bin \
-            dist/xteink-pokemon-x4-pro-firmware-latest.bin
+          cp "$x3_x4_src" dist/xteink-pokemon-x3-x4-firmware-latest.bin
+          cp "$x4_pro_src" dist/xteink-pokemon-x4-pro-firmware-latest.bin
+
+          # Unrenamed copies too, under the exact name
+          # src/network/OtaUpdater.cpp's isMatchingFirmwareAssetName() looks for
+          # (see the comment at the top of this file) - required for the
+          # device's own "Check for Update" over Wi-Fi to find this release.
+          cp "$x3_x4_src" dist/firmware-x3-x4.bin
+          cp "$x4_pro_src" dist/firmware-x4-pro.bin
+
           (cd dist && sha256sum ./*.bin | sed 's#\./##' > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -107,6 +130,8 @@ jobs:
             "dist/xteink-pokemon-x4-pro-firmware-v${{ steps.package.outputs.version }}.bin" \
             dist/xteink-pokemon-x3-x4-firmware-latest.bin \
             dist/xteink-pokemon-x4-pro-firmware-latest.bin \
+            dist/firmware-x3-x4.bin \
+            dist/firmware-x4-pro.bin \
             dist/SHA256SUMS.txt \
             --title "${{ github.ref_name }}" \
             --notes-file release-notes.md
