@@ -457,3 +457,56 @@ Fixes shipped:
 
 3 new tests in `PokemonBattleTest.cpp`. Full native suite 496/496, clean
 `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.
+
+## Round 4: escaping forced moves, real badge boosts, real catch algorithm (`v0.16.0`)
+
+A fourth audit, dug deeper still. Re-confirmed as already correct (no change): a two-turn
+charge interrupted by status on the release turn correctly preserves `forcedMoveId`/
+`forcedTurnsRemaining`/`invulnerable` rather than losing the charge; evolution's cancel
+option is already modeled; HM/TM move-forgetting having no restriction is original by-design
+QoL (real Gen 1 didn't even have a Move Deleter), not a gap; a fresh full pass over
+`scripts/data/pokemon-moves.csv` found nothing new needing a hand-authored table entry.
+
+One genuine, previously-missed bug found and fixed:
+
+- **Forced-continuation moves (two-turn charge, Bide, trapping-move lock, Thrash) could be
+  escaped for free via Bag/Switch/Run** - the engine already forced FIGHT to retry the same
+  move, but never blocked the OTHER three menu options, or the hardware Back button (which
+  runs the same "back out of a battle" path as RUN). A player mid-Fly/Dig charge or mid-Bide
+  brace could just Switch out (free - `setupBattlePlayer()` resets the combatant with no
+  cost) or Run, when real Gen 1 offers no menu at all on a turn like that. Fixed in
+  `PokemonActivity.cpp`: both the `Screen::Battle` `activate()` case and its hardware-Back
+  handler now check `forcedMoveId`/`bideTurnsRemaining`/`trappedTurnsRemaining` and block
+  every option except FIGHT (which already auto-resolves) while any of them is active.
+
+Two of the three previously-open items were also tackled this round (the third, proactive
+trainer AI, was assessed as high-risk/high-cost and held back - see the memory note):
+
+- **Badges now give their real Gen 1 stat boost**: Boulder (Attack), Thunder (Defense), Soul
+  (Speed), and Volcano (Special), each a flat +12.5% for the player's own Pokemon only (never
+  a wild/trainer opponent - they never have badges). New `BattleCombatant::badgeBoostMask`
+  bitmask (`BADGE_BOOST_ATTACK`/`_DEFENSE`/`_SPEED`/`_SPECIAL`), applied in `computeDamage()`
+  to whichever of Attack/Special the move actually uses, and in `stepBattle()`'s Speed-based
+  turn order. Set once in `PokemonActivity::setupBattlePlayer()` from
+  `PokemonState::battleProgress`'s gym-defeated bits (gym 1/3/5/7 = Boulder/Thunder/Soul/
+  Volcano, per `scripts/data/pokemon-gyms.csv`'s badge order). Deliberately does NOT replicate
+  the real games' badge-boost STACKING glitch (re-applying the multiplier every time any stat
+  stage changes, compounding without limit) - just the flat, one-time 12.5% baseline, the
+  same kind of call already made for the type chart and Focus Energy in earlier rounds.
+- **Catching now uses Gen 1's real two-roll algorithm** instead of the single-roll
+  approximation this project had shipped since `v0.2.0` (which, on closer inspection, turned
+  out to actually be a *later* generation's HP-based catch formula, not Gen 1's own). The new
+  `attemptCatch()`: rolls R1 from a ball-specific range (256/201/151 for Poke/Great/Ultra),
+  which a sleep/freeze/other-status bonus can push into an automatic catch outright, or which
+  must otherwise still clear the species' own `SpeciesData::captureRate` (an instant breakout
+  if not); only then rolls R2 against an HP-based factor (higher for a more-damaged target,
+  Great Ball using a more forgiving divisor than Poke/Ultra) to decide the catch. Does not
+  model the real games' separate "how many times the ball shakes" cosmetic animation, since
+  this project has no such animation to drive either way.
+
+3 new tests in `PokemonBattleTest.cpp` for the badge boost (the catch-algorithm rewrite's
+correctness is instead verified by rewriting the 2 existing catch tests' expected values/
+reasoning for the new algorithm, since they encode exact numeric outcomes; the lock-escape
+fix lives entirely in `PokemonActivity.cpp`, which this project's native suite doesn't cover -
+verified by a clean `pio run -e pokemon-x3` build only, same as every other UI-level change).
+Full native suite 496/496, clean `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.
