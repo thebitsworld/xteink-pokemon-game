@@ -6,7 +6,7 @@
 
 - Gym Battle now includes the Champion (Blue), the final challenge after all 8 Gym Leaders and the Elite Four - previously the Champion was missing entirely. His team uses his real Pokémon Red roster, including sending out the evolution that counters your own starter for his final Pokémon, just like the original games.
 - The Gym Battle list now shows a portrait of each Gym Leader, Elite Four member, and the Champion before their name.
-- A Pokémon's gender now shows as the real ♂/♀ symbol instead of a plain "M"/"F" letter.
+- A Pokémon's gender now shows as the real ♂/♀ symbol right after its name, instead of a plain "M"/"F" letter tucked next to its level. This now also shows up during battles (both wild encounters and gym/Elite Four/Champion challenges), which never showed gender at all before.
 
 ## [0.4.1] - 2026-09-12
 
