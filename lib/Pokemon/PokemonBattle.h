@@ -101,6 +101,12 @@ struct BattleCombatant {
   // battle - see rollCriticalHit()'s call site in resolveAction().
   bool guardSpecActive = false;
   bool direHitActive = false;
+  // True if this combatant was just hit by a move with a flinch effect
+  // (Stomp, Bite, ...) and hasn't acted since - reset to false at the start
+  // of every stepBattle()/stepOpponentOnlyTurn() call, same as
+  // lastPhysicalDamageTaken, and consumed (cleared) the moment it prevents
+  // one action, whether or not that action ever runs.
+  bool flinched = false;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -140,6 +146,7 @@ enum class BattleLogEvent : uint8_t {
   StatsReset,       // Haze - both sides' stages (and this engine's status slot) reset
   OneHitKo,          // Fissure/Horn Drill/Guillotine connected - instant faint
   MoveFailed,        // Counter with nothing to reflect this turn ("But it failed!")
+  Flinched,          // hit by a flinch-inducing move last turn (Stomp, Bite, ...) - this turn's action is skipped
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with
@@ -224,6 +231,11 @@ struct BattleActionResult {
   // Struggle's 1/2-of-damage-dealt recoil) - independent of `event` for the
   // same reason `critical` is, since recoil can accompany any damage event.
   bool recoilApplied = false;
+  // True if this action drained HP back to the attacker (Absorb/Mega Drain/
+  // Leech Life/Dream Eater's real Gen 1 effect: heal half the damage dealt,
+  // minimum 1) - independent of `event` for the same reason `critical`/
+  // `recoilApplied` are.
+  bool drainApplied = false;
 };
 
 struct BattleTurnResult {

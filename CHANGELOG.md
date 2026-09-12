@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-12
+
+### Added
+
+- Stomp, Rolling Kick, Headbutt, Bite, Bone Club, and Hyper Fang now have a real chance to make the target flinch and lose their turn, matching the original games.
+- Absorb, Mega Drain, Leech Life, and Dream Eater now heal the user for half the damage they deal.
+- Explosion and Self-Destruct now halve the target's Defense for that hit, and always faint the user - even if the move misses - matching the original games.
+
 ## [0.12.0] - 2026-09-12
 
 ### Added

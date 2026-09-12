@@ -387,11 +387,13 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
     case pokemon::BattleLogEvent::StatusPreventedMove:
     case pokemon::BattleLogEvent::ConfusionSelfHit:
     case pokemon::BattleLogEvent::StatusCured:
-    case pokemon::BattleLogEvent::StatusDamage: {
+    case pokemon::BattleLogEvent::StatusDamage:
+    case pokemon::BattleLogEvent::Flinched: {
       const char* suffix =
           action.event == pokemon::BattleLogEvent::StatusPreventedMove ? tr(STR_POKEMON_STATUS_PREVENTED)
           : action.event == pokemon::BattleLogEvent::ConfusionSelfHit  ? tr(STR_POKEMON_CONFUSION_HURT_SELF)
           : action.event == pokemon::BattleLogEvent::StatusCured       ? tr(STR_POKEMON_STATUS_CURED)
+          : action.event == pokemon::BattleLogEvent::Flinched          ? tr(STR_POKEMON_FLINCHED)
                                                                        : tr(STR_POKEMON_STATUS_DAMAGE);
       snprintf(buffer, size, "%s %s", name, suffix);
       return;
@@ -435,10 +437,11 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
   if (action.hitCount > 0) {
     snprintf(hitCountClause, sizeof(hitCountClause), tr(STR_POKEMON_HIT_TIMES), action.hitCount);
   }
-  const char* clauses[4] = {hitCountClause[0] != '\0' ? hitCountClause : nullptr,
+  const char* clauses[5] = {hitCountClause[0] != '\0' ? hitCountClause : nullptr,
                             action.critical ? tr(STR_POKEMON_CRITICAL_HIT) : nullptr,
                             suffix[0] != '\0' ? suffix : nullptr,
-                            action.recoilApplied ? tr(STR_POKEMON_RECOIL) : nullptr};
+                            action.recoilApplied ? tr(STR_POKEMON_RECOIL) : nullptr,
+                            action.drainApplied ? tr(STR_POKEMON_DRAINED) : nullptr};
   snprintf(buffer, size, "%s", used);
   for (const char* clause : clauses) {
     if (clause == nullptr) continue;
