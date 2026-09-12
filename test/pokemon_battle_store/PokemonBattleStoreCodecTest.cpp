@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "PokemonBattleStoreCodec.h"
 
@@ -187,15 +188,33 @@ void emptyStateEncodesToJustTheHeaderAndCrc() {
   CHECK(sequence == 1);
 }
 
+// Hand-rolls a genuine v1 (pre-PP-Up, 16-byte) entry - encodeBattleRecordEntry
+// only ever writes the current (v2, 20-byte) format now, so a real v1 byte
+// layout has to be built by hand here, matching exactly what the old
+// encodeBattleRecordEntry used to produce before PP Up existed.
+pokemon::BattleEntryBytesV1 makeV1EntryBytes(const BattleRecordEntry& entry) {
+  pokemon::BattleEntryBytesV1 bytes{};
+  bytes[0] = static_cast<uint8_t>(entry.recordId);
+  bytes[1] = static_cast<uint8_t>(entry.recordId >> 8);
+  bytes[2] = static_cast<uint8_t>(entry.recordId >> 16);
+  bytes[3] = static_cast<uint8_t>(entry.recordId >> 24);
+  for (size_t i = 0; i < 4; ++i) bytes[4 + i] = entry.moves[i];
+  for (size_t i = 0; i < 4; ++i) bytes[8 + i] = entry.pp[i];
+  bytes[12] = static_cast<uint8_t>(entry.currentHp);
+  bytes[13] = static_cast<uint8_t>(entry.currentHp >> 8);
+  bytes[14] = static_cast<uint8_t>(entry.status);
+  bytes[15] = entry.statusTurns;
+  return bytes;
+}
+
 void legacyHeaderlessFileStillDecodesForMigration() {
   BattleStoreState state{};
   CHECK(pokemon::upsertBattleEntry(state, makeEntry(9)));
 
   // The pre-double-buffering format: just entries back to back + CRC32,
-  // no magic/version/sequence header. Hand-roll it the way the old
-  // encodeBattleStoreFile used to, since only decode needs to survive.
-  pokemon::BattleEntryBytes entryBytes{};
-  CHECK(pokemon::encodeBattleRecordEntry(state.entries[0], entryBytes));
+  // no magic/version/sequence header, and always v1 (16-byte) entries since
+  // it predates PP Up entirely.
+  pokemon::BattleEntryBytesV1 entryBytes = makeV1EntryBytes(state.entries[0]);
   pokemon::BattleStoreLegacyFileBytes legacyBytes{};
   std::memcpy(legacyBytes.data(), entryBytes.data(), entryBytes.size());
   const uint32_t crc = pokemon::finishBattleStoreCrc32(
@@ -213,6 +232,37 @@ void legacyHeaderlessFileStillDecodesForMigration() {
   CHECK(!pokemon::decodeLegacyBattleStoreFile(legacyBytes.data(), legacySize, corruptOutput));
 }
 
+void v1DoubleBufferedFileStillDecodesWithZeroPpUp() {
+  BattleStoreState state{};
+  CHECK(pokemon::upsertBattleEntry(state, makeEntry(5)));
+
+  // Hand-build a genuine v1 (16-byte entries) double-buffered file, exactly
+  // what a real existing user's pokemon-battle-{a,b}.bin already looks like
+  // from before PP Up existed - distinct from the older, headerless
+  // pre-double-buffering format the test above covers.
+  const pokemon::BattleEntryBytesV1 entryBytes = makeV1EntryBytes(state.entries[0]);
+  std::vector<uint8_t> bytes = {'P', 'K', 'B', 'T', pokemon::POKEMON_BATTLE_STORE_VERSION_V1, 1};
+  constexpr uint32_t sequence = 3;
+  for (size_t i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(sequence >> (8 * i)));
+  bytes.insert(bytes.end(), entryBytes.begin(), entryBytes.end());
+  const uint32_t crc = pokemon::finishBattleStoreCrc32(
+      pokemon::updateBattleStoreCrc32(pokemon::BATTLE_STORE_CRC32_INITIAL, bytes.data(), bytes.size()));
+  for (size_t i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(crc >> (8 * i)));
+
+  BattleStoreState decoded{};
+  uint32_t decodedSequence = 0;
+  CHECK(pokemon::decodeBattleStoreFile(bytes.data(), bytes.size(), decoded, decodedSequence));
+  CHECK(decodedSequence == sequence);
+  CHECK(decoded == state);  // ppUp defaults to 0 on both sides, so equality still holds
+
+  // An unrecognized version (neither v1 nor the current v2) is rejected.
+  std::vector<uint8_t> badVersion = bytes;
+  badVersion[4] = 99;
+  BattleStoreState badOutput{};
+  uint32_t badSequence = 0;
+  CHECK(!pokemon::decodeBattleStoreFile(badVersion.data(), badVersion.size(), badOutput, badSequence));
+}
+
 }  // namespace
 
 int main() {
@@ -224,5 +274,6 @@ int main() {
   fileRoundTripsCarriesSequenceAndDetectsCorruption();
   emptyStateEncodesToJustTheHeaderAndCrc();
   legacyHeaderlessFileStillDecodesForMigration();
+  v1DoubleBufferedFileStillDecodesWithZeroPpUp();
   return failures == 0 ? 0 : 1;
 }

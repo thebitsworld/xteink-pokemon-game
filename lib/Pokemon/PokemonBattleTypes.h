@@ -10,7 +10,7 @@
 namespace pokemon {
 
 constexpr uint8_t MOVE_COUNT = 165;
-constexpr uint8_t ITEM_COUNT = 83;
+constexpr uint8_t ITEM_COUNT = 84;  // 83 original items + PP Up (id 84, PP_UP_ITEM_ID)
 constexpr uint8_t GYM_COUNT = 13;  // 8 gyms + 4 Elite Four + the Champion (Blue), in challenge order
 // The Champion is always the last entry - see gymProgressFor()'s Champion
 // branch and PokemonActivity's dynamic final-slot substitution.
@@ -100,7 +100,16 @@ enum class ItemCategory : uint8_t {
   Candy = 4,
   PPRestore = 5,
   Machine = 6,  // TM/HM
+  PpUp = 7,     // id 84, PP_UP_ITEM_ID - the one exception tracked in PokemonState::ppUpCount, not bagCounts
 };
+
+// The one and only PP Up item id - deliberately outside the
+// [EVOLUTION_ITEM_COUNT+1, EVOLUTION_ITEM_COUNT+POKEMON_BAG_SLOT_COUNT] range
+// every other non-evolution-stone item lives in (see PokemonTypes.h), since
+// its count is tracked in its own PokemonState::ppUpCount field rather than
+// growing bagCounts (which would shift every byte after it in every
+// already-shipped save - see the v5 note on PokemonState).
+constexpr uint8_t PP_UP_ITEM_ID = 84;
 
 struct ItemData {
   uint8_t itemId;

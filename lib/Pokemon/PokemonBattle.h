@@ -44,6 +44,12 @@ struct BattleCombatant {
   Ailment status = Ailment::None;
   uint8_t statusTurns = 0;  // sleep/confusion countdown, engine-managed
   std::array<BattleMoveSlot, BATTLE_MOVE_SLOTS> moves{};
+  // How many times each move slot has had a PP Up used on it (0-3) - copied
+  // from BattleRecordEntry::ppUp at battle setup so the in-battle move menu
+  // can show the real, boosted max PP (see maxPpFor()). Always all-zero for
+  // a gym/Elite Four/Champion trainer's fixed roster or a wild encounter -
+  // neither ever accumulates PP Up.
+  std::array<uint8_t, BATTLE_MOVE_SLOTS> ppUp{};
   // Display-only - never read by the engine (damage/type/catch math is all
   // gender-independent in these games). The player's side copies it straight
   // from the party PokemonRecord; a wild opponent copies it from the
@@ -217,6 +223,13 @@ uint16_t battleWorkingStat(uint8_t baseStat, uint8_t level, uint8_t iv = 0, uint
 // from before this mechanic existed) and for a wild encounter's own
 // BattleCombatant at fight time (not persisted unless the catch succeeds).
 void rollIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& output);
+
+// PP Up: a real Gen 1 item that permanently raises one move slot's max PP by
+// 1/5 of its base PP (floored) per use, up to 3 uses. `basePp` is the move's
+// own PP (MoveData::pp); `ppUpCount` is that slot's accumulated use count
+// (BattleRecordEntry::ppUp, 0-3 - clamped here too in case of caller error).
+// A 40-PP move goes 40 -> 48 -> 56 -> 64, matching the real games exactly.
+uint8_t maxPpFor(uint8_t basePp, uint8_t ppUpCount);
 
 // Picks up to BATTLE_MOVE_SLOTS moves for `speciesId` at `level`: the
 // learnset is stored ascending by level, so walking it backwards yields the

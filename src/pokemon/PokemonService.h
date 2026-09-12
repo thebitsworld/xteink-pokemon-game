@@ -142,6 +142,15 @@ class PokemonService {
   // Pokemon always has at least one move in the real games too.
   ServiceStatus forgetMove(uint32_t recordId, uint8_t slot);
 
+  // PP Up: raises `slot`'s max PP (see maxPpFor() in PokemonBattle.h),
+  // 20% of the move's base PP per use, up to 3 uses. Returns NotApplicable
+  // if the slot is empty or already at 3 uses (the caller should not have
+  // offered it in that case, but this is checked regardless). If the slot's
+  // current PP was already at its old max, it's topped up to the new max too
+  // (a full move stays full); otherwise current PP is left untouched -
+  // matches the real games exactly.
+  ServiceStatus applyPpUp(uint32_t recordId, uint8_t slot);
+
   // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
   // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine
   // items go through useEvolutionItem/teachMove/attemptBattleCatch

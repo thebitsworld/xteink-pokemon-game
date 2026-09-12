@@ -293,7 +293,11 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
     if (loadBattleEntry(event.recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
     const MoveData* move = moveData(event.speciesId);
     entry.moves[replaceSlot] = event.speciesId;
-    entry.pp[replaceSlot] = move == nullptr ? 0 : move->pp;
+    // maxPpFor(), not the move's raw base PP - PP Up is tied to the slot, not
+    // the move identity, so a slot that's already been PP-Up'd keeps that
+    // bonus for whatever move ends up there (entry.ppUp[replaceSlot] itself
+    // is left untouched).
+    entry.pp[replaceSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[replaceSlot]);
     if (!battleStore_.upsertEntry(entry)) {
       LOG_ERR("PokemonService", "Failed to save learned move");
       return ServiceStatus::StorageError;
@@ -335,7 +339,9 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
   }
   const MoveData* move = moveData(moveId);
   entry.moves[targetSlot] = moveId;
-  entry.pp[targetSlot] = move == nullptr ? 0 : move->pp;
+  // maxPpFor(), not the move's raw base PP - see resolveMoveLearn()'s same
+  // comment: PP Up is tied to the slot, not the move identity.
+  entry.pp[targetSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[targetSlot]);
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to teach move");
     return TeachMoveOutcome::Failed;
@@ -351,7 +357,9 @@ ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const u
   BattleRecordEntry entry{};
   if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
   entry.moves[slot] = moveId;
-  entry.pp[slot] = move->pp;
+  // maxPpFor(), not the move's raw base PP - see teachMove()'s same comment:
+  // PP Up is tied to the slot, not the move identity.
+  entry.pp[slot] = maxPpFor(move->pp, entry.ppUp[slot]);
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to update moveset");
     return ServiceStatus::StorageError;
@@ -378,12 +386,36 @@ ServiceStatus PokemonService::forgetMove(const uint32_t recordId, const uint8_t 
   for (size_t i = slot; i + 1 < BATTLE_MOVE_SLOTS; ++i) {
     entry.moves[i] = entry.moves[i + 1];
     entry.pp[i] = entry.pp[i + 1];
+    entry.ppUp[i] = entry.ppUp[i + 1];
   }
   entry.moves[BATTLE_MOVE_SLOTS - 1] = 0;
   entry.pp[BATTLE_MOVE_SLOTS - 1] = 0;
+  entry.ppUp[BATTLE_MOVE_SLOTS - 1] = 0;
 
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to forget move");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::applyPpUp(const uint32_t recordId, const uint8_t slot) {
+  if (slot >= BATTLE_MOVE_SLOTS) return ServiceStatus::Invalid;
+
+  BattleRecordEntry entry{};
+  if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+  if (entry.moves[slot] == 0 || entry.ppUp[slot] >= 3) return ServiceStatus::NotApplicable;
+
+  const MoveData* move = moveData(entry.moves[slot]);
+  if (move == nullptr) return ServiceStatus::StorageError;
+
+  const uint8_t oldMaxPp = maxPpFor(move->pp, entry.ppUp[slot]);
+  ++entry.ppUp[slot];
+  const uint8_t newMaxPp = maxPpFor(move->pp, entry.ppUp[slot]);
+  if (entry.pp[slot] >= oldMaxPp) entry.pp[slot] = newMaxPp;  // was already full - stays full
+
+  if (!battleStore_.upsertEntry(entry)) {
+    LOG_ERR("PokemonService", "Failed to use PP Up");
     return ServiceStatus::StorageError;
   }
   return ServiceStatus::Ok;
@@ -451,7 +483,7 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
       for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
         if (entry.moves[slot] == 0) continue;
         const MoveData* move = moveData(entry.moves[slot]);
-        const uint8_t maxPp = move == nullptr ? 0 : move->pp;
+        const uint8_t maxPp = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[slot]);
         if (entry.pp[slot] >= maxPp) continue;
         entry.pp[slot] = static_cast<uint8_t>(
             std::min<uint32_t>(maxPp, static_cast<uint32_t>(entry.pp[slot]) + item->effectValue));
@@ -507,6 +539,9 @@ ServiceStatus PokemonService::consumeBagItem(const uint8_t itemId) {
     const size_t index = itemId - 1U;
     if (state.itemCounts[index] == 0) return ServiceStatus::NotApplicable;
     --state.itemCounts[index];
+  } else if (itemId == PP_UP_ITEM_ID) {
+    if (state.ppUpCount == 0) return ServiceStatus::NotApplicable;
+    --state.ppUpCount;
   } else {
     const size_t index = itemId - EVOLUTION_ITEM_COUNT - 1U;
     if (state.bagCounts[index] == 0) return ServiceStatus::NotApplicable;
@@ -632,7 +667,7 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
       for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
         if (healed.moves[slot] == 0) continue;
         const MoveData* move = moveData(healed.moves[slot]);
-        const uint8_t maxPp = move == nullptr ? 0 : move->pp;
+        const uint8_t maxPp = move == nullptr ? 0 : maxPpFor(move->pp, healed.ppUp[slot]);
         const uint32_t healedPp = static_cast<uint32_t>(healed.pp[slot]) + ppTicks;
         healed.pp[slot] = static_cast<uint8_t>(std::min<uint32_t>(maxPp, healedPp));
       }
@@ -674,6 +709,10 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
       if (entry.moves[slot] != 0) continue;
       const MoveData* move = moveData(learn.moveId);
       entry.moves[slot] = learn.moveId;
+      // Raw move->pp, not maxPpFor() - this only ever fills a currently-empty
+      // slot, and validateBattleRecordEntry requires ppUp to already be 0
+      // there, so the two are equivalent; written this way to match the
+      // other empty-slot-fill sites.
       entry.pp[slot] = move == nullptr ? 0 : move->pp;
       changed = true;
       placed = true;

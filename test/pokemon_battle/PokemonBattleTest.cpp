@@ -611,6 +611,23 @@ void rollIvSetProducesValuesInTheRealGen1Range() {
   for (const uint8_t value : iv) CHECK(value == 0);
 }
 
+void maxPpForMatchesTheRealGen1PpUpProgression() {
+  // A real Gen 1 example: a 40-PP move goes 40 -> 48 -> 56 -> 64 across the
+  // 3 real PP Up uses (each adds floor(basePp/5) = 8).
+  CHECK(pokemon::maxPpFor(40, 0) == 40);
+  CHECK(pokemon::maxPpFor(40, 1) == 48);
+  CHECK(pokemon::maxPpFor(40, 2) == 56);
+  CHECK(pokemon::maxPpFor(40, 3) == 64);
+  // A caller passing more than the real 3-use cap (shouldn't happen -
+  // PokemonService::applyPpUp() refuses a 4th use - but the formula itself
+  // still guards independently) must not exceed the 3-use result.
+  CHECK(pokemon::maxPpFor(40, 5) == pokemon::maxPpFor(40, 3));
+  // A move whose base PP isn't a multiple of 5 still floors the bonus per
+  // use rather than accumulating fractional PP.
+  CHECK(pokemon::maxPpFor(30, 1) == 36);  // floor(30/5)=6
+  CHECK(pokemon::maxPpFor(17, 1) == 20);  // floor(17/5)=3
+}
+
 void battleVictoryXpScalesWithLevelAndTrainerBonus() {
   CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
   CHECK(pokemon::battleVictoryXp(25, false) == 100);
@@ -663,6 +680,7 @@ int main() {
   evBonusMatchesTheFlatDivideByFourFormula();
   outOfRangeIvIsClampedToTheRealGen1Ceiling();
   rollIvSetProducesValuesInTheRealGen1Range();
+  maxPpForMatchesTheRealGen1PpUpProgression();
   battleVictoryXpScalesWithLevelAndTrainerBonus();
   return failures == 0 ? 0 : 1;
 }

@@ -11,7 +11,8 @@ namespace pokemon {
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V1 = 1;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V2 = 2;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V3 = 3;
-constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 4;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V4 = 4;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 5;
 constexpr size_t POKEMON_STATE_V1_BYTES = 96;
 constexpr size_t POKEMON_STATE_V2_BYTES = 116;
 // v3 appends bagCounts[POKEMON_BAG_SLOT_COUNT] and battleProgress (uint16_t)
@@ -20,7 +21,9 @@ constexpr size_t POKEMON_STATE_V3_BYTES = POKEMON_STATE_V2_BYTES + POKEMON_BAG_S
 // v4 (Stage 23) appends ballMisses/medicineMisses/machineMisses (uint8_t each) -
 // pity counters for the three item-drop tracks that gained their own
 // guaranteed-after-N-misses roll (see PokemonGame.cpp) - after the v3 layout.
-constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V3_BYTES + 3;
+constexpr size_t POKEMON_STATE_V4_BYTES = POKEMON_STATE_V3_BYTES + 3;
+// v5 (PP Up) appends ppUpCount (uint8_t) - see PokemonState in PokemonTypes.h.
+constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V4_BYTES + 1;
 using StateBytes = std::array<uint8_t, POKEMON_STATE_BYTES>;
 
 constexpr size_t POKEMON_SNAPSHOT_HEADER_BYTES = 24;

@@ -1209,6 +1209,95 @@ TEST(PokemonService, ForgetMoveRepacksTheRemainingMovesInsteadOfLeavingAGap) {
   EXPECT_EQ(service.forgetMove(1, 3), pokemon::ServiceStatus::NotApplicable);  // slot 3 is already empty now
 }
 
+TEST(PokemonService, ApplyPpUpRaisesMaxPpAndCapsAtThreeUses) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] - move 84 (Thunder Shock) has 30 base PP
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::Ok);
+  const pokemon::BattleRecordEntry* entry = battleStore.findEntry(1);
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->ppUp[0], 1U);
+  EXPECT_EQ(entry->pp[0], 36U);  // was already full (30/30) - tops up to the new max too
+
+  ASSERT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::Ok);
+  entry = battleStore.findEntry(1);
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->ppUp[0], 3U);
+  EXPECT_EQ(entry->pp[0], 48U);
+
+  EXPECT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::NotApplicable);  // already at the real cap of 3 uses
+  EXPECT_EQ(service.applyPpUp(1, 3), pokemon::ServiceStatus::NotApplicable);  // slot 3 is empty
+  EXPECT_EQ(service.applyPpUp(1, pokemon::BATTLE_MOVE_SLOTS), pokemon::ServiceStatus::Invalid);
+}
+
+TEST(PokemonService, ApplyPpUpDoesNotGrantFreePpWhenPartiallyUsed) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.pp[0] = 10;  // partially used (out of 30 max)
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::Ok);
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->ppUp[0], 1U);
+  EXPECT_EQ(updated->pp[0], 10U);  // current PP untouched - matches the real games exactly
+}
+
+TEST(PokemonService, ForgetMoveShiftsPpUpAlongWithMovesAndPp) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.moves = {84, 45, 98, 5};
+  entry.pp = {30, 40, 20, 20};
+  entry.ppUp = {2, 0, 1, 0};
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_EQ(service.forgetMove(1, 1), pokemon::ServiceStatus::Ok);  // forget Growl (slot 1)
+  const pokemon::BattleRecordEntry* after = battleStore.findEntry(1);
+  ASSERT_NE(after, nullptr);
+  const std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> expectedPpUp{2, 1, 0, 0};
+  EXPECT_EQ(after->ppUp, expectedPpUp);  // slot 0's own PP Up (2) stays put; slot 2's (1) shifts into slot 1
+}
+
+TEST(PokemonService, TeachMoveKeepsTheSlotsExistingPpUpForTheNewMove) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.applyPpUp(1, 1), pokemon::ServiceStatus::Ok);  // PP-Up slot 1 (Growl) once
+
+  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // fills slot 2
+  ASSERT_EQ(service.teachMove(1, 6), pokemon::TeachMoveOutcome::Learned);  // fills the last slot
+  EXPECT_EQ(service.teachMove(1, 25), pokemon::TeachMoveOutcome::MovesetFull);
+  ASSERT_EQ(service.teachMove(1, 25, 1), pokemon::TeachMoveOutcome::Learned);  // replace slot 1 (was Growl, ppUp=1)
+
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->moves[1], 25U);
+  EXPECT_EQ(updated->ppUp[1], 1U);  // the slot's PP Up level carried over to the new move
+}
+
 TEST(PokemonService, ForgetMoveRefusesToClearAPokemonsLastRemainingMove) {
   Storage.clear();
   pokemon::PokemonStore store;

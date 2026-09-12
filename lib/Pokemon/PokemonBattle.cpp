@@ -537,6 +537,12 @@ void rollIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& outp
   }
 }
 
+uint8_t maxPpFor(const uint8_t basePp, uint8_t ppUpCount) {
+  ppUpCount = std::min<uint8_t>(ppUpCount, 3U);
+  const uint32_t bonus = (static_cast<uint32_t>(basePp) / 5U) * ppUpCount;
+  return static_cast<uint8_t>(std::min<uint32_t>(static_cast<uint32_t>(basePp) + bonus, 255U));
+}
+
 uint16_t applyStatStage(const uint16_t baseValue, int8_t stage) {
   stage = std::clamp<int8_t>(stage, -6, 6);
   const uint32_t value = stage >= 0 ? static_cast<uint32_t>(baseValue) * (2U + static_cast<uint32_t>(stage)) / 2U

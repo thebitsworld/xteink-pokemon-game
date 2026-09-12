@@ -48,11 +48,12 @@ bool validateBattleRecordEntry(const BattleRecordEntry& entry) {
     const uint8_t moveId = entry.moves[index];
     if (moveId == 0) {
       sawEmptyMoveSlot = true;
-      if (entry.pp[index] != 0) return false;
+      if (entry.pp[index] != 0 || entry.ppUp[index] != 0) return false;
       continue;
     }
     if (sawEmptyMoveSlot) return false;  // moves must be packed at the front, like PokemonState::partyRecordIds
     if (moveId > POKEMON_MOVE_ID_MAX) return false;
+    if (entry.ppUp[index] > 3) return false;  // real Gen 1 cap: 3 PP Ups per move slot
   }
   switch (entry.status) {
     case Ailment::None:
@@ -79,6 +80,7 @@ bool encodeBattleRecordEntry(const BattleRecordEntry& entry, BattleEntryBytes& o
   write16(candidate.data(), 12, entry.currentHp);
   candidate[14] = static_cast<uint8_t>(entry.status);
   candidate[15] = entry.statusTurns;
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate[16 + index] = entry.ppUp[index];
   output = candidate;
   return true;
 }
@@ -92,6 +94,22 @@ bool decodeBattleRecordEntry(const BattleEntryBytes& bytes, BattleRecordEntry& o
   if (bytes[14] > static_cast<uint8_t>(Ailment::All)) return false;
   candidate.status = static_cast<Ailment>(bytes[14]);
   candidate.statusTurns = bytes[15];
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.ppUp[index] = bytes[16 + index];
+  if (!validateBattleRecordEntry(candidate)) return false;
+  output = candidate;
+  return true;
+}
+
+bool decodeBattleRecordEntryV1(const BattleEntryBytesV1& bytes, BattleRecordEntry& output) {
+  BattleRecordEntry candidate{};
+  candidate.recordId = read32(bytes.data(), 0);
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.moves[index] = bytes[4 + index];
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.pp[index] = bytes[8 + index];
+  candidate.currentHp = read16(bytes.data(), 12);
+  if (bytes[14] > static_cast<uint8_t>(Ailment::All)) return false;
+  candidate.status = static_cast<Ailment>(bytes[14]);
+  candidate.statusTurns = bytes[15];
+  // ppUp stays all-zero - v1 predates PP Up entirely.
   if (!validateBattleRecordEntry(candidate)) return false;
   output = candidate;
   return true;
@@ -189,13 +207,16 @@ bool encodeBattleStoreFile(const BattleStoreState& state, const uint32_t sequenc
 bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreState& output, uint32_t& sequence) {
   if (data == nullptr || size < POKEMON_BATTLE_HEADER_BYTES + POKEMON_BATTLE_FILE_CRC_BYTES) return false;
   if (data[0] != 'P' || data[1] != 'K' || data[2] != 'B' || data[3] != 'T') return false;
-  if (data[4] != POKEMON_BATTLE_STORE_VERSION) return false;
+  const uint8_t version = data[4];
+  if (version != POKEMON_BATTLE_STORE_VERSION && version != POKEMON_BATTLE_STORE_VERSION_V1) return false;
+  const size_t entryBytes = version == POKEMON_BATTLE_STORE_VERSION_V1 ? POKEMON_BATTLE_ENTRY_BYTES_V1
+                                                                       : POKEMON_BATTLE_ENTRY_BYTES;
   const uint8_t count = data[5];
   if (count > POKEMON_BATTLE_MAX_ENTRIES) return false;
   const uint32_t candidateSequence = read32(data, 6);
   if (candidateSequence == 0) return false;  // 0 is reserved for "no valid slot written yet"
 
-  const size_t payloadSize = POKEMON_BATTLE_HEADER_BYTES + static_cast<size_t>(count) * POKEMON_BATTLE_ENTRY_BYTES;
+  const size_t payloadSize = POKEMON_BATTLE_HEADER_BYTES + static_cast<size_t>(count) * entryBytes;
   if (size != payloadSize + POKEMON_BATTLE_FILE_CRC_BYTES) return false;
 
   const uint32_t expectedCrc = read32(data, payloadSize);
@@ -205,10 +226,18 @@ bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreSt
 
   BattleStoreState candidate{};
   for (size_t index = 0; index < count; ++index) {
-    BattleEntryBytes entryBytes{};
-    std::memcpy(entryBytes.data(), data + POKEMON_BATTLE_HEADER_BYTES + index * POKEMON_BATTLE_ENTRY_BYTES,
-                entryBytes.size());
-    if (!decodeBattleRecordEntry(entryBytes, candidate.entries[index])) return false;
+    const uint8_t* entryData = data + POKEMON_BATTLE_HEADER_BYTES + index * entryBytes;
+    bool entryOk = false;
+    if (version == POKEMON_BATTLE_STORE_VERSION_V1) {
+      BattleEntryBytesV1 v1Bytes{};
+      std::memcpy(v1Bytes.data(), entryData, v1Bytes.size());
+      entryOk = decodeBattleRecordEntryV1(v1Bytes, candidate.entries[index]);
+    } else {
+      BattleEntryBytes v2Bytes{};
+      std::memcpy(v2Bytes.data(), entryData, v2Bytes.size());
+      entryOk = decodeBattleRecordEntry(v2Bytes, candidate.entries[index]);
+    }
+    if (!entryOk) return false;
   }
   if (!validateBattleStoreState(candidate)) return false;
   output = candidate;
@@ -219,8 +248,8 @@ bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreSt
 bool decodeLegacyBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreState& output) {
   if (data == nullptr || size < POKEMON_BATTLE_FILE_CRC_BYTES) return false;
   const size_t payloadSize = size - POKEMON_BATTLE_FILE_CRC_BYTES;
-  if (payloadSize % POKEMON_BATTLE_ENTRY_BYTES != 0) return false;
-  const size_t count = payloadSize / POKEMON_BATTLE_ENTRY_BYTES;
+  if (payloadSize % POKEMON_BATTLE_ENTRY_BYTES_V1 != 0) return false;
+  const size_t count = payloadSize / POKEMON_BATTLE_ENTRY_BYTES_V1;
   if (count > POKEMON_BATTLE_MAX_ENTRIES) return false;
 
   const uint32_t expectedCrc = read32(data, payloadSize);
@@ -230,9 +259,9 @@ bool decodeLegacyBattleStoreFile(const uint8_t* data, const size_t size, BattleS
 
   BattleStoreState candidate{};
   for (size_t index = 0; index < count; ++index) {
-    BattleEntryBytes entryBytes{};
-    std::memcpy(entryBytes.data(), data + index * POKEMON_BATTLE_ENTRY_BYTES, entryBytes.size());
-    if (!decodeBattleRecordEntry(entryBytes, candidate.entries[index])) return false;
+    BattleEntryBytesV1 entryBytes{};
+    std::memcpy(entryBytes.data(), data + index * POKEMON_BATTLE_ENTRY_BYTES_V1, entryBytes.size());
+    if (!decodeBattleRecordEntryV1(entryBytes, candidate.entries[index])) return false;
   }
   if (!validateBattleStoreState(candidate)) return false;
   output = candidate;

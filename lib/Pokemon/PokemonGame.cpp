@@ -275,13 +275,16 @@ bool createEncounter(PokemonState& state, const uint8_t bookProgressPercent, con
 }
 
 bool itemCountIsFull(const PokemonState& state, const uint8_t itemId) {
-  return itemId <= EVOLUTION_ITEM_COUNT ? state.itemCounts[itemId - 1U] == UINT16_MAX
-                                        : state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U] == UINT8_MAX;
+  if (itemId <= EVOLUTION_ITEM_COUNT) return state.itemCounts[itemId - 1U] == UINT16_MAX;
+  if (itemId == PP_UP_ITEM_ID) return state.ppUpCount == UINT8_MAX;
+  return state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U] == UINT8_MAX;
 }
 
 void incrementItemCount(PokemonState& state, const uint8_t itemId) {
   if (itemId <= EVOLUTION_ITEM_COUNT) {
     ++state.itemCounts[itemId - 1U];
+  } else if (itemId == PP_UP_ITEM_ID) {
+    ++state.ppUpCount;
   } else {
     ++state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U];
   }
@@ -290,7 +293,17 @@ void incrementItemCount(PokemonState& state, const uint8_t itemId) {
 bool isStoneCategory(const ItemCategory category) { return category == ItemCategory::Stone; }
 
 // Matches what the Bag > Medicine screen shows, so "the medicine you collect"
-// means the same set in the drop rules as it does on screen.
+// means the same set in the drop rules as it does on screen. PP Up
+// (ItemCategory::PpUp) is deliberately NOT included here - it's not part of
+// the automatic reading-time drop pool at all yet (see
+// docs/development/pokemon-gen1-authenticity-roadmap.md's PP Up item) since
+// folding a brand-new candidate into this shared pool shifts every
+// subsequent random draw from it, and this project's own hour-by-hour
+// scripted drop tests (PokemonGameTest.cpp) are pinned to the exact current
+// candidate-count/draw-index sequence. itemCountIsFull()/incrementItemCount()
+// above already handle PP_UP_ITEM_ID correctly regardless, for whenever a
+// future acquisition path (a dedicated pity track, a shop, a battle reward)
+// is added.
 bool isMedicineCategory(const ItemCategory category) {
   return category == ItemCategory::Medicine || category == ItemCategory::StatusCure ||
          category == ItemCategory::PPRestore || category == ItemCategory::Candy;
