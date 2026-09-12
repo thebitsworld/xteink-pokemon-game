@@ -28,6 +28,13 @@ constexpr uint8_t STRUGGLE_MOVE_ID = 165;
 // to repeating it" the same way it already does for a forced Struggle.
 constexpr uint8_t BIDE_MOVE_ID = 117;
 
+// Mimic's real Gen 1 move id - exposed publicly (unlike most of the hand-
+// authored move-id constants in PokemonBattle.cpp) because
+// PokemonActivity::savePlayerBattleEntry() needs it too, to restore a
+// Mimic-overwritten move slot back to Mimic itself before persisting (see
+// BattleCombatant::mimicActive's doc comment).
+constexpr uint8_t MIMIC_MOVE_ID = 102;
+
 struct BattleMoveSlot {
   uint8_t moveId = 0;  // 0 = empty slot
   uint8_t currentPp = 0;
@@ -158,6 +165,44 @@ struct BattleCombatant {
   // are blocked entirely - see resolveAction()'s various substituteHp
   // checks. 0 means no substitute is up.
   uint16_t substituteHp = 0;
+  // Mirror Move: the most recent real move id used against this combatant,
+  // regardless of whether it actually hit (0 = nothing recorded yet) - see
+  // resolveAction()'s tracking line and the Mirror Move dispatch. Never
+  // persisted, same battle-duration-only rationale as the fields above.
+  // Simplified from the real games, which also require the move to have
+  // actually made contact before it can be mirrored.
+  uint8_t lastMoveUsedAgainstMe = 0;
+  // Mimic: true while one of this combatant's move slots has been
+  // temporarily overwritten with a move copied from the opponent (see
+  // resolveAction()). mimicSlot names which slot; mimicOriginalPp remembers
+  // Mimic's own remaining PP from right before this use, so
+  // PokemonActivity::savePlayerBattleEntry() can restore that slot back to
+  // Mimic itself (id MIMIC_MOVE_ID) rather than persisting the borrowed
+  // move - Mimic's copy only ever lasts for this one battle. Reset to false
+  // whenever a fresh BattleCombatant is built, same as every other
+  // transient field above.
+  bool mimicActive = false;
+  uint8_t mimicSlot = 0;
+  uint8_t mimicOriginalPp = 0;
+  // Transform: true once this combatant has copied an opponent's form this
+  // battle - Transform fails ("But it failed!") if used again, matching
+  // Gen 1. Copying itself (speciesId/stat stages/moveset, see
+  // resolveAction()) doesn't need its own storage beyond this flag; HP,
+  // level, and status are deliberately left untouched, matching the real
+  // games. speciesId/moveset changes from Transform are never persisted
+  // (see PokemonActivity::savePlayerBattleEntry()) - they only ever last
+  // until this combatant switches out or the battle ends, same as every
+  // other transient field above.
+  bool transformed = false;
+  // Conversion: overrides this combatant's own type (for STAB and
+  // incoming/outgoing type-effectiveness purposes only - display, the
+  // Pokedex, and every other type reference are unaffected) with whatever
+  // it copied from the opponent at the moment Conversion was used, for the
+  // rest of the battle. PokemonType::None means "no override - use the
+  // species' real type", which conversionType1 can never legitimately hold
+  // otherwise (SpeciesData::primaryType is never None for a real species).
+  PokemonType conversionType1 = PokemonType::None;
+  PokemonType conversionType2 = PokemonType::None;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -204,6 +249,9 @@ enum class BattleLogEvent : uint8_t {
   ForcedSwitch,      // Whirlwind/Roar connected - see PokemonActivity.cpp for what that actually does
   MoveDisabled,      // Disable took hold on one of the target's moves
   SubstituteUp,      // Substitute was created
+  Transformed,       // Transform copied the opponent's form
+  MimicCopied,       // Mimic copied one of the opponent's moves into a slot
+  ConversionApplied,  // Conversion copied the opponent's type
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with
@@ -293,6 +341,13 @@ struct BattleActionResult {
   // minimum 1) - independent of `event` for the same reason `critical`/
   // `recoilApplied` are.
   bool drainApplied = false;
+  // The real move id actually executed this action, if it differs from the
+  // slot's own move - i.e. Metronome/Mirror Move redirecting to whatever
+  // move they picked/mirrored. 0 when no redirection happened (the normal
+  // case for every other move, including a forced Struggle). The UI uses
+  // this to show what Metronome/Mirror Move actually turned into, on top of
+  // the usual "X used METRONOME!" framing.
+  uint8_t redirectedMoveId = 0;
 };
 
 struct BattleTurnResult {

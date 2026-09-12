@@ -13,6 +13,7 @@ using pokemon::BattleLogEvent;
 using pokemon::BattleMoveSlot;
 using pokemon::BattleOutcome;
 using pokemon::MoveCategory;
+using pokemon::PokemonType;
 using pokemon::RandomSource;
 using pokemon::StatKind;
 
@@ -1227,6 +1228,143 @@ void substituteFailsWithoutEnoughHpToSpareOrIfAlreadyUp() {
   CHECK(bulbasaur.substituteHp == 0);
 }
 
+// --- Conversion (160), Mimic (102), Metronome (118), Mirror Move (119),
+// Transform (144) - the last group of the Gen 1 mechanics gaps audit. ---
+
+void conversionCopiesTheDefendersEffectiveTypeOntoTheAttacker() {
+  BattleCombatant charmander = makeCombatant(4, 30, {160});  // Conversion
+  BattleCombatant squirtle = makeCombatant(7, 5, {33});      // pure Water, no secondary type
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(squirtle, charmander, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::ConversionApplied);
+  CHECK(charmander.conversionType1 == PokemonType::Water);
+  CHECK(charmander.conversionType2 == PokemonType::None);
+}
+
+void conversionAppliesStabForTheNewTypeOnDamagingMoves() {
+  // Bulbasaur (Grass/Poison) using Water Gun (Water) normally gets no STAB;
+  // manually simulating "just used Conversion against a Water-type target"
+  // (see BattleCombatant::conversionType1's doc comment) should make
+  // computeDamage() apply STAB for it instead, dealing strictly more damage
+  // than an otherwise-identical unconverted attacker.
+  BattleCombatant converted = makeCombatant(1, 20, {55});  // Water Gun
+  converted.conversionType1 = PokemonType::Water;
+  BattleCombatant unconverted = makeCombatant(1, 20, {55});
+  BattleCombatant defenderForConverted = makeCombatant(4, 50, {33});
+  BattleCombatant defenderForUnconverted = makeCombatant(4, 50, {33});
+  pokemon::stepOpponentOnlyTurn(defenderForConverted, converted, ZERO_RANDOM);
+  pokemon::stepOpponentOnlyTurn(defenderForUnconverted, unconverted, ZERO_RANDOM);
+  const uint16_t convertedDamage = defenderForConverted.maxHp - defenderForConverted.currentHp;
+  const uint16_t unconvertedDamage = defenderForUnconverted.maxHp - defenderForUnconverted.currentHp;
+  CHECK(convertedDamage > unconvertedDamage);
+}
+
+void leechSeedFailsAgainstAConvertedGrassTypeTarget() {
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {73});  // Leech Seed
+  BattleCombatant charmander = makeCombatant(4, 5, {33});
+  charmander.conversionType1 = PokemonType::Grass;  // pretend it just converted to Grass
+  pokemon::stepOpponentOnlyTurn(charmander, bulbasaur, ZERO_RANDOM);
+  CHECK(!charmander.seeded);
+}
+
+void mimicCopiesOneOfTheDefendersMovesWithFivePpIntoTheUsersSlot() {
+  BattleCombatant mimicUser = makeCombatant(4, 30, {102});  // Mimic only
+  BattleCombatant tackler = makeCombatant(7, 5, {33});      // Tackle only - deterministic pick
+  const uint8_t mimicBasePp = pokemon::moveData(102)->pp;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(tackler, mimicUser, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::MimicCopied);
+  CHECK(result.opponent.redirectedMoveId == 33);
+  CHECK(mimicUser.moves[0].moveId == 33);
+  CHECK(mimicUser.moves[0].currentPp == 5);
+  CHECK(mimicUser.mimicActive);
+  CHECK(mimicUser.mimicSlot == 0);
+  CHECK(mimicUser.mimicOriginalPp == mimicBasePp - 1U);
+}
+
+void mimicFailsWhenTheDefenderHasNoOtherMoveToCopy() {
+  BattleCombatant mimicUser = makeCombatant(4, 30, {102});
+  BattleCombatant otherMimicUser = makeCombatant(7, 5, {102});  // only knows Mimic itself - no valid candidate
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(otherMimicUser, mimicUser, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::MoveNoEffect);
+  CHECK(!mimicUser.mimicActive);
+}
+
+void transformCopiesSpeciesStatStagesAndMovesetButKeepsHpLevelAndStatus() {
+  BattleCombatant charmander = makeCombatant(4, 20, {144});  // Transform
+  BattleCombatant squirtle = makeCombatant(7, 20, {55});     // Water Gun
+  squirtle.attackStage = 2;
+  const uint16_t originalHp = charmander.currentHp;
+  const uint8_t originalLevel = charmander.level;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(squirtle, charmander, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::Transformed);
+  CHECK(charmander.speciesId == 7);
+  CHECK(charmander.attackStage == 2);
+  CHECK(charmander.moves[0].moveId == 55);
+  CHECK(charmander.moves[0].currentPp == 5);
+  CHECK(charmander.currentHp == originalHp);
+  CHECK(charmander.level == originalLevel);
+  CHECK(charmander.transformed);
+}
+
+void transformFailsIfAlreadyTransformedThisBattle() {
+  BattleCombatant charmander = makeCombatant(4, 20, {144});
+  charmander.transformed = true;
+  BattleCombatant squirtle = makeCombatant(7, 20, {55});
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(squirtle, charmander, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::MoveFailed);
+  CHECK(charmander.speciesId == 4);
+}
+
+void mirrorMoveReplaysTheLastMoveUsedAgainstTheUser() {
+  BattleCombatant mirrorUser = makeCombatant(4, 30, {119});  // Mirror Move only
+  BattleCombatant tackler = makeCombatant(7, 5, {33});       // Tackle only
+  // Turn 1: the tackler hits mirrorUser with Tackle, recording it.
+  pokemon::stepOpponentOnlyTurn(mirrorUser, tackler, ZERO_RANDOM);
+  CHECK(mirrorUser.lastMoveUsedAgainstMe == 33);
+  const uint16_t tacklerHpBefore = tackler.currentHp;
+  // Turn 2: mirrorUser replays Tackle back at the tackler.
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(tackler, mirrorUser, ZERO_RANDOM);
+  CHECK(result.opponent.redirectedMoveId == 33);
+  CHECK(tackler.currentHp < tacklerHpBefore);
+}
+
+void mirrorMoveFailsWithNothingRecordedYet() {
+  BattleCombatant mirrorUser = makeCombatant(4, 30, {119});
+  BattleCombatant dummy = makeCombatant(7, 5, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(dummy, mirrorUser, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::MoveFailed);
+  CHECK(result.opponent.redirectedMoveId == 0);
+}
+
+void metronomeExecutesADifferentMovesEffectInsteadOfItsOwn() {
+  // fixedRoll's context feeds every roll Metronome's redirected move makes
+  // too (see pickRandomMetronomeMove()'s doc comment) - 32 as the very first
+  // roll (out of MOVE_COUNT=165) lands on move id 33 (Tackle), an ordinary
+  // damaging move with nothing move-copying-specific about it.
+  uint32_t seed = 32;
+  const RandomSource seeded{&seed, fixedRoll};
+  BattleCombatant metronomeUser = makeCombatant(4, 30, {118});  // Metronome only
+  BattleCombatant target = makeCombatant(7, 30, {45});          // Growl - harmless filler
+  const uint16_t targetHpBefore = target.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(target, metronomeUser, seeded);
+  CHECK(result.opponent.redirectedMoveId == 33);
+  CHECK(result.opponent.event != BattleLogEvent::MoveNoEffect);
+  CHECK(result.opponent.event != BattleLogEvent::MoveFailed);
+  CHECK(target.currentHp < targetHpBefore);
+}
+
+void metronomeSelectedTrapMoveDoesNotLockTheAttackerIn() {
+  // Context 19 -> move id 20 (Wrap), one of the 4 real partial-trapping
+  // moves - a normal slot-based use would lock the attacker into repeating
+  // it (see isTrapMove()'s doc comment), but a Metronome-redirected one
+  // shouldn't, since there's no real slot to keep "choosing" it from.
+  uint32_t seed = 19;
+  const RandomSource seeded{&seed, fixedRoll};
+  BattleCombatant metronomeUser = makeCombatant(4, 30, {118});
+  BattleCombatant target = makeCombatant(7, 30, {45});
+  pokemon::stepOpponentOnlyTurn(target, metronomeUser, seeded);
+  CHECK(metronomeUser.forcedMoveId == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1311,5 +1449,16 @@ int main() {
   substituteCostsAQuarterMaxHpAndAbsorbsDamageUntilItBreaks();
   substituteBlocksAnOpponentsStatLoweringMove();
   substituteFailsWithoutEnoughHpToSpareOrIfAlreadyUp();
+  conversionCopiesTheDefendersEffectiveTypeOntoTheAttacker();
+  conversionAppliesStabForTheNewTypeOnDamagingMoves();
+  leechSeedFailsAgainstAConvertedGrassTypeTarget();
+  mimicCopiesOneOfTheDefendersMovesWithFivePpIntoTheUsersSlot();
+  mimicFailsWhenTheDefenderHasNoOtherMoveToCopy();
+  transformCopiesSpeciesStatStagesAndMovesetButKeepsHpLevelAndStatus();
+  transformFailsIfAlreadyTransformedThisBattle();
+  mirrorMoveReplaysTheLastMoveUsedAgainstTheUser();
+  mirrorMoveFailsWithNothingRecordedYet();
+  metronomeExecutesADifferentMovesEffectInsteadOfItsOwn();
+  metronomeSelectedTrapMoveDoesNotLockTheAttackerIn();
   return failures == 0 ? 0 : 1;
 }

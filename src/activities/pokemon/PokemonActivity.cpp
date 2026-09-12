@@ -434,7 +434,21 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                        : action.event == pokemon::BattleLogEvent::ForcedSwitch  ? tr(STR_POKEMON_FORCED_SWITCH)
                        : action.event == pokemon::BattleLogEvent::MoveDisabled ? tr(STR_POKEMON_MOVE_DISABLED)
                        : action.event == pokemon::BattleLogEvent::SubstituteUp ? tr(STR_POKEMON_SUBSTITUTE_UP)
+                       : action.event == pokemon::BattleLogEvent::Transformed ? tr(STR_POKEMON_TRANSFORMED)
+                       : action.event == pokemon::BattleLogEvent::MimicCopied ? tr(STR_POKEMON_MIMIC_COPIED)
+                       : action.event == pokemon::BattleLogEvent::ConversionApplied
+                           ? tr(STR_POKEMON_CONVERSION_APPLIED)
                                                                                   : "";
+  // Metronome/Mirror Move report what they actually turned into via
+  // redirectedMoveId - surfaced as its own clause rather than folded into
+  // `used`, since `name`/the "used MOVE!" framing above still refers to
+  // Metronome/Mirror Move itself (the real slot that was chosen).
+  char redirectedClause[64] = "";
+  if (action.redirectedMoveId != 0 && action.redirectedMoveId != moveId) {
+    const pokemon::MoveData* redirectedMove = pokemon::moveData(action.redirectedMoveId);
+    snprintf(redirectedClause, sizeof(redirectedClause), tr(STR_POKEMON_MOVE_BECAME),
+              redirectedMove == nullptr ? "?" : redirectedMove->name);
+  }
   // Hit count, crit, the effectiveness suffix, and recoil are all
   // independent of one another (a multi-hit move can also crit and also
   // recoil, on top of its own effectiveness suffix), so they're joined in a
@@ -443,7 +457,8 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
   if (action.hitCount > 0) {
     snprintf(hitCountClause, sizeof(hitCountClause), tr(STR_POKEMON_HIT_TIMES), action.hitCount);
   }
-  const char* clauses[5] = {hitCountClause[0] != '\0' ? hitCountClause : nullptr,
+  const char* clauses[6] = {redirectedClause[0] != '\0' ? redirectedClause : nullptr,
+                            hitCountClause[0] != '\0' ? hitCountClause : nullptr,
                             action.critical ? tr(STR_POKEMON_CRITICAL_HIT) : nullptr,
                             suffix[0] != '\0' ? suffix : nullptr,
                             action.recoilApplied ? tr(STR_POKEMON_RECOIL) : nullptr,
@@ -909,9 +924,30 @@ void PokemonActivity::savePlayerBattleEntry() {
   if (battlePartySlot_ < 0 || battlePartySlot_ >= snapshot_.partyCount) return;
   pokemon::BattleRecordEntry entry{};
   entry.recordId = snapshot_.party[battlePartySlot_].recordId;
-  for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
-    entry.moves[i] = battlePlayer_.moves[i].moveId;
-    entry.pp[i] = battlePlayer_.moves[i].currentPp;
+  if (battlePlayer_.transformed) {
+    // Transform temporarily overwrites the live moveset (and species) for
+    // this battle only (see pokemon::BattleCombatant::transformed's doc
+    // comment) - the real Pokemon never actually forgets its own moves, so
+    // persist whatever's already on record instead of the borrowed one.
+    const pokemon::BattleRecordEntry existing = service_.peekBattleMoves(snapshot_.party[battlePartySlot_]);
+    entry.moves = existing.moves;
+    entry.pp = existing.pp;
+    entry.ppUp = existing.ppUp;
+  } else {
+    for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+      if (battlePlayer_.mimicActive && battlePlayer_.mimicSlot == i) {
+        // Mimic only ever temporarily overwrites one slot's live moveId/PP -
+        // restore its real identity (Mimic itself) and the PP it had left
+        // right before this use, rather than persisting the borrowed move
+        // (see pokemon::BattleCombatant::mimicActive's doc comment).
+        entry.moves[i] = pokemon::MIMIC_MOVE_ID;
+        entry.pp[i] = battlePlayer_.mimicOriginalPp;
+      } else {
+        entry.moves[i] = battlePlayer_.moves[i].moveId;
+        entry.pp[i] = battlePlayer_.moves[i].currentPp;
+      }
+      entry.ppUp[i] = battlePlayer_.ppUp[i];
+    }
   }
   entry.currentHp = battlePlayer_.currentHp;
   entry.status = battlePlayer_.status;
