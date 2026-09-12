@@ -162,6 +162,12 @@ class PokemonService {
   // turn in Gen 1 (no Speed check), so only the opponent acts.
   BattleTurnResult resolveOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& opponent);
   bool attemptBattleCatch(const BattleCombatant& wild, BallKind ball);
+  // A gym/Elite Four/Champion trainer's fixed roster carries no gender of
+  // its own (unlike a wild encounter's PendingEvent, already rolled at
+  // encounter time) - rolls one by the species' real gender ratio so the
+  // Battle HUD can still show it. Falls back to Gender::Unknown (shown as
+  // nothing) if speciesId is invalid.
+  Gender rollGenderFor(uint16_t speciesId);
 
  private:
   ServiceStatus prepareStore();

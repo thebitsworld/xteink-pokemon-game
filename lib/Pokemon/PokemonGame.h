@@ -85,4 +85,13 @@ bool resolveEvolution(PokemonState& state, PokemonRecord& record, EvolutionChoic
 bool useEvolutionItem(PokemonState& state, PokemonRecord& record, EvolutionItem item, RecordMutation& mutation);
 CollectionActionSet collectionActions(bool party, uint8_t partyCount);
 
+// Rolls a gender for a species by its real gender ratio, the same rule a
+// wild encounter uses (chooseGender(), file-local to PokemonGame.cpp) -
+// exported so a gym/Elite Four/Champion trainer's fixed roster (which
+// carries no gender of its own in scripts/data/pokemon-gyms.csv, unlike a
+// wild encounter's PendingEvent) can still show a real gender in the Battle
+// HUD instead of omitting it. Returns false (leaving gender untouched) only
+// if speciesId is out of range or the RNG call itself fails.
+bool chooseGenderForSpecies(uint16_t speciesId, const RandomSource& random, Gender& gender);
+
 }  // namespace pokemon

@@ -630,6 +630,7 @@ bool PokemonActivity::setupBattlePlayer(const int slot) {
   battlePartySlot_ = slot;
   battlePlayer_ = pokemon::BattleCombatant{};
   battlePlayer_.speciesId = fighter.speciesId;
+  battlePlayer_.gender = fighter.gender;
   battlePlayer_.level = pokemon::levelForXp(fighter.totalXp);
   const pokemon::BaseStats* playerStats = pokemon::baseStatsFor(fighter.speciesId);
   battlePlayer_.maxHp = playerStats == nullptr ? 1 : pokemon::battleMaxHp(playerStats->hp, battlePlayer_.level);
@@ -643,10 +644,11 @@ bool PokemonActivity::setupBattlePlayer(const int slot) {
 }
 
 void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_t level,
-                                          const std::span<const uint8_t> fixedMoves) {
+                                          const std::span<const uint8_t> fixedMoves, const pokemon::Gender gender) {
   battleOpponent_ = pokemon::BattleCombatant{};
   battleOpponent_.speciesId = speciesId;
   battleOpponent_.level = level;
+  battleOpponent_.gender = gender;
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(speciesId);
   battleOpponent_.maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, level);
   battleOpponent_.currentHp = battleOpponent_.maxHp;
@@ -672,7 +674,7 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
 bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
   const int slot = firstUsablePartySlot();
   if (slot < 0 || !setupBattlePlayer(slot)) return false;
-  setupBattleOpponent(pending.speciesId, pending.level);
+  setupBattleOpponent(pending.speciesId, pending.level, {}, pending.gender);
   gymChallengeIndex_ = 0;
   forcedBattleSwitch_ = false;
   snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
@@ -685,7 +687,7 @@ bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
   if (team.empty()) return false;
   const int slot = firstUsablePartySlot();
   if (slot < 0 || !setupBattlePlayer(slot)) return false;
-  setupBattleOpponent(team[0].speciesId, team[0].level, team[0].moves);
+  setupBattleOpponent(team[0].speciesId, team[0].level, team[0].moves, service_.rollGenderFor(team[0].speciesId));
   gymChallengeIndex_ = gymIndex;
   gymChallengeTeamProgress_ = 0;
   forcedBattleSwitch_ = false;
@@ -783,7 +785,7 @@ void PokemonActivity::advanceGymOpponentOrFinish() {
         next = pokemon::championFinalSlotFor(starterRecord.speciesId);
       }
     }
-    setupBattleOpponent(next.speciesId, next.level, next.moves);
+    setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId));
     const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
     snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
              speciesName(battleOpponent_.speciesId));
@@ -1927,14 +1929,19 @@ void PokemonActivity::buildRows() {
         }
         if (local >= static_cast<int>(pcCount_)) break;
         const auto& record = pcPage_[local];
-        // "Lv N  Gender" goes in the subtitle slot (its own line under the
-        // name, spanning the full row width) rather than the value slot
-        // (which sits to the name's right, competing with it for
-        // horizontal space) - a value slot there was cutting off longer
-        // Pokemon names.
-        row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data());
-        snprintf(values_[local].data(), values_[local].size(), "%s %u  %s", tr(STR_POKEMON_LEVEL),
-                 pokemon::levelForXp(record.totalXp), genderText(record.gender));
+        // "Lv N" goes in the subtitle slot (its own line under the name,
+        // spanning the full row width) rather than the value slot (which
+        // sits to the name's right, competing with it for horizontal space)
+        // - a value slot there was cutting off longer Pokemon names. Gender
+        // is appended straight onto the label instead, right after the
+        // name, matching Party/Battle's placement.
+        char label[40];
+        snprintf(label, sizeof(label), "%s %s",
+                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
+                 genderAbbrev(record.gender));
+        row(local, label);
+        snprintf(values_[local].data(), values_[local].size(), "%s %u", tr(STR_POKEMON_LEVEL),
+                 pokemon::levelForXp(record.totalXp));
         rows_[local].subtitle = values_[local].data();
         break;
       }
@@ -2074,11 +2081,15 @@ void PokemonActivity::buildRows() {
         const pokemon::PokemonRecord& record = snapshot_.party[slot];
         // HP/status now show via the taller row's health strip
         // (showsPartyHealthRows()) instead of a plain "HP %u" value text -
-        // the value slot shows Level/gender instead, matching Party's row.
-        char value[24];
-        snprintf(value, sizeof(value), "%s %u  %s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
-                 genderText(record.gender));
-        row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), value);
+        // the value slot shows Level instead, matching Party's row. Gender
+        // is appended onto the label instead, right after the name.
+        char label[40];
+        snprintf(label, sizeof(label), "%s %s",
+                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
+                 genderAbbrev(record.gender));
+        char value[16];
+        snprintf(value, sizeof(value), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
+        row(local, label, value);
         break;
       }
       case Screen::BattleBag: {
@@ -2786,7 +2797,9 @@ void PokemonActivity::renderBattleHud() {
     const int levelW = renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR);
 
     const int nameY = panelY + 8;
-    renderer.drawText(UI_10_FONT_ID, panelX + 8, nameY, nameText, true, EpdFontFamily::BOLD);
+    char nameWithGender[40];
+    snprintf(nameWithGender, sizeof(nameWithGender), "%s %s", nameText, genderAbbrev(combatant.gender));
+    renderer.drawText(UI_10_FONT_ID, panelX + 8, nameY, nameWithGender, true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, panelX + panelWidth - 8 - levelW, nameY, levelLine);
 
     char hpText[16];
@@ -3120,14 +3133,17 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
     const int line2Top = blockTop + lineHeight1 + lineGap;
 
     char meta[16];
-    snprintf(meta, sizeof(meta), "%s %u %s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
-             genderAbbrev(record.gender));
+    snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
     const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
-    const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - 10);
+    const char* gender = genderAbbrev(record.gender);
+    const int genderWidth = gender[0] == '\0' ? 0 : renderer.getTextWidth(UI_12_FONT_ID, gender) + 4;
+    const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - genderWidth - 10);
     const std::string name = renderer.truncatedText(
         UI_12_FONT_ID, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
         nameMaxWidth, EpdFontFamily::BOLD);
+    const int nameWidth = renderer.getTextWidth(UI_12_FONT_ID, name.c_str(), EpdFontFamily::BOLD);
     renderer.drawText(UI_12_FONT_ID, textX, blockTop, name.c_str(), true, EpdFontFamily::BOLD);
+    if (gender[0] != '\0') renderer.drawText(UI_12_FONT_ID, textX + nameWidth + 4, blockTop, gender);
     renderer.drawText(UI_12_FONT_ID, textRight - metaWidth, blockTop, meta);
 
     barX = textX;
