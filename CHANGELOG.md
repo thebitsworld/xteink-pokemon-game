@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-12
+
+### Added
+
+- Attacks can now land a critical hit for double damage, based on the attacker's Speed - faster Pokémon crit more often, and Karate Chop, Razor Leaf, Crabhammer, and Slash have a much higher chance to crit, matching the original games.
+
 ## [0.6.0] - 2026-09-12
 
 ### Added
