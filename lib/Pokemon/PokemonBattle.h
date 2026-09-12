@@ -11,6 +11,17 @@ namespace pokemon {
 constexpr uint8_t BATTLE_MOVE_SLOTS = 4;
 static_assert(BATTLE_MOVE_SLOTS == GYM_MOVE_SLOTS, "GymTeamMember::moves must match BATTLE_MOVE_SLOTS");
 
+// The real Gen 1 move id for Struggle (already present in this game's own
+// move data, scripts/data/pokemon-moves.csv - a typeless-in-spirit,
+// fixed-power physical move with accuracy 0, meaning "never misses" per this
+// dataset's convention). Passing this as `playerMoveSlot`/an AI move slot to
+// stepBattle()/stepOpponentOnlyTurn() (any value >= BATTLE_MOVE_SLOTS) forces
+// a Struggle turn instead of indexing into the combatant's own moveset - see
+// resolveAction() in PokemonBattle.cpp. This is the same sentinel
+// chooseOpponentMoveSlot() already returned for "no usable move" before
+// Struggle existed as a real forced action.
+constexpr uint8_t STRUGGLE_MOVE_ID = 165;
+
 struct BattleMoveSlot {
   uint8_t moveId = 0;  // 0 = empty slot
   uint8_t currentPp = 0;
@@ -139,6 +150,18 @@ struct BattleActionResult {
   // both critical and super/not-very effective at once. Never true for a
   // Status move or a miss/immune hit (nothing to double).
   bool critical = false;
+  // How many times a multi-hit move (Double Slap, Fury Attack, Twineedle,
+  // ...) actually connected this turn - 0 for any move that isn't one of the
+  // hand-authored multi-hit moves (see MULTI_HIT_TABLE), even if it landed
+  // exactly once, so the UI can tell "a normal single-hit move" apart from
+  // "a multi-hit move that happened to roll its minimum." Stops short of the
+  // move's intended hit count if the defender faints partway through.
+  uint8_t hitCount = 0;
+  // True if this action dealt recoil damage back to the attacker (Take
+  // Down/Double-Edge/Submission's fixed 1/4-of-damage-dealt recoil, or
+  // Struggle's 1/2-of-damage-dealt recoil) - independent of `event` for the
+  // same reason `critical` is, since recoil can accompany any damage event.
+  bool recoilApplied = false;
 };
 
 struct BattleTurnResult {
@@ -167,7 +190,10 @@ void defaultMovesetForLevel(uint16_t speciesId, uint8_t level, std::array<uint8_
 // favor the player) acts first; if that action faints the other side, the
 // slower side never gets to act. `playerMoveSlot` must reference a
 // non-empty, non-zero-PP slot in player.moves (validated by the caller/UI
-// before calling in) or the turn is treated as MoveHadNoPp with no effect.
+// before calling in) or the turn is treated as MoveHadNoPp with no effect -
+// *unless* it's STRUGGLE_MOVE_ID's sentinel (any value >= BATTLE_MOVE_SLOTS),
+// which forces a real Struggle turn instead (matching Gen 1: once every
+// learned move is out of PP, a Pokemon Struggles rather than doing nothing).
 BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot,
                             const RandomSource& random);
 

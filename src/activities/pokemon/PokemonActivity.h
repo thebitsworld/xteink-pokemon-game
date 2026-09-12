@@ -116,6 +116,8 @@ class PokemonActivity final : public Activity {
   Rect buttonGridCellRect(int index, int columns = 2) const;
   void drawGridButton(const Rect& cell, bool selected, const char* label);
   int battlePlayerMoveCount() const;
+  bool battlePlayerHasAnyUsablePp() const;
+  void resolveBattlePlayerMoveTurn(uint8_t moveSlot);
   // Stage 13: which party members can currently fight (BattleRecordEntry's
   // currentHp > 0, via the read-only peekBattleMoves - no battle-store
   // writes just from checking). firstUsablePartySlot() picks who starts a
