@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-12
+
+### Added
+
+- Winning a battle now grants EXP, on top of the EXP earned from reading - defeating or catching a wild Pokémon, and defeating each Gym Leader/Elite Four/Champion team member. Any Pokémon actively fighting can earn it, not just your lead Pokémon, giving every Pokémon in your party a way to grow through battling.
+
 ## [0.5.1] - 2026-09-12
 
 ### Fixed

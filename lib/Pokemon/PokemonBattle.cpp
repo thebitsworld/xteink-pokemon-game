@@ -407,6 +407,12 @@ bool attemptCatch(const BattleCombatant& wild, const BallKind ball, const Random
   return roll < catchValue;
 }
 
+uint32_t battleVictoryXp(const uint8_t opponentLevel, const bool isTrainerBattle) {
+  constexpr uint32_t WILD_MULTIPLIER = 4U;
+  constexpr uint32_t TRAINER_MULTIPLIER = 6U;
+  return static_cast<uint32_t>(opponentLevel) * (isTrainerBattle ? TRAINER_MULTIPLIER : WILD_MULTIPLIER);
+}
+
 }  // namespace pokemon
 
 #endif

@@ -125,4 +125,13 @@ enum class BallKind : uint8_t {
 // fraction, and a bonus for Sleep/Freeze/Paralysis/Poison/Burn.
 bool attemptCatch(const BattleCombatant& wild, BallKind ball, const RandomSource& random);
 
+// XP awarded to the Pokemon active when a battle is won (defeating or
+// catching a wild Pokemon, or defeating one gym/Elite Four/Champion team
+// member) - a deliberately simple `level * multiplier` rather than Gen 1's
+// real species-yield formula, scaled to stay a meaningful bonus on top of
+// reading-driven XP without dwarfing it (see docs/development's battle
+// roadmap for the reasoning). Trainer battles use a higher multiplier than
+// wild ones, loosely mirroring the real games' 1.5x trainer-battle bonus.
+uint32_t battleVictoryXp(uint8_t opponentLevel, bool isTrainerBattle);
+
 }  // namespace pokemon

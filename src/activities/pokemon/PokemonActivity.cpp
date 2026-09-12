@@ -740,6 +740,14 @@ void PokemonActivity::resolveBattleAsPass() {
 }
 
 void PokemonActivity::finishBattleAfterWildFainted() {
+  // Award XP to whichever Pokemon is actively fighting before anything below
+  // switches battleOpponent_ to the gym's next team member or clears
+  // battlePartySlot_ - both branches (wild faint and one gym opponent down)
+  // reach here with the just-defeated opponent's level still valid.
+  if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
+    service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level,
+                           gymChallengeIndex_ != 0);
+  }
   if (gymChallengeIndex_ != 0) {
     advanceGymOpponentOrFinish();
     return;
@@ -1400,6 +1408,12 @@ void PokemonActivity::activate() {
         snprintf(battleLog_, sizeof(battleLog_), "%s", line);
         setScreen(Screen::Battle);
         return;
+      }
+      // A successful catch counts as a win too - award the same battle XP a
+      // faint would have (always the wild multiplier; BattleBalls is gym-gated
+      // out above, so this path is never a trainer battle).
+      if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
+        service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level, false);
       }
       const uint16_t caughtSpecies = battleOpponent_.speciesId;
       uint32_t caughtRecordId = 0;

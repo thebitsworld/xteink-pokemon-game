@@ -92,3 +92,7 @@ Pokémon and related names, characters, and artwork belong to their respective r
 - [Save-file formats](docs/file-formats.md)
 - [Pokémon battle system roadmap](docs/development/pokemon-battle-roadmap.md)
 - [Xteink X4 Pro support roadmap](docs/development/pokemon-x4pro-roadmap.md)
+
+### TODO / future consideration
+
+- Battle stats are currently the plain Gen 1 formula with no IVs/EVs (individual stat variation) and no critical hits - revisit whether adding either is worth the complexity for a future phase.
