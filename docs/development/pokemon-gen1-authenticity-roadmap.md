@@ -594,3 +594,33 @@ No dedicated new test - the trainer-AI decision logic lives entirely in `Pokemon
 uncovered by the native suite (same situation as round 6's own switch logic); verified via
 clean `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds. Full native suite 496/496
 (unaffected, confirming no regression elsewhere).
+
+## Round 8: outside-of-battle status - a fainted Pokemon kept its ailment (`v0.17.2`)
+
+All 7 rounds so far focused almost entirely on in-battle mechanics. This round deliberately
+looked outside of it, since reading time is this project's substitute for "time passing" in
+the real games. Re-confirmed correct: the level-100 XP cap holds across every award path
+(reading credit, `awardBattleXp()`, Rare Candy); poison/burn passively NOT ticking during
+reading, and a full-HP heal-via-reading clearing status, are both already deliberate,
+documented, and tested design choices (reading models "resting," not "walking around town" -
+changing that would be a much bigger design call, not a bug, and wasn't touched). One genuine,
+previously-unnoticed bug found and fixed:
+
+- **A fainted Pokemon kept its status condition, contradicting real Gen 1** (where 0 HP means
+  nothing is left to be poisoned/paralyzed/burned/asleep about - a fainted Pokemon always
+  shows no status, and Revive/Max Revive bring it back status-free). This project's engine
+  never cleared `status`/`statusTurns` at any of its 14 separate "just fainted" call sites
+  across `stepBattle()`/`stepOpponentOnlyTurn()`/`stepPlayerOnlyTurn()`/`finishTurn()` - worse,
+  a test's own comment explicitly (and incorrectly) asserted this was intended Gen 1 behavior
+  ("the real games leave that to a dedicated status cure once the Pokemon is up"). Fixed with
+  a single new `faintCombatant(combatant, event)` helper that clears status alongside setting
+  the `Fainted` event, replacing all 14 call sites uniformly (all consistently named
+  `player`/`opponent`, confirmed a safe mechanical substitution) rather than patching each of
+  the many HP-hits-zero sites individually. The misleading test comment was corrected to
+  describe what it actually now covers - a defensive/synthetic scenario (a persisted entry
+  fainted-with-status, constructed directly, bypassing the engine) rather than real Gen 1
+  behavior.
+
+2 new tests (a direct-hit faint and an end-of-turn-poison-tick faint, covering both major
+code paths that detect fainting). Full native suite 496/496, clean `pio run -e pokemon-x3`
+build.

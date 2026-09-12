@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.17.2] - 2026-09-13
+
+### Fixed
+
+- A fainted Pokémon no longer keeps its status condition - matching the original games, it now comes back status-free after a Revive or Max Revive instead of needing a separate status cure.
+
 ## [0.17.1] - 2026-09-13
 
 ### Fixed
