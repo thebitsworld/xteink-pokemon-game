@@ -48,11 +48,13 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonicalV5Layout() {
+void stateCodecUsesTheCanonicalV6Layout() {
   static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
   static_assert(pokemon::POKEMON_STATE_V3_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
   static_assert(pokemon::POKEMON_STATE_V4_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
-  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V4_BYTES + 1);
+  static_assert(pokemon::POKEMON_STATE_V5_BYTES == pokemon::POKEMON_STATE_V4_BYTES + 1);
+  static_assert(pokemon::POKEMON_STATE_BYTES ==
+                pokemon::POKEMON_STATE_V5_BYTES + pokemon::POKEMON_BATTLE_BOOST_ITEM_COUNT);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
   state.partyRecordIds[0] = 7;
@@ -79,6 +81,7 @@ void stateCodecUsesTheCanonicalV5Layout() {
   state.medicineMisses = 2;
   state.machineMisses = 1;
   state.ppUpCount = 4;
+  state.battleBoostCounts = {1, 2, 3, 4, 5, 6};
 
   pokemon::StateBytes bytes{};
   CHECK(pokemon::encodeState(state, bytes));
@@ -105,6 +108,9 @@ void stateCodecUsesTheCanonicalV5Layout() {
   CHECK(bytes[pokemon::POKEMON_STATE_V3_BYTES + 1] == 2);
   CHECK(bytes[pokemon::POKEMON_STATE_V3_BYTES + 2] == 1);
   CHECK(bytes[pokemon::POKEMON_STATE_V4_BYTES] == 4);
+  for (size_t index = 0; index < state.battleBoostCounts.size(); ++index) {
+    CHECK(bytes[pokemon::POKEMON_STATE_V5_BYTES + index] == state.battleBoostCounts[index]);
+  }
 
   pokemon::PokemonState decoded{};
   CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION, decoded));
@@ -175,6 +181,27 @@ void v4StateDecodesWithZeroedPpUpCount() {
   CHECK(decoded.lifetimeMinutes == 500);
   CHECK(decoded.ballMisses == 2);  // v4 fields still decode correctly
   CHECK(decoded.ppUpCount == 0);
+}
+
+void v5StateDecodesWithZeroedBattleBoostCounts() {
+  pokemon::PokemonState v5State{};
+  v5State.partyRecordIds[0] = 3;
+  v5State.lifetimeMinutes = 500;
+  v5State.ppUpCount = 4;
+
+  std::array<uint8_t, pokemon::POKEMON_STATE_V5_BYTES> bytes{};
+  write32(bytes.data(), 0, v5State.partyRecordIds[0]);
+  write32(bytes.data(), 104, v5State.lifetimeMinutes);
+  write32(bytes.data(), 108, 1);  // sequence, must be non-zero-ish and match what validateState allows
+  bytes[pokemon::POKEMON_STATE_V4_BYTES] = v5State.ppUpCount;
+
+  pokemon::PokemonState decoded{};
+  decoded.battleBoostCounts.fill(0xAA);  // prove the decoder actually zeroes these, not just leaves them alone
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V5, decoded));
+  CHECK(decoded.partyRecordIds[0] == 3);
+  CHECK(decoded.lifetimeMinutes == 500);
+  CHECK(decoded.ppUpCount == 4);  // v5 fields still decode correctly
+  for (const uint8_t slot : decoded.battleBoostCounts) CHECK(slot == 0);
 }
 
 void battleProgressReservedBitsAreRejected() {
@@ -248,6 +275,7 @@ void snapshotHeaderUsesCanonical24ByteLayout() {
   CHECK(pokemon::snapshotFileBytes(header) == 24U + pokemon::POKEMON_STATE_BYTES + 3U * 48U + 4U);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V1) == 96);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V2) == 116);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V5) == pokemon::POKEMON_STATE_V5_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION) == pokemon::POKEMON_STATE_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION + 1U) == 0);
 
@@ -312,9 +340,10 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonicalV5Layout();
+  stateCodecUsesTheCanonicalV6Layout();
   v3StateDecodesWithZeroedMissCounters();
   v4StateDecodesWithZeroedPpUpCount();
+  v5StateDecodesWithZeroedBattleBoostCounts();
   v2StateDecodesWithZeroedBagAndBattleProgress();
   battleProgressReservedBitsAreRejected();
   legacyStateDecodesItsPendingEventIntoTheQueue();

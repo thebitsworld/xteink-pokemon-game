@@ -542,6 +542,10 @@ ServiceStatus PokemonService::consumeBagItem(const uint8_t itemId) {
   } else if (itemId == PP_UP_ITEM_ID) {
     if (state.ppUpCount == 0) return ServiceStatus::NotApplicable;
     --state.ppUpCount;
+  } else if (itemId >= BATTLE_BOOST_ITEM_ID_FIRST && itemId <= BATTLE_BOOST_ITEM_ID_LAST) {
+    const size_t index = itemId - BATTLE_BOOST_ITEM_ID_FIRST;
+    if (state.battleBoostCounts[index] == 0) return ServiceStatus::NotApplicable;
+    --state.battleBoostCounts[index];
   } else {
     const size_t index = itemId - EVOLUTION_ITEM_COUNT - 1U;
     if (state.bagCounts[index] == 0) return ServiceStatus::NotApplicable;

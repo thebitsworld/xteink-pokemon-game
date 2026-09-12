@@ -108,6 +108,7 @@ class PokemonActivity final : public Activity {
   bool enterGymBattle(uint8_t gymIndex);
   void savePlayerBattleEntry();
   void resolveBattleAsPass();
+  void finishItemUseMidBattle(const char* usedLine);
   void finishBattleAfterWildFainted();
   void finishBattleAfterPlayerFainted();
   void advanceGymOpponentOrFinish();

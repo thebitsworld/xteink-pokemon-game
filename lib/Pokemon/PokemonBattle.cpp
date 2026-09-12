@@ -515,8 +515,13 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       uint8_t hitsLanded = 0;
       uint32_t totalDamage = 0;
       for (uint8_t hit = 0; hit < hitsToAttempt && defender.currentHp > 0; ++hit) {
-        const bool critical = attackerStats != nullptr &&
-                              rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId), random);
+        // Dire Hit (a battle-boost item) raises the user's own crit ratio to
+        // the same high-crit tier a move like Slash gets, for the rest of
+        // the battle - stacks with (rather than doubling past) an
+        // already-high-crit move.
+        const bool critical =
+            attackerStats != nullptr &&
+            rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId) || attacker.direHitActive, random);
         const uint16_t damage = computeDamage(attacker, defender, effectiveMove, random, critical);
         defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
         totalDamage += damage;
@@ -554,12 +559,20 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     result.event = BattleLogEvent::StatsReset;
   } else if (const StatChangeEffect* statEffect = statChangeForMove(moveId); statEffect != nullptr) {
     BattleCombatant& target = statEffect->targetsSelf ? attacker : defender;
-    int8_t& stage = statStageRef(target, statEffect->stat);
-    const int8_t before = stage;
-    stage = std::clamp<int8_t>(static_cast<int8_t>(stage + statEffect->stages), -6, 6);
-    result.event = stage == before ? BattleLogEvent::StatChangeFailed
-                   : statEffect->stages > 0 ? BattleLogEvent::StatRaised
-                                            : BattleLogEvent::StatLowered;
+    // Guard Spec. (a battle-boost item) blocks an opponent's stat-lowering
+    // move from affecting whoever activated it - the same "no change, no
+    // further effect" outcome as already being at the -6 floor, so this
+    // reuses StatChangeFailed rather than adding a dedicated message.
+    if (!statEffect->targetsSelf && statEffect->stages < 0 && target.guardSpecActive) {
+      result.event = BattleLogEvent::StatChangeFailed;
+    } else {
+      int8_t& stage = statStageRef(target, statEffect->stat);
+      const int8_t before = stage;
+      stage = std::clamp<int8_t>(static_cast<int8_t>(stage + statEffect->stages), -6, 6);
+      result.event = stage == before ? BattleLogEvent::StatChangeFailed
+                     : statEffect->stages > 0 ? BattleLogEvent::StatRaised
+                                              : BattleLogEvent::StatLowered;
+    }
   }
 
   // PokeAPI's ailment_chance is 0 for a pure status move's guaranteed main
@@ -713,6 +726,40 @@ void resetBattleStages(BattleCombatant& combatant) {
   combatant.speedStage = 0;
   combatant.accuracyStage = 0;
   combatant.evasionStage = 0;
+}
+
+namespace {
+// Shared by all 4 X items below: raises the given stage by 1, clamped at
+// +6 - returns false (no change) if it was already there, matching how a
+// stat-raising move reports StatChangeFailed at the cap.
+bool raiseStageByOne(int8_t& stage) {
+  if (stage >= 6) return false;
+  ++stage;
+  return true;
+}
+}  // namespace
+
+bool applyBattleBoostItem(BattleCombatant& combatant, const uint8_t itemId) {
+  switch (itemId) {
+    case ITEM_X_ATTACK:
+      return raiseStageByOne(combatant.attackStage);
+    case ITEM_X_DEFENSE:
+      return raiseStageByOne(combatant.defenseStage);
+    case ITEM_X_SPEED:
+      return raiseStageByOne(combatant.speedStage);
+    case ITEM_X_SPECIAL:
+      return raiseStageByOne(combatant.specialStage);
+    case ITEM_GUARD_SPEC:
+      if (combatant.guardSpecActive) return false;
+      combatant.guardSpecActive = true;
+      return true;
+    case ITEM_DIRE_HIT:
+      if (combatant.direHitActive) return false;
+      combatant.direHitActive = true;
+      return true;
+    default:
+      return false;
+  }
 }
 
 void defaultMovesetForLevel(const uint16_t speciesId, const uint8_t level,

@@ -163,7 +163,53 @@ bool isMedicineCategory(const pokemon::ItemCategory category) {
 // so Candy stays an out-of-battle-only item.
 bool isBattleUsableCategory(const pokemon::ItemCategory category) {
   return category == pokemon::ItemCategory::Medicine || category == pokemon::ItemCategory::StatusCure ||
-         category == pokemon::ItemCategory::PPRestore;
+         category == pokemon::ItemCategory::PPRestore || category == pokemon::ItemCategory::BattleBoost;
+}
+
+// PP Up and the 6 battle-boost items (X Attack/X Defense/X Speed/X Special/
+// Guard Spec./Dire Hit) all live outside bagCounts (see PokemonState::
+// ppUpCount/battleBoostCounts) - none of the generic bagItemIdAt()/
+// bagItemCount() machinery above can see them. extraItemIdAt()/
+// extraItemCount() below are their equivalent, walking this small fixed id
+// list instead of bagCounts; `matches` narrows which screen's extras show
+// (Bag > Medicine shows all of them per this project's own choice to group
+// PP Up and every battle-boost item under Medicine; BattleBag - mid-battle -
+// only ever shows the BattleBoost ones, via isBattleUsableCategory above,
+// since PP Up can't be used in battle at all).
+constexpr uint8_t EXTRA_ITEM_IDS[] = {pokemon::PP_UP_ITEM_ID,   pokemon::ITEM_X_ATTACK,  pokemon::ITEM_X_DEFENSE,
+                                      pokemon::ITEM_X_SPEED,    pokemon::ITEM_X_SPECIAL, pokemon::ITEM_GUARD_SPEC,
+                                      pokemon::ITEM_DIRE_HIT};
+
+bool isMedicineExtraCategory(const pokemon::ItemCategory category) {
+  return category == pokemon::ItemCategory::PpUp || category == pokemon::ItemCategory::BattleBoost;
+}
+
+uint8_t extraItemCountFor(const pokemon::PokemonState& state, const uint8_t itemId) {
+  if (itemId == pokemon::PP_UP_ITEM_ID) return state.ppUpCount;
+  if (itemId >= pokemon::BATTLE_BOOST_ITEM_ID_FIRST && itemId <= pokemon::BATTLE_BOOST_ITEM_ID_LAST) {
+    return state.battleBoostCounts[itemId - pokemon::BATTLE_BOOST_ITEM_ID_FIRST];
+  }
+  return 0;
+}
+
+size_t extraItemCount(const pokemon::PokemonState& state, bool (*matches)(pokemon::ItemCategory)) {
+  size_t count = 0;
+  for (const uint8_t id : EXTRA_ITEM_IDS) {
+    const pokemon::ItemData* data = pokemon::itemData(id);
+    if (data == nullptr || !matches(data->category) || extraItemCountFor(state, id) == 0) continue;
+    ++count;
+  }
+  return count;
+}
+
+uint8_t extraItemIdAt(const pokemon::PokemonState& state, size_t index, bool (*matches)(pokemon::ItemCategory)) {
+  for (const uint8_t id : EXTRA_ITEM_IDS) {
+    const pokemon::ItemData* data = pokemon::itemData(id);
+    if (data == nullptr || !matches(data->category) || extraItemCountFor(state, id) == 0) continue;
+    if (index == 0) return id;
+    --index;
+  }
+  return 0;
 }
 
 // Stage 19 follow-up: every item menu now skips ids the player owns none of
@@ -521,12 +567,12 @@ int PokemonActivity::logicalCount() const {
     case Screen::BagEvolution:
       return static_cast<int>(ownedSlotCount(snapshot_.state.itemCounts));
     case Screen::BagMedicine:
-      // +1 for a trailing synthetic "PP Up" row - PP Up's count lives in its
-      // own ppUpCount field (not bagCounts, which is already a full,
-      // already-shipped array that can't be resized without breaking
-      // existing saves), so it can't join the generic bagItemCount() walk.
+      // Trailing synthetic rows for PP Up and every battle-boost item - their
+      // counts live outside bagCounts (which is already a full, already-
+      // shipped array that can't be resized without breaking existing
+      // saves), so they can't join the generic bagItemCount() walk.
       return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory)) +
-             (snapshot_.state.ppUpCount > 0 ? 1 : 0);
+             static_cast<int>(extraItemCount(snapshot_.state, isMedicineExtraCategory));
     case Screen::BagBalls:
       return static_cast<int>(ownedSlotCount(std::span<const uint8_t>(snapshot_.state.bagCounts).first(4)));
     case Screen::BagMachine:
@@ -551,7 +597,11 @@ int PokemonActivity::logicalCount() const {
     case Screen::BattleBalls:
       return static_cast<int>(ownedSlotCount(std::span<const uint8_t>(snapshot_.state.bagCounts).first(4)));
     case Screen::BattleBag:
-      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory));
+      // Same trailing-synthetic-rows idea as Screen::BagMedicine above, but
+      // only for the battle-boost items (isBattleUsableCategory excludes PP
+      // Up - it can't be used in battle at all).
+      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory)) +
+             static_cast<int>(extraItemCount(snapshot_.state, isBattleUsableCategory));
     case Screen::BattleSwitch:
       return static_cast<int>(usablePartySlotCount());
     case Screen::GymList:
@@ -859,6 +909,39 @@ void PokemonActivity::resolveBattleAsPass() {
   setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
 }
 
+// Shared tail for every mid-battle item use, regardless of whether it was a
+// Medicine-category item (BagCategory::BattleMedicine, applied through
+// ItemTarget to a possibly-benched party member) or a battle-boost item
+// (applied directly to the active battlePlayer_, no target picker needed -
+// see Screen::BattleBag's activate() case). `usedLine` is the "X used Y!"
+// line the caller already built; this appends the opponent's own free turn.
+void PokemonActivity::finishItemUseMidBattle(const char* usedLine) {
+  // Using an item mid-battle costs the whole turn in Gen 1 - the opponent
+  // attacks the active Pokemon right away regardless of what the item did,
+  // with no Speed comparison (see stepOpponentOnlyTurn()).
+  const pokemon::BattleTurnResult result = service_.resolveOpponentOnlyTurn(battlePlayer_, battleOpponent_);
+  savePlayerBattleEntry();
+  char opponentLine[80] = "";
+  if (result.opponent.acted) {
+    formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, battlePlayer_, result.opponent);
+  }
+  if (opponentLine[0] != '\0') {
+    snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", usedLine, opponentLine);
+  } else {
+    snprintf(battleLog_, sizeof(battleLog_), "%s", usedLine);
+  }
+  if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
+    if (usablePartySlotCount() > 0) {
+      forcedBattleSwitch_ = true;
+      setScreen(Screen::BattleSwitch);
+    } else {
+      finishBattleAfterPlayerFainted();
+    }
+    return;
+  }
+  setScreen(Screen::Battle);
+}
+
 void PokemonActivity::finishBattleAfterWildFainted() {
   // Award XP to whichever Pokemon is actively fighting before anything below
   // switches battleOpponent_ to the gym's next team member or clears
@@ -1151,15 +1234,21 @@ void PokemonActivity::activate() {
     }
     case Screen::BagMedicine: {
       const auto realItemCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
-      if (selected_ == realItemCount) {
-        // Trailing synthetic "PP Up" row - its count lives in ppUpCount, not
-        // bagCounts, so it can't be resolved through bagItemIdAt().
-        if (snapshot_.state.ppUpCount == 0) {
-          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMedicine);
+      if (selected_ >= realItemCount) {
+        // Trailing synthetic row for PP Up or a battle-boost item - its
+        // count lives outside bagCounts, so it can't be resolved through
+        // bagItemIdAt().
+        const uint8_t itemId =
+            extraItemIdAt(snapshot_.state, static_cast<size_t>(selected_ - realItemCount), isMedicineExtraCategory);
+        if (itemId == pokemon::PP_UP_ITEM_ID) {
+          bagCategory_ = BagCategory::PpUp;
+          setScreen(Screen::ItemTarget);
           return;
         }
-        bagCategory_ = BagCategory::PpUp;
-        setScreen(Screen::ItemTarget);
+        // Battle-boost items (X Attack, Guard Spec., ...) only ever do
+        // anything mid-battle - there's nothing to use outside an active
+        // fight, even though they're viewable/counted here.
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMedicine);
         return;
       }
       bagCategory_ = BagCategory::Medicine;
@@ -1232,31 +1321,7 @@ void PokemonActivity::activate() {
         char usedLine[80];
         snprintf(usedLine, sizeof(usedLine), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
                  item == nullptr ? "?" : item->name);
-        // Using an item mid-battle costs the whole turn in Gen 1 - the
-        // opponent attacks the active Pokemon right away regardless of
-        // which party member received the item, with no Speed comparison
-        // (see stepOpponentOnlyTurn()).
-        const pokemon::BattleTurnResult result = service_.resolveOpponentOnlyTurn(battlePlayer_, battleOpponent_);
-        savePlayerBattleEntry();
-        char opponentLine[80] = "";
-        if (result.opponent.acted) {
-          formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, battlePlayer_, result.opponent);
-        }
-        if (opponentLine[0] != '\0') {
-          snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", usedLine, opponentLine);
-        } else {
-          snprintf(battleLog_, sizeof(battleLog_), "%s", usedLine);
-        }
-        if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
-          if (usablePartySlotCount() > 0) {
-            forcedBattleSwitch_ = true;
-            setScreen(Screen::BattleSwitch);
-          } else {
-            finishBattleAfterPlayerFainted();
-          }
-          return;
-        }
-        setScreen(Screen::Battle);
+        finishItemUseMidBattle(usedLine);
         return;
       }
       if (bagCategory_ == BagCategory::Machine) {
@@ -1511,6 +1576,30 @@ void PokemonActivity::activate() {
       return;
     }
     case Screen::BattleBag: {
+      const auto realItemCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory));
+      if (selected_ >= realItemCount) {
+        // A battle-boost item (X Attack, Guard Spec., ...) - unlike a
+        // Medicine-category item, this always affects the active combatant
+        // directly, right now, with no ItemTarget party-member picker (you
+        // can't buff a benched Pokemon).
+        const uint8_t itemId =
+            extraItemIdAt(snapshot_.state, static_cast<size_t>(selected_ - realItemCount), isBattleUsableCategory);
+        if (itemId == 0 || !pokemon::applyBattleBoostItem(battlePlayer_, itemId)) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
+          return;
+        }
+        if (service_.consumeBagItem(itemId) != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BattleBag);
+          return;
+        }
+        if (!refreshSnapshot()) return;
+        const pokemon::ItemData* item = pokemon::itemData(itemId);
+        char usedLine[80];
+        snprintf(usedLine, sizeof(usedLine), tr(STR_POKEMON_USED_ITEM), speciesName(battlePlayer_.speciesId),
+                 item == nullptr ? "?" : item->name);
+        finishItemUseMidBattle(usedLine);
+        return;
+      }
       const uint8_t itemId =
           bagItemIdAt(static_cast<size_t>(selected_), snapshot_.state.bagCounts, isBattleUsableCategory);
       const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
@@ -2184,13 +2273,17 @@ void PokemonActivity::buildRows() {
       }
       case Screen::BagMedicine: {
         const auto realItemCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
-        if (index == realItemCount) {
-          // Trailing synthetic "PP Up" row - its count lives in ppUpCount,
-          // not bagCounts, so it's appended here rather than through the
-          // generic bagItemIdAt()/bagItemCount() walk below.
+        if (index >= realItemCount) {
+          // Trailing synthetic rows for PP Up and every battle-boost item -
+          // their counts live outside bagCounts, so they're appended here
+          // rather than through the generic bagItemIdAt()/bagItemCount()
+          // walk below.
+          const uint8_t itemId =
+              extraItemIdAt(snapshot_.state, static_cast<size_t>(index - realItemCount), isMedicineExtraCategory);
+          const pokemon::ItemData* data = pokemon::itemData(itemId);
           char count[16];
-          snprintf(count, sizeof(count), "× %u", snapshot_.state.ppUpCount);
-          row(local, tr(STR_POKEMON_BAG_PPUP), count);
+          snprintf(count, sizeof(count), "× %u", extraItemCountFor(snapshot_.state, itemId));
+          row(local, data == nullptr ? "?" : data->name, count);
           break;
         }
         const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isMedicineCategory);
@@ -2309,6 +2402,19 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::BattleBag: {
+        const auto realItemCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory));
+        if (index >= realItemCount) {
+          // Trailing synthetic rows for battle-boost items (X Attack, Guard
+          // Spec., ...) - their counts live outside bagCounts, same as PP Up
+          // in Screen::BagMedicine below.
+          const uint8_t itemId =
+              extraItemIdAt(snapshot_.state, static_cast<size_t>(index - realItemCount), isBattleUsableCategory);
+          const pokemon::ItemData* item = pokemon::itemData(itemId);
+          char value[16];
+          snprintf(value, sizeof(value), "× %u", extraItemCountFor(snapshot_.state, itemId));
+          row(local, item == nullptr ? "?" : item->name, value);
+          break;
+        }
         const uint8_t itemId =
             bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isBattleUsableCategory);
         const pokemon::ItemData* item = pokemon::itemData(itemId);

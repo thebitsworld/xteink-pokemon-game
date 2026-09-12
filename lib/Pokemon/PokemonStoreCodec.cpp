@@ -58,6 +58,7 @@ size_t snapshotStateBytes(const uint16_t version) {
   if (version == POKEMON_SNAPSHOT_VERSION_V2) return POKEMON_STATE_V2_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION_V3) return POKEMON_STATE_V3_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION_V4) return POKEMON_STATE_V4_BYTES;
+  if (version == POKEMON_SNAPSHOT_VERSION_V5) return POKEMON_STATE_V5_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION) return POKEMON_STATE_BYTES;
   return 0;
 }
@@ -145,6 +146,8 @@ bool encodeState(const PokemonState& state, StateBytes& output) {
   candidate[POKEMON_STATE_V3_BYTES + 1] = state.medicineMisses;
   candidate[POKEMON_STATE_V3_BYTES + 2] = state.machineMisses;
   candidate[POKEMON_STATE_V4_BYTES] = state.ppUpCount;
+  std::memcpy(candidate.data() + POKEMON_STATE_V5_BYTES, state.battleBoostCounts.data(),
+              state.battleBoostCounts.size());
   output = candidate;
   return true;
 }
@@ -185,21 +188,26 @@ bool decodeState(const uint8_t* bytes, const size_t size, const uint16_t version
     candidate.itemMisses = bytes[114];
     candidate.dashboardNotice = static_cast<DashboardNotice>(bytes[115]);
     // bagCounts/battleProgress (v3), ballMisses/medicineMisses/machineMisses
-    // (v4), and ppUpCount (v5) stay zero-valued (from `PokemonState
-    // candidate{};` above) for whichever of them a given file's version
-    // predates.
+    // (v4), ppUpCount (v5), and battleBoostCounts (v6) stay zero-valued (from
+    // `PokemonState candidate{};` above) for whichever of them a given file's
+    // version predates.
     if (version == POKEMON_SNAPSHOT_VERSION_V3 || version == POKEMON_SNAPSHOT_VERSION_V4 ||
-        version == POKEMON_SNAPSHOT_VERSION) {
+        version == POKEMON_SNAPSHOT_VERSION_V5 || version == POKEMON_SNAPSHOT_VERSION) {
       std::memcpy(candidate.bagCounts.data(), bytes + POKEMON_STATE_V2_BYTES, candidate.bagCounts.size());
       candidate.battleProgress = read16(bytes, POKEMON_STATE_V2_BYTES + POKEMON_BAG_SLOT_COUNT);
     }
-    if (version == POKEMON_SNAPSHOT_VERSION_V4 || version == POKEMON_SNAPSHOT_VERSION) {
+    if (version == POKEMON_SNAPSHOT_VERSION_V4 || version == POKEMON_SNAPSHOT_VERSION_V5 ||
+        version == POKEMON_SNAPSHOT_VERSION) {
       candidate.ballMisses = bytes[POKEMON_STATE_V3_BYTES];
       candidate.medicineMisses = bytes[POKEMON_STATE_V3_BYTES + 1];
       candidate.machineMisses = bytes[POKEMON_STATE_V3_BYTES + 2];
     }
-    if (version == POKEMON_SNAPSHOT_VERSION) {
+    if (version == POKEMON_SNAPSHOT_VERSION_V5 || version == POKEMON_SNAPSHOT_VERSION) {
       candidate.ppUpCount = bytes[POKEMON_STATE_V4_BYTES];
+    }
+    if (version == POKEMON_SNAPSHOT_VERSION) {
+      std::memcpy(candidate.battleBoostCounts.data(), bytes + POKEMON_STATE_V5_BYTES,
+                  candidate.battleBoostCounts.size());
     }
   }
   if (!validateState(candidate)) return false;

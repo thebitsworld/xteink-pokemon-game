@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-12
+
+### Added
+
+- X Attack, X Defense, X Speed, X Special, Guard Spec., and Dire Hit are now real items - use them mid-battle to boost your active Pokémon for the rest of the fight. All six are found through reading and listed in the Bag's Medicine category, alongside PP Up.
+
 ## [0.11.2] - 2026-09-12
 
 ### Fixed
