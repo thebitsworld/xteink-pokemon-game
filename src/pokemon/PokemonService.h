@@ -176,6 +176,9 @@ class PokemonService {
   // For a voluntary switch or mid-battle item use - both cost the whole
   // turn in Gen 1 (no Speed check), so only the opponent acts.
   BattleTurnResult resolveOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& opponent);
+  // Mirror image: the OPPONENT spent its turn on a trainer-AI heal or
+  // voluntary switch, so only the player's own chosen move resolves.
+  BattleTurnResult resolvePlayerOnlyTurn(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot);
   bool attemptBattleCatch(const BattleCombatant& wild, BallKind ball);
   // A gym/Elite Four/Champion trainer's fixed roster carries no gender of
   // its own (unlike a wild encounter's PendingEvent, already rolled at

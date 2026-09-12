@@ -740,6 +740,11 @@ BattleTurnResult PokemonService::resolveOpponentOnlyTurn(BattleCombatant& player
   return stepOpponentOnlyTurn(player, opponent, random_);
 }
 
+BattleTurnResult PokemonService::resolvePlayerOnlyTurn(BattleCombatant& player, BattleCombatant& opponent,
+                                                       const uint8_t playerMoveSlot) {
+  return stepPlayerOnlyTurn(player, opponent, playerMoveSlot, random_);
+}
+
 bool PokemonService::attemptBattleCatch(const BattleCombatant& wild, const BallKind ball) {
   return attemptCatch(wild, ball, random_);
 }

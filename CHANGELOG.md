@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-13
+
+### Added
+
+- Gym Leaders, Elite Four members, and the Champion can now use a healing item when their active Pokémon is badly hurt. Gym Leaders and the Elite Four (not the Champion) can also proactively switch to a fresh team member when the matchup is going badly against them - they're no longer purely reactive.
+
 ## [0.16.0] - 2026-09-13
 
 ### Added

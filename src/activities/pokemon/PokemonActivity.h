@@ -128,6 +128,14 @@ class PokemonActivity final : public Activity {
   int battlePlayerMoveCount() const;
   bool battlePlayerHasAnyUsablePp() const;
   void resolveBattlePlayerMoveTurn(uint8_t moveSlot);
+  // Trainer AI (gym/Elite Four only, not the Champion - see
+  // gymTeamOrder_'s doc comment - and never a wild encounter): decides
+  // whether the opponent should use a healing item or proactively switch
+  // instead of attacking this turn. If so, mutates battleOpponent_ (and
+  // gymTeamOrder_/opponentHealChargesRemaining_ as needed) and writes a
+  // "Trainer used ...!"-style line into `buffer`, returning true; otherwise
+  // leaves everything untouched and returns false.
+  bool trainerAiShouldActInsteadOfMoveThisTurn(char* buffer, size_t size);
   // Stage 13: which party members can currently fight (BattleRecordEntry's
   // currentHp > 0, via the read-only peekBattleMoves - no battle-store
   // writes just from checking). firstUsablePartySlot() picks who starts a
@@ -175,6 +183,22 @@ class PokemonActivity final : public Activity {
   char battleLog_[160]{};
   uint8_t gymChallengeIndex_ = 0;         // 0 = not fighting a gym/Elite Four right now
   uint8_t gymChallengeTeamProgress_ = 0;  // index of the opponent team member currently out
+  // gymTeamOrder_[i] is which real gymTeamFor(gymChallengeIndex_) index sits
+  // at position i - identity-initialized (gymTeamOrder_[i] == i) whenever a
+  // gym challenge starts, in enterGymBattle(). The trainer AI's own
+  // voluntary switch (see trainerAiShouldActInsteadOfMoveThisTurn()) swaps
+  // entries in the still-to-fight suffix (indices > gymChallengeTeamProgress_)
+  // rather than ever changing what gymChallengeTeamProgress_ itself means -
+  // it's still simply "how many of the trainer's team have been defeated,"
+  // now reached through this indirection instead of indexing the team
+  // directly. Never touched for a wild encounter (gymChallengeIndex_ == 0).
+  std::array<uint8_t, pokemon::MAX_GYM_TEAM_SIZE> gymTeamOrder_{};
+  // How many more times this trainer battle's AI can use a healing item
+  // (see trainerAiShouldActInsteadOfMoveThisTurn()) - reset once per gym
+  // challenge in enterGymBattle(), never replenished mid-fight. A small,
+  // deliberately simplified stand-in for the real games' actual per-trainer
+  // item stock, which this project has no data for at all.
+  uint8_t opponentHealChargesRemaining_ = 0;
   int battlePartySlot_ = 0;               // which snapshot_.party[] slot is currently battlePlayer_
   bool forcedBattleSwitch_ = false;       // true while the active Pokemon just fainted - Back can't cancel out
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};

@@ -1648,6 +1648,35 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
   return result;
 }
 
+BattleTurnResult stepPlayerOnlyTurn(BattleCombatant& player, BattleCombatant& opponent, const uint8_t playerMoveSlot,
+                                    const RandomSource& random) {
+  BattleTurnResult result{};
+  if (player.currentHp == 0 || opponent.currentHp == 0) {
+    result.outcome = player.currentHp == 0 ? BattleOutcome::OpponentWon : BattleOutcome::PlayerWon;
+    return result;
+  }
+
+  // Mirrors stepOpponentOnlyTurn()'s reset, roles reversed: the opponent
+  // skipped its own action this turn (a trainer AI using a healing item or
+  // switching mid-battle - see PokemonActivity.cpp), so only the player's
+  // own Counter could have anything to reflect, and only from a hit
+  // earlier this same turn (there isn't one).
+  player.lastPhysicalDamageTaken = 0;
+  opponent.lastPhysicalDamageTaken = 0;
+  player.flinched = false;
+  opponent.flinched = false;
+
+  result.player = resolveAction(player, opponent, playerMoveSlot, random);
+  if (opponent.currentHp == 0) {
+    result.opponent.event = BattleLogEvent::Fainted;
+    result.outcome = BattleOutcome::PlayerWon;
+    return result;
+  }
+
+  finishTurn(player, opponent, result);
+  return result;
+}
+
 bool attemptCatch(const BattleCombatant& wild, const BallKind ball, const RandomSource& random) {
   if (ball == BallKind::Master) return true;
   if (wild.currentHp == 0 || wild.maxHp == 0) return false;
