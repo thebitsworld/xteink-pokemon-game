@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-12
+
+### Added
+
+- Status moves like Growl, Swords Dance, Agility, and Harden now actually raise or lower a stat during battle, matching the original games - a debuffed Attack, boosted Defense, or a speed edge from Agility all make a real difference. Haze wipes out every stat change on both sides.
+
 ## [0.7.0] - 2026-09-12
 
 ### Added

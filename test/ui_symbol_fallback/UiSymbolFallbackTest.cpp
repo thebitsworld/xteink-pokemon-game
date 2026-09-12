@@ -60,12 +60,16 @@ TEST(UiSymbolFallback, GenderGlyphsFallBackAtBothScalesAndStyles) {
       }
     }
   }
+  // Measured width includes the glyph's 1px left bearing (EpdGlyph::left),
+  // not just its raw EpdGlyph::width - matching how getTextDimensions()
+  // computes maxX as glyphBaseX + glyph->left + glyph->width. U+2640 is
+  // {width 9, left 1} -> 10; U+2642 is {width 11, left 1} -> 12.
   int width = 0, height = 0;
   small.getTextDimensions("♀", &width, &height);
-  EXPECT_EQ(width, 9);
+  EXPECT_EQ(width, 10);
   EXPECT_EQ(height, 15);
   small.getTextDimensions("♂", &width, &height);
-  EXPECT_EQ(width, 11);
+  EXPECT_EQ(width, 12);
   EXPECT_EQ(height, 12);
 }
 

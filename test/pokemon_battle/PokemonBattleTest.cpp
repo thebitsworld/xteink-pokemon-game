@@ -14,6 +14,7 @@ using pokemon::BattleMoveSlot;
 using pokemon::BattleOutcome;
 using pokemon::MoveCategory;
 using pokemon::RandomSource;
+using pokemon::StatKind;
 
 int failures = 0;
 
@@ -281,6 +282,165 @@ void criticalHitExactlyDoublesDamageForAHighCritRatioMove() {
   CHECK(!tackleResult.player.critical);  // 100 >= Tackle's threshold of 45
 }
 
+void applyStatStageMultiplierMatchesGen1Table() {
+  CHECK(pokemon::applyStatStage(100, 0) == 100);
+  CHECK(pokemon::applyStatStage(100, 1) == 150);
+  CHECK(pokemon::applyStatStage(100, 2) == 200);
+  CHECK(pokemon::applyStatStage(100, 6) == 400);
+  CHECK(pokemon::applyStatStage(100, -1) == 66);
+  CHECK(pokemon::applyStatStage(100, -6) == 25);
+  // Out-of-range stages are clamped to +-6 rather than trusted verbatim.
+  CHECK(pokemon::applyStatStage(100, 10) == pokemon::applyStatStage(100, 6));
+  CHECK(pokemon::applyStatStage(100, -10) == pokemon::applyStatStage(100, -6));
+}
+
+void applyAccuracyEvasionStageMultiplierMatchesGen1Table() {
+  CHECK(pokemon::applyAccuracyEvasionStage(100, 0) == 100);
+  CHECK(pokemon::applyAccuracyEvasionStage(100, 1) == 133);
+  CHECK(pokemon::applyAccuracyEvasionStage(100, 6) == 300);
+  CHECK(pokemon::applyAccuracyEvasionStage(100, -1) == 75);
+  CHECK(pokemon::applyAccuracyEvasionStage(100, -6) == 33);
+}
+
+void statChangeForMoveIdentifiesSelfBuffsAndOpponentDebuffs() {
+  const pokemon::StatChangeEffect* swordsDance = pokemon::statChangeForMove(14);
+  CHECK(swordsDance != nullptr);
+  CHECK(swordsDance->targetsSelf);
+  CHECK(swordsDance->stat == StatKind::Attack);
+  CHECK(swordsDance->stages == 2);
+
+  const pokemon::StatChangeEffect* growl = pokemon::statChangeForMove(45);
+  CHECK(growl != nullptr);
+  CHECK(!growl->targetsSelf);
+  CHECK(growl->stat == StatKind::Attack);
+  CHECK(growl->stages == -1);
+
+  CHECK(pokemon::statChangeForMove(114) == nullptr);  // Haze is handled separately, not table-driven
+  CHECK(pokemon::statChangeForMove(33) == nullptr);   // Tackle: not a stat-changing move at all
+}
+
+void selfBuffMoveRaisesAttackStageAndReportsEvent() {
+  BattleCombatant attacker = makeCombatant(1, 20, {14});  // Swords Dance
+  BattleCombatant defender = makeCombatant(4, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::StatRaised);
+  CHECK(attacker.attackStage == 2);
+  CHECK(defender.attackStage == 0);
+}
+
+void opponentDebuffMoveLowersDefendersStageNotTheUsers() {
+  BattleCombatant attacker = makeCombatant(1, 20, {45});  // Growl
+  BattleCombatant defender = makeCombatant(4, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::StatLowered);
+  CHECK(defender.attackStage == -1);
+  CHECK(attacker.attackStage == 0);
+}
+
+void statChangeAtCapReportsFailureInsteadOfExceedingBounds() {
+  BattleCombatant attacker = makeCombatant(1, 20, {14});  // Swords Dance, +2 Attack
+  attacker.attackStage = 6;                               // already at the cap
+  BattleCombatant defender = makeCombatant(4, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::StatChangeFailed);
+  CHECK(attacker.attackStage == 6);
+}
+
+void hazeResetsBothSidesStatStages() {
+  BattleCombatant attacker = makeCombatant(1, 20, {114});  // Haze
+  attacker.attackStage = 2;
+  BattleCombatant defender = makeCombatant(4, 20, {33});
+  defender.defenseStage = -3;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::StatsReset);
+  CHECK(attacker.attackStage == 0);
+  CHECK(defender.defenseStage == 0);
+}
+
+void speedStageCanFlipWhichSideActsFirst() {
+  // Bulbasaur (base Speed 45) is normally slower than Charmander (65) at the
+  // same level, so Charmander acts first and its Ember faints a 1-HP
+  // Bulbasaur before it ever gets a turn.
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33});
+  bulbasaur.currentHp = 1;
+  bulbasaur.maxHp = 1;
+  BattleCombatant charmander = makeCombatant(4, 20, {52});
+  const pokemon::BattleTurnResult baseline = pokemon::stepBattle(bulbasaur, charmander, 0, ZERO_RANDOM);
+  CHECK(!baseline.player.acted);
+
+  // +6 Speed stages (45 * 4 = 180) comfortably overtakes Charmander's 65 -
+  // now Bulbasaur must act before Charmander gets a turn.
+  BattleCombatant fastBulbasaur = makeCombatant(1, 20, {33});
+  fastBulbasaur.currentHp = 1;
+  fastBulbasaur.maxHp = 1;
+  fastBulbasaur.speedStage = 6;
+  BattleCombatant slowCharmander = makeCombatant(4, 20, {52});
+  const pokemon::BattleTurnResult boosted = pokemon::stepBattle(fastBulbasaur, slowCharmander, 0, ZERO_RANDOM);
+  CHECK(boosted.player.acted);
+}
+
+void accuracyStageLoweringCanCauseAMissThatWouldOtherwiseHit() {
+  uint32_t roll = 50;  // between the staged (33) and unstaged (100) accuracy thresholds
+  const RandomSource midRandom{&roll, fixedRoll};
+
+  BattleCombatant plainAttacker = makeCombatant(1, 20, {33});
+  BattleCombatant plainDefender = makeCombatant(4, 20, {33});
+  CHECK(pokemon::stepBattle(plainAttacker, plainDefender, 0, midRandom).player.event != BattleLogEvent::MoveMissed);
+
+  BattleCombatant debuffedAttacker = makeCombatant(1, 20, {33});
+  debuffedAttacker.accuracyStage = -6;
+  BattleCombatant defender = makeCombatant(4, 20, {33});
+  CHECK(pokemon::stepBattle(debuffedAttacker, defender, 0, midRandom).player.event == BattleLogEvent::MoveMissed);
+}
+
+void evasionStageRaisingCanCauseAMissThatWouldOtherwiseHit() {
+  uint32_t roll = 50;  // between the staged (33) and unstaged (100) accuracy thresholds
+  const RandomSource midRandom{&roll, fixedRoll};
+
+  BattleCombatant attacker = makeCombatant(1, 20, {33});
+  BattleCombatant evasiveDefender = makeCombatant(4, 20, {33});
+  evasiveDefender.evasionStage = 6;
+  CHECK(pokemon::stepBattle(attacker, evasiveDefender, 0, midRandom).player.event == BattleLogEvent::MoveMissed);
+}
+
+void criticalHitIgnoresAttackersUnfavorableNegativeAttackStage() {
+  // A crit uses whichever of {unstaged, staged} Attack is higher, so a -1
+  // Attack stage has zero effect on a guaranteed crit - the real Gen 1 rule.
+  uint32_t critRoll = 15;  // guarantees both max variance and a crit on Slash
+  const RandomSource critRandom{&critRoll, fixedRoll};
+
+  BattleCombatant debuffed = makeCombatant(1, 20, {163});  // Slash, high-crit move
+  debuffed.attackStage = -1;
+  BattleCombatant defenderA = makeCombatant(4, 20, {33});
+  pokemon::stepBattle(debuffed, defenderA, 0, critRandom);
+
+  BattleCombatant normal = makeCombatant(1, 20, {163});
+  BattleCombatant defenderB = makeCombatant(4, 20, {33});
+  pokemon::stepBattle(normal, defenderB, 0, critRandom);
+
+  const uint16_t debuffedDamage = defenderA.maxHp - defenderA.currentHp;
+  const uint16_t normalDamage = defenderB.maxHp - defenderB.currentHp;
+  CHECK(debuffedDamage == normalDamage);
+}
+
+void criticalHitIgnoresDefendersUnfavorablePositiveDefenseStage() {
+  uint32_t critRoll = 15;
+  const RandomSource critRandom{&critRoll, fixedRoll};
+
+  BattleCombatant attackerA = makeCombatant(1, 20, {163});
+  BattleCombatant buffedDefender = makeCombatant(4, 20, {33});
+  buffedDefender.defenseStage = 2;
+  pokemon::stepBattle(attackerA, buffedDefender, 0, critRandom);
+
+  BattleCombatant attackerB = makeCombatant(1, 20, {163});
+  BattleCombatant plainDefender = makeCombatant(4, 20, {33});
+  pokemon::stepBattle(attackerB, plainDefender, 0, critRandom);
+
+  const uint16_t buffedDamage = buffedDefender.maxHp - buffedDefender.currentHp;
+  const uint16_t plainDamage = plainDefender.maxHp - plainDefender.currentHp;
+  CHECK(buffedDamage == plainDamage);
+}
+
 void battleVictoryXpScalesWithLevelAndTrainerBonus() {
   CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
   CHECK(pokemon::battleVictoryXp(25, false) == 100);
@@ -308,6 +468,18 @@ int main() {
   masterBallAlwaysCatchesRegardlessOfRandomness();
   pokeBallCatchOddsScaleWithHpAndCaptureRate();
   criticalHitExactlyDoublesDamageForAHighCritRatioMove();
+  applyStatStageMultiplierMatchesGen1Table();
+  applyAccuracyEvasionStageMultiplierMatchesGen1Table();
+  statChangeForMoveIdentifiesSelfBuffsAndOpponentDebuffs();
+  selfBuffMoveRaisesAttackStageAndReportsEvent();
+  opponentDebuffMoveLowersDefendersStageNotTheUsers();
+  statChangeAtCapReportsFailureInsteadOfExceedingBounds();
+  hazeResetsBothSidesStatStages();
+  speedStageCanFlipWhichSideActsFirst();
+  accuracyStageLoweringCanCauseAMissThatWouldOtherwiseHit();
+  evasionStageRaisingCanCauseAMissThatWouldOtherwiseHit();
+  criticalHitIgnoresAttackersUnfavorableNegativeAttackStage();
+  criticalHitIgnoresDefendersUnfavorablePositiveDefenseStage();
   battleVictoryXpScalesWithLevelAndTrainerBonus();
   return failures == 0 ? 0 : 1;
 }

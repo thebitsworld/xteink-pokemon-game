@@ -297,11 +297,29 @@ const char* statusAbbrev(const pokemon::Ailment status) {
   return "";
 }
 
+// Gen 1's six stat-stage names, in StatKind order. Not run through i18n,
+// matching how move/item names are already plain C strings (see
+// PokemonBattle.h's StatKind doc comment).
+const char* statKindName(const pokemon::StatKind kind) {
+  switch (kind) {
+    case pokemon::StatKind::Attack: return "Attack";
+    case pokemon::StatKind::Defense: return "Defense";
+    case pokemon::StatKind::Special: return "Special";
+    case pokemon::StatKind::Speed: return "Speed";
+    case pokemon::StatKind::Accuracy: return "Accuracy";
+    case pokemon::StatKind::Evasion: return "Evasion";
+  }
+  return "?";
+}
+
 // Builds one side's battle-log line for the turn just resolved. Status-only
 // events (couldn't move, confusion self-hit, cured, status damage, fainted)
 // skip the "used MOVE!" framing since no move was actually executed.
+// `other` is whichever combatant didn't act this turn - needed to name the
+// right Pokemon on a stat-changing move that targets the opponent (Growl,
+// Leer, ...) rather than the user (Swords Dance, Agility, ...).
 void formatBattleActionLine(char* buffer, const size_t size, const pokemon::BattleCombatant& actor,
-                            const pokemon::BattleActionResult& action) {
+                            const pokemon::BattleCombatant& other, const pokemon::BattleActionResult& action) {
   const char* name = speciesName(actor.speciesId);
   switch (action.event) {
     case pokemon::BattleLogEvent::None:
@@ -329,8 +347,23 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
   const pokemon::MoveData* move = pokemon::moveData(actor.moves[action.moveSlot].moveId);
   char used[64];
   snprintf(used, sizeof(used), tr(STR_POKEMON_USED_MOVE), name, move == nullptr ? "?" : move->name);
-  const char* suffix = action.event == pokemon::BattleLogEvent::MoveMissed           ? tr(STR_POKEMON_MOVE_MISSED)
-                       : action.event == pokemon::BattleLogEvent::MoveNoEffect       ? tr(STR_POKEMON_NO_EFFECT)
+  char statSuffix[64] = "";
+  if (action.event == pokemon::BattleLogEvent::StatRaised || action.event == pokemon::BattleLogEvent::StatLowered ||
+      action.event == pokemon::BattleLogEvent::StatChangeFailed) {
+    const pokemon::StatChangeEffect* effect = pokemon::statChangeForMove(actor.moves[action.moveSlot].moveId);
+    const char* targetName = effect != nullptr && effect->targetsSelf ? name : speciesName(other.speciesId);
+    const char* statName = statKindName(effect != nullptr ? effect->stat : pokemon::StatKind::Attack);
+    const char* templateStr = action.event == pokemon::BattleLogEvent::StatRaised    ? tr(STR_POKEMON_STAT_ROSE)
+                              : action.event == pokemon::BattleLogEvent::StatLowered ? tr(STR_POKEMON_STAT_FELL)
+                              : effect != nullptr && effect->stages > 0             ? tr(STR_POKEMON_STAT_WONT_RISE)
+                                                                                     : tr(STR_POKEMON_STAT_WONT_FALL);
+    snprintf(statSuffix, sizeof(statSuffix), templateStr, targetName, statName);
+  } else if (action.event == pokemon::BattleLogEvent::StatsReset) {
+    snprintf(statSuffix, sizeof(statSuffix), "%s", tr(STR_POKEMON_STATS_RESET));
+  }
+  const char* suffix = statSuffix[0] != '\0'                                        ? statSuffix
+                       : action.event == pokemon::BattleLogEvent::MoveMissed        ? tr(STR_POKEMON_MOVE_MISSED)
+                       : action.event == pokemon::BattleLogEvent::MoveNoEffect      ? tr(STR_POKEMON_NO_EFFECT)
                        : action.event == pokemon::BattleLogEvent::MoveSuperEffective ? tr(STR_POKEMON_SUPER_EFFECTIVE)
                        : action.event == pokemon::BattleLogEvent::MoveNotVeryEffective
                            ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
@@ -838,9 +871,10 @@ void PokemonActivity::finishGymChallenge(const bool won) {
 void PokemonActivity::buildBattleLog(const pokemon::BattleTurnResult& result) {
   char playerLine[80] = "";
   char opponentLine[80] = "";
-  if (result.player.acted) formatBattleActionLine(playerLine, sizeof(playerLine), battlePlayer_, result.player);
+  if (result.player.acted)
+    formatBattleActionLine(playerLine, sizeof(playerLine), battlePlayer_, battleOpponent_, result.player);
   if (result.opponent.acted)
-    formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+    formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, battlePlayer_, result.opponent);
   if (playerLine[0] != '\0' && opponentLine[0] != '\0') {
     snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", playerLine, opponentLine);
   } else if (playerLine[0] != '\0') {
@@ -1106,7 +1140,7 @@ void PokemonActivity::activate() {
         savePlayerBattleEntry();
         char opponentLine[80] = "";
         if (result.opponent.acted) {
-          formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+          formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, battlePlayer_, result.opponent);
         }
         if (opponentLine[0] != '\0') {
           snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", usedLine, opponentLine);
@@ -1344,7 +1378,7 @@ void PokemonActivity::activate() {
       savePlayerBattleEntry();
       char opponentLine[80] = "";
       if (result.opponent.acted) {
-        formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, result.opponent);
+        formatBattleActionLine(opponentLine, sizeof(opponentLine), battleOpponent_, battlePlayer_, result.opponent);
       }
       if (opponentLine[0] != '\0') {
         snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", goLine, opponentLine);

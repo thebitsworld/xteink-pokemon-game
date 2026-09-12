@@ -51,35 +51,29 @@ correct, not a gap:
 
 ## Confirmed gaps, with real impact numbers
 
-### 1. No stat stages (Growl, Swords Dance, Reflect, etc.) — biggest gap by move count
+### 1. Stat stages (Growl, Swords Dance, Reflect, etc.) — ✅ done (`v0.8.0`, branch `feat/stat-stages`)
 
-**Real Gen 1 behavior**: moves like Growl (-1 Attack), Swords Dance (+2 Attack), Reflect
-(halves physical damage taken), Amnesia (+2 Special) apply a temporary ±1 to ±6 stage
-modifier to a stat for the rest of the battle (or until switched out).
+Implemented via `BattleCombatant`'s 6 new stage fields (Attack/Defense/Special/Speed/
+Accuracy/Evasion, `-6..+6`, reset every battle/switch for free by the existing
+`= BattleCombatant{}` reset pattern), a hand-authored 22-entry `STAT_CHANGE_TABLE` in
+`PokemonBattle.cpp` covering the self-buff and opponent-debuff status moves (Swords Dance,
+Growl, Agility, Barrier, Acid Armor, Amnesia, Harden, Sharpen, Meditate, Screech, Double
+Team, Minimize, Withdraw, Defense Curl, Tail Whip, Leer, Sand Attack, Smokescreen, Flash,
+Kinesis, String Shot), plus Haze (id 114) as a hardcoded full-reset special case. Real Gen 1
+non-linear multiplier tables (`applyStatStage`/`applyAccuracyEvasionStage`): `(2+stage)/2`
+up / `2/(2-stage)` down for Attack/Defense/Special/Speed (25% floor, 400% ceiling);
+`(3+stage)/3` up / `3/(3-stage)` down for Accuracy/Evasion (33% floor, 300% ceiling). Wired
+into `computeDamage()`, `stepBattle()`'s turn-order Speed check, and `resolveAction()`'s
+accuracy check. Also implements the real (not simplified) Gen 1 crit quirk: a critical hit
+ignores whichever staged value would hurt the attacker — a negative Attack/Special stage on
+the attacker, or a positive Defense/Special stage on the defender — while still applying any
+stage that helps.
 
-**Current behavior**: these moves only roll to hit or miss, then do **nothing** — no stat
-change of any kind is applied.
-
-**Measured impact**: counted directly in `scripts/data/pokemon-moves.csv` — of 165 moves,
-**55 are `damage_class = status`** (zero power), and of those, **42 have `ailment = None`**.
-Those 42 moves currently do *nothing but consume a turn and a PP* — roughly a quarter of
-this game's entire move roster (42/165 ≈ 25%) is effectively dead weight right now. This
-includes iconic, frequently-taught moves: Growl, Leer, Tail Whip, Swords Dance, Agility,
-Reflect, Light Screen, Barrier, Amnesia, Double Team, Minimize, Withdraw, Defense Curl,
-Harden, Sharpen, Meditate, Screech, and more.
-
-**Why this is the highest-priority gap**: it's the single change with the largest
-percentage of existing content it would bring to life, and it's a self-contained addition
-to `BattleCombatant` (add 5 stage counters: Attack/Defense/Special/Speed/Accuracy, plus
-Evasion) and to `stepBattle()`'s move-resolution — no new data files needed, since the
-move CSV's `ailment` field could stay `None` for these (stat changes would be identified by
-move ID, similar to how `PokemonTypeChart.cpp` is hand-written rather than CSV-driven).
-
-**Estimated cost**: moderate. Needs a per-move stat-change table (hand-authored, ~42
-entries — which stat, how many stages, self or opponent target), stage-to-multiplier math
-(Gen 1's real table is `2/2, 2/3, 1/2, 2/5, 1/3, ...` down to `8/2` up — not simply linear),
-and stage state living in `BattleCombatant` for the duration of one battle only (never
-persisted, matching how HP/status *are* persisted but this wouldn't need to be).
+**Deliberately out of scope for this pass** (kept as smaller, separate future work since
+they're either self-heal/switch-forcing/move-copying mechanics or screen effects rather than
+a stage change): Recover, Soft-Boiled, Rest, Substitute, Teleport, Mimic, Metronome, Mirror
+Move, Transform, Conversion, Disable, Leech Seed, Whirlwind, Roar, Focus Energy, Mist,
+Reflect, Light Screen.
 
 ### 2. Critical hits — ✅ done (`v0.7.0`, branch `feat/critical-hits`)
 
@@ -164,7 +158,7 @@ rather than as one big change.
 ## Suggested order (cheapest + highest-impact first)
 
 1. ✅ **Critical hits** — done (`v0.7.0`).
-2. **Stat stages** — biggest move-roster impact (revives ~25% of the moveset), moderate
+2. ✅ **Stat stages** — done (`v0.8.0`). Biggest move-roster impact (revives ~25% of the moveset), moderate
    cost, no save-format changes (battle-only state).
 3. **Recoil / multi-hit moves / a real player-facing Struggle** — small, scoped additions,
    good candidates to interleave with the above rather than doing as one big batch.
