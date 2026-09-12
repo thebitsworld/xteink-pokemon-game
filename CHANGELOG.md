@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-12
+
+### Fixed
+
+- **Reading a book did not actually grant any Pokémon progress on a real device** - no EXP, no wild encounters, no item or ball drops, regardless of how long or how actively you read. The reader was never telling the Pokémon system that a page had been turned, so none of it ever ran. This is now fixed; reading credits EXP, encounters, and item drops again as intended.
+
 ## [0.5.0] - 2026-09-12
 
 ### Added
