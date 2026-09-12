@@ -33,6 +33,13 @@ struct BattleCombatant {
   Ailment status = Ailment::None;
   uint8_t statusTurns = 0;  // sleep/confusion countdown, engine-managed
   std::array<BattleMoveSlot, BATTLE_MOVE_SLOTS> moves{};
+  // Display-only - never read by the engine (damage/type/catch math is all
+  // gender-independent in these games). The player's side copies it straight
+  // from the party PokemonRecord; a wild opponent copies it from the
+  // PendingEvent's already-rolled gender; a gym/Elite Four/Champion
+  // opponent (whose fixed roster carries no gender of its own) gets one
+  // rolled fresh via chooseGenderForSpecies() at battle setup.
+  Gender gender = Gender::Unknown;
 };
 
 enum class BattleOutcome : uint8_t {

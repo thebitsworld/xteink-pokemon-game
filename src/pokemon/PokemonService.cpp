@@ -678,6 +678,12 @@ bool PokemonService::attemptBattleCatch(const BattleCombatant& wild, const BallK
   return attemptCatch(wild, ball, random_);
 }
 
+Gender PokemonService::rollGenderFor(const uint16_t speciesId) {
+  Gender gender = Gender::Unknown;
+  chooseGenderForSpecies(speciesId, random_, gender);
+  return gender;
+}
+
 ServiceStatus PokemonService::reset() {
   readingSessionActive_ = false;
   if (!store_.reset()) {

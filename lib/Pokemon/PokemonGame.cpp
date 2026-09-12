@@ -779,6 +779,12 @@ CollectionActionSet collectionActions(const bool party, const uint8_t partyCount
   return actions;
 }
 
+bool chooseGenderForSpecies(const uint16_t speciesId, const RandomSource& random, Gender& gender) {
+  const SpeciesData* species = speciesData(speciesId);
+  if (species == nullptr) return false;
+  return chooseGender(*species, random, gender);
+}
+
 }  // namespace pokemon
 
 #endif
