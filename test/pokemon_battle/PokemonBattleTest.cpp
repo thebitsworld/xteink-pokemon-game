@@ -441,6 +441,129 @@ void criticalHitIgnoresDefendersUnfavorablePositiveDefenseStage() {
   CHECK(buffedDamage == plainDamage);
 }
 
+void recoilMoveDamagesTheAttackerAfterDealingDamage() {
+  // Take Down (move 36): a real Gen 1 recoil move, 1/4 of damage dealt back
+  // to the user. A fixedRoll context of 70 lands under Take Down's 85
+  // accuracy (hit), at/above Charmander's 65 base-Speed crit threshold (no
+  // crit, keeping the damage/recoil math simple to verify exactly), and
+  // saturates the 16-wide damage-variance roll to its max (100%).
+  uint32_t context = 70;
+  const RandomSource fixedRandom{&context, fixedRoll};
+  BattleCombatant attacker = makeCombatant(4, 20, {36});  // Charmander, Take Down
+  // Same level as the attacker - Charmander's higher base Speed (65 vs 45)
+  // keeps it acting first regardless - with HP overridden well above
+  // anything Take Down could deal in one hit, so the measured damage/recoil
+  // never gets skewed by HP clamping at 0.
+  BattleCombatant defender = makeCombatant(1, 20, {33});
+  defender.maxHp = 200;
+  defender.currentHp = 200;
+  // Asleep so it never counter-attacks - stepBattle() resolves a full
+  // two-sided turn, and an awake defender's own hit back would inflate the
+  // measured "recoil" with unrelated damage from its counter-attack.
+  defender.status = Ailment::Sleep;
+  defender.statusTurns = 5;
+  const uint16_t attackerHpBefore = attacker.currentHp;
+  const uint16_t defenderHpBefore = defender.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, fixedRandom);
+  CHECK(defender.currentHp < defenderHpBefore);
+  CHECK(result.player.recoilApplied);
+  CHECK(attacker.currentHp < attackerHpBefore);
+  const uint16_t damageDealt = defenderHpBefore - defender.currentHp;
+  const uint16_t recoilTaken = attackerHpBefore - attacker.currentHp;
+  CHECK(recoilTaken == std::max<uint16_t>(1, static_cast<uint16_t>(damageDealt / 4U)));
+}
+
+void nonRecoilMoveNeverAppliesRecoil() {
+  BattleCombatant attacker = makeCombatant(4, 20, {33});  // Tackle: not a recoil move
+  BattleCombatant defender = makeCombatant(1, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(!result.player.recoilApplied);
+}
+
+void multiHitMoveConnectsMultipleTimesAndReportsHitCount() {
+  // Comet Punch (move 4): a real Gen 1 multi-hit move with a random 2/3/4/5
+  // hit count. A fixedRoll context of 7 forces every 8-wide roll in
+  // rollMultiHitCount() to its max (upperExclusive-1 = 7), landing in the
+  // top 1/8 bucket - always exactly 5 hits.
+  uint32_t context = 7;
+  const RandomSource fixedRandom{&context, fixedRoll};
+  BattleCombatant attacker = makeCombatant(4, 30, {4});   // Charmander, Comet Punch
+  // Same level as the attacker - Charmander's higher base Speed keeps it
+  // acting first - with HP overridden well above what 5 hits could deal.
+  BattleCombatant defender = makeCombatant(1, 30, {33});  // Bulbasaur
+  defender.maxHp = 300;
+  defender.currentHp = 300;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, fixedRandom);
+  CHECK(result.player.hitCount == 5);
+}
+
+void twineedleAlwaysHitsExactlyTwice() {
+  // Twineedle (move 41) is the one multi-hit move with a fixed count rather
+  // than a rolled one - always exactly 2 hits, never 3-5.
+  BattleCombatant attacker = makeCombatant(1, 30, {41});  // Bulbasaur, Twineedle
+  BattleCombatant defender = makeCombatant(4, 60, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(result.player.hitCount == 2);
+}
+
+void nonMultiHitMoveReportsZeroHitCount() {
+  BattleCombatant attacker = makeCombatant(4, 20, {33});  // Tackle: single-hit
+  BattleCombatant defender = makeCombatant(1, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(result.player.hitCount == 0);
+}
+
+void multiHitMoveStopsEarlyIfTheDefenderFaintsPartway() {
+  uint32_t context = 7;  // forces 5 intended hits, same as the test above
+  const RandomSource fixedRandom{&context, fixedRoll};
+  BattleCombatant attacker = makeCombatant(4, 50, {4});  // strong Charmander, Comet Punch
+  BattleCombatant defender = makeCombatant(1, 5, {33});  // weak, 1-HP Bulbasaur
+  defender.currentHp = 1;
+  defender.maxHp = 1;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, fixedRandom);
+  CHECK(defender.currentHp == 0);
+  CHECK(result.player.hitCount == 1);  // fainted on the first hit - the rest never got attempted
+}
+
+void forcedStruggleSentinelDealsDamageAndRecoilsWithNoLearnedMove() {
+  // pokemon::BATTLE_MOVE_SLOTS itself (or any value >= it) as the move slot
+  // forces a real Struggle turn - no learned move needed, no PP touched.
+  BattleCombatant attacker = makeCombatant(4, 30, {});  // Charmander, no moves at all
+  // HP overridden well above what one Struggle hit could deal, so the
+  // measured damage/recoil never gets skewed by HP clamping at 0.
+  BattleCombatant defender = makeCombatant(7, 20, {33});
+  defender.maxHp = 200;
+  defender.currentHp = 200;
+  // Asleep so it never counter-attacks (see the same note in the Take Down
+  // recoil test above).
+  defender.status = Ailment::Sleep;
+  defender.statusTurns = 5;
+  const uint16_t attackerHpBefore = attacker.currentHp;
+  const uint16_t defenderHpBefore = defender.currentHp;
+  const pokemon::BattleTurnResult result =
+      pokemon::stepBattle(attacker, defender, pokemon::BATTLE_MOVE_SLOTS, MAX_RANDOM);
+  CHECK(result.player.acted);
+  CHECK(result.player.moveSlot == pokemon::BATTLE_MOVE_SLOTS);
+  CHECK(defender.currentHp < defenderHpBefore);
+  CHECK(result.player.recoilApplied);
+  CHECK(attacker.currentHp < attackerHpBefore);
+  const uint16_t damageDealt = defenderHpBefore - defender.currentHp;
+  const uint16_t recoilTaken = attackerHpBefore - attacker.currentHp;
+  CHECK(recoilTaken == std::max<uint16_t>(1, static_cast<uint16_t>(damageDealt / 2U)));
+}
+
+void opponentStrugglesWhenAllOfItsLearnedMovesAreOutOfPp() {
+  BattleCombatant player = makeCombatant(4, 20, {45});  // Growl: harmless filler, never KOs
+  BattleCombatant opponent = makeCombatant(7, 20, {33, 55});
+  opponent.moves[0].currentPp = 0;
+  opponent.moves[1].currentPp = 0;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(player, opponent, 0, MAX_RANDOM);
+  CHECK(result.opponent.acted);
+  CHECK(result.opponent.moveSlot == pokemon::BATTLE_MOVE_SLOTS);
+  CHECK(result.opponent.event != BattleLogEvent::MoveHadNoPp);
+  CHECK(result.opponent.recoilApplied);
+}
+
 void battleVictoryXpScalesWithLevelAndTrainerBonus() {
   CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
   CHECK(pokemon::battleVictoryXp(25, false) == 100);
@@ -480,6 +603,14 @@ int main() {
   evasionStageRaisingCanCauseAMissThatWouldOtherwiseHit();
   criticalHitIgnoresAttackersUnfavorableNegativeAttackStage();
   criticalHitIgnoresDefendersUnfavorablePositiveDefenseStage();
+  recoilMoveDamagesTheAttackerAfterDealingDamage();
+  nonRecoilMoveNeverAppliesRecoil();
+  multiHitMoveConnectsMultipleTimesAndReportsHitCount();
+  twineedleAlwaysHitsExactlyTwice();
+  nonMultiHitMoveReportsZeroHitCount();
+  multiHitMoveStopsEarlyIfTheDefenderFaintsPartway();
+  forcedStruggleSentinelDealsDamageAndRecoilsWithNoLearnedMove();
+  opponentStrugglesWhenAllOfItsLearnedMovesAreOutOfPp();
   battleVictoryXpScalesWithLevelAndTrainerBonus();
   return failures == 0 ? 0 : 1;
 }

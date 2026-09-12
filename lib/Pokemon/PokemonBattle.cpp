@@ -92,6 +92,70 @@ constexpr StatChangeTableEntry STAT_CHANGE_TABLE[] = {
     {159, {StatKind::Attack, 1, true}},    // Sharpen
 };
 
+// The 3 real Gen 1 recoil moves, plus Struggle itself (STRUGGLE_MOVE_ID,
+// declared in PokemonBattle.h) - recoil is `recoilNumerator/recoilDenominator`
+// of the *total damage dealt this turn* (all hits summed, for a move that's
+// also multi-hit - none of these three are, but the formula generalizes),
+// floored, minimum 1 if any damage was dealt at all. Take Down/Double-Edge/
+// Submission recoil 1/4 of damage dealt (Gen 1's real fraction); Struggle
+// recoils a full 1/2 (also Gen 1's real fraction - later generations changed
+// both of these to fixed fractions of max HP instead, not modeled here).
+struct RecoilTableEntry {
+  uint8_t moveId;
+  uint8_t recoilNumerator;
+  uint8_t recoilDenominator;
+};
+constexpr RecoilTableEntry RECOIL_TABLE[] = {
+    {36, 1, 4},              // Take Down
+    {38, 1, 4},              // Double-Edge
+    {66, 1, 4},              // Submission
+    {STRUGGLE_MOVE_ID, 1, 2},  // Struggle
+};
+
+const RecoilTableEntry* recoilEntryForMove(const uint8_t moveId) {
+  for (const RecoilTableEntry& entry : RECOIL_TABLE) {
+    if (entry.moveId == moveId) return &entry;
+  }
+  return nullptr;
+}
+
+// The real Gen 1 multi-hit moves. `fixedHits == 0` means "roll it" via
+// rollMultiHitCount()'s real 2/3/4/5-hit distribution; Twineedle is the one
+// exception that always hits exactly twice rather than rolling. Hand-authored
+// rather than a new CSV column, same rationale as the crit/stat-change lists
+// above - PokeAPI's own move data doesn't carry a hit-count field for these.
+struct MultiHitTableEntry {
+  uint8_t moveId;
+  uint8_t fixedHits;  // 0 = roll via rollMultiHitCount()
+};
+constexpr MultiHitTableEntry MULTI_HIT_TABLE[] = {
+    {3, 0},    // Double Slap
+    {4, 0},    // Comet Punch
+    {31, 0},   // Fury Attack
+    {41, 2},   // Twineedle - always exactly 2 hits
+    {42, 0},   // Pin Missile
+    {140, 0},  // Barrage
+    {154, 0},  // Fury Swipes
+};
+
+const MultiHitTableEntry* multiHitEntryForMove(const uint8_t moveId) {
+  for (const MultiHitTableEntry& entry : MULTI_HIT_TABLE) {
+    if (entry.moveId == moveId) return &entry;
+  }
+  return nullptr;
+}
+
+// Gen 1's real multi-hit distribution: 2 hits and 3 hits are each 3/8 likely,
+// 4 and 5 hits are each 1/8 - not a flat 2-5 spread.
+uint8_t rollMultiHitCount(const RandomSource& random) {
+  uint32_t roll = 0;
+  if (!rollBelow(random, 8U, roll)) return 2;
+  if (roll < 3U) return 2;
+  if (roll < 6U) return 3;
+  if (roll < 7U) return 4;
+  return 5;
+}
+
 int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
   switch (stat) {
     case StatKind::Attack:
@@ -241,27 +305,36 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   result.acted = true;
   result.moveSlot = moveSlot;
 
-  if (moveSlot >= BATTLE_MOVE_SLOTS) {
-    result.event = BattleLogEvent::MoveHadNoPp;
-    return result;
-  }
-  BattleMoveSlot& slot = attacker.moves[moveSlot];
-  if (slot.moveId == 0 || slot.currentPp == 0) {
-    result.event = BattleLogEvent::MoveHadNoPp;
-    return result;
+  // moveSlot >= BATTLE_MOVE_SLOTS is the Struggle sentinel (STRUGGLE_MOVE_ID's
+  // doc comment) rather than a real slot index - both stepBattle()'s player
+  // path (once every learned move is out of PP, PokemonActivity.cpp forces
+  // this) and chooseOpponentMoveSlot() (once the AI has no usable move
+  // either) can hand this in. There's no BattleMoveSlot/PP to touch for it -
+  // Struggle isn't a learned move and never runs out.
+  const bool forcedStruggle = moveSlot >= BATTLE_MOVE_SLOTS;
+  BattleMoveSlot* slot = nullptr;
+  uint8_t moveId = STRUGGLE_MOVE_ID;
+  if (!forcedStruggle) {
+    slot = &attacker.moves[moveSlot];
+    if (slot->moveId == 0 || slot->currentPp == 0) {
+      result.event = BattleLogEvent::MoveHadNoPp;
+      return result;
+    }
+    moveId = slot->moveId;
   }
 
   if (statusPreventsAction(attacker, random, result.event)) return result;
 
-  const MoveData* move = moveData(slot.moveId);
+  const MoveData* move = moveData(moveId);
   if (move == nullptr) {
     result.event = BattleLogEvent::MoveHadNoPp;
     return result;
   }
-  --slot.currentPp;
+  if (slot != nullptr) --slot->currentPp;
 
-  // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style moves)
-  // - stat stages never apply to those either, matching the real games.
+  // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style
+  // moves, and also how Struggle's own accuracy is recorded) - stat stages
+  // never apply to those either, matching the real games.
   if (move->accuracy != 0) {
     const int8_t combinedStage =
         std::clamp<int8_t>(attacker.accuracyStage - defender.evasionStage, -6, 6);
@@ -281,27 +354,56 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
 
   if (move->category != MoveCategory::Status) {
     const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
-    const bool critical = attackerStats != nullptr &&
-                          rollCriticalHit(attackerStats->speed, isHighCritRatioMove(slot.moveId), random);
-    const uint16_t damage = computeDamage(attacker, defender, *move, random, critical);
-    defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
     const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
     const uint16_t effectivenessPercent =
         defenderSpecies == nullptr
             ? 100
             : typeEffectivenessPercent(move->type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
+
+    // A move that's immune (0% effectiveness) never gets to try more than
+    // once - real Gen 1 shows "doesn't affect" a single time, not per hit.
+    const MultiHitTableEntry* multiHit = effectivenessPercent == 0 ? nullptr : multiHitEntryForMove(moveId);
+    const uint8_t hitsToAttempt =
+        multiHit == nullptr ? 1 : multiHit->fixedHits != 0 ? multiHit->fixedHits : rollMultiHitCount(random);
+
+    bool anyCritical = false;
+    uint8_t hitsLanded = 0;
+    uint32_t totalDamage = 0;
+    for (uint8_t hit = 0; hit < hitsToAttempt && defender.currentHp > 0; ++hit) {
+      const bool critical = attackerStats != nullptr &&
+                            rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId), random);
+      const uint16_t damage = computeDamage(attacker, defender, *move, random, critical);
+      defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+      totalDamage += damage;
+      if (critical) anyCritical = true;
+      ++hitsLanded;
+    }
+
     result.event = effectivenessEvent(effectivenessPercent);
-    if (damage == 0 && effectivenessPercent != 0) result.event = BattleLogEvent::MoveHit;
+    if (totalDamage == 0 && effectivenessPercent != 0) result.event = BattleLogEvent::MoveHit;
     // Immune (0% effectiveness) hits never actually land, so there's nothing
-    // to have been "critical" about even if the roll succeeded.
-    result.critical = critical && effectivenessPercent != 0;
+    // to have been "critical" about even if a roll succeeded.
+    result.critical = anyCritical && effectivenessPercent != 0;
+    result.hitCount = multiHit != nullptr && effectivenessPercent != 0 ? hitsLanded : 0;
+
+    // Recoil is based on the *total* damage this action dealt (all hits
+    // summed, for the rare case a recoil move were ever also multi-hit -
+    // none of Take Down/Double-Edge/Submission/Struggle actually are, but the
+    // formula generalizes), floored, minimum 1 if any damage landed at all.
+    if (const RecoilTableEntry* recoil = recoilEntryForMove(moveId); recoil != nullptr && totalDamage > 0) {
+      const uint16_t recoilDamage =
+          clampToUint16(std::max<uint32_t>(1U, totalDamage * recoil->recoilNumerator / recoil->recoilDenominator));
+      attacker.currentHp =
+          attacker.currentHp > recoilDamage ? static_cast<uint16_t>(attacker.currentHp - recoilDamage) : 0;
+      result.recoilApplied = true;
+    }
   }
 
-  if (slot.moveId == HAZE_MOVE_ID) {
+  if (moveId == HAZE_MOVE_ID) {
     resetBattleStages(attacker);
     resetBattleStages(defender);
     result.event = BattleLogEvent::StatsReset;
-  } else if (const StatChangeEffect* statEffect = statChangeForMove(slot.moveId); statEffect != nullptr) {
+  } else if (const StatChangeEffect* statEffect = statChangeForMove(moveId); statEffect != nullptr) {
     BattleCombatant& target = statEffect->targetsSelf ? attacker : defender;
     int8_t& stage = statStageRef(target, statEffect->stat);
     const int8_t before = stage;
@@ -355,7 +457,10 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
         typeEffectivenessPercent(move->type, playerSpecies->primaryType, playerSpecies->secondaryType);
     if (effectiveness > bestEffectiveness) bestEffectiveness = effectiveness;
   }
-  if (usableCount == 0) return BATTLE_MOVE_SLOTS;  // no PP left anywhere - Struggle-equivalent fallback
+  // No PP left anywhere - the BATTLE_MOVE_SLOTS sentinel forces a real
+  // Struggle turn in resolveAction() (see STRUGGLE_MOVE_ID's doc comment),
+  // not just a skipped/no-op turn.
+  if (usableCount == 0) return BATTLE_MOVE_SLOTS;
 
   uint32_t wildcardRoll = 0;
   const bool considerAnyUsable = rollBelow(random, 4U, wildcardRoll) && wildcardRoll == 0;

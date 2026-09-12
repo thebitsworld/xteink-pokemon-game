@@ -312,6 +312,15 @@ const char* statKindName(const pokemon::StatKind kind) {
   return "?";
 }
 
+// A forced Struggle turn (moveSlot >= pokemon::BATTLE_MOVE_SLOTS - see
+// pokemon::STRUGGLE_MOVE_ID's doc comment) never touched a real slot in
+// `actor.moves`, so indexing that array directly would read out of bounds;
+// resolve to the real Struggle move id instead in that case.
+uint8_t resolvedMoveId(const pokemon::BattleCombatant& actor, const pokemon::BattleActionResult& action) {
+  if (action.moveSlot >= pokemon::BATTLE_MOVE_SLOTS) return pokemon::STRUGGLE_MOVE_ID;
+  return actor.moves[action.moveSlot].moveId;
+}
+
 // Builds one side's battle-log line for the turn just resolved. Status-only
 // events (couldn't move, confusion self-hit, cured, status damage, fainted)
 // skip the "used MOVE!" framing since no move was actually executed.
@@ -344,13 +353,14 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
     default:
       break;
   }
-  const pokemon::MoveData* move = pokemon::moveData(actor.moves[action.moveSlot].moveId);
+  const uint8_t moveId = resolvedMoveId(actor, action);
+  const pokemon::MoveData* move = pokemon::moveData(moveId);
   char used[64];
   snprintf(used, sizeof(used), tr(STR_POKEMON_USED_MOVE), name, move == nullptr ? "?" : move->name);
   char statSuffix[64] = "";
   if (action.event == pokemon::BattleLogEvent::StatRaised || action.event == pokemon::BattleLogEvent::StatLowered ||
       action.event == pokemon::BattleLogEvent::StatChangeFailed) {
-    const pokemon::StatChangeEffect* effect = pokemon::statChangeForMove(actor.moves[action.moveSlot].moveId);
+    const pokemon::StatChangeEffect* effect = pokemon::statChangeForMove(moveId);
     const char* targetName = effect != nullptr && effect->targetsSelf ? name : speciesName(other.speciesId);
     const char* statName = statKindName(effect != nullptr ? effect->stat : pokemon::StatKind::Attack);
     const char* templateStr = action.event == pokemon::BattleLogEvent::StatRaised    ? tr(STR_POKEMON_STAT_ROSE)
@@ -369,17 +379,24 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                            ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
                        : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
                                                                                   : "";
-  // A crit is orthogonal to the effectiveness suffix above (a hit can be
-  // both critical and super-effective at once), so it's appended as its own
-  // clause rather than folded into the ternary chain.
-  if (suffix[0] == '\0' && !action.critical) {
-    snprintf(buffer, size, "%s", used);
-  } else if (!action.critical) {
-    snprintf(buffer, size, "%s %s", used, suffix);
-  } else if (suffix[0] == '\0') {
-    snprintf(buffer, size, "%s %s", used, tr(STR_POKEMON_CRITICAL_HIT));
-  } else {
-    snprintf(buffer, size, "%s %s %s", used, tr(STR_POKEMON_CRITICAL_HIT), suffix);
+  // Hit count, crit, the effectiveness suffix, and recoil are all
+  // independent of one another (a multi-hit move can also crit and also
+  // recoil, on top of its own effectiveness suffix), so they're joined in a
+  // fixed order rather than folded into one ternary chain.
+  char hitCountClause[32] = "";
+  if (action.hitCount > 0) {
+    snprintf(hitCountClause, sizeof(hitCountClause), tr(STR_POKEMON_HIT_TIMES), action.hitCount);
+  }
+  const char* clauses[4] = {hitCountClause[0] != '\0' ? hitCountClause : nullptr,
+                            action.critical ? tr(STR_POKEMON_CRITICAL_HIT) : nullptr,
+                            suffix[0] != '\0' ? suffix : nullptr,
+                            action.recoilApplied ? tr(STR_POKEMON_RECOIL) : nullptr};
+  snprintf(buffer, size, "%s", used);
+  for (const char* clause : clauses) {
+    if (clause == nullptr) continue;
+    const size_t usedLen = strlen(buffer);
+    if (usedLen >= size) break;
+    snprintf(buffer + usedLen, size - usedLen, " %s", clause);
   }
 }
 
@@ -632,6 +649,39 @@ int PokemonActivity::battlePlayerMoveCount() const {
   int count = 0;
   while (count < static_cast<int>(pokemon::BATTLE_MOVE_SLOTS) && battlePlayer_.moves[count].moveId != 0) ++count;
   return count;
+}
+
+bool PokemonActivity::battlePlayerHasAnyUsablePp() const {
+  const int count = battlePlayerMoveCount();
+  for (int i = 0; i < count; ++i) {
+    if (battlePlayer_.moves[i].currentPp > 0) return true;
+  }
+  return false;
+}
+
+// Shared by both a normal move pick (Screen::BattleMoves) and a forced
+// Struggle turn (Screen::Battle, when every learned move is out of PP) -
+// `moveSlot` is pokemon::BATTLE_MOVE_SLOTS itself in the Struggle case,
+// the same sentinel chooseOpponentMoveSlot() already used for "opponent has
+// no usable move either" before Struggle existed as a real move.
+void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
+  const pokemon::BattleTurnResult result = service_.resolveBattleTurn(battlePlayer_, battleOpponent_, moveSlot);
+  savePlayerBattleEntry();
+  buildBattleLog(result);
+  if (result.outcome == pokemon::BattleOutcome::PlayerWon) {
+    finishBattleAfterWildFainted();
+  } else if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
+    // Only truly a loss once nothing left in the party can fight - otherwise
+    // force a switch instead of ending the battle (Stage 13).
+    if (usablePartySlotCount() > 0) {
+      forcedBattleSwitch_ = true;
+      setScreen(Screen::BattleSwitch);
+    } else {
+      finishBattleAfterPlayerFainted();
+    }
+  } else {
+    setScreen(Screen::Battle);
+  }
 }
 
 int PokemonActivity::firstUsablePartySlot() const {
@@ -1290,6 +1340,12 @@ void PokemonActivity::activate() {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
           return;
         }
+        // Real Gen 1 behavior: once every learned move is out of PP, FIGHT
+        // doesn't even offer a menu - it's forced straight into Struggle.
+        if (!battlePlayerHasAnyUsablePp()) {
+          resolveBattlePlayerMoveTurn(pokemon::BATTLE_MOVE_SLOTS);
+          return;
+        }
         setScreen(Screen::BattleMoves);
         return;
       }
@@ -1330,24 +1386,7 @@ void PokemonActivity::activate() {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleMoves);
         return;
       }
-      const pokemon::BattleTurnResult result =
-          service_.resolveBattleTurn(battlePlayer_, battleOpponent_, static_cast<uint8_t>(selected_));
-      savePlayerBattleEntry();
-      buildBattleLog(result);
-      if (result.outcome == pokemon::BattleOutcome::PlayerWon) {
-        finishBattleAfterWildFainted();
-      } else if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
-        // Only truly a loss once nothing left in the party can fight -
-        // otherwise force a switch instead of ending the battle (Stage 13).
-        if (usablePartySlotCount() > 0) {
-          forcedBattleSwitch_ = true;
-          setScreen(Screen::BattleSwitch);
-        } else {
-          finishBattleAfterPlayerFainted();
-        }
-      } else {
-        setScreen(Screen::Battle);
-      }
+      resolveBattlePlayerMoveTurn(static_cast<uint8_t>(selected_));
       return;
     }
     case Screen::BattleSwitch: {
