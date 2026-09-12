@@ -510,3 +510,58 @@ reasoning for the new algorithm, since they encode exact numeric outcomes; the l
 fix lives entirely in `PokemonActivity.cpp`, which this project's native suite doesn't cover -
 verified by a clean `pio run -e pokemon-x3` build only, same as every other UI-level change).
 Full native suite 496/496, clean `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.
+
+## Round 6: proactive trainer AI (heal/switch) - the last open item (`v0.17.0`)
+
+Round 4 assessed this as the highest-risk/highest-cost item on the whole list and deliberately
+held it back rather than rush it; the user, after seeing that assessment, explicitly chose the
+full version anyway (heal *and* switch) over a smaller heal-only scope. Implemented carefully,
+scoped to minimize risk to the already-stable gym-progression system:
+
+- **New engine primitive, `stepPlayerOnlyTurn()`** (`PokemonBattle.h`/`.cpp`, `PokemonService::
+  resolvePlayerOnlyTurn()`): the mirror image of the existing `stepOpponentOnlyTurn()` - only
+  the player's own chosen move resolves, since the opponent "spent its turn" on a heal or
+  switch instead of attacking. A clean addition alongside the existing function rather than a
+  change to it, so every existing turn-resolution path is untouched.
+- **Healing**: a new `opponentHealChargesRemaining_` counter (reset to a flat 2 per gym
+  challenge in `enterGymBattle()`) - a deliberately simplified stand-in for a real trainer's
+  actual item stock, which this project has no per-trainer data for at all. Triggers at ≤25%
+  HP, fully restoring HP and curing status (a simplified "Full Restore").
+- **Switching - the genuinely risky part, handled without changing what `gymChallengeTeamProgress_`
+  means.** That field has always been a strict "how many of the trainer's team are
+  defeated/index of who's currently out" counter, incremented by exactly 1 whenever the active
+  member faints (`advanceGymOpponentOrFinish()`) - if a voluntary (non-faint) switch had
+  incremented it the same way, the abandoned-but-still-alive Pokemon would have been silently
+  treated as defeated, e.g. letting a trainer's roster shrink for free, or ending the gym
+  battle early without the player ever needing to beat everyone. Solved with a new indirection
+  layer instead: `gymTeamOrder_` (a `std::array<uint8_t, MAX_GYM_TEAM_SIZE>`, identity-
+  initialized every gym start), so "who's at position N" becomes `team[gymTeamOrder_[N]]`
+  rather than `team[N]` directly. A voluntary switch just swaps two entries within the still-
+  to-fight suffix (positions > `gymChallengeTeamProgress_`) - `gymChallengeTeamProgress_`
+  itself is never touched by switching, only by an actual faint, so every existing "how many
+  defeated," HUD dot-rendering, and last-slot check keeps working unchanged (the HUD dots are
+  already purely position/count-based, not species-specific, so they needed no change at all).
+  Switching is deliberately disabled for the Champion specifically, since
+  `advanceGymOpponentOrFinish()`'s hardcoded final-slot logic (`championFinalSlotFor()`) keys
+  off a specific *original* team index always landing in the last position - reordering could
+  break that. A documented simplification: the Pokemon switched OUT is simply re-slotted into
+  the not-yet-fought suffix, so if it's ever sent back out later it gets a fresh full-HP start
+  rather than remembering whatever damage/status it had when benched - no side-storage exists
+  for a benched-but-alive opponent's state, and adding one was judged not worth the extra risk.
+- **The matchup heuristic**: `worstCasePlayerEffectivenessAgainst()` reuses the same
+  "peek at the opponent's real type" simplification `chooseOpponentMoveSlot()`'s own move-
+  choice AI already relies on (not a new kind of omniscience). Switches only when the current
+  matchup is genuinely bad (a player type is super effective, ≥200%) AND it's actually hurting
+  (≤50% HP) AND a not-yet-fought reserve resists that type meaningfully better (≤100%) -
+  conservative on purpose, so the AI doesn't feel erratic or switch on marginal calls.
+- Wired into `resolveBattlePlayerMoveTurn()`: checked once at the top of the function, before
+  either of the two possible engine calls; the rest of that function's outcome-handling tail
+  (win/loss/forced-switch checks) is fully shared and untouched, since it already only
+  branches on `result.outcome`/`result.opponent.event`/`result.player.event`, all of which stay
+  meaningful whether the turn came from `stepBattle()` or the new `stepPlayerOnlyTurn()`.
+
+4 new tests in `PokemonBattleTest.cpp` mirroring `stepOpponentOnlyTurn()`'s own existing test
+set for the new `stepPlayerOnlyTurn()` primitive (the trainer-AI decision logic itself lives
+in `PokemonActivity.cpp`, uncovered by the native suite - verified by clean `pio run -e
+pokemon-x3`/`pokemon-simulator-X3` builds only, same as every other UI-level change). Full
+native suite 496/496.
