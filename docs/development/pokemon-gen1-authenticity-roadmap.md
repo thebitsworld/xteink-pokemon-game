@@ -233,3 +233,23 @@ Dire Hit), drain moves, and Explosion/Self-Destruct's faint+halve-Defense quirk 
 follow-ups, and trapping/two-turn/Substitute/Disable/Transform/self-heal/screen moves as
 larger ones - not tracked in this doc since they're beyond this roadmap's original battle-
 formula scope, but worth knowing this fix came from the same review.
+
+The stat-boost items shipped separately as `v0.12.0`. The three remaining cheap follow-ups
+from that same review all shipped together as `v0.12.1`: **flinch** (Stomp/Rolling Kick/
+Headbutt/Bite/Bone Club/Hyper Fang - a hand-authored `FLINCH_TABLE` since PokeAPI's move
+data doesn't carry a flinch-chance field at all, unlike the 6 real status ailments; a new
+transient `BattleCombatant::flinched` flag, checked and cleared at the very top of
+`resolveAction()` before even a status-prevention check, since flinch takes priority and
+costs no PP), **drain moves** (Absorb/Mega Drain/Leech Life/Dream Eater - heal the attacker
+half the damage dealt, minimum 1, capped at max HP; new `BattleActionResult::drainApplied`),
+and **Explosion/Self-Destruct's two real Gen 1 quirks** (the target's Defense is halved for
+that one hit - `computeDamage()` gained a `moveId` parameter just for this check; the user
+faints unconditionally from using the move, even on a miss, applied right after PP is spent
+and before the accuracy roll). The self-KO surfaced one real pre-existing edge case in
+`stepBattle()`: its early-return branches after each side's action only ever checked the
+*other* side's HP, so a self-destructing attacker that also happened to KO its target in the
+same hit would have been misreported as a plain win instead of the simultaneous-KO result
+`finishTurn()` already handles correctly for the equivalent end-of-turn case - fixed by
+checking both sides' HP in the right order in all 4 of those branches. 6 new tests in
+`PokemonBattleTest.cpp` (2 for flinch, 1 for drain caps/healing, 3 for the self-destruct
+quirks including the simultaneous-KO fix).
