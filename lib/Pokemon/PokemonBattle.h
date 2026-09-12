@@ -144,6 +144,20 @@ struct BattleCombatant {
   // both, matching the real games.
   bool reflectActive = false;
   bool lightScreenActive = false;
+  // Disable: prevents choosing the move at this slot for a few turns.
+  // disableTurnsRemaining == 0 means nothing is disabled - disabledMoveSlot
+  // is only meaningful while it's positive. Counted down once per turn in
+  // finishTurn(), alongside the poison/burn/Leech Seed ticks.
+  uint8_t disabledMoveSlot = 0;
+  uint8_t disableTurnsRemaining = 0;
+  // Substitute: a decoy holding this much HP, created for 1/4 of the user's
+  // own max HP (minimum 1). While it's up (> 0), incoming damage comes out
+  // of this instead of currentHp (a hit that would deal more than the
+  // remaining amount just breaks it outright, no overflow onto the real
+  // Pokemon), and status/stat-lowering/Leech Seed/flinch from the opponent
+  // are blocked entirely - see resolveAction()'s various substituteHp
+  // checks. 0 means no substitute is up.
+  uint16_t substituteHp = 0;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -187,6 +201,9 @@ enum class BattleLogEvent : uint8_t {
   ChargingMove,      // a two-turn move's charge turn (Fly, Dig, Solar Beam, ...) or Bide bracing - no effect yet
   Seeded,            // Leech Seed took hold
   BuffApplied,       // Reflect/Light Screen/Mist/Focus Energy went up
+  ForcedSwitch,      // Whirlwind/Roar connected - see PokemonActivity.cpp for what that actually does
+  MoveDisabled,      // Disable took hold on one of the target's moves
+  SubstituteUp,      // Substitute was created
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with

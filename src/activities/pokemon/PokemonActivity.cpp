@@ -431,6 +431,9 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                        : action.event == pokemon::BattleLogEvent::ChargingMove    ? tr(STR_POKEMON_CHARGING_MOVE)
                        : action.event == pokemon::BattleLogEvent::Seeded         ? tr(STR_POKEMON_SEEDED)
                        : action.event == pokemon::BattleLogEvent::BuffApplied    ? tr(STR_POKEMON_BUFF_APPLIED)
+                       : action.event == pokemon::BattleLogEvent::ForcedSwitch  ? tr(STR_POKEMON_FORCED_SWITCH)
+                       : action.event == pokemon::BattleLogEvent::MoveDisabled ? tr(STR_POKEMON_MOVE_DISABLED)
+                       : action.event == pokemon::BattleLogEvent::SubstituteUp ? tr(STR_POKEMON_SUBSTITUTE_UP)
                                                                                   : "";
   // Hit count, crit, the effectiveness suffix, and recoil are all
   // independent of one another (a multi-hit move can also crit and also
@@ -718,7 +721,9 @@ int PokemonActivity::battlePlayerMoveCount() const {
 bool PokemonActivity::battlePlayerHasAnyUsablePp() const {
   const int count = battlePlayerMoveCount();
   for (int i = 0; i < count; ++i) {
-    if (battlePlayer_.moves[i].currentPp > 0) return true;
+    if (battlePlayer_.moves[i].currentPp == 0) continue;
+    if (battlePlayer_.disableTurnsRemaining > 0 && battlePlayer_.disabledMoveSlot == i) continue;
+    return true;
   }
   return false;
 }
@@ -742,6 +747,28 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
       setScreen(Screen::BattleSwitch);
     } else {
       finishBattleAfterPlayerFainted();
+    }
+  } else if (result.opponent.event == pokemon::BattleLogEvent::ForcedSwitch && usablePartySlotCount() > 0) {
+    // The opponent's Whirlwind/Roar connected - force the player to swap to
+    // a different party member, the same flow as a faint-forced switch but
+    // without the active Pokemon actually fainting.
+    forcedBattleSwitch_ = true;
+    setScreen(Screen::BattleSwitch);
+  } else if (result.player.event == pokemon::BattleLogEvent::ForcedSwitch) {
+    // The player's own Whirlwind/Roar connected.
+    if (gymChallengeIndex_ != 0) {
+      const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+      if (gymChallengeTeamProgress_ + 1 < team.size()) {
+        advanceGymOpponentOrFinish();
+      } else {
+        // Nothing left to switch the trainer's last Pokemon into - matches
+        // the real games, where Whirlwind/Roar simply has no effect there.
+        setScreen(Screen::Battle);
+      }
+    } else {
+      // Against a wild Pokemon, forcing it out just ends the encounter -
+      // the same outcome (and screen) as running away.
+      resolveBattleAsPass();
     }
   } else {
     setScreen(Screen::Battle);
@@ -1543,6 +1570,10 @@ void PokemonActivity::activate() {
     case Screen::BattleMoves: {
       if (selected_ < 0 || selected_ >= battlePlayerMoveCount()) return;
       if (battlePlayer_.moves[selected_].currentPp == 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleMoves);
+        return;
+      }
+      if (battlePlayer_.disableTurnsRemaining > 0 && battlePlayer_.disabledMoveSlot == selected_) {
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleMoves);
         return;
       }

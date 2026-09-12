@@ -1145,6 +1145,88 @@ void restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns() {
   CHECK(bulbasaur.statusTurns == 2);
 }
 
+void whirlwindAndRoarAlwaysReportForcedSwitchOnUse() {
+  // The engine can't know whether a switch is actually possible (a roster
+  // concern only PokemonActivity.cpp can answer) - it just reports the
+  // event unconditionally on use, since these moves have accuracy 0
+  // ("never misses" in this dataset).
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {18});  // Whirlwind
+  BattleCombatant charmander = makeCombatant(4, 5, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(bulbasaur, charmander, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::ForcedSwitch);
+}
+
+void disableLocksOutARandomMoveWithPpAndFailsIfNoneQualify() {
+  BattleCombatant charmander = makeCombatant(4, 20, {50});    // Disable
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33, 45});  // Tackle, Growl
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveDisabled);
+  CHECK(bulbasaur.disableTurnsRemaining > 0);
+  CHECK(bulbasaur.disabledMoveSlot < 2);
+
+  BattleCombatant charmander2 = makeCombatant(4, 20, {50});
+  BattleCombatant bulbasaurNoPp = makeCombatant(1, 20, {33});
+  bulbasaurNoPp.moves[0].currentPp = 0;
+  const pokemon::BattleTurnResult failResult = pokemon::stepBattle(charmander2, bulbasaurNoPp, 0, ZERO_RANDOM);
+  CHECK(failResult.player.event == BattleLogEvent::MoveNoEffect);
+}
+
+void disableCountsDownAndEventuallyReleases() {
+  BattleCombatant charmander = makeCombatant(4, 20, {50, 45});  // Disable, Growl
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33, 45});   // Tackle, Growl
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);   // Disable
+  CHECK(bulbasaur.disableTurnsRemaining > 0);
+  // Duration is 1-3 turns (simplified from the real 1-7, same range as
+  // Sleep) - 3 more filler turns guarantees it reaches 0 regardless of the
+  // actual roll.
+  for (int i = 0; i < 3; ++i) {
+    pokemon::stepBattle(charmander, bulbasaur, 1, ZERO_RANDOM);  // Growl - harmless filler
+  }
+  CHECK(bulbasaur.disableTurnsRemaining == 0);
+}
+
+void disabledMoveIsSkippedByTheAiFallingBackToStruggle() {
+  // Bulbasaur (opponent) has only one move, currently disabled - the AI
+  // must fall back to a forced Struggle turn instead of picking it anyway.
+  // Struggle is the only move here that recoils, so that's what's checked.
+  BattleCombatant charmander = makeCombatant(4, 20, {45});  // Growl, harmless
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});    // Tackle
+  bulbasaur.disabledMoveSlot = 0;
+  bulbasaur.disableTurnsRemaining = 2;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(result.opponent.recoilApplied);
+}
+
+void substituteCostsAQuarterMaxHpAndAbsorbsDamageUntilItBreaks() {
+  // stepOpponentOnlyTurn() so only Bulbasaur's own Substitute use happens -
+  // a normal stepBattle() call would let Charmander's own counter-Tackle
+  // land on the freshly-made substitute within the same turn, muddying the
+  // "exactly 1/4 max HP" check below.
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {164});  // Substitute
+  const uint16_t costExpected = std::max<uint16_t>(1, static_cast<uint16_t>(bulbasaur.maxHp / 4U));
+  BattleCombatant charmander = makeCombatant(4, 5, {33});
+  pokemon::stepOpponentOnlyTurn(charmander, bulbasaur, ZERO_RANDOM);
+  CHECK(bulbasaur.substituteHp == costExpected);
+  CHECK(bulbasaur.currentHp == bulbasaur.maxHp - costExpected);
+}
+
+void substituteBlocksAnOpponentsStatLoweringMove() {
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {33});
+  bulbasaur.substituteHp = 10;
+  BattleCombatant charmander = makeCombatant(4, 5, {45});  // Growl - opponent-debuff
+  pokemon::stepOpponentOnlyTurn(bulbasaur, charmander, ZERO_RANDOM);
+  CHECK(bulbasaur.attackStage == 0);
+}
+
+void substituteFailsWithoutEnoughHpToSpareOrIfAlreadyUp() {
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {164});
+  bulbasaur.currentHp = 1;  // not enough to spare 1/4 max HP
+  BattleCombatant dummy = makeCombatant(4, 5, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(bulbasaur, dummy, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(bulbasaur.substituteHp == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1222,5 +1304,12 @@ int main() {
   mistAndFocusEnergyReuseGuardSpecAndDireHit();
   recoverHealsHalfMaxHpAndFailsAtFullHealth();
   restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns();
+  whirlwindAndRoarAlwaysReportForcedSwitchOnUse();
+  disableLocksOutARandomMoveWithPpAndFailsIfNoneQualify();
+  disableCountsDownAndEventuallyReleases();
+  disabledMoveIsSkippedByTheAiFallingBackToStruggle();
+  substituteCostsAQuarterMaxHpAndAbsorbsDamageUntilItBreaks();
+  substituteBlocksAnOpponentsStatLoweringMove();
+  substituteFailsWithoutEnoughHpToSpareOrIfAlreadyUp();
   return failures == 0 ? 0 : 1;
 }

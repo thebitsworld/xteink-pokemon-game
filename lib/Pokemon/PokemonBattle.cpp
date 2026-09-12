@@ -309,6 +309,29 @@ constexpr uint8_t FOCUS_ENERGY_MOVE_ID = 116;
 constexpr uint8_t RECOVER_MOVE_ID = 105;
 constexpr uint8_t SOFT_BOILED_MOVE_ID = 135;
 constexpr uint8_t REST_MOVE_ID = 156;
+// Whirlwind/Roar: force a switch. The engine has no idea whether the target
+// actually has anywhere to switch TO (a wild Pokemon fleeing, a trainer's
+// last team member, the player's own remaining party) - that's a roster
+// concern PokemonActivity.cpp alone can answer - so this just reports
+// BattleLogEvent::ForcedSwitch on a successful hit and leaves what actually
+// happens to the caller.
+constexpr uint8_t WHIRLWIND_MOVE_ID = 18;
+constexpr uint8_t ROAR_MOVE_ID = 46;
+constexpr uint8_t DISABLE_MOVE_ID = 50;
+constexpr uint8_t SUBSTITUTE_MOVE_ID = 164;
+
+// Applies damage to whichever of `defender`'s two HP pools is currently
+// active - a Substitute (if one is up) absorbs it instead of the real
+// Pokemon, and a hit that would deal more than the Substitute's remaining
+// HP just breaks it outright rather than overflowing onto currentHp,
+// matching the real games.
+void applyDamageRespectingSubstitute(BattleCombatant& defender, const uint16_t damage) {
+  if (defender.substituteHp > 0) {
+    defender.substituteHp = defender.substituteHp > damage ? static_cast<uint16_t>(defender.substituteHp - damage) : 0;
+    return;
+  }
+  defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+}
 
 int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
   switch (stat) {
@@ -557,7 +580,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       return result;
     }
     const uint16_t bideDamage = clampToUint16(static_cast<uint32_t>(attacker.bideDamageStored) * 2U);
-    defender.currentHp = defender.currentHp > bideDamage ? static_cast<uint16_t>(defender.currentHp - bideDamage) : 0;
+    applyDamageRespectingSubstitute(defender, bideDamage);
     result.event = bideDamage > 0 ? BattleLogEvent::MoveHit : BattleLogEvent::MoveNoEffect;
     return result;
   }
@@ -693,8 +716,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       }
       if (noEffect && result.event != BattleLogEvent::MoveFailed) result.event = BattleLogEvent::MoveNoEffect;
       const uint16_t clampedDamage = clampToUint16(damage);
-      defender.currentHp = defender.currentHp > clampedDamage ? static_cast<uint16_t>(defender.currentHp - clampedDamage)
-                                                               : 0;
+      applyDamageRespectingSubstitute(defender, clampedDamage);
       if (move->category == MoveCategory::Physical && clampedDamage > 0) {
         defender.lastPhysicalDamageTaken = clampedDamage;
       }
@@ -721,7 +743,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
             attackerStats != nullptr &&
             rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId) || attacker.direHitActive, random);
         const uint16_t damage = computeDamage(attacker, defender, effectiveMove, moveId, random, critical);
-        defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+        applyDamageRespectingSubstitute(defender, damage);
         totalDamage += damage;
         // Bide (move 117) accumulates whatever damage its user takes while
         // bracing - only from this generic power-based path, not the
@@ -770,7 +792,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       // is still standing (a fainted target has nothing left to flinch).
       if (const FlinchTableEntry* flinch = flinchEntryForMove(moveId);
           flinch != nullptr && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0 &&
-          rollPercentChance(random, flinch->chancePercent)) {
+          defender.substituteHp == 0 && rollPercentChance(random, flinch->chancePercent)) {
         defender.flinched = true;
       }
 
@@ -801,7 +823,10 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     // move from affecting whoever activated it - the same "no change, no
     // further effect" outcome as already being at the -6 floor, so this
     // reuses StatChangeFailed rather than adding a dedicated message.
-    if (!statEffect->targetsSelf && statEffect->stages < 0 && target.guardSpecActive) {
+    if (!statEffect->targetsSelf && statEffect->stages < 0 && (target.guardSpecActive || target.substituteHp > 0)) {
+      // A Substitute blocks an opponent's stat-lowering move the same way
+      // Guard Spec. does - it's the decoy that would be affected, not the
+      // real Pokemon, so nothing happens.
       result.event = BattleLogEvent::StatChangeFailed;
     } else {
       int8_t& stage = statStageRef(target, statEffect->stat);
@@ -855,11 +880,50 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
     const bool isGrassType = defenderSpecies != nullptr && (defenderSpecies->primaryType == PokemonType::Grass ||
                                                             defenderSpecies->secondaryType == PokemonType::Grass);
-    if (isGrassType || defender.seeded) {
+    if (isGrassType || defender.seeded || defender.substituteHp > 0) {
       result.event = BattleLogEvent::MoveNoEffect;
     } else {
       defender.seeded = true;
       result.event = BattleLogEvent::Seeded;
+    }
+  } else if (moveId == WHIRLWIND_MOVE_ID || moveId == ROAR_MOVE_ID) {
+    result.event = BattleLogEvent::ForcedSwitch;
+  } else if (moveId == DISABLE_MOVE_ID) {
+    // Picks a random one of the target's moves that still has PP and isn't
+    // already disabled - fails with no effect if none qualify.
+    uint8_t candidates[BATTLE_MOVE_SLOTS];
+    uint8_t candidateCount = 0;
+    for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+      if (defender.moves[index].moveId == 0 || defender.moves[index].currentPp == 0) continue;
+      if (defender.disableTurnsRemaining > 0 && defender.disabledMoveSlot == index) continue;
+      candidates[candidateCount++] = index;
+    }
+    if (candidateCount == 0) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      uint32_t pick = 0;
+      if (!rollBelow(random, candidateCount, pick)) pick = 0;
+      defender.disabledMoveSlot = candidates[pick];
+      // Simplified from the real 1-7 turns to 1-3, the same range this
+      // engine already uses for Sleep.
+      // +1: finishTurn() unconditionally counts every disable down once per
+      // turn (including this one, since Disable itself doesn't get a
+      // special exemption there), so this keeps the roll's real 1-3 meaning
+      // "turns disabled AFTER this one" rather than losing a turn to the
+      // immediate same-turn decrement.
+      defender.disableTurnsRemaining = static_cast<uint8_t>(rollStatusDuration(random, 1, 3) + 1U);
+      result.event = BattleLogEvent::MoveDisabled;
+    }
+  } else if (moveId == SUBSTITUTE_MOVE_ID) {
+    // Costs 1/4 of the user's own max HP (minimum 1) - fails if one is
+    // already up, or the user doesn't have enough HP left to spare.
+    const uint16_t cost = std::max<uint16_t>(1, static_cast<uint16_t>(attacker.maxHp / 4U));
+    if (attacker.substituteHp > 0 || attacker.currentHp <= cost) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      attacker.currentHp = static_cast<uint16_t>(attacker.currentHp - cost);
+      attacker.substituteHp = cost;
+      result.event = BattleLogEvent::SubstituteUp;
     }
   }
 
@@ -869,8 +933,8 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   // Thunder Shock's 10% paralysis). Treat 0 as "always" for Status moves.
   const uint8_t effectiveAilmentChance =
       (move->category == MoveCategory::Status && move->ailmentChance == 0) ? 100 : move->ailmentChance;
-  if (defender.status == Ailment::None && defender.currentHp > 0 && move->ailment != Ailment::None &&
-      rollPercentChance(random, effectiveAilmentChance)) {
+  if (defender.status == Ailment::None && defender.currentHp > 0 && defender.substituteHp == 0 &&
+      move->ailment != Ailment::None && rollPercentChance(random, effectiveAilmentChance)) {
     defender.status = move->ailment;
     if (move->ailment == Ailment::Sleep) {
       defender.statusTurns = rollStatusDuration(random, 1, 3);
@@ -915,6 +979,7 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
   for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
     const BattleMoveSlot& slot = opponent.moves[index];
     if (slot.moveId == 0 || slot.currentPp == 0) continue;
+    if (opponent.disableTurnsRemaining > 0 && opponent.disabledMoveSlot == index) continue;
     usable[usableCount++] = index;
     const MoveData* move = moveData(slot.moveId);
     if (move == nullptr || playerSpecies == nullptr) continue;
@@ -957,6 +1022,9 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
 // the single opponent action, for the skip-player-turn case) already ran
 // and any immediate faint from those was already handled by the caller.
 void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnResult& result) {
+  if (player.disableTurnsRemaining > 0) --player.disableTurnsRemaining;
+  if (opponent.disableTurnsRemaining > 0) --opponent.disableTurnsRemaining;
+
   BattleLogEvent playerDotEvent = BattleLogEvent::None;
   BattleLogEvent opponentDotEvent = BattleLogEvent::None;
   applyEndOfTurnStatusDamage(player, playerDotEvent);
