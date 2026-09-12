@@ -67,15 +67,19 @@ void statFormulasScaleWithLevel() {
 
 void damagingMoveReducesDefenderHpAndReportsSuperEffective() {
   // Squirtle (Water) uses Water Gun on Charmander (Fire): 200% effectiveness.
-  BattleCombatant squirtle = makeCombatant(7, 10, {55});
-  BattleCombatant charmander = makeCombatant(4, 10, {33});
+  // Give Squirtle a much higher level so it's guaranteed to act first
+  // regardless of base Speed (same technique the next test uses) - ZERO_RANDOM
+  // now also guarantees a critical hit on every attack (see rollCriticalHit:
+  // a roll of 0 is always below any positive threshold), so without this,
+  // Charmander's own move could go first and faint the low-level Squirtle
+  // before Water Gun ever gets a turn.
+  BattleCombatant squirtle = makeCombatant(7, 30, {55});
+  BattleCombatant charmander = makeCombatant(4, 5, {33});
   const uint16_t hpBefore = charmander.currentHp;
 
   const pokemon::BattleTurnResult result = pokemon::stepBattle(squirtle, charmander, 0, ZERO_RANDOM);
-  // Squirtle's move slot was passed as the "player" side's action; whichever
-  // side is faster acts first, so check whichever side actually attacked.
-  CHECK(result.outcome == BattleOutcome::InProgress);
-  CHECK(charmander.currentHp < hpBefore || squirtle.currentHp < squirtle.maxHp);
+  CHECK(result.player.event == BattleLogEvent::MoveSuperEffective);
+  CHECK(charmander.currentHp < hpBefore);
 }
 
 void fireMoveIsNotVeryEffectiveAgainstWaterAndCanBurn() {
@@ -238,6 +242,45 @@ void pokeBallCatchOddsScaleWithHpAndCaptureRate() {
   CHECK(pokemon::attemptCatch(wounded, BallKind::Poke, midRandom));
 }
 
+void criticalHitExactlyDoublesDamageForAHighCritRatioMove() {
+  // Bulbasaur (base Speed 45) uses Slash (move 163, a real Gen 1 high-crit
+  // move: threshold min(45*8,511)=360) on Charmander. A fixedRoll context of
+  // 15 saturates the 16-wide damage-variance roll to its max (100%) *and*
+  // lands under the 360 crit threshold (guaranteed crit); a context of 400
+  // still saturates variance to 100% (same upperExclusive-1 either way) but
+  // clears the crit threshold (guaranteed no crit) - isolating the crit
+  // multiplier as the only difference between the two calls.
+  uint32_t critContext = 15;
+  uint32_t noCritContext = 400;
+  const RandomSource critRandom{&critContext, fixedRoll};
+  const RandomSource noCritRandom{&noCritContext, fixedRoll};
+
+  BattleCombatant attackerCrit = makeCombatant(1, 20, {163});
+  BattleCombatant defenderCrit = makeCombatant(4, 20, {33});
+  BattleCombatant attackerNoCrit = makeCombatant(1, 20, {163});
+  BattleCombatant defenderNoCrit = makeCombatant(4, 20, {33});
+
+  const pokemon::BattleTurnResult critResult = pokemon::stepBattle(attackerCrit, defenderCrit, 0, critRandom);
+  const pokemon::BattleTurnResult noCritResult = pokemon::stepBattle(attackerNoCrit, defenderNoCrit, 0, noCritRandom);
+
+  CHECK(critResult.player.critical);
+  CHECK(!noCritResult.player.critical);
+  const uint16_t critDamage = defenderCrit.maxHp - defenderCrit.currentHp;
+  const uint16_t noCritDamage = defenderNoCrit.maxHp - defenderNoCrit.currentHp;
+  CHECK(critDamage == noCritDamage * 2U);
+
+  // A move outside the high-crit list uses the plain baseSpeed/512 threshold
+  // (45 for Bulbasaur) rather than baseSpeed/64 (360) - a roll of 100 sits
+  // between the two, demonstrating the high-crit list genuinely lowers the
+  // bar rather than every move sharing one threshold.
+  uint32_t midContext = 100;
+  const RandomSource midRandom{&midContext, fixedRoll};
+  BattleCombatant tackleUser = makeCombatant(1, 20, {33});
+  BattleCombatant tackleTarget = makeCombatant(4, 20, {33});
+  const pokemon::BattleTurnResult tackleResult = pokemon::stepBattle(tackleUser, tackleTarget, 0, midRandom);
+  CHECK(!tackleResult.player.critical);  // 100 >= Tackle's threshold of 45
+}
+
 void battleVictoryXpScalesWithLevelAndTrainerBonus() {
   CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
   CHECK(pokemon::battleVictoryXp(25, false) == 100);
@@ -264,6 +307,7 @@ int main() {
   opponentOnlyTurnShortCircuitsWhenAlreadyFainted();
   masterBallAlwaysCatchesRegardlessOfRandomness();
   pokeBallCatchOddsScaleWithHpAndCaptureRate();
+  criticalHitExactlyDoublesDamageForAHighCritRatioMove();
   battleVictoryXpScalesWithLevelAndTrainerBonus();
   return failures == 0 ? 0 : 1;
 }

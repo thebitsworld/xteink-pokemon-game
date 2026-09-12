@@ -34,6 +34,27 @@ bool rollPercentChance(const RandomSource& random, const uint8_t chancePercent) 
 
 uint16_t clampToUint16(const uint32_t value) { return static_cast<uint16_t>(std::min<uint32_t>(value, UINT16_MAX)); }
 
+// The 4 real Gen 1 high-critical-hit-ratio moves (Karate Chop, Razor Leaf,
+// Crabhammer, Slash) - a fixed, well-known list rather than a CSV column,
+// same rationale as PokemonTypeChart.cpp being hand-written.
+bool isHighCritRatioMove(const uint8_t moveId) {
+  return moveId == 2 || moveId == 75 || moveId == 152 || moveId == 163;
+}
+
+// Gen 1's real crit formula: floor(baseSpeed/2)/256 normally, x8 for a
+// high-crit-ratio move - simplified here to baseSpeed/512 and baseSpeed/64
+// (equivalent for baseSpeed even, off by a rounding half-step otherwise,
+// which doesn't matter at this scale). Capped so no realistic base Speed
+// (max in Gen 1 is 140, Electrode) can push the threshold past the 512-wide
+// roll.
+bool rollCriticalHit(const uint8_t baseSpeed, const bool highCritRatio, const RandomSource& random) {
+  const uint32_t threshold =
+      std::min<uint32_t>(static_cast<uint32_t>(baseSpeed) * (highCritRatio ? 8U : 1U), 511U);
+  uint32_t roll = 0;
+  if (!rollBelow(random, 512U, roll)) return false;
+  return roll < threshold;
+}
+
 // Sleep/confusion durations: 1-3 turns average, kept short because a turn
 // here also costs a full e-ink refresh.
 uint8_t rollStatusDuration(const RandomSource& random, const uint8_t minTurns, const uint8_t maxTurns) {
@@ -102,7 +123,7 @@ void applyEndOfTurnStatusDamage(BattleCombatant& combatant, BattleLogEvent& even
 }
 
 uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& defender, const MoveData& move,
-                       const RandomSource& random) {
+                       const RandomSource& random, const bool critical) {
   const SpeciesData* attackerSpecies = speciesData(attacker.speciesId);
   const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
   const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
@@ -119,6 +140,12 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
   const uint16_t defenseStat = std::max<uint16_t>(1, battleWorkingStat(defenseBase, defender.level));
 
   uint32_t damage = ((2U * attacker.level / 5U + 2U) * move.power * attackStat) / (50U * defenseStat) + 2U;
+  // A crit effectively doubles Gen 1's level term in the formula above -
+  // mathematically equivalent to doubling the whole base result here, since
+  // level only ever appears as that one multiplicative factor. No IVs/EVs or
+  // stat stages are modeled yet, so there's no "ignore negative stages on
+  // crit" quirk to reproduce (see the Gen 1 authenticity roadmap).
+  if (critical) damage *= 2U;
 
   const bool stab = move.type == attackerSpecies->primaryType || move.type == attackerSpecies->secondaryType;
   if (stab) damage = damage * STAB_BONUS_PERCENT / 100U;
@@ -183,7 +210,10 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   result.event = BattleLogEvent::MoveHit;
 
   if (move->category != MoveCategory::Status) {
-    const uint16_t damage = computeDamage(attacker, defender, *move, random);
+    const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
+    const bool critical = attackerStats != nullptr &&
+                          rollCriticalHit(attackerStats->speed, isHighCritRatioMove(slot.moveId), random);
+    const uint16_t damage = computeDamage(attacker, defender, *move, random, critical);
     defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
     const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
     const uint16_t effectivenessPercent =
@@ -192,6 +222,9 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
             : typeEffectivenessPercent(move->type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
     result.event = effectivenessEvent(effectivenessPercent);
     if (damage == 0 && effectivenessPercent != 0) result.event = BattleLogEvent::MoveHit;
+    // Immune (0% effectiveness) hits never actually land, so there's nothing
+    // to have been "critical" about even if the roll succeeded.
+    result.critical = critical && effectivenessPercent != 0;
   }
 
   // PokeAPI's ailment_chance is 0 for a pure status move's guaranteed main
