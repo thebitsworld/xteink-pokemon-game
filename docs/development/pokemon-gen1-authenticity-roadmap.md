@@ -361,3 +361,59 @@ logic lives in `resolveAction()`'s own preamble, which a redirect bypasses entir
 
 9 new tests in `PokemonBattleTest.cpp`. This closes out the Gen 1 mechanics gaps audit - see
 the memory note for the final status.
+
+## Round 2: a fresh audit after the roadmap above was fully done (`v0.15.0`)
+
+With every item above shipped, a second audit was done specifically to look *beyond* battle
+move mechanics this time (catching, status damage fractions, EXP, the type chart, trainer AI)
+as well as re-checking move data for anything that still doesn't fit any existing hand-
+authored table. Three items were explicitly raised with the user for a design call before
+touching anything, since they're either already-deliberate design choices or make a move
+strictly worse for the player:
+
+- **The type chart stays the modern (non-buggy) chart** - the user chose not to reintroduce
+  the real Gen 1 Ghost-vs-Psychic bug (Ghost moves doing nothing to Psychic, rather than the
+  intended-but-never-real super effective). No change made.
+- **Focus Energy stays a real buff** - the user chose not to replicate Gen 1's actual bug
+  (which lowers crit chance instead of raising it). No change made.
+- **Wrap/Bind/Fire Spin/Clamp: the user chose to add the missing target-side immobilization**
+  (see below) - real Gen 1 traps BOTH sides at once, not just locking the attacker in as this
+  project already did.
+
+Everything else found was a clear, uncontroversial gap - fixed directly:
+
+- **Burn halves Attack**: `computeDamage()` now halves the attacker's raw (pre-stage)
+  Attack stat for a physical move while burned - the same treatment `stepBattle()` already
+  gives Paralysis's halved Speed. Applied before staging, so unlike a negative stat stage, a
+  critical hit does NOT bypass it (matches the real games; a burn's Attack penalty isn't a
+  stage at all).
+- **Dream Eater requires a sleeping target**: fails outright ("But it failed!", no accuracy
+  roll or damage) unless `defender.status == Ailment::Sleep` - previously it happened to
+  work (and drain HP) against any target, awake or not.
+- **Hyper Beam's recharge turn**: a new `BattleCombatant::mustRecharge` flag, set whenever
+  Hyper Beam lands a hit (a miss doesn't set it), checked first in `resolveAction()` - ahead
+  of even flinch/status - forcing a completely skipped turn next time, then clearing itself.
+- **Rage**: a new `BattleCombatant::enraged` flag, toggled true/false at the top of
+  `resolveGenericMoveEffect()` based on whether Rage is the move actually being used this
+  action (so choosing any other move cancels it, matching Gen 1 - no hard lock-in the way
+  Thrash below has). A new `raiseAttackIfEnraged()` helper, called from both damage-
+  application sites (`FIXED_DAMAGE_TABLE`'s branch and the generic per-hit loop), raises the
+  enraged combatant's own Attack stage by 1 every time it takes nonzero damage.
+- **Thrash/Petal Dance**: reuse the same `forcedMoveId`/`forcedTurnsRemaining` machinery the
+  two-turn-charge/trapping moves already have (`isThrashMove()`), locking the attacker into
+  repeating the move for 1-2 more turns (2-3 total) - unlike a trapping move, each repeat
+  still rolls accuracy normally, and the user becomes confused (Gen 1's real 2-4 turn range)
+  the instant the lock ends.
+- **Wrap/Bind/Fire Spin/Clamp now trap the target too**: a new
+  `BattleCombatant::trappedTurnsRemaining` field is set on the defender (`attacker
+  .forcedTurnsRemaining + 1`, the same off-by-one trick Disable's own duration already uses)
+  the moment the attacker's own lock starts; `resolveAction()` checks it first (right after
+  `mustRecharge`, ahead of flinch/status) and immobilizes that side entirely for the turn,
+  reporting a new `Trapped` event. Counted down once per turn in `finishTurn()`, alongside
+  `disableTurnsRemaining`. A documented simplification: the real games also block switching
+  while trapped, which this project's UI still allows (no PokemonActivity.cpp change was
+  needed for the move-selection side, since the engine-level check already overrides
+  whatever the player picks, the same way sleep/paralysis already work today).
+
+11 new tests in `PokemonBattleTest.cpp`. Full native suite 496/496, clean
+`pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.
