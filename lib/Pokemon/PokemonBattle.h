@@ -22,6 +22,12 @@ static_assert(BATTLE_MOVE_SLOTS == GYM_MOVE_SLOTS, "GymTeamMember::moves must ma
 // Struggle existed as a real forced action.
 constexpr uint8_t STRUGGLE_MOVE_ID = 165;
 
+// Bide's real Gen 1 move id - exposed publicly (unlike most of the hand-
+// authored move-id tables in PokemonBattle.cpp) because PokemonActivity.cpp
+// needs it too, to detect "the player is mid-Bide, FIGHT must skip straight
+// to repeating it" the same way it already does for a forced Struggle.
+constexpr uint8_t BIDE_MOVE_ID = 117;
+
 struct BattleMoveSlot {
   uint8_t moveId = 0;  // 0 = empty slot
   uint8_t currentPp = 0;
@@ -107,6 +113,37 @@ struct BattleCombatant {
   // lastPhysicalDamageTaken, and consumed (cleared) the moment it prevents
   // one action, whether or not that action ever runs.
   bool flinched = false;
+  // Two-turn charge moves (Fly/Dig/Solar Beam/Skull Bash/Sky Attack) and
+  // trapping moves (Wrap/Bind/Fire Spin/Clamp) share this: once started, the
+  // SAME move keeps resolving automatically on this combatant's following
+  // turn(s) without a fresh move being chosen - see resolveAction()'s
+  // handling and chooseOpponentMoveSlot()'s early check. 0 = no multi-turn
+  // move in progress. Never persisted - a fresh BattleCombatant always
+  // starts clear of this, matching every other transient field above.
+  uint8_t forcedMoveId = 0;
+  uint8_t forcedTurnsRemaining = 0;
+  // True only during a two-turn move's charge turn that grants it (Fly/Dig -
+  // Solar Beam/Skull Bash/Sky Attack don't) - simplified from the real
+  // semi-invulnerable turn to "every incoming move just misses" rather than
+  // modeling the specific moves (Swift, Earthquake while the target Dig's,
+  // ...) that are meant to bypass it.
+  bool invulnerable = false;
+  // Bide (move 117): stores the damage taken over the 2 turns it's braced
+  // for below, then releases double that back on the turn it runs out.
+  // bideTurnsRemaining == 0 means not bracing.
+  uint16_t bideDamageStored = 0;
+  uint8_t bideTurnsRemaining = 0;
+  // Leech Seed: this combatant is seeded and loses 1/8 of its max HP at the
+  // end of every turn, healing whichever opponent seeded it that same
+  // amount (see finishTurn()) - persists until switched out or the battle
+  // ends, same battle-duration simplification as guardSpecActive below.
+  bool seeded = false;
+  // Reflect/Light Screen (moves) - halve incoming Physical/Special damage
+  // respectively for the rest of the battle (simplified from the real 5-turn
+  // timer, same rationale as guardSpecActive). A critical hit still bypasses
+  // both, matching the real games.
+  bool reflectActive = false;
+  bool lightScreenActive = false;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -147,6 +184,9 @@ enum class BattleLogEvent : uint8_t {
   OneHitKo,          // Fissure/Horn Drill/Guillotine connected - instant faint
   MoveFailed,        // Counter with nothing to reflect this turn ("But it failed!")
   Flinched,          // hit by a flinch-inducing move last turn (Stomp, Bite, ...) - this turn's action is skipped
+  ChargingMove,      // a two-turn move's charge turn (Fly, Dig, Solar Beam, ...) or Bide bracing - no effect yet
+  Seeded,            // Leech Seed took hold
+  BuffApplied,       // Reflect/Light Screen/Mist/Focus Energy went up
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with

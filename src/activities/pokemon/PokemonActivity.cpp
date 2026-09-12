@@ -428,6 +428,9 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                        : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
                        : action.event == pokemon::BattleLogEvent::OneHitKo        ? tr(STR_POKEMON_ONE_HIT_KO)
                        : action.event == pokemon::BattleLogEvent::MoveFailed      ? tr(STR_POKEMON_MOVE_FAILED)
+                       : action.event == pokemon::BattleLogEvent::ChargingMove    ? tr(STR_POKEMON_CHARGING_MOVE)
+                       : action.event == pokemon::BattleLogEvent::Seeded         ? tr(STR_POKEMON_SEEDED)
+                       : action.event == pokemon::BattleLogEvent::BuffApplied    ? tr(STR_POKEMON_BUFF_APPLIED)
                                                                                   : "";
   // Hit count, crit, the effectiveness suffix, and recoil are all
   // independent of one another (a multi-hit move can also crit and also
@@ -1481,6 +1484,21 @@ void PokemonActivity::activate() {
         if (battlePlayerMoveCount() == 0) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
           return;
+        }
+        // Mid-charge (Fly/Dig/...), mid-trap (Wrap/Bind/...), or bracing for
+        // Bide - there's no real choice this turn, FIGHT goes straight into
+        // repeating the same move, same idea as the forced-Struggle case
+        // below. PokemonBattle.cpp's chooseOpponentMoveSlot() does the
+        // equivalent for the AI's own side.
+        const uint8_t forcedContinuationMoveId =
+            battlePlayer_.bideTurnsRemaining > 0 ? pokemon::BIDE_MOVE_ID : battlePlayer_.forcedMoveId;
+        if (forcedContinuationMoveId != 0) {
+          for (int slot = 0; slot < static_cast<int>(pokemon::BATTLE_MOVE_SLOTS); ++slot) {
+            if (battlePlayer_.moves[slot].moveId == forcedContinuationMoveId) {
+              resolveBattlePlayerMoveTurn(static_cast<uint8_t>(slot));
+              return;
+            }
+          }
         }
         // Real Gen 1 behavior: once every learned move is out of PP, FIGHT
         // doesn't even offer a menu - it's forced straight into Struggle.

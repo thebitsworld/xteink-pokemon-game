@@ -965,6 +965,186 @@ void selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget() {
   CHECK(result.outcome == pokemon::BattleOutcome::OpponentWon);
 }
 
+void twoTurnMoveChargesThenReleasesOnTheFollowingTurn() {
+  // Charmander (faster) uses Fly on Bulbasaur - turn 1 charges (no damage,
+  // no accuracy roll); turn 2 automatically releases using the same slot,
+  // dealing real damage and spending PP only once (on the charge turn).
+  BattleCombatant charmander = makeCombatant(4, 30, {19});  // Fly
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});    // Tackle
+  const uint16_t hpBeforeCharge = bulbasaur.currentHp;
+  const pokemon::MoveData* fly = pokemon::moveData(19);
+
+  const pokemon::BattleTurnResult chargeResult = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(chargeResult.player.event == BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.currentHp == hpBeforeCharge);
+  CHECK(charmander.forcedMoveId == 19);
+  CHECK(charmander.moves[0].currentPp == fly->pp - 1);
+
+  const pokemon::BattleTurnResult releaseResult = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(releaseResult.player.event != BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.currentHp < hpBeforeCharge);
+  CHECK(charmander.forcedMoveId == 0);
+  CHECK(charmander.moves[0].currentPp == fly->pp - 1);  // no second PP charge on release
+}
+
+void flyGrantsInvulnerabilityDuringTheChargeTurnButSolarBeamDoesNot() {
+  // Fly (id 19) grants a charge-turn invulnerability that makes every
+  // incoming move miss (simplified - see BattleCombatant::invulnerable) -
+  // Bulbasaur's Tackle must whiff even with ZERO_RANDOM, which would
+  // otherwise guarantee a hit.
+  BattleCombatant charmanderFly = makeCombatant(4, 30, {19});
+  BattleCombatant bulbasaurVsFly = makeCombatant(1, 5, {33});
+  const uint16_t hpBeforeFlyCharge = charmanderFly.currentHp;
+  pokemon::stepBattle(charmanderFly, bulbasaurVsFly, 0, ZERO_RANDOM);
+  CHECK(charmanderFly.currentHp == hpBeforeFlyCharge);
+
+  // Solar Beam (id 76) does NOT grant invulnerability - the same setup's
+  // Tackle should land normally during its charge turn.
+  BattleCombatant charmanderSolar = makeCombatant(4, 30, {76});
+  BattleCombatant bulbasaurVsSolar = makeCombatant(1, 5, {33});
+  const uint16_t hpBeforeSolarCharge = charmanderSolar.currentHp;
+  pokemon::stepBattle(charmanderSolar, bulbasaurVsSolar, 0, ZERO_RANDOM);
+  CHECK(charmanderSolar.currentHp < hpBeforeSolarCharge);
+}
+
+void trapMoveLocksTheAttackerIntoRepeatingItAndBypassesAccuracyOnFollowUpTurns() {
+  // Charmander (faster - higher base Speed even at an equal level) uses
+  // Wrap on Bulbasaur - a successful first hit locks Charmander into
+  // automatically repeating Wrap. Equal levels keep Wrap's real but modest
+  // power (15) from one-shotting Bulbasaur outright, which would prevent
+  // the lock from ever engaging.
+  BattleCombatant charmander = makeCombatant(4, 20, {35});  // Wrap
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {45});   // Growl - harmless filler
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(charmander.forcedMoveId == 35);
+  CHECK(charmander.forcedTurnsRemaining > 0);
+
+  // A follow-up turn always hits, even with a random source that would
+  // otherwise miss against Wrap's 90 accuracy (a roll of 99).
+  uint32_t highRollContext = 99;
+  const RandomSource highRoll{&highRollContext, fixedRoll};
+  const uint16_t hpBeforeContinuation = bulbasaur.currentHp;
+  pokemon::stepBattle(charmander, bulbasaur, 0, highRoll);
+  CHECK(bulbasaur.currentHp < hpBeforeContinuation);
+}
+
+void bideStoresDamageOverTwoTurnsThenReleasesDoubleItBack() {
+  // Bulbasaur (level 80, so faster than Charmander's own base-Speed edge)
+  // uses Bide; Charmander's Ember lands each turn. MAX_RANDOM avoids a
+  // critical hit (which ZERO_RANDOM would otherwise guarantee) so the
+  // stored/released amounts stay simple to compare. Charmander is level 50
+  // (not 5) so it comfortably survives the doubled release instead of the
+  // clamp-at-0 case obscuring the exact-double check.
+  BattleCombatant bulbasaur = makeCombatant(1, 80, {117});  // Bide
+  BattleCombatant charmander = makeCombatant(4, 50, {52});  // Ember
+  const uint16_t charmanderHpBeforeRelease = charmander.currentHp;
+
+  const pokemon::BattleTurnResult turn1 = pokemon::stepBattle(bulbasaur, charmander, 0, MAX_RANDOM);
+  CHECK(turn1.player.event == BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.bideTurnsRemaining == 1);
+  const uint16_t storedAfterTurn1 = bulbasaur.bideDamageStored;
+  CHECK(storedAfterTurn1 > 0);
+
+  const pokemon::BattleTurnResult turn2 = pokemon::stepBattle(bulbasaur, charmander, 0, MAX_RANDOM);
+  CHECK(turn2.player.event != BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.bideTurnsRemaining == 0);
+  // Charmander also took a second Ember hit from Bulbasaur this same turn,
+  // in between - but that happens AFTER Bulbasaur's own (faster) release
+  // action, so it doesn't affect what was already unleashed.
+  const uint16_t chargedmanderDamageThisRelease =
+      static_cast<uint16_t>(charmanderHpBeforeRelease - charmander.currentHp);
+  CHECK(chargedmanderDamageThisRelease >= storedAfterTurn1 * 2U);
+}
+
+void leechSeedDrainsTheSeededSideAndHealsTheSeederAtEndOfTurn() {
+  // Charmander (faster) seeds Squirtle (not Grass-type, so it isn't immune).
+  BattleCombatant charmander = makeCombatant(4, 30, {73});  // Leech Seed
+  BattleCombatant squirtle = makeCombatant(7, 5, {45});     // Growl - harmless filler
+  charmander.currentHp = static_cast<uint16_t>(charmander.maxHp / 2U);
+  const uint16_t charmanderHpBeforeTick = charmander.currentHp;
+  const uint16_t squirtleHpBeforeTick = squirtle.currentHp;
+
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, squirtle, 0, ZERO_RANDOM);
+
+  CHECK(result.player.event == BattleLogEvent::Seeded);
+  CHECK(squirtle.seeded);
+  CHECK(squirtle.currentHp < squirtleHpBeforeTick);
+  CHECK(charmander.currentHp > charmanderHpBeforeTick);
+}
+
+void leechSeedFailsAgainstAGrassTypeTarget() {
+  BattleCombatant charmander = makeCombatant(4, 30, {73});  // Leech Seed
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {45});    // Grass/Poison - immune
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(!bulbasaur.seeded);
+}
+
+void reflectExactlyHalvesNonCriticalPhysicalDamage() {
+  // Reflect protects whoever activated it FROM incoming damage - it goes on
+  // the defender/target of this exchange (Charmander), not the attacker
+  // (Bulbasaur, using Tackle). Uses stepOpponentOnlyTurn() so only
+  // Bulbasaur's hit happens (no counter-Tackle back), and a high Charmander
+  // level keeps that one hit from one-shotting it - either of which would
+  // otherwise clamp the measured damage and hide the real halved value.
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {33});  // Tackle, physical
+  BattleCombatant charmanderWithReflect = makeCombatant(4, 50, {33});
+  charmanderWithReflect.reflectActive = true;
+  const uint16_t hpBeforeReflected = charmanderWithReflect.currentHp;
+  // avoid a crit, which bypasses Reflect
+  pokemon::stepOpponentOnlyTurn(charmanderWithReflect, bulbasaur, MAX_RANDOM);
+  const uint16_t reflectedDamage = static_cast<uint16_t>(hpBeforeReflected - charmanderWithReflect.currentHp);
+
+  BattleCombatant bulbasaurControl = makeCombatant(1, 30, {33});
+  BattleCombatant charmanderPlain = makeCombatant(4, 50, {33});
+  const uint16_t hpBeforePlain = charmanderPlain.currentHp;
+  pokemon::stepOpponentOnlyTurn(charmanderPlain, bulbasaurControl, MAX_RANDOM);
+  const uint16_t plainDamage = static_cast<uint16_t>(hpBeforePlain - charmanderPlain.currentHp);
+
+  CHECK(reflectedDamage == plainDamage / 2U);
+}
+
+void mistAndFocusEnergyReuseGuardSpecAndDireHit() {
+  // Mist and Focus Energy are moves that reuse the exact same
+  // guardSpecActive/direHitActive fields the Guard Spec./Dire Hit battle-
+  // boost items already use for the identical effects.
+  BattleCombatant bulbasaurMist = makeCombatant(1, 20, {54});  // Mist
+  BattleCombatant dummy1 = makeCombatant(4, 20, {45});
+  pokemon::stepBattle(bulbasaurMist, dummy1, 0, ZERO_RANDOM);
+  CHECK(bulbasaurMist.guardSpecActive);
+
+  BattleCombatant bulbasaurFocus = makeCombatant(1, 20, {116});  // Focus Energy
+  BattleCombatant dummy2 = makeCombatant(4, 20, {45});
+  pokemon::stepBattle(bulbasaurFocus, dummy2, 0, ZERO_RANDOM);
+  CHECK(bulbasaurFocus.direHitActive);
+}
+
+void recoverHealsHalfMaxHpAndFailsAtFullHealth() {
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {105});  // Recover
+  bulbasaur.currentHp = static_cast<uint16_t>(bulbasaur.maxHp / 4U);
+  const uint16_t hpBeforeHeal = bulbasaur.currentHp;
+  BattleCombatant dummy = makeCombatant(4, 5, {45});
+  const pokemon::BattleTurnResult healResult = pokemon::stepBattle(bulbasaur, dummy, 0, ZERO_RANDOM);
+  CHECK(healResult.player.drainApplied);
+  CHECK(bulbasaur.currentHp > hpBeforeHeal);
+
+  BattleCombatant bulbasaurFull = makeCombatant(1, 30, {105});
+  BattleCombatant dummy2 = makeCombatant(4, 5, {45});
+  const pokemon::BattleTurnResult fullResult = pokemon::stepBattle(bulbasaurFull, dummy2, 0, ZERO_RANDOM);
+  CHECK(fullResult.player.event == BattleLogEvent::MoveNoEffect);
+}
+
+void restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns() {
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {156});  // Rest
+  bulbasaur.currentHp = 1;
+  bulbasaur.status = Ailment::Poison;
+  BattleCombatant dummy = makeCombatant(4, 5, {45});
+  pokemon::stepBattle(bulbasaur, dummy, 0, ZERO_RANDOM);
+  CHECK(bulbasaur.currentHp == bulbasaur.maxHp);
+  CHECK(bulbasaur.status == Ailment::Sleep);
+  CHECK(bulbasaur.statusTurns == 2);
+}
+
 }  // namespace
 
 int main() {
@@ -1032,5 +1212,15 @@ int main() {
   selfDestructMoveFaintsTheUserRegardlessOfHitOrMiss();
   selfDestructHalvesDefendersDefenseForThisHit();
   selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget();
+  twoTurnMoveChargesThenReleasesOnTheFollowingTurn();
+  flyGrantsInvulnerabilityDuringTheChargeTurnButSolarBeamDoesNot();
+  trapMoveLocksTheAttackerIntoRepeatingItAndBypassesAccuracyOnFollowUpTurns();
+  bideStoresDamageOverTwoTurnsThenReleasesDoubleItBack();
+  leechSeedDrainsTheSeededSideAndHealsTheSeederAtEndOfTurn();
+  leechSeedFailsAgainstAGrassTypeTarget();
+  reflectExactlyHalvesNonCriticalPhysicalDamage();
+  mistAndFocusEnergyReuseGuardSpecAndDireHit();
+  recoverHealsHalfMaxHpAndFailsAtFullHealth();
+  restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns();
   return failures == 0 ? 0 : 1;
 }
