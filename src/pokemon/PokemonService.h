@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "PokemonBattleStore.h"
+#include "PokemonIvEvStore.h"
 #include "PokemonStore.h"
 
 namespace pokemon {
@@ -52,8 +53,13 @@ struct PokemonDashboardSnapshot {
 
 class PokemonService {
  public:
-  PokemonService(PokemonStore& store, PokemonBattleStore& battleStore, RandomSource random)
-      : store_(store), battleStore_(battleStore), random_(random), tracker_(&PokemonService::creditFromTracker, this) {}
+  PokemonService(PokemonStore& store, PokemonBattleStore& battleStore, PokemonIvEvStore& ivEvStore,
+                 RandomSource random)
+      : store_(store),
+        battleStore_(battleStore),
+        ivEvStore_(ivEvStore),
+        random_(random),
+        tracker_(&PokemonService::creditFromTracker, this) {}
 
   bool beginReadingSession();
   void setBookProgressPercent(uint8_t percent);
@@ -136,6 +142,15 @@ class PokemonService {
   // Pokemon always has at least one move in the real games too.
   ServiceStatus forgetMove(uint32_t recordId, uint8_t slot);
 
+  // PP Up: raises `slot`'s max PP (see maxPpFor() in PokemonBattle.h),
+  // 20% of the move's base PP per use, up to 3 uses. Returns NotApplicable
+  // if the slot is empty or already at 3 uses (the caller should not have
+  // offered it in that case, but this is checked regardless). If the slot's
+  // current PP was already at its old max, it's topped up to the new max too
+  // (a full move stays full); otherwise current PP is left untouched -
+  // matches the real games exactly.
+  ServiceStatus applyPpUp(uint32_t recordId, uint8_t slot);
+
   // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
   // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine
   // items go through useEvolutionItem/teachMove/attemptBattleCatch
@@ -168,16 +183,44 @@ class PokemonService {
   // Battle HUD can still show it. Falls back to Gender::Unknown (shown as
   // nothing) if speciesId is invalid.
   Gender rollGenderFor(uint16_t speciesId);
+  // A fresh, unpersisted IV roll for a wild encounter's own BattleCombatant
+  // at fight time - only becomes permanent (via ensureIvEv(), rolled
+  // independently) if the catch succeeds. See
+  // docs/development/pokemon-iv-ev-plan.md for why these two rolls are
+  // deliberately not the same one.
+  std::array<uint8_t, STAT_COUNT> rollWildIv();
   // Grants battleVictoryXp(opponentLevel, isTrainerBattle) to recordId (the
   // Pokemon active when the battle was won), capped at MAXIMUM_TOTAL_XP same
   // as reading credit, and queues any move newly available from the level(s)
-  // gained. A no-op (still ServiceStatus::Ok) once already at level 100.
-  ServiceStatus awardBattleXp(uint32_t recordId, uint8_t opponentLevel, bool isTrainerBattle);
+  // gained - a no-op for the XP/level part (still ServiceStatus::Ok) once
+  // already at level 100. Also accumulates EVs from opponentSpeciesId's
+  // per-stat EV yield (BaseStats::evHp/.../evSpeed), saturating at 255 per
+  // stat - this part is NOT gated by the level-100 XP cap, matching how EVs
+  // and XP are independent quantities in the real games.
+  ServiceStatus awardBattleXp(uint32_t recordId, uint8_t opponentLevel, bool isTrainerBattle,
+                             uint16_t opponentSpeciesId);
+
+  // A Pokemon's permanent IV/EV pair (see PokemonIvEvStoreCodec.h). Rolls a
+  // fresh IV set (EV all 0) and persists it the first time this is called
+  // for a given recordId - covers both a brand-new record (just caught/
+  // picked as a starter) and backfilling a record created before this
+  // mechanic existed (both cases look identical: no side-file entry yet).
+  // Best-effort: if persisting the fresh roll fails, still returns it for
+  // this call (the caller sees correct values this once) but tries again
+  // next call rather than silently caching a value that never made it to
+  // disk.
+  IvEvEntry ensureIvEv(uint32_t recordId);
+  // Read-only: never rolls or persists anything, for display/HP-calc paths
+  // that must not write just from being looked at (mirrors peekBattleMoves()
+  // vs loadBattleEntry()). Returns a zero IV/EV entry if none exists yet -
+  // exactly today's pre-this-feature stats, until the record's first real
+  // battle/creation calls ensureIvEv() for real.
+  IvEvEntry peekIvEv(uint32_t recordId) const;
 
  private:
   ServiceStatus prepareStore();
   ServiceStatus loadReadyState(PokemonState& output);
-  BattleRecordEntry synthesizeBattleEntry(const PokemonRecord& record) const;
+  BattleRecordEntry synthesizeBattleEntry(const PokemonRecord& record, const IvEvEntry& ivEv) const;
   void healPartyOnRead(const PokemonState& state, uint16_t minutes);
   // Checks the leader's learnset for any move newly available between
   // previousLevel (exclusive) and currentLevel (inclusive): auto-fills an
@@ -191,6 +234,7 @@ class PokemonService {
 
   PokemonStore& store_;
   PokemonBattleStore& battleStore_;
+  PokemonIvEvStore& ivEvStore_;
   RandomSource random_{};
   PokemonTracker tracker_;
   bool readingSessionActive_ = false;

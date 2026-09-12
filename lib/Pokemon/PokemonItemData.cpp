@@ -9,7 +9,8 @@ namespace pokemon {
 // the non-stone item count, and POKEMON_ITEM_ID_MAX) since it cannot include
 // this battle layer without inverting the dependency direction; keep them
 // in sync.
-static_assert(POKEMON_BAG_SLOT_COUNT + 6U == ITEM_COUNT);
+// +1 is PP Up (id 84, PP_UP_ITEM_ID) - the one item tracked outside bagCounts.
+static_assert(POKEMON_BAG_SLOT_COUNT + 6U + 1U == ITEM_COUNT);
 static_assert(POKEMON_ITEM_ID_MAX == ITEM_COUNT);
 
 const ItemData* itemData(const uint8_t itemId) {

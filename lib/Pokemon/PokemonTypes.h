@@ -23,8 +23,12 @@ constexpr size_t PENDING_EVENT_CAPACITY = 3;
 // PokemonMoveData.cpp/PokemonItemData.cpp/PokemonGymData.cpp each carry a
 // static_assert cross-checking these stay in sync with their source of truth.
 constexpr uint16_t POKEMON_MOVE_ID_MAX = 165;
-constexpr size_t POKEMON_BAG_SLOT_COUNT = 77;       // ITEM_COUNT(83) - the 6 evolution stones tracked in itemCounts
-constexpr uint8_t POKEMON_ITEM_ID_MAX = 83;         // = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT
+// ITEM_COUNT(84) - the 6 evolution stones (tracked in itemCounts) - PP Up
+// (id 84, tracked in its own PokemonState::ppUpCount field, not bagCounts -
+// see PP_UP_ITEM_ID in PokemonBattleTypes.h for why).
+constexpr size_t POKEMON_BAG_SLOT_COUNT = 77;
+// = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT + 1 (the +1 is PP Up).
+constexpr uint8_t POKEMON_ITEM_ID_MAX = 84;
 constexpr uint16_t POKEMON_GYM_PROGRESS_BITS = 13;  // 8 gyms + 4 Elite Four + the Champion
 constexpr uint16_t POKEMON_GYM_PROGRESS_MASK = static_cast<uint16_t>((1U << POKEMON_GYM_PROGRESS_BITS) - 1U);
 
@@ -132,6 +136,13 @@ struct PokemonState {
   uint8_t ballMisses = 0;
   uint8_t medicineMisses = 0;
   uint8_t machineMisses = 0;
+  // v5: appended after the v4 layout (PokemonStoreCodec.cpp's byte 198). How
+  // many PP Up items the player currently holds - a new item, but one whose
+  // effect (raising a move slot's max PP) doesn't fit any existing bagCounts-
+  // tracked category cleanly enough to reuse that array, so it gets its own
+  // field instead of growing bagCounts (which would shift every byte after
+  // it and break every already-shipped v3/v4 save).
+  uint8_t ppUpCount = 0;
 
   bool operator==(const PokemonState&) const = default;
 };

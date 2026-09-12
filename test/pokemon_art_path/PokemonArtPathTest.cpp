@@ -58,11 +58,16 @@ TEST(PokemonArtPath, BuildsBagItemPathsForBagItemsOnly) {
   EXPECT_STREQ(path, "/pokemon/items/007.bmp");
   ASSERT_NE(pokemon::pokemonBagItemArtPath(83, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "/pokemon/items/083.bmp");
+  // Item id 84 (PP Up) is a real, valid bag item too, tracked outside
+  // bagCounts (see PP_UP_ITEM_ID) but still a normal item for art-path
+  // purposes.
+  ASSERT_NE(pokemon::pokemonBagItemArtPath(84, path, sizeof(path)), nullptr);
+  EXPECT_STREQ(path, "/pokemon/items/084.bmp");
   // Evolution items (ids 1-6) go through pokemonItemArtPath()'s slug-based
   // path instead, not this one.
   EXPECT_EQ(pokemon::pokemonBagItemArtPath(6, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "");
-  EXPECT_EQ(pokemon::pokemonBagItemArtPath(84, path, sizeof(path)), nullptr);
+  EXPECT_EQ(pokemon::pokemonBagItemArtPath(85, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "");
 }
 

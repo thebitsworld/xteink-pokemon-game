@@ -11,9 +11,9 @@ from pathlib import Path
 
 PROVENANCE = "# Hand-authored: Generation I (Red/Blue) items, ids 1-6 pinned to EvolutionItem"
 HEADERS = ("id", "name", "category", "effect_value", "cures_ailment", "teaches_move_id", "drop_weight")
-ITEM_COUNT = 83
+ITEM_COUNT = 84
 MOVE_COUNT = 165
-CATEGORIES = {"Stone", "Ball", "Medicine", "StatusCure", "Candy", "PPRestore", "Machine"}
+CATEGORIES = {"Stone", "Ball", "Medicine", "StatusCure", "Candy", "PPRestore", "Machine", "PpUp"}
 AILMENTS = {"None", "Paralysis", "Sleep", "Freeze", "Burn", "Poison", "Confusion", "All"}
 # ids 1-6 must stay in this exact order: they are read back through the
 # existing EvolutionItem enum (PokemonTypes.h) so pre-existing pending

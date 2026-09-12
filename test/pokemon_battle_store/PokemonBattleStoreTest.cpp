@@ -167,12 +167,24 @@ void aWriteFailureLeavesTheActiveFileAndInMemoryStateUnchanged() {
 void preExistingLegacySingleFileIsMigratedOnFirstLoad() {
   Storage.clear();
   // Hand-roll a legacy (pre-double-buffering, headerless) file exactly as
-  // the old single-file format wrote it: entries back to back + CRC32.
+  // the old single-file format wrote it: v1 (16-byte, no PP-Up counters)
+  // entries back to back + CRC32. encodeBattleRecordEntry only ever writes
+  // the current (v2, 20-byte) format now, so the true legacy layout has to
+  // be built by hand here.
   pokemon::BattleRecordEntry entry = makeEntry(11, 30);
   entry.moves = {14, 0, 0, 0};  // teach a move that's *not* level-derivable, to show migration keeps it
   entry.pp = {20, 0, 0, 0};
-  pokemon::BattleEntryBytes entryBytes{};
-  CHECK(pokemon::encodeBattleRecordEntry(entry, entryBytes));
+  pokemon::BattleEntryBytesV1 entryBytes{};
+  entryBytes[0] = static_cast<uint8_t>(entry.recordId);
+  entryBytes[1] = static_cast<uint8_t>(entry.recordId >> 8);
+  entryBytes[2] = static_cast<uint8_t>(entry.recordId >> 16);
+  entryBytes[3] = static_cast<uint8_t>(entry.recordId >> 24);
+  for (size_t i = 0; i < 4; ++i) entryBytes[4 + i] = entry.moves[i];
+  for (size_t i = 0; i < 4; ++i) entryBytes[8 + i] = entry.pp[i];
+  entryBytes[12] = static_cast<uint8_t>(entry.currentHp);
+  entryBytes[13] = static_cast<uint8_t>(entry.currentHp >> 8);
+  entryBytes[14] = static_cast<uint8_t>(entry.status);
+  entryBytes[15] = entry.statusTurns;
   std::vector<uint8_t> legacyBytes(entryBytes.begin(), entryBytes.end());
   const uint32_t crc = pokemon::finishBattleStoreCrc32(
       pokemon::updateBattleStoreCrc32(pokemon::BATTLE_STORE_CRC32_INITIAL, entryBytes.data(), entryBytes.size()));

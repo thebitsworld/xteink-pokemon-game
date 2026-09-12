@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROVENANCE = "# PokeAPI https://pokeapi.co/api/v2 - generation-i / red-blue"
-HEADERS = ("id", "name", "hp", "attack", "defense", "special", "speed")
+HEADERS = (
+    "id", "name", "hp", "attack", "defense", "special", "speed",
+    "ev_hp", "ev_attack", "ev_defense", "ev_special", "ev_speed",
+)
 SPECIES_COUNT = 151
 
 
@@ -25,6 +28,18 @@ class Stats:
     defense: int
     special: int
     speed: int
+    # EV yield: how much of each stat's Effort Value a Pokemon of this species
+    # grants when defeated - PokeAPI's own per-species "effort" field (a
+    # small 0-3 integer per stat), the same modern-games EV-yield table this
+    # project's own simplified EV model already deviates toward (see
+    # docs/development/pokemon-iv-ev-plan.md - real Gen 1 didn't have a
+    # per-species yield table at all, it accumulated "Stat Experience"
+    # directly from the defeated Pokemon's base stats).
+    ev_hp: int
+    ev_attack: int
+    ev_defense: int
+    ev_special: int
+    ev_speed: int
 
 
 def load_stats(path: Path) -> list[Stats]:
@@ -44,6 +59,11 @@ def load_stats(path: Path) -> list[Stats]:
                 defense = int(row["defense"])
                 special = int(row["special"])
                 speed = int(row["speed"])
+                ev_hp = int(row["ev_hp"])
+                ev_attack = int(row["ev_attack"])
+                ev_defense = int(row["ev_defense"])
+                ev_special = int(row["ev_special"])
+                ev_speed = int(row["ev_speed"])
             except (TypeError, ValueError) as error:
                 raise DataError("stats CSV contains a non-numeric field") from error
             if species_id != len(output) + 1:
@@ -51,7 +71,14 @@ def load_stats(path: Path) -> list[Stats]:
             for label, value in (("hp", hp), ("attack", attack), ("defense", defense), ("special", special), ("speed", speed)):
                 if not 1 <= value <= 255:
                     raise DataError(f"species {species_id}: {label} out of range")
-            output.append(Stats(species_id, hp, attack, defense, special, speed))
+            for label, value in (
+                ("ev_hp", ev_hp), ("ev_attack", ev_attack), ("ev_defense", ev_defense),
+                ("ev_special", ev_special), ("ev_speed", ev_speed),
+            ):
+                if not 0 <= value <= 255:
+                    raise DataError(f"species {species_id}: {label} out of range")
+            output.append(Stats(species_id, hp, attack, defense, special, speed,
+                                 ev_hp, ev_attack, ev_defense, ev_special, ev_speed))
     if len(output) != SPECIES_COUNT:
         raise DataError(f"expected {SPECIES_COUNT} species, found {len(output)}")
     return output
@@ -67,7 +94,10 @@ def generate(stats: list[Stats]) -> str:
         "static const BaseStats KANTO_BASE_STATS[] = {",
     ]
     for row in stats:
-        lines.append(f"    BaseStats{{{row.hp}, {row.attack}, {row.defense}, {row.special}, {row.speed}}},")
+        lines.append(
+            f"    BaseStats{{{row.hp}, {row.attack}, {row.defense}, {row.special}, {row.speed}, "
+            f"{row.ev_hp}, {row.ev_attack}, {row.ev_defense}, {row.ev_special}, {row.ev_speed}}},"
+        )
     lines.extend(
         (
             "};",

@@ -44,6 +44,12 @@ struct BattleCombatant {
   Ailment status = Ailment::None;
   uint8_t statusTurns = 0;  // sleep/confusion countdown, engine-managed
   std::array<BattleMoveSlot, BATTLE_MOVE_SLOTS> moves{};
+  // How many times each move slot has had a PP Up used on it (0-3) - copied
+  // from BattleRecordEntry::ppUp at battle setup so the in-battle move menu
+  // can show the real, boosted max PP (see maxPpFor()). Always all-zero for
+  // a gym/Elite Four/Champion trainer's fixed roster or a wild encounter -
+  // neither ever accumulates PP Up.
+  std::array<uint8_t, BATTLE_MOVE_SLOTS> ppUp{};
   // Display-only - never read by the engine (damage/type/catch math is all
   // gender-independent in these games). The player's side copies it straight
   // from the party PokemonRecord; a wild opponent copies it from the
@@ -62,6 +68,29 @@ struct BattleCombatant {
   int8_t speedStage = 0;
   int8_t accuracyStage = 0;
   int8_t evasionStage = 0;
+  // Permanent individual variance (IVs, 0-15, rolled once at creation and
+  // never changed) and accumulated EVs (0-255, simplified from real Gen 1's
+  // 0-65,535 - see docs/development/pokemon-iv-ev-plan.md), one pair per
+  // stat in BaseStats/STAT_COUNT order (HP/Attack/Defense/Special/Speed).
+  // Unlike the stat stages above, these are NOT reset per battle - a
+  // party member's values come from PokemonService::ensureIvEv() (backed by
+  // the pokemon-ivev-{a,b}.bin side file), a wild encounter gets a fresh
+  // unpersisted roll for the fight (persisted only if the catch succeeds),
+  // and a gym/Elite Four/Champion trainer's fixed roster hardcodes IV 15/EV
+  // 0 at battle setup (no record exists for them to persist against).
+  std::array<uint8_t, STAT_COUNT> iv{};
+  std::array<uint8_t, STAT_COUNT> ev{};
+};
+
+// Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
+// Attack, Defense, Special, Speed, matching STAT_COUNT's order everywhere
+// else in this project.
+enum class StatIndex : uint8_t {
+  Hp = 0,
+  Attack,
+  Defense,
+  Special,
+  Speed,
 };
 
 enum class BattleOutcome : uint8_t {
@@ -170,10 +199,37 @@ struct BattleTurnResult {
   BattleOutcome outcome = BattleOutcome::InProgress;
 };
 
-// Generation I-derived stat formulas without IV/EV (not modeled): a fair,
-// deterministic approximation that scales correctly with level.
-uint16_t battleMaxHp(uint8_t baseHp, uint8_t level);
-uint16_t battleWorkingStat(uint8_t baseStat, uint8_t level);
+// Generation I-derived stat formulas, now with IV/EV: `iv` is 0-15 (real Gen
+// 1 range), `ev` is 0-255 (this project's simplified range - see
+// docs/development/pokemon-iv-ev-plan.md). `iv=0, ev=0` reproduces exactly
+// what these formulas returned before IV/EV existed - every existing caller
+// that hasn't been taught about a Pokemon's real IV/EV yet can still pass
+// 0/0 and see no behavior change.
+//
+//   HP    = floor((2*(baseHp+iv)   + ev/4) * level / 100) + level + 10
+//   other = floor((2*(baseStat+iv) + ev/4) * level / 100) + 5
+//
+// The EV/4 term is a deliberate simplification of real Gen 1's
+// floor(sqrt(EV)/4) - both reach the same maximum bonus (63), just via a
+// flat climb instead of a square-root curve, at 1 byte/stat of storage
+// instead of 2.
+uint16_t battleMaxHp(uint8_t baseHp, uint8_t level, uint8_t iv = 0, uint8_t ev = 0);
+uint16_t battleWorkingStat(uint8_t baseStat, uint8_t level, uint8_t iv = 0, uint8_t ev = 0);
+
+// Rolls a fresh IV set (0-15 per stat, STAT_COUNT/HP-Attack-Defense-Special-
+// Speed order) - Gen 1's real IV range, meant to be assigned once and never
+// changed again. Used both for a brand-new permanent record (see
+// PokemonService::ensureIvEv(), which also backfills a pre-existing record
+// from before this mechanic existed) and for a wild encounter's own
+// BattleCombatant at fight time (not persisted unless the catch succeeds).
+void rollIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& output);
+
+// PP Up: a real Gen 1 item that permanently raises one move slot's max PP by
+// 1/5 of its base PP (floored) per use, up to 3 uses. `basePp` is the move's
+// own PP (MoveData::pp); `ppUpCount` is that slot's accumulated use count
+// (BattleRecordEntry::ppUp, 0-3 - clamped here too in case of caller error).
+// A 40-PP move goes 40 -> 48 -> 56 -> 64, matching the real games exactly.
+uint8_t maxPpFor(uint8_t basePp, uint8_t ppUpCount);
 
 // Picks up to BATTLE_MOVE_SLOTS moves for `speciesId` at `level`: the
 // learnset is stored ascending by level, so walking it backwards yields the

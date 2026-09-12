@@ -48,10 +48,11 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonicalV4Layout() {
+void stateCodecUsesTheCanonicalV5Layout() {
   static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
   static_assert(pokemon::POKEMON_STATE_V3_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
-  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
+  static_assert(pokemon::POKEMON_STATE_V4_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
+  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V4_BYTES + 1);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
   state.partyRecordIds[0] = 7;
@@ -77,6 +78,7 @@ void stateCodecUsesTheCanonicalV4Layout() {
   state.ballMisses = 3;
   state.medicineMisses = 2;
   state.machineMisses = 1;
+  state.ppUpCount = 4;
 
   pokemon::StateBytes bytes{};
   CHECK(pokemon::encodeState(state, bytes));
@@ -102,6 +104,7 @@ void stateCodecUsesTheCanonicalV4Layout() {
   CHECK(bytes[pokemon::POKEMON_STATE_V3_BYTES] == 3);
   CHECK(bytes[pokemon::POKEMON_STATE_V3_BYTES + 1] == 2);
   CHECK(bytes[pokemon::POKEMON_STATE_V3_BYTES + 2] == 1);
+  CHECK(bytes[pokemon::POKEMON_STATE_V4_BYTES] == 4);
 
   pokemon::PokemonState decoded{};
   CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION, decoded));
@@ -151,6 +154,27 @@ void v3StateDecodesWithZeroedMissCounters() {
   CHECK(decoded.ballMisses == 0);
   CHECK(decoded.medicineMisses == 0);
   CHECK(decoded.machineMisses == 0);
+}
+
+void v4StateDecodesWithZeroedPpUpCount() {
+  pokemon::PokemonState v4State{};
+  v4State.partyRecordIds[0] = 3;
+  v4State.lifetimeMinutes = 500;
+  v4State.ballMisses = 2;
+
+  std::array<uint8_t, pokemon::POKEMON_STATE_V4_BYTES> bytes{};
+  write32(bytes.data(), 0, v4State.partyRecordIds[0]);
+  write32(bytes.data(), 104, v4State.lifetimeMinutes);
+  write32(bytes.data(), 108, 1);  // sequence, must be non-zero-ish and match what validateState allows
+  bytes[pokemon::POKEMON_STATE_V3_BYTES] = v4State.ballMisses;
+
+  pokemon::PokemonState decoded{};
+  decoded.ppUpCount = 0xAA;  // prove the decoder actually zeroes this, not just leaves it alone
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V4, decoded));
+  CHECK(decoded.partyRecordIds[0] == 3);
+  CHECK(decoded.lifetimeMinutes == 500);
+  CHECK(decoded.ballMisses == 2);  // v4 fields still decode correctly
+  CHECK(decoded.ppUpCount == 0);
 }
 
 void battleProgressReservedBitsAreRejected() {
@@ -288,8 +312,9 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonicalV4Layout();
+  stateCodecUsesTheCanonicalV5Layout();
   v3StateDecodesWithZeroedMissCounters();
+  v4StateDecodesWithZeroedPpUpCount();
   v2StateDecodesWithZeroedBagAndBattleProgress();
   battleProgressReservedBitsAreRejected();
   legacyStateDecodesItsPendingEventIntoTheQueue();

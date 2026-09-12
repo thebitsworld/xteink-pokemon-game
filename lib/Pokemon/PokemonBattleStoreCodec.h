@@ -9,7 +9,16 @@
 
 namespace pokemon {
 
-constexpr size_t POKEMON_BATTLE_ENTRY_BYTES = 16;
+// v1 (original format) entries were 16 bytes with no PP-Up counters; v2 adds
+// a per-slot ppUp[BATTLE_MOVE_SLOTS] (see BattleRecordEntry below), 20 bytes.
+// Both the header's version byte and each entry's actual on-disk size follow
+// the format version - decodeBattleStoreFile() branches on the header's
+// version to pick the right entry size and decode function, exactly the way
+// PokemonStoreCodec's own decodeState() branches on its own version to
+// handle old vs. new PokemonState layouts. Encoding always writes the
+// current (latest) version.
+constexpr size_t POKEMON_BATTLE_ENTRY_BYTES_V1 = 16;
+constexpr size_t POKEMON_BATTLE_ENTRY_BYTES = 20;
 constexpr size_t POKEMON_BATTLE_MAX_ENTRIES = 6;  // one per Party slot; PC-boxed Pokemon carry no live battle state
 constexpr size_t POKEMON_BATTLE_FILE_CRC_BYTES = 4;
 // Header: magic "PKBT" (4) + version (1) + entryCount (1) + sequence (4). A
@@ -19,17 +28,20 @@ constexpr size_t POKEMON_BATTLE_FILE_CRC_BYTES = 4;
 // the same way as pokemon-{a,b}.bin: two alternating files plus a sequence
 // number, never overwriting the currently-active slot in place.
 constexpr size_t POKEMON_BATTLE_HEADER_BYTES = 10;
-constexpr uint8_t POKEMON_BATTLE_STORE_VERSION = 1;
+constexpr uint8_t POKEMON_BATTLE_STORE_VERSION_V1 = 1;  // legacy: no ppUp counters
+constexpr uint8_t POKEMON_BATTLE_STORE_VERSION = 2;     // current: adds ppUp[BATTLE_MOVE_SLOTS]
 constexpr size_t POKEMON_BATTLE_FILE_MAX_BYTES = POKEMON_BATTLE_HEADER_BYTES +
                                                  POKEMON_BATTLE_MAX_ENTRIES * POKEMON_BATTLE_ENTRY_BYTES +
                                                  POKEMON_BATTLE_FILE_CRC_BYTES;
 // The legacy single-file format (no header, no double-buffering) this
 // replaces: just entries back to back plus a trailing CRC32. Kept only so a
 // pre-existing pokemon-battle.bin can be migrated once into the new format.
+// Predates PP Up entirely, so it always uses the v1 (16-byte) entry size.
 constexpr size_t POKEMON_BATTLE_LEGACY_FILE_MAX_BYTES =
-    POKEMON_BATTLE_MAX_ENTRIES * POKEMON_BATTLE_ENTRY_BYTES + POKEMON_BATTLE_FILE_CRC_BYTES;
+    POKEMON_BATTLE_MAX_ENTRIES * POKEMON_BATTLE_ENTRY_BYTES_V1 + POKEMON_BATTLE_FILE_CRC_BYTES;
 
 using BattleEntryBytes = std::array<uint8_t, POKEMON_BATTLE_ENTRY_BYTES>;
+using BattleEntryBytesV1 = std::array<uint8_t, POKEMON_BATTLE_ENTRY_BYTES_V1>;
 using BattleStoreFileBytes = std::array<uint8_t, POKEMON_BATTLE_FILE_MAX_BYTES>;
 using BattleStoreLegacyFileBytes = std::array<uint8_t, POKEMON_BATTLE_LEGACY_FILE_MAX_BYTES>;
 
@@ -48,6 +60,18 @@ struct BattleRecordEntry {
   uint16_t currentHp = 0;
   Ailment status = Ailment::None;
   uint8_t statusTurns = 0;
+  // How many times each move slot has had a PP Up used on it (0-3, real Gen
+  // 1's own cap). Teaching a brand-new move into an existing slot (teachMove/
+  // learnMoveIntoSlot/resolveMoveLearn) keeps that slot's existing PP Up
+  // level for whatever move ends up there - matching how the real games tie
+  // PP Up to the slot, not the move identity. Unlike the real games, this
+  // engine keeps `moves`/`pp` packed with no gaps (see validateBattleRecordEntry),
+  // so forgetMove() shifts `ppUp` left in lockstep with `moves`/`pp` when it
+  // closes a gap, keeping each remaining move's own PP Up level attached to
+  // it through the shift rather than resetting or scrambling it. See
+  // maxPpFor() in PokemonBattle.h. Absent (defaults to all 0) when decoded
+  // from a v1 (pre-PP-Up) file.
+  std::array<uint8_t, BATTLE_MOVE_SLOTS> ppUp{};
 
   bool operator==(const BattleRecordEntry&) const = default;
 };
@@ -77,6 +101,10 @@ bool validateBattleRecordEntry(const BattleRecordEntry& entry);
 bool validateBattleStoreState(const BattleStoreState& state);
 bool encodeBattleRecordEntry(const BattleRecordEntry& entry, BattleEntryBytes& output);
 bool decodeBattleRecordEntry(const BattleEntryBytes& bytes, BattleRecordEntry& output);
+// Decodes a v1 (pre-PP-Up) 16-byte entry - ppUp comes back all zero. Used by
+// decodeBattleStoreFile() when the file header says version 1, and by
+// decodeLegacyBattleStoreFile() (which predates PP Up entirely).
+bool decodeBattleRecordEntryV1(const BattleEntryBytesV1& bytes, BattleRecordEntry& output);
 
 uint32_t updateBattleStoreCrc32(uint32_t crc, const uint8_t* data, size_t size);
 constexpr uint32_t finishBattleStoreCrc32(const uint32_t crc) { return crc ^ 0xFFFFFFFFU; }

@@ -45,6 +45,7 @@ class PokemonActivity final : public Activity {
     BagBalls,
     BagMachine,
     ItemTarget,
+    PpUpSlot,
     Pokedex,
     PokedexDetail,
     Event,
@@ -73,6 +74,14 @@ class PokemonActivity final : public Activity {
     // but the outcome returns to Screen::Battle (and syncs battlePlayer_ if
     // the target was the active combatant) instead of Screen::Party.
     BattleMedicine,
+    // PP Up - lives as a trailing synthetic row inside Screen::BagMedicine's
+    // list (its count lives in its own ppUpCount field, not bagCounts, so it
+    // can't join the generic per-category item walk). Unlike every other
+    // category there's only ever one PP Up "item" to pick from, so selecting
+    // it goes straight to Screen::ItemTarget, then straight to
+    // Screen::PpUpSlot (always - no MovesetFull-style retry branching, every
+    // occupied slot is valid).
+    PpUp,
   };
 
   static constexpr uint8_t ROW_CAPACITY = 10;

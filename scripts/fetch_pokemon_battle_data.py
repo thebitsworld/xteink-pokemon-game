@@ -120,6 +120,11 @@ def write_species_tables():
     for species_id in range(1, SPECIES_COUNT + 1):
         pokemon = fetch(f"pokemon/{species_id}")
         by_stat = {s["stat"]["name"]: s["base_stat"] for s in pokemon["stats"]}
+        # "effort" is PokeAPI's own per-species EV-yield table (a modern-games
+        # mechanic, not a real Gen 1 one - see BaseStats's doc comment in
+        # PokemonBattleTypes.h) - reused here as this project's simplified EV
+        # yield source.
+        by_effort = {s["stat"]["name"]: s["effort"] for s in pokemon["stats"]}
         stats_rows.append({
             "id": species_id,
             "name": display_name(pokemon["name"]),
@@ -128,6 +133,11 @@ def write_species_tables():
             "defense": by_stat["defense"],
             "special": by_stat["special-attack"],
             "speed": by_stat["speed"],
+            "ev_hp": by_effort["hp"],
+            "ev_attack": by_effort["attack"],
+            "ev_defense": by_effort["defense"],
+            "ev_special": by_effort["special-attack"],
+            "ev_speed": by_effort["speed"],
         })
 
         level_ups = []
