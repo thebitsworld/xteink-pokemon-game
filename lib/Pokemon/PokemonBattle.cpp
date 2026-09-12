@@ -218,6 +218,49 @@ const FixedDamageTableEntry* fixedDamageEntryForMove(const uint8_t moveId) {
 constexpr uint8_t LOW_KICK_MOVE_ID = 67;
 constexpr uint8_t LOW_KICK_SIMPLIFIED_POWER = 50;
 
+// The real Gen 1 moves with a flinch secondary effect. PokeAPI's own move
+// data doesn't carry flinch chance at all (this project's Ailment enum only
+// models the 6 real status conditions, not the transient "flinch" effect),
+// so this is hand-authored, same rationale as the tables above.
+struct FlinchTableEntry {
+  uint8_t moveId;
+  uint8_t chancePercent;
+};
+constexpr FlinchTableEntry FLINCH_TABLE[] = {
+    {23, 30},   // Stomp
+    {27, 30},   // Rolling Kick
+    {29, 30},   // Headbutt
+    {44, 10},   // Bite
+    {125, 10},  // Bone Club
+    {158, 10},  // Hyper Fang
+};
+
+const FlinchTableEntry* flinchEntryForMove(const uint8_t moveId) {
+  for (const FlinchTableEntry& entry : FLINCH_TABLE) {
+    if (entry.moveId == moveId) return &entry;
+  }
+  return nullptr;
+}
+
+// The 4 real Gen 1 HP-drain moves - the attacker heals half the damage dealt
+// (minimum 1), on top of the normal damage formula (unlike FIXED_DAMAGE_TABLE's
+// entries, these don't change how damage itself is computed).
+bool isDrainMove(const uint8_t moveId) {
+  return moveId == 71 ||    // Absorb
+         moveId == 72 ||    // Mega Drain
+         moveId == 138 ||   // Dream Eater
+         moveId == 141;     // Leech Life
+}
+
+// Explosion/Self-Destruct: two real Gen 1 quirks modeled here - the target's
+// Defense is halved for this one hit (see computeDamage()'s moveId parameter),
+// and the user faints as an unconditional side effect of using the move,
+// even on a miss (see resolveAction() - applied right after the PP is spent,
+// before the accuracy roll).
+constexpr uint8_t SELF_DESTRUCT_MOVE_ID = 120;
+constexpr uint8_t EXPLOSION_MOVE_ID = 153;
+bool isSelfDestructMove(const uint8_t moveId) { return moveId == SELF_DESTRUCT_MOVE_ID || moveId == EXPLOSION_MOVE_ID; }
+
 int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
   switch (stat) {
     case StatKind::Attack:
@@ -304,7 +347,7 @@ void applyEndOfTurnStatusDamage(BattleCombatant& combatant, BattleLogEvent& even
 }
 
 uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& defender, const MoveData& move,
-                       const RandomSource& random, const bool critical) {
+                       const uint8_t moveId, const RandomSource& random, const bool critical) {
   const SpeciesData* attackerSpecies = speciesData(attacker.speciesId);
   const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
   const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
@@ -323,8 +366,11 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
       physical ? static_cast<size_t>(StatIndex::Defense) : static_cast<size_t>(StatIndex::Special);
   const uint16_t attackWorking =
       battleWorkingStat(attackBase, attacker.level, attacker.iv[attackStatIndex], attacker.ev[attackStatIndex]);
-  const uint16_t defenseWorking =
+  uint16_t defenseWorking =
       battleWorkingStat(defenseBase, defender.level, defender.iv[defenseStatIndex], defender.ev[defenseStatIndex]);
+  // Real Gen 1 quirk: Explosion/Self-Destruct halve the target's Defense for
+  // this one hit.
+  if (isSelfDestructMove(moveId)) defenseWorking = std::max<uint16_t>(1, defenseWorking / 2U);
   const uint16_t attackStaged =
       applyStatStage(attackWorking, physical ? attacker.attackStage : attacker.specialStage);
   const uint16_t defenseStaged =
@@ -391,6 +437,15 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     moveId = slot->moveId;
   }
 
+  // Flinch (Stomp, Bite, ...) takes priority over even a status check below -
+  // like paralysis/sleep, it skips the move entirely (no PP spent), but it's
+  // its own transient per-turn flag rather than a persisted Ailment.
+  if (attacker.flinched) {
+    attacker.flinched = false;
+    result.event = BattleLogEvent::Flinched;
+    return result;
+  }
+
   if (statusPreventsAction(attacker, random, result.event)) return result;
 
   const MoveData* move = moveData(moveId);
@@ -399,6 +454,12 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     return result;
   }
   if (slot != nullptr) --slot->currentPp;
+
+  // Explosion/Self-Destruct: the user faints as an unconditional side effect
+  // of using the move - a real Gen 1 quirk, not merely "recoil after a hit."
+  // This applies even on a miss, so it happens here, before the accuracy
+  // roll below, rather than alongside the damage-dealing block.
+  if (isSelfDestructMove(moveId)) attacker.currentHp = 0;
 
   const FixedDamageTableEntry* fixedDamage = fixedDamageEntryForMove(moveId);
   const bool isOhko = fixedDamage != nullptr && fixedDamage->kind == FixedDamageKind::Ohko;
@@ -522,7 +583,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
         const bool critical =
             attackerStats != nullptr &&
             rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId) || attacker.direHitActive, random);
-        const uint16_t damage = computeDamage(attacker, defender, effectiveMove, random, critical);
+        const uint16_t damage = computeDamage(attacker, defender, effectiveMove, moveId, random, critical);
         defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
         totalDamage += damage;
         if (critical) anyCritical = true;
@@ -549,6 +610,24 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
         attacker.currentHp =
             attacker.currentHp > recoilDamage ? static_cast<uint16_t>(attacker.currentHp - recoilDamage) : 0;
         result.recoilApplied = true;
+      }
+
+      // Absorb/Mega Drain/Leech Life/Dream Eater: heal half the damage dealt
+      // (minimum 1), on top of whatever else the hit already did.
+      if (isDrainMove(moveId) && totalDamage > 0) {
+        const uint16_t healAmount = clampToUint16(std::max<uint32_t>(1U, totalDamage / 2U));
+        attacker.currentHp = clampToUint16(
+            std::min<uint32_t>(attacker.maxHp, static_cast<uint32_t>(attacker.currentHp) + healAmount));
+        result.drainApplied = true;
+      }
+
+      // Stomp/Bite/... : a chance to flinch the target, preventing its next
+      // action - only if the hit actually landed (not immune) and the target
+      // is still standing (a fainted target has nothing left to flinch).
+      if (const FlinchTableEntry* flinch = flinchEntryForMove(moveId);
+          flinch != nullptr && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0 &&
+          rollPercentChance(random, flinch->chancePercent)) {
+        defender.flinched = true;
       }
     }
   }
@@ -806,15 +885,34 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
 
   // Counter only reflects a physical hit taken *this same turn* - clear last
   // turn's record before either side acts (see BattleCombatant::
-  // lastPhysicalDamageTaken's doc comment).
+  // lastPhysicalDamageTaken's doc comment). Flinch is likewise a same-turn
+  // effect - clear any stale flag from a turn where the flinched side never
+  // got to act (e.g. it fainted first).
   player.lastPhysicalDamageTaken = 0;
   opponent.lastPhysicalDamageTaken = 0;
+  player.flinched = false;
+  opponent.flinched = false;
 
   if (playerFirst) {
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
+    // Explosion/Self-Destruct can now faint the attacker too - check for a
+    // simultaneous KO before either side-specific branch below, matching
+    // finishTurn()'s own "wild Pokemon still standing in spirit" convention
+    // for the equivalent end-of-turn case.
+    if (player.currentHp == 0 && opponent.currentHp == 0) {
+      result.player.event = BattleLogEvent::Fainted;
+      result.opponent.event = BattleLogEvent::Fainted;
+      result.outcome = BattleOutcome::OpponentWon;
+      return result;
+    }
     if (opponent.currentHp == 0) {
       result.opponent.event = BattleLogEvent::Fainted;
       result.outcome = BattleOutcome::PlayerWon;
+      return result;
+    }
+    if (player.currentHp == 0) {
+      result.player.event = BattleLogEvent::Fainted;
+      result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
@@ -825,9 +923,20 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
     }
   } else {
     result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
+    if (player.currentHp == 0 && opponent.currentHp == 0) {
+      result.player.event = BattleLogEvent::Fainted;
+      result.opponent.event = BattleLogEvent::Fainted;
+      result.outcome = BattleOutcome::OpponentWon;
+      return result;
+    }
     if (player.currentHp == 0) {
       result.player.event = BattleLogEvent::Fainted;
       result.outcome = BattleOutcome::OpponentWon;
+      return result;
+    }
+    if (opponent.currentHp == 0) {
+      result.opponent.event = BattleLogEvent::Fainted;
+      result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
@@ -853,8 +962,12 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
   // here (using an item mid-battle), so only the opponent's own Counter
   // could ever have anything to reflect, and only from a hit earlier this
   // same turn (there isn't one, since the opponent is the only one acting).
+  // Any flinch from a prior turn is likewise stale by now - it should only
+  // ever block the action immediately following the hit that caused it.
   player.lastPhysicalDamageTaken = 0;
   opponent.lastPhysicalDamageTaken = 0;
+  player.flinched = false;
+  opponent.flinched = false;
 
   result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
   if (player.currentHp == 0) {

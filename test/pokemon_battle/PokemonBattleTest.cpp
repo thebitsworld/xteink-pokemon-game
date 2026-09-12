@@ -851,6 +851,120 @@ void counterFailsWhenUserHasNotTakenPhysicalDamageThisTurn() {
   CHECK(charmander.currentHp == charmanderHpBefore);
 }
 
+void flinchMoveCanPreventTheTargetsActionThisSameTurn() {
+  // Charmander (higher base Speed, faster at an equal level) uses Stomp
+  // (move 23, 30% flinch chance) on Bulbasaur; ZERO_RANDOM guarantees both
+  // a critical hit and the flinch roll succeeding (0 < 30), so Bulbasaur's
+  // own Tackle must never resolve this same turn. Level 20 for both keeps
+  // Bulbasaur's HP comfortably above even a critical Stomp, so it survives
+  // to (not) act.
+  BattleCombatant charmander = makeCombatant(4, 20, {23});  // Stomp
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33});   // Tackle
+  const uint16_t charmanderHpBefore = charmander.currentHp;
+
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+
+  CHECK(result.opponent.event == BattleLogEvent::Flinched);
+  CHECK(charmander.currentHp == charmanderHpBefore);
+}
+
+void flinchDoesNotPersistPastTheTurnItWasInflicted() {
+  // A flinch flag left over from a turn where the flinched side never got
+  // to act (e.g. it fainted first) must not carry into the next turn -
+  // stepBattle() resets it up front, before either side's own action runs.
+  BattleCombatant charmander = makeCombatant(4, 30, {45});  // Growl - harmless, never flinches
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});    // Tackle
+  bulbasaur.flinched = true;
+  const uint16_t charmanderHpBefore = charmander.currentHp;
+
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+
+  CHECK(charmander.currentHp < charmanderHpBefore);  // Bulbasaur's Tackle landed normally
+}
+
+void drainMoveHealsHalfTheDamageDealtAndCapsAtMaxHp() {
+  // Charmander (faster) uses Absorb (move 71) on Bulbasaur; Bulbasaur's own
+  // move is Growl (harmless, deals no damage), isolating Charmander's HP
+  // change to the drain effect alone.
+  BattleCombatant charmander = makeCombatant(4, 30, {71});  // Absorb
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {45});    // Growl
+  charmander.currentHp = static_cast<uint16_t>(charmander.maxHp / 2U);
+  const uint16_t hpBeforeHeal = charmander.currentHp;
+  const uint16_t bulbasaurHpBefore = bulbasaur.currentHp;
+
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+
+  const uint16_t damageDealt = static_cast<uint16_t>(bulbasaurHpBefore - bulbasaur.currentHp);
+  CHECK(damageDealt > 0);
+  CHECK(result.player.drainApplied);
+  const uint16_t healed = static_cast<uint16_t>(charmander.currentHp - hpBeforeHeal);
+  CHECK(healed == std::max<uint16_t>(1, static_cast<uint16_t>(damageDealt / 2U)));
+
+  // Starting at full HP, the same heal must clamp at maxHp instead of
+  // overflowing past it.
+  BattleCombatant charmander2 = makeCombatant(4, 30, {71});
+  BattleCombatant bulbasaur2 = makeCombatant(1, 5, {45});
+  pokemon::stepBattle(charmander2, bulbasaur2, 0, ZERO_RANDOM);
+  CHECK(charmander2.currentHp == charmander2.maxHp);
+}
+
+void selfDestructMoveFaintsTheUserRegardlessOfHitOrMiss() {
+  BattleCombatant charmander = makeCombatant(4, 30, {153});  // Explosion
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(charmander.currentHp == 0);
+}
+
+void selfDestructHalvesDefendersDefenseForThisHit() {
+  // Charmander (level 30) uses Explosion on a tanky level-100 Bulbasaur -
+  // Normal vs. Grass/Poison is exactly 100% effectiveness and Charmander
+  // isn't Normal-type (no STAB), so the only unknown left in the standard
+  // formula is the Defense term, which the real Gen 1 quirk halves for this
+  // one hit. A high defender level keeps the hit from one-shotting (and
+  // thus clamping) the result, so the exact formula can be checked.
+  //
+  // Uses stepOpponentOnlyTurn() (with Charmander in the "opponent" role, so
+  // it's the one guaranteed to act) rather than stepBattle(), specifically
+  // to sidestep turn order - Bulbasaur's much higher level would otherwise
+  // make it faster and let its own Tackle go first, which isn't what this
+  // test is about.
+  BattleCombatant charmander = makeCombatant(4, 30, {153});  // Explosion
+  BattleCombatant bulbasaur = makeCombatant(1, 100, {33});
+  const uint16_t hpBefore = bulbasaur.currentHp;
+
+  uint32_t maxContext = 0xFFFFFFFFU;  // saturates any upperExclusive roll to its max
+  const RandomSource maxRoll{&maxContext, fixedRoll};
+  pokemon::stepOpponentOnlyTurn(bulbasaur, charmander, maxRoll);
+  const uint16_t damage = static_cast<uint16_t>(hpBefore - bulbasaur.currentHp);
+
+  const pokemon::BaseStats* attackerStats = pokemon::baseStatsFor(4);
+  const pokemon::BaseStats* defenderStats = pokemon::baseStatsFor(1);
+  const uint16_t attackStat = pokemon::battleWorkingStat(attackerStats->attack, 30);
+  const uint16_t fullDefenseStat = pokemon::battleWorkingStat(defenderStats->defense, 100);
+  const uint16_t halvedDefenseStat = std::max<uint16_t>(1, static_cast<uint16_t>(fullDefenseStat / 2U));
+  const uint32_t expected = ((2U * 30U / 5U + 2U) * 250U * attackStat) / (50U * halvedDefenseStat) + 2U;
+  CHECK(damage == expected);
+
+  // Sanity check that halving actually mattered - the unhalved-defense
+  // result would have been meaningfully smaller.
+  const uint32_t withoutHalving = ((2U * 30U / 5U + 2U) * 250U * attackStat) / (50U * fullDefenseStat) + 2U;
+  CHECK(expected > withoutHalving);
+}
+
+void selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget() {
+  // Both the user (always, from using the move) and the low-level, low-HP
+  // target (from the hit itself) faint the same turn - stepBattle() must
+  // report this via the same "simultaneous KO -> OpponentWon" convention
+  // finishTurn() already uses for the equivalent end-of-turn case, not
+  // misreport it as a plain PlayerWon.
+  BattleCombatant charmander = makeCombatant(4, 100, {153});  // Explosion
+  BattleCombatant bulbasaur = makeCombatant(1, 2, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(charmander.currentHp == 0);
+  CHECK(bulbasaur.currentHp == 0);
+  CHECK(result.outcome == pokemon::BattleOutcome::OpponentWon);
+}
+
 }  // namespace
 
 int main() {
@@ -912,5 +1026,11 @@ int main() {
   lowKickDealsRealDamageInsteadOfTheOldFlatBug();
   counterReflectsDoubleTheLastPhysicalDamageTakenThisTurn();
   counterFailsWhenUserHasNotTakenPhysicalDamageThisTurn();
+  flinchMoveCanPreventTheTargetsActionThisSameTurn();
+  flinchDoesNotPersistPastTheTurnItWasInflicted();
+  drainMoveHealsHalfTheDamageDealtAndCapsAtMaxHp();
+  selfDestructMoveFaintsTheUserRegardlessOfHitOrMiss();
+  selfDestructHalvesDefendersDefenseForThisHit();
+  selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget();
   return failures == 0 ? 0 : 1;
 }
