@@ -1481,6 +1481,39 @@ void wrapReleasesTheTargetOnceTheAttackersLockEnds() {
   CHECK(target.trappedTurnsRemaining == 0);
 }
 
+// --- Round-3 Gen 1 authenticity fixes: confusion self-hit's real damage
+// formula, Splash-style no-op status moves, and Substitute blocking the
+// round-2 target-trapping effect. ---
+
+void confusionSelfHitUsesTheRealDamageFormulaNotAFlatMaxHpFraction() {
+  BattleCombatant confused = makeCombatant(4, 30, {33});  // Tackle - irrelevant, self-hit preempts it
+  confused.status = Ailment::Confusion;
+  confused.statusTurns = 3;
+  BattleCombatant dummy = makeCombatant(7, 5, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(dummy, confused, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::ConfusionSelfHit);
+  const uint16_t selfDamage = confused.maxHp - confused.currentHp;
+  const uint16_t oldFlatFormula = std::max<uint16_t>(1, static_cast<uint16_t>(confused.maxHp / 8U));
+  CHECK(selfDamage > 0);
+  CHECK(selfDamage != oldFlatFormula);
+}
+
+void splashReportsNothingHappenedInsteadOfMoveHit() {
+  BattleCombatant splasher = makeCombatant(4, 30, {150});  // Splash
+  BattleCombatant dummy = makeCombatant(7, 30, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(dummy, splasher, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::NothingHappened);
+}
+
+void substituteBlocksTheTargetImmobilizationFromATrapMove() {
+  BattleCombatant wrapper = makeCombatant(4, 50, {35});  // Wrap
+  BattleCombatant target = makeCombatant(7, 50, {45});
+  target.substituteHp = 10;
+  pokemon::stepOpponentOnlyTurn(target, wrapper, ZERO_RANDOM);
+  CHECK(wrapper.forcedMoveId == 35);          // the attacker side still locks in
+  CHECK(target.trappedTurnsRemaining == 0);   // but the real Pokemon was never touched
+}
+
 }  // namespace
 
 int main() {
@@ -1586,5 +1619,8 @@ int main() {
   thrashLocksTheUserForTwoTurnsThenConfusesIt();
   wrapImmobilizesTheTargetWhileTrapped();
   wrapReleasesTheTargetOnceTheAttackersLockEnds();
+  confusionSelfHitUsesTheRealDamageFormulaNotAFlatMaxHpFraction();
+  splashReportsNothingHappenedInsteadOfMoveHit();
+  substituteBlocksTheTargetImmobilizationFromATrapMove();
   return failures == 0 ? 0 : 1;
 }

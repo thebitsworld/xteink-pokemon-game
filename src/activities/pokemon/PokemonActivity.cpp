@@ -442,6 +442,8 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                        : action.event == pokemon::BattleLogEvent::MimicCopied ? tr(STR_POKEMON_MIMIC_COPIED)
                        : action.event == pokemon::BattleLogEvent::ConversionApplied
                            ? tr(STR_POKEMON_CONVERSION_APPLIED)
+                       : action.event == pokemon::BattleLogEvent::NothingHappened
+                           ? tr(STR_POKEMON_NOTHING_HAPPENED)
                                                                                   : "";
   // Metronome/Mirror Move report what they actually turned into via
   // redirectedMoveId - surfaced as its own clause rather than folded into

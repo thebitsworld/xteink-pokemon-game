@@ -417,3 +417,43 @@ Everything else found was a clear, uncontroversial gap - fixed directly:
 
 11 new tests in `PokemonBattleTest.cpp`. Full native suite 496/496, clean
 `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.
+
+## Round 3: a third audit, digging deeper still (`v0.15.1`)
+
+Round 2 already covered the obvious/well-known gaps, so this pass specifically looked for
+subtler issues: confusion's exact damage formula, no-op status moves' messaging, and edge-
+case interactions between existing mechanics (Substitute vs. the round-2 target-trapping
+fix). Sky Attack/Skull Bash's invulnerability flags, `STAT_CHANGE_TABLE`'s completeness, the
+Sleep "can't wake up turn 1" quirk, and evasion/accuracy stage stacking were all re-checked
+and confirmed already correct - no changes needed there. One item was raised with the user
+for a design call:
+
+- **Substitute now blocks the round-2 target-trapping effect** (see below) - the user chose
+  to have a Substitute block it, the same way it already blocks status/stat-lowering/flinch/
+  Leech Seed, rather than leave it as a `v0.15.0`-era gap.
+
+Fixes shipped:
+
+- **Confusion self-hit now uses the real Gen 1 damage formula**: previously a flat
+  `max(1, maxHp/8)`, regardless of the confused Pokemon's own stats - a genuine bug, not a
+  documented simplification. Real Gen 1 confusion self-hit is a typeless 40-power physical
+  hit computed via the normal formula (the confused Pokemon's own Attack vs its own Defense,
+  at its own level - no STAB, no type-effectiveness, never a critical hit). `statusPreventsAction()`
+  now builds a synthetic zero-type 40-power `MoveData` and calls the existing `computeDamage()`
+  with the same combatant as both attacker and defender, `critical=false`. Required forward-
+  declaring `computeDamage()` since `statusPreventsAction()` is defined earlier in the file.
+- **Splash-style no-op status moves now say "But nothing happened!"**: a pure-flavor status
+  move with no `STAT_CHANGE_TABLE` entry, no ailment, and no other special-case dispatch
+  (only Splash currently ships as one of these) previously fell all the way through to the
+  generic `MoveHit` baseline with no suffix text at all - reporting exactly like a real hit
+  landed. A new trailing `else if` catches "status category, no ailment, nothing else
+  matched" and sets a new `BattleLogEvent::NothingHappened`.
+- **Substitute now blocks Wrap/Bind/Fire Spin/Clamp's target-trapping effect** (`v0.15.0`'s
+  own addition): the target's Substitute status is snapshotted *before* the hit lands
+  (`defenderHadSubstitute`), since the same hit can break the Substitute outright - checking
+  post-hit state would have let a just-broken Substitute retroactively fail to protect
+  against the trap. The attacker's own auto-repeat lock is unaffected either way (real Gen 1:
+  the attacker keeps re-using the move regardless of what it did to the target).
+
+3 new tests in `PokemonBattleTest.cpp`. Full native suite 496/496, clean
+`pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.

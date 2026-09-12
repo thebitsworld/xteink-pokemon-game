@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.15.1] - 2026-09-13
+
+### Fixed
+
+- Confusion now hurts a Pokémon based on its own Attack/Defense (like a real 40-power hit), instead of a flat fraction of its max HP.
+- Splash (and any other move that truly does nothing) now says "But nothing happened!" instead of reporting as a normal hit.
+- A Substitute now also blocks a partial-trapping move (Wrap, Bind, Fire Spin, Clamp) from immobilizing the real Pokémon behind it.
+
 ## [0.15.0] - 2026-09-13
 
 ### Added

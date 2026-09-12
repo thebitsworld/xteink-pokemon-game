@@ -449,6 +449,18 @@ uint8_t rollStatusDuration(const RandomSource& random, const uint8_t minTurns, c
   return static_cast<uint8_t>(minTurns + roll);
 }
 
+// Real Gen 1 confusion self-hit power - a typeless 40-power physical hit
+// computed via the normal damage formula (the confused Pokemon's own
+// Attack vs its own Defense, at its own level), not a flat max-HP fraction.
+// See statusPreventsAction()'s Confusion case below.
+constexpr uint8_t CONFUSION_SELF_HIT_POWER = 40;
+
+// Forward-declared so statusPreventsAction() (defined here, ahead of
+// computeDamage() further down) can reuse the real damage formula for
+// confusion's self-hit instead of a separate ad hoc calculation.
+uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& defender, const MoveData& move,
+                       uint8_t moveId, const RandomSource& random, bool critical);
+
 // Non-volatile (Paralysis/Sleep/Freeze/Burn/Poison) vs. the volatile
 // Confusion this engine folds into the same slot (see PokemonBattle.h).
 bool statusPreventsAction(BattleCombatant& combatant, const RandomSource& random, BattleLogEvent& event) {
@@ -484,7 +496,14 @@ bool statusPreventsAction(BattleCombatant& combatant, const RandomSource& random
         return false;
       }
       if (rollPercentChance(random, CONFUSION_SELF_HIT_CHANCE_PERCENT)) {
-        const uint16_t selfDamage = clampToUint16(std::max<uint32_t>(1U, combatant.maxHp / 8U));
+        // Real Gen 1: no STAB, no type-effectiveness, never a critical hit -
+        // just the raw formula with a typeless 40-power hit against the
+        // user's own stats.
+        MoveData confusionHit{};
+        confusionHit.type = PokemonType::None;
+        confusionHit.power = CONFUSION_SELF_HIT_POWER;
+        confusionHit.category = MoveCategory::Physical;
+        const uint16_t selfDamage = computeDamage(combatant, combatant, confusionHit, 0, random, false);
         combatant.currentHp =
             combatant.currentHp > selfDamage ? static_cast<uint16_t>(combatant.currentHp - selfDamage) : 0;
         event = BattleLogEvent::ConfusionSelfHit;
@@ -899,6 +918,12 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       const uint8_t hitsToAttempt =
           multiHit == nullptr ? 1 : multiHit->fixedHits != 0 ? multiHit->fixedHits : rollMultiHitCount(random);
 
+      // Snapshotted before any hit lands - a trapping move's own damage can
+      // break the defender's Substitute in this same action, but the trap
+      // should still be judged against whatever was true when the hit
+      // landed (see isTrapMove(moveId)'s dispatch below), not the
+      // just-broken aftermath.
+      const bool defenderHadSubstitute = defender.substituteHp > 0;
       bool anyCritical = false;
       uint8_t hitsLanded = 0;
       uint32_t totalDamage = 0;
@@ -984,8 +1009,14 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
           // for roughly the same duration the attacker keeps auto-repeating
           // (+1, same off-by-one reasoning as Disable's own duration, so it
           // survives finishTurn()'s unconditional same-turn decrement rather
-          // than losing a turn to it).
-          defender.trappedTurnsRemaining = static_cast<uint8_t>(attacker.forcedTurnsRemaining + 1U);
+          // than losing a turn to it). A Substitute blocks this the same
+          // way it already blocks status/stat-lowering/flinch/Leech Seed -
+          // the hit only ever touched the decoy, never the real Pokemon
+          // (checked against the pre-hit snapshot, since this same hit can
+          // break the substitute without that retroactively un-blocking it).
+          if (!defenderHadSubstitute) {
+            defender.trappedTurnsRemaining = static_cast<uint8_t>(attacker.forcedTurnsRemaining + 1U);
+          }
         } else if (isContinuingTrap) {
           if (attacker.forcedTurnsRemaining > 0) --attacker.forcedTurnsRemaining;
           if (attacker.forcedTurnsRemaining == 0 || defender.currentHp == 0) attacker.forcedMoveId = 0;
@@ -1241,6 +1272,11 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       resolveGenericMoveEffect(attacker, defender, mirroredMoveId, mirroredMove, random,
                                /*allowMultiTurnLock=*/false, moveSlotOfMimicUser, result);
     }
+  } else if (move->category == MoveCategory::Status && move->ailment == Ailment::None) {
+    // A pure-flavor status move with no dispatch above and no ailment to
+    // inflict (Splash, and any other move like it) - real Gen 1 reports
+    // "But nothing happened!" rather than the generic MoveHit baseline.
+    result.event = BattleLogEvent::NothingHappened;
   }
 
   // PokeAPI's ailment_chance is 0 for a pure status move's guaranteed main
