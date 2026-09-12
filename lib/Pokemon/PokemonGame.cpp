@@ -277,6 +277,9 @@ bool createEncounter(PokemonState& state, const uint8_t bookProgressPercent, con
 bool itemCountIsFull(const PokemonState& state, const uint8_t itemId) {
   if (itemId <= EVOLUTION_ITEM_COUNT) return state.itemCounts[itemId - 1U] == UINT16_MAX;
   if (itemId == PP_UP_ITEM_ID) return state.ppUpCount == UINT8_MAX;
+  if (itemId >= BATTLE_BOOST_ITEM_ID_FIRST && itemId <= BATTLE_BOOST_ITEM_ID_LAST) {
+    return state.battleBoostCounts[itemId - BATTLE_BOOST_ITEM_ID_FIRST] == UINT8_MAX;
+  }
   return state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U] == UINT8_MAX;
 }
 
@@ -285,6 +288,8 @@ void incrementItemCount(PokemonState& state, const uint8_t itemId) {
     ++state.itemCounts[itemId - 1U];
   } else if (itemId == PP_UP_ITEM_ID) {
     ++state.ppUpCount;
+  } else if (itemId >= BATTLE_BOOST_ITEM_ID_FIRST && itemId <= BATTLE_BOOST_ITEM_ID_LAST) {
+    ++state.battleBoostCounts[itemId - BATTLE_BOOST_ITEM_ID_FIRST];
   } else {
     ++state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U];
   }
@@ -294,18 +299,16 @@ bool isStoneCategory(const ItemCategory category) { return category == ItemCateg
 
 // Matches what the Bag > Medicine screen shows, so "the medicine you collect"
 // means the same set in the drop rules as it does on screen. PP Up
-// (ItemCategory::PpUp) is deliberately NOT included here - it's not part of
-// the automatic reading-time drop pool at all yet (see
-// docs/development/pokemon-gen1-authenticity-roadmap.md's PP Up item) since
-// PP Up (ItemCategory::PpUp) is included here so it drops from reading the
-// same way every other medicine-track item does - itemCountIsFull()/
-// incrementItemCount() above already route it to state.ppUpCount instead of
+// (ItemCategory::PpUp) and the 6 battle-boost items (ItemCategory::
+// BattleBoost) are both included here so they drop from reading the same way
+// every other medicine-track item does - itemCountIsFull()/incrementItemCount()
+// above already route them to state.ppUpCount/battleBoostCounts instead of
 // bagCounts, so the generic buildItemCandidates()/incrementItemCount() flow
-// handles it correctly with no special-casing needed here.
+// handles them correctly with no further special-casing needed here.
 bool isMedicineCategory(const ItemCategory category) {
   return category == ItemCategory::Medicine || category == ItemCategory::StatusCure ||
          category == ItemCategory::PPRestore || category == ItemCategory::Candy ||
-         category == ItemCategory::PpUp;
+         category == ItemCategory::PpUp || category == ItemCategory::BattleBoost;
 }
 
 bool isMachineCategory(const ItemCategory category) { return category == ItemCategory::Machine; }

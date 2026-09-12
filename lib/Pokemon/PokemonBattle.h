@@ -89,6 +89,18 @@ struct BattleCombatant {
   // the stat stages above, this is purely transient battle state, never
   // persisted to the side-file store.
   uint16_t lastPhysicalDamageTaken = 0;
+  // Guard Spec./Dire Hit (battle-boost items, ItemCategory::BattleBoost) -
+  // like the stat stages above, reset to false whenever a fresh
+  // BattleCombatant is built (a new battle or either side switching), never
+  // persisted. guardSpecActive blocks the OPPONENT from lowering this
+  // combatant's stats for the rest of the battle (simplified from the real
+  // Gen 1 5-turn timer - this project already treats several other
+  // temporary effects as battle-duration rather than turn-precise).
+  // direHitActive raises this combatant's own critical-hit ratio to the
+  // same "high-crit" tier a move like Slash gets, for the rest of the
+  // battle - see rollCriticalHit()'s call site in resolveAction().
+  bool guardSpecActive = false;
+  bool direHitActive = false;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -176,6 +188,16 @@ uint32_t applyAccuracyEvasionStage(uint32_t baseValue, int8_t stage);
 // StatChangeEffect's single-stat model: resets all 6 of a combatant's
 // stages to 0.
 void resetBattleStages(BattleCombatant& combatant);
+
+// Applies a battle-boost item (ItemCategory::BattleBoost, ids
+// BATTLE_BOOST_ITEM_ID_FIRST..LAST) directly to a live BattleCombatant -
+// these only ever affect the active battler for the rest of the current
+// battle, so unlike Medicine/StatusCure/PPRestore items there's no
+// persisted BattleRecordEntry to update. Returns false if the item had
+// nothing to do (a stat already at +6, or Guard Spec./Dire Hit already
+// active on this combatant) - the same "NotApplicable" meaning
+// UseConsumableOutcome::NotApplicable carries for every other item category.
+bool applyBattleBoostItem(BattleCombatant& combatant, uint8_t itemId);
 
 // One combat side's result for a single simultaneous turn: which side acted,
 // what happened, and whether either combatant fainted or was cured by the

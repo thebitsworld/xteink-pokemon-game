@@ -23,12 +23,17 @@ constexpr size_t PENDING_EVENT_CAPACITY = 3;
 // PokemonMoveData.cpp/PokemonItemData.cpp/PokemonGymData.cpp each carry a
 // static_assert cross-checking these stay in sync with their source of truth.
 constexpr uint16_t POKEMON_MOVE_ID_MAX = 165;
-// ITEM_COUNT(84) - the 6 evolution stones (tracked in itemCounts) - PP Up
+// ITEM_COUNT(90) - the 6 evolution stones (tracked in itemCounts) - PP Up
 // (id 84, tracked in its own PokemonState::ppUpCount field, not bagCounts -
-// see PP_UP_ITEM_ID in PokemonBattleTypes.h for why).
+// see PP_UP_ITEM_ID in PokemonBattleTypes.h for why) - the 6 battle-boost
+// items (ids 85-90, tracked in PokemonState::battleBoostCounts, same reason).
 constexpr size_t POKEMON_BAG_SLOT_COUNT = 77;
-// = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT + 1 (the +1 is PP Up).
-constexpr uint8_t POKEMON_ITEM_ID_MAX = 84;
+// = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT + 1 (PP Up) + 6 (battle-boost items).
+constexpr uint8_t POKEMON_ITEM_ID_MAX = 90;
+// Pinned copy of PokemonBattleTypes.h's BATTLE_BOOST_ITEM_COUNT (same
+// cross-layer-dependency reason as POKEMON_BAG_SLOT_COUNT/POKEMON_ITEM_ID_MAX
+// above) - PokemonItemData.cpp's static_assert keeps these in sync.
+constexpr size_t POKEMON_BATTLE_BOOST_ITEM_COUNT = 6;
 constexpr uint16_t POKEMON_GYM_PROGRESS_BITS = 13;  // 8 gyms + 4 Elite Four + the Champion
 constexpr uint16_t POKEMON_GYM_PROGRESS_MASK = static_cast<uint16_t>((1U << POKEMON_GYM_PROGRESS_BITS) - 1U);
 
@@ -143,6 +148,12 @@ struct PokemonState {
   // field instead of growing bagCounts (which would shift every byte after
   // it and break every already-shipped v3/v4 save).
   uint8_t ppUpCount = 0;
+  // v6: appended after the v5 layout (PokemonStoreCodec.cpp's byte 199). One
+  // count per battle-boost item (X Attack/X Defense/X Speed/X Special/Guard
+  // Spec./Dire Hit, indices 0-5 matching BATTLE_BOOST_ITEM_ID_FIRST.. in
+  // ItemCategory::BattleBoost order) - same reason as ppUpCount above: none
+  // of these fit bagCounts without growing it and breaking every earlier save.
+  std::array<uint8_t, POKEMON_BATTLE_BOOST_ITEM_COUNT> battleBoostCounts{};
 
   bool operator==(const PokemonState&) const = default;
 };

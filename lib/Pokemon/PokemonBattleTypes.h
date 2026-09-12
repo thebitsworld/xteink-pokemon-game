@@ -10,7 +10,8 @@
 namespace pokemon {
 
 constexpr uint8_t MOVE_COUNT = 165;
-constexpr uint8_t ITEM_COUNT = 84;  // 83 original items + PP Up (id 84, PP_UP_ITEM_ID)
+// 83 original items + PP Up (id 84) + 6 battle-boost items (ids 85-90).
+constexpr uint8_t ITEM_COUNT = 90;
 constexpr uint8_t GYM_COUNT = 13;  // 8 gyms + 4 Elite Four + the Champion (Blue), in challenge order
 // The Champion is always the last entry - see gymProgressFor()'s Champion
 // branch and PokemonActivity's dynamic final-slot substitution.
@@ -101,6 +102,13 @@ enum class ItemCategory : uint8_t {
   PPRestore = 5,
   Machine = 6,  // TM/HM
   PpUp = 7,     // id 84, PP_UP_ITEM_ID - the one exception tracked in PokemonState::ppUpCount, not bagCounts
+  // ids 85-90 (BATTLE_BOOST_ITEM_ID_FIRST..LAST) - X Attack/X Defense/X Speed/
+  // X Special/Guard Spec./Dire Hit. Same exception as PpUp above: tracked in
+  // PokemonState::battleBoostCounts, not bagCounts (which is already a full,
+  // already-shipped fixed array). Only meaningful mid-battle - applied
+  // directly to the live BattleCombatant via applyBattleBoostItem()
+  // (PokemonBattle.h/.cpp), never persisted to a BattleRecordEntry.
+  BattleBoost = 8,
 };
 
 // The one and only PP Up item id - deliberately outside the
@@ -110,6 +118,23 @@ enum class ItemCategory : uint8_t {
 // growing bagCounts (which would shift every byte after it in every
 // already-shipped save - see the v5 note on PokemonState).
 constexpr uint8_t PP_UP_ITEM_ID = 84;
+
+// The 6 battle-boost item ids, same "outside bagCounts" exception as PP Up
+// above (see PokemonState::battleBoostCounts, v6). Real Gen 1 items: each of
+// the 4 X items raises one stat by 1 stage for the rest of the battle; Guard
+// Spec. blocks the opponent from lowering the user's stats for the rest of
+// the battle (simplified from the real 5-turn timer - see
+// applyBattleBoostItem()'s doc comment); Dire Hit raises the user's own
+// critical-hit ratio for the rest of the battle.
+constexpr uint8_t ITEM_X_ATTACK = 85;
+constexpr uint8_t ITEM_X_DEFENSE = 86;
+constexpr uint8_t ITEM_X_SPEED = 87;
+constexpr uint8_t ITEM_X_SPECIAL = 88;
+constexpr uint8_t ITEM_GUARD_SPEC = 89;
+constexpr uint8_t ITEM_DIRE_HIT = 90;
+constexpr uint8_t BATTLE_BOOST_ITEM_ID_FIRST = ITEM_X_ATTACK;
+constexpr uint8_t BATTLE_BOOST_ITEM_ID_LAST = ITEM_DIRE_HIT;
+constexpr size_t BATTLE_BOOST_ITEM_COUNT = BATTLE_BOOST_ITEM_ID_LAST - BATTLE_BOOST_ITEM_ID_FIRST + 1U;
 
 struct ItemData {
   uint8_t itemId;

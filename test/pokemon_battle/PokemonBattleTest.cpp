@@ -357,6 +357,74 @@ void hazeResetsBothSidesStatStages() {
   CHECK(defender.defenseStage == 0);
 }
 
+void applyBattleBoostItemRaisesEachXStatByOneStageUpToTheCap() {
+  BattleCombatant combatant{};
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_ATTACK));
+  CHECK(combatant.attackStage == 1);
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_DEFENSE));
+  CHECK(combatant.defenseStage == 1);
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_SPEED));
+  CHECK(combatant.speedStage == 1);
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_SPECIAL));
+  CHECK(combatant.specialStage == 1);
+
+  combatant.attackStage = 6;
+  CHECK(!pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_ATTACK));  // already at the +6 cap
+  CHECK(combatant.attackStage == 6);
+}
+
+void guardSpecItemActivatesOnceAndBlocksOpponentStatLoweringMoves() {
+  BattleCombatant combatant{};
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_GUARD_SPEC));
+  CHECK(combatant.guardSpecActive);
+  CHECK(!pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_GUARD_SPEC));  // already active this battle
+
+  // Growl (move 45) lowers the target's Attack by 1 stage - Guard Spec
+  // should block that entirely, leaving the stage untouched, rather than
+  // just capping it the way an already-at-6 stage would.
+  BattleCombatant attacker = makeCombatant(4, 20, {45});
+  BattleCombatant defender = makeCombatant(1, 20, {33});
+  defender.guardSpecActive = true;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(defender.attackStage == 0);
+  CHECK(result.player.event == BattleLogEvent::StatChangeFailed);
+}
+
+void guardSpecDoesNotBlockSelfBuffingStatMoves() {
+  // Guard Spec only blocks the OPPONENT from lowering this combatant's own
+  // stats - it must not interfere with the combatant's own self-buffs.
+  BattleCombatant attacker = makeCombatant(1, 20, {14});  // Swords Dance, self-targeting +2 Attack
+  attacker.guardSpecActive = true;
+  BattleCombatant defender = makeCombatant(4, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::StatRaised);
+  CHECK(attacker.attackStage == 2);
+}
+
+void direHitItemActivatesOnceAndRaisesCritRatioToTheHighTier() {
+  BattleCombatant combatant{};
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_DIRE_HIT));
+  CHECK(combatant.direHitActive);
+  CHECK(!pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_DIRE_HIT));  // already active this battle
+
+  // Same roll=100 Tackle scenario as criticalHitExactlyDoublesDamageForAHighCritRatioMove's
+  // last check (100 sits between Bulbasaur's plain 45 threshold and the
+  // high-crit 360 one) - Dire Hit should push a plain Tackle into the
+  // high-crit tier exactly the way a move like Slash already is.
+  uint32_t midContext = 100;
+  const RandomSource midRandom{&midContext, fixedRoll};
+  BattleCombatant tackleUser = makeCombatant(1, 20, {33});
+  tackleUser.direHitActive = true;
+  BattleCombatant tackleTarget = makeCombatant(4, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(tackleUser, tackleTarget, 0, midRandom);
+  CHECK(result.player.critical);
+}
+
+void applyBattleBoostItemRejectsAnUnknownItemId() {
+  BattleCombatant combatant{};
+  CHECK(!pokemon::applyBattleBoostItem(combatant, 11));  // Potion - not a battle-boost item at all
+}
+
 void speedStageCanFlipWhichSideActsFirst() {
   // Bulbasaur (base Speed 45) is normally slower than Charmander (65) at the
   // same level, so Charmander acts first and its Ember faints a 1-HP
@@ -809,6 +877,11 @@ int main() {
   opponentDebuffMoveLowersDefendersStageNotTheUsers();
   statChangeAtCapReportsFailureInsteadOfExceedingBounds();
   hazeResetsBothSidesStatStages();
+  applyBattleBoostItemRaisesEachXStatByOneStageUpToTheCap();
+  guardSpecItemActivatesOnceAndBlocksOpponentStatLoweringMoves();
+  guardSpecDoesNotBlockSelfBuffingStatMoves();
+  direHitItemActivatesOnceAndRaisesCritRatioToTheHighTier();
+  applyBattleBoostItemRejectsAnUnknownItemId();
   speedStageCanFlipWhichSideActsFirst();
   accuracyStageLoweringCanCauseAMissThatWouldOtherwiseHit();
   evasionStageRaisingCanCauseAMissThatWouldOtherwiseHit();

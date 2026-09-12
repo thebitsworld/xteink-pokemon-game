@@ -424,10 +424,11 @@ void multiHourCreditUsesLifetimeAtEachHourlyBoundary() {
   state.encounterMisses = 3;
   state.bagCounts.fill(UINT8_MAX);
   state.bagCounts[0] = state.bagCounts[1] = state.bagCounts[2] = state.bagCounts[3] = 0;  // balls stay available
-  // PP Up's count lives outside bagCounts (its own ppUpCount field), so it
-  // needs its own "sold out" cap to stay neutralized like every other
-  // medicine-track item here.
+  // PP Up and the 6 battle-boost items live outside bagCounts (their own
+  // ppUpCount/battleBoostCounts fields), so they need their own "sold out"
+  // cap to stay neutralized like every other medicine-track item here.
   state.ppUpCount = UINT8_MAX;
+  state.battleBoostCounts.fill(UINT8_MAX);
   constexpr uint32_t draws[] = {
       1,
       3,
