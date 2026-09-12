@@ -253,3 +253,34 @@ same hit would have been misreported as a plain win instead of the simultaneous-
 checking both sides' HP in the right order in all 4 of those branches. 6 new tests in
 `PokemonBattleTest.cpp` (2 for flinch, 1 for drain caps/healing, 3 for the self-destruct
 quirks including the simultaneous-KO fix).
+
+The larger, multi-turn-state group mostly shipped too, as `v0.13.0`: **two-turn charge
+moves** (Fly/Dig/Solar Beam/Skull Bash/Sky Attack - a new `BattleCombatant::forcedMoveId`/
+`forcedTurnsRemaining` pair drives the automatic charge-then-release, shared with trapping
+moves below; Fly/Dig additionally set `invulnerable`, simplified to "everything just misses"
+during the charge turn rather than modeling the real games' specific bypass moves),
+**trapping moves** (Wrap/Bind/Fire Spin/Clamp - it's the *attacker* that's locked into
+repeating the move for 2-5 turns via the same `forcedMoveId` mechanism, not the target;
+follow-up turns skip the accuracy roll entirely, a documented simplification), **Bide**
+(braces for 2 turns via `bideDamageStored`/`bideTurnsRemaining`, then unleashes double back,
+ignoring type effectiveness like Counter does), **Leech Seed** (drains 1/8 max HP each turn
+to heal whoever planted it; Grass-type targets are immune), **Reflect/Light Screen**
+(halve incoming Physical/Special damage respectively - a crit still bypasses both, matching
+the real games), and **Recover/Soft-Boiled/Rest** (heal the user; Rest also cures status and
+sleeps for a real fixed 2 turns, not the random 1-3 this engine already simplified normal
+Sleep to). **Mist and Focus Energy were folded into the existing Guard Spec./Dire Hit
+battle-boost-item fields** (`guardSpecActive`/`direHitActive`) rather than getting new state,
+since both move/item pairs do the exact same thing. The player-side UI needed one small
+change too - `Screen::Battle`'s FIGHT handler now detects a forced continuation
+(charge/trap/Bide) and skips straight to it, the same way it already does for a forced
+Struggle; `chooseOpponentMoveSlot()` got the equivalent check for the AI side.
+`BIDE_MOVE_ID` moved to the public header for this reason. 10 new tests in
+`PokemonBattleTest.cpp`.
+
+**Still not done, deferred further**: Whirlwind/Roar (forcing a switch touches the battle
+UI's win/loss/switch flow deeply, including "wild Pokemon flees"/"trainer sends out its next
+Pokemon" cases that don't otherwise exist in this engine), Substitute (needs new
+UI-visible HP-bar state), Disable (needs the move menu to grey out/reject a disabled
+move), and Transform/Mimic/Metronome/Mirror Move/Conversion (move-copying/self-modifying
+mechanics, genuinely a separate larger effort each). See the Gen 1 mechanics gaps memory
+note for the up-to-date list.
