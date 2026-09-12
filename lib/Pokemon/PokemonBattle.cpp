@@ -261,6 +261,78 @@ constexpr uint8_t SELF_DESTRUCT_MOVE_ID = 120;
 constexpr uint8_t EXPLOSION_MOVE_ID = 153;
 bool isSelfDestructMove(const uint8_t moveId) { return moveId == SELF_DESTRUCT_MOVE_ID || moveId == EXPLOSION_MOVE_ID; }
 
+// The 5 real Gen 1 two-turn charge moves: turn 1 charges (no damage, see
+// resolveAction()'s dispatch), turn 2 automatically releases the attack
+// without the player/AI choosing again (BattleCombatant::forcedMoveId).
+// Fly/Dig additionally grant semi-invulnerability during the charge turn
+// (simplified to "everything just misses" - see
+// BattleCombatant::invulnerable's doc comment).
+struct TwoTurnTableEntry {
+  uint8_t moveId;
+  bool grantsInvulnerability;
+};
+constexpr TwoTurnTableEntry TWO_TURN_TABLE[] = {
+    {19, true},    // Fly
+    {91, true},    // Dig
+    {76, false},   // Solar Beam
+    {130, false},  // Skull Bash
+    {143, false},  // Sky Attack
+};
+const TwoTurnTableEntry* twoTurnEntryForMove(const uint8_t moveId) {
+  for (const TwoTurnTableEntry& entry : TWO_TURN_TABLE) {
+    if (entry.moveId == moveId) return &entry;
+  }
+  return nullptr;
+}
+
+// The 4 real Gen 1 partial-trapping moves - already deal real damage via the
+// normal formula (nonzero power in the move data), but on a successful first
+// hit also lock the ATTACKER into automatically repeating the same move for
+// 1-4 further turns (2-5 total, the same real Gen 1 duration distribution as
+// rollMultiHitCount()) without a fresh accuracy roll - see resolveAction().
+// It's the attacker's own freedom that's restricted, not the target's (the
+// target can still act normally); BattleCombatant::forcedMoveId/
+// forcedTurnsRemaining double as the storage for this, same as the two-turn
+// moves above.
+bool isTrapMove(const uint8_t moveId) {
+  return moveId == 20 ||   // Bind
+         moveId == 35 ||   // Wrap
+         moveId == 83 ||   // Fire Spin
+         moveId == 128;    // Clamp
+}
+
+constexpr uint8_t LEECH_SEED_MOVE_ID = 73;
+constexpr uint8_t REFLECT_MOVE_ID = 115;
+constexpr uint8_t LIGHT_SCREEN_MOVE_ID = 113;
+constexpr uint8_t MIST_MOVE_ID = 54;
+constexpr uint8_t FOCUS_ENERGY_MOVE_ID = 116;
+constexpr uint8_t RECOVER_MOVE_ID = 105;
+constexpr uint8_t SOFT_BOILED_MOVE_ID = 135;
+constexpr uint8_t REST_MOVE_ID = 156;
+// Whirlwind/Roar: force a switch. The engine has no idea whether the target
+// actually has anywhere to switch TO (a wild Pokemon fleeing, a trainer's
+// last team member, the player's own remaining party) - that's a roster
+// concern PokemonActivity.cpp alone can answer - so this just reports
+// BattleLogEvent::ForcedSwitch on a successful hit and leaves what actually
+// happens to the caller.
+constexpr uint8_t WHIRLWIND_MOVE_ID = 18;
+constexpr uint8_t ROAR_MOVE_ID = 46;
+constexpr uint8_t DISABLE_MOVE_ID = 50;
+constexpr uint8_t SUBSTITUTE_MOVE_ID = 164;
+
+// Applies damage to whichever of `defender`'s two HP pools is currently
+// active - a Substitute (if one is up) absorbs it instead of the real
+// Pokemon, and a hit that would deal more than the Substitute's remaining
+// HP just breaks it outright rather than overflowing onto currentHp,
+// matching the real games.
+void applyDamageRespectingSubstitute(BattleCombatant& defender, const uint16_t damage) {
+  if (defender.substituteHp > 0) {
+    defender.substituteHp = defender.substituteHp > damage ? static_cast<uint16_t>(defender.substituteHp - damage) : 0;
+    return;
+  }
+  defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+}
+
 int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
   switch (stat) {
     case StatKind::Attack:
@@ -346,6 +418,22 @@ void applyEndOfTurnStatusDamage(BattleCombatant& combatant, BattleLogEvent& even
   event = BattleLogEvent::StatusDamage;
 }
 
+// Leech Seed: the seeded side loses 1/8 max HP at the end of the turn,
+// healing whoever planted it (`otherSide`) by that same amount - unless
+// otherSide has already fainted, in which case the drain still happens but
+// there's no one left to receive it.
+void applyLeechSeedDamage(BattleCombatant& seededSide, BattleCombatant& otherSide, BattleLogEvent& event) {
+  if (!seededSide.seeded || seededSide.currentHp == 0) return;
+  const uint16_t drained =
+      std::min(seededSide.currentHp, clampToUint16(std::max<uint32_t>(1U, seededSide.maxHp / STATUS_DAMAGE_FRACTION)));
+  seededSide.currentHp = static_cast<uint16_t>(seededSide.currentHp - drained);
+  if (otherSide.currentHp > 0) {
+    otherSide.currentHp =
+        clampToUint16(std::min<uint32_t>(otherSide.maxHp, static_cast<uint32_t>(otherSide.currentHp) + drained));
+  }
+  event = BattleLogEvent::Seeded;
+}
+
 uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& defender, const MoveData& move,
                        const uint8_t moveId, const RandomSource& random, const bool critical) {
   const SpeciesData* attackerSpecies = speciesData(attacker.speciesId);
@@ -398,6 +486,13 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
       typeEffectivenessPercent(move.type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
   damage = damage * effectivenessPercent / 100U;
   if (damage == 0) return 0;
+
+  // Reflect/Light Screen halve incoming Physical/Special damage respectively
+  // - a critical hit bypasses both, matching the real games.
+  if (!critical) {
+    if (physical && defender.reflectActive) damage /= 2U;
+    if (!physical && defender.lightScreenActive) damage /= 2U;
+  }
 
   uint32_t randomPercent = 100U;
   uint32_t roll = 0;
@@ -453,7 +548,59 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     result.event = BattleLogEvent::MoveHadNoPp;
     return result;
   }
-  if (slot != nullptr) --slot->currentPp;
+  // Multi-turn moves (Bide, two-turn charge moves, trapping moves) only
+  // spend PP on the turn the player/AI actually chooses them - every
+  // automatic follow-up turn re-executes the same move for free, matching
+  // the real games. isReleasingTwoTurn/isContinuingTrap detect "this is a
+  // follow-up turn, not a fresh use" by checking forcedMoveId; isContinuingBide
+  // is simpler since Bide never lets go of the move id across its 2 turns.
+  const bool isContinuingBide = moveId == BIDE_MOVE_ID && attacker.bideTurnsRemaining > 0;
+  const TwoTurnTableEntry* twoTurn = twoTurnEntryForMove(moveId);
+  const bool isReleasingTwoTurn = twoTurn != nullptr && attacker.forcedMoveId == moveId;
+  const bool isContinuingTrap = isTrapMove(moveId) && attacker.forcedMoveId == moveId;
+  if (!isContinuingBide && !isReleasingTwoTurn && !isContinuingTrap && slot != nullptr) {
+    --slot->currentPp;
+  }
+
+  // Bide: turn 1 (and 2) just brace, storing whatever damage lands in the
+  // meantime (see the generic damage block's accumulateBideDamage() call);
+  // the turn the countdown reaches 0, it unleashes double that back,
+  // ignoring type effectiveness/accuracy/crit entirely - same "raw
+  // reflected damage" precedent as Counter.
+  if (moveId == BIDE_MOVE_ID) {
+    if (attacker.bideTurnsRemaining == 0) {
+      attacker.bideDamageStored = 0;
+      attacker.bideTurnsRemaining = 2;
+    }
+    // Decrements on the SAME turn it's (re)armed too, so "2 turns" means
+    // exactly 2 total activations (brace, then release) rather than 3.
+    --attacker.bideTurnsRemaining;
+    if (attacker.bideTurnsRemaining > 0) {
+      result.event = BattleLogEvent::ChargingMove;
+      return result;
+    }
+    const uint16_t bideDamage = clampToUint16(static_cast<uint32_t>(attacker.bideDamageStored) * 2U);
+    applyDamageRespectingSubstitute(defender, bideDamage);
+    result.event = bideDamage > 0 ? BattleLogEvent::MoveHit : BattleLogEvent::MoveNoEffect;
+    return result;
+  }
+
+  // Two-turn charge moves: the first use just charges (no damage/accuracy
+  // roll at all this turn), setting up the automatic release next turn; the
+  // release turn clears the forced state and falls through to the normal
+  // resolution below, exactly like any other attack.
+  if (twoTurn != nullptr && attacker.forcedMoveId != moveId) {
+    attacker.forcedMoveId = moveId;
+    attacker.forcedTurnsRemaining = 1;
+    attacker.invulnerable = twoTurn->grantsInvulnerability;
+    result.event = BattleLogEvent::ChargingMove;
+    return result;
+  }
+  if (isReleasingTwoTurn) {
+    attacker.forcedMoveId = 0;
+    attacker.forcedTurnsRemaining = 0;
+    attacker.invulnerable = false;
+  }
 
   // Explosion/Self-Destruct: the user faints as an unconditional side effect
   // of using the move - a real Gen 1 quirk, not merely "recoil after a hit."
@@ -464,10 +611,23 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   const FixedDamageTableEntry* fixedDamage = fixedDamageEntryForMove(moveId);
   const bool isOhko = fixedDamage != nullptr && fixedDamage->kind == FixedDamageKind::Ohko;
 
+  // Fly/Dig's semi-invulnerable charge turn: simplified to "everything just
+  // misses" regardless of accuracy/OHKO rules, rather than modeling the
+  // specific real-game exceptions (Swift, Earthquake-vs-Dig, ...).
+  if (defender.invulnerable) {
+    result.event = BattleLogEvent::MoveMissed;
+    return result;
+  }
+
   // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style
   // moves, and also how Struggle's own accuracy is recorded) - stat stages
-  // never apply to those either, matching the real games.
-  if (isOhko) {
+  // never apply to those either, matching the real games. A trapping move's
+  // automatic follow-up turns always hit - no fresh accuracy roll once
+  // locked in, a documented simplification of the real games' own repeat
+  // roll.
+  if (isContinuingTrap) {
+    // fall straight through to damage resolution below
+  } else if (isOhko) {
     // Real Gen 1 OHKO accuracy: always misses if the user's level is lower
     // than the target's, otherwise hit chance is the move's listed accuracy
     // (30) plus the level difference - a Pokemon 20 levels higher connects
@@ -556,8 +716,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       }
       if (noEffect && result.event != BattleLogEvent::MoveFailed) result.event = BattleLogEvent::MoveNoEffect;
       const uint16_t clampedDamage = clampToUint16(damage);
-      defender.currentHp = defender.currentHp > clampedDamage ? static_cast<uint16_t>(defender.currentHp - clampedDamage)
-                                                               : 0;
+      applyDamageRespectingSubstitute(defender, clampedDamage);
       if (move->category == MoveCategory::Physical && clampedDamage > 0) {
         defender.lastPhysicalDamageTaken = clampedDamage;
       }
@@ -584,8 +743,15 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
             attackerStats != nullptr &&
             rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId) || attacker.direHitActive, random);
         const uint16_t damage = computeDamage(attacker, defender, effectiveMove, moveId, random, critical);
-        defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+        applyDamageRespectingSubstitute(defender, damage);
         totalDamage += damage;
+        // Bide (move 117) accumulates whatever damage its user takes while
+        // bracing - only from this generic power-based path, not the
+        // FIXED_DAMAGE_TABLE moves (Counter, OHKO, ...), a scoped
+        // simplification for a fairly rare combination either way.
+        if (defender.bideTurnsRemaining > 0) {
+          defender.bideDamageStored = clampToUint16(static_cast<uint32_t>(defender.bideDamageStored) + damage);
+        }
         if (critical) anyCritical = true;
         ++hitsLanded;
       }
@@ -626,8 +792,23 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       // is still standing (a fainted target has nothing left to flinch).
       if (const FlinchTableEntry* flinch = flinchEntryForMove(moveId);
           flinch != nullptr && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0 &&
-          rollPercentChance(random, flinch->chancePercent)) {
+          defender.substituteHp == 0 && rollPercentChance(random, flinch->chancePercent)) {
         defender.flinched = true;
+      }
+
+      // Wrap/Bind/Fire Spin/Clamp: a successful first hit locks the
+      // ATTACKER into repeating this same move automatically for 1-4 more
+      // turns (2-5 total - the same real Gen 1 duration distribution
+      // rollMultiHitCount() already models). isContinuingTrap turns just
+      // count down; the lock releases early if the target faints.
+      if (isTrapMove(moveId)) {
+        if (!isContinuingTrap && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0) {
+          attacker.forcedMoveId = moveId;
+          attacker.forcedTurnsRemaining = static_cast<uint8_t>(rollMultiHitCount(random) - 1U);
+        } else if (isContinuingTrap) {
+          if (attacker.forcedTurnsRemaining > 0) --attacker.forcedTurnsRemaining;
+          if (attacker.forcedTurnsRemaining == 0 || defender.currentHp == 0) attacker.forcedMoveId = 0;
+        }
       }
     }
   }
@@ -642,7 +823,10 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     // move from affecting whoever activated it - the same "no change, no
     // further effect" outcome as already being at the -6 floor, so this
     // reuses StatChangeFailed rather than adding a dedicated message.
-    if (!statEffect->targetsSelf && statEffect->stages < 0 && target.guardSpecActive) {
+    if (!statEffect->targetsSelf && statEffect->stages < 0 && (target.guardSpecActive || target.substituteHp > 0)) {
+      // A Substitute blocks an opponent's stat-lowering move the same way
+      // Guard Spec. does - it's the decoy that would be affected, not the
+      // real Pokemon, so nothing happens.
       result.event = BattleLogEvent::StatChangeFailed;
     } else {
       int8_t& stage = statStageRef(target, statEffect->stat);
@@ -652,6 +836,95 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
                      : statEffect->stages > 0 ? BattleLogEvent::StatRaised
                                               : BattleLogEvent::StatLowered;
     }
+  } else if (moveId == REFLECT_MOVE_ID || moveId == LIGHT_SCREEN_MOVE_ID) {
+    bool& active = moveId == REFLECT_MOVE_ID ? attacker.reflectActive : attacker.lightScreenActive;
+    if (active) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      active = true;
+      result.event = BattleLogEvent::BuffApplied;
+    }
+  } else if (moveId == MIST_MOVE_ID || moveId == FOCUS_ENERGY_MOVE_ID) {
+    // Mist and Focus Energy reuse the exact same battle-boost-item fields as
+    // Guard Spec./Dire Hit (guardSpecActive/direHitActive) - both pairs do
+    // the identical thing (block the user's own stats from being lowered;
+    // raise the user's own crit ratio to the high-crit tier), just reached
+    // via a move instead of an item.
+    bool& active = moveId == MIST_MOVE_ID ? attacker.guardSpecActive : attacker.direHitActive;
+    if (active) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      active = true;
+      result.event = BattleLogEvent::BuffApplied;
+    }
+  } else if (moveId == RECOVER_MOVE_ID || moveId == SOFT_BOILED_MOVE_ID) {
+    if (attacker.currentHp >= attacker.maxHp) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      const uint16_t healAmount = clampToUint16(std::max<uint32_t>(1U, attacker.maxHp / 2U));
+      attacker.currentHp =
+          clampToUint16(std::min<uint32_t>(attacker.maxHp, static_cast<uint32_t>(attacker.currentHp) + healAmount));
+      result.drainApplied = true;  // reuses the "It regained health!" clause
+    }
+  } else if (moveId == REST_MOVE_ID) {
+    attacker.currentHp = attacker.maxHp;
+    attacker.status = Ailment::Sleep;
+    // Rest's real Gen 1 duration is a fixed 2 turns, unlike the random 1-3
+    // (simplified from the real 1-7) this engine rolls for every other
+    // sleep-inducing move.
+    attacker.statusTurns = 2;
+    result.event = BattleLogEvent::InflictedStatus;
+    result.drainApplied = true;
+  } else if (moveId == LEECH_SEED_MOVE_ID) {
+    // Grass-type targets are immune to Leech Seed in the real games.
+    const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
+    const bool isGrassType = defenderSpecies != nullptr && (defenderSpecies->primaryType == PokemonType::Grass ||
+                                                            defenderSpecies->secondaryType == PokemonType::Grass);
+    if (isGrassType || defender.seeded || defender.substituteHp > 0) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      defender.seeded = true;
+      result.event = BattleLogEvent::Seeded;
+    }
+  } else if (moveId == WHIRLWIND_MOVE_ID || moveId == ROAR_MOVE_ID) {
+    result.event = BattleLogEvent::ForcedSwitch;
+  } else if (moveId == DISABLE_MOVE_ID) {
+    // Picks a random one of the target's moves that still has PP and isn't
+    // already disabled - fails with no effect if none qualify.
+    uint8_t candidates[BATTLE_MOVE_SLOTS];
+    uint8_t candidateCount = 0;
+    for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+      if (defender.moves[index].moveId == 0 || defender.moves[index].currentPp == 0) continue;
+      if (defender.disableTurnsRemaining > 0 && defender.disabledMoveSlot == index) continue;
+      candidates[candidateCount++] = index;
+    }
+    if (candidateCount == 0) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      uint32_t pick = 0;
+      if (!rollBelow(random, candidateCount, pick)) pick = 0;
+      defender.disabledMoveSlot = candidates[pick];
+      // Simplified from the real 1-7 turns to 1-3, the same range this
+      // engine already uses for Sleep.
+      // +1: finishTurn() unconditionally counts every disable down once per
+      // turn (including this one, since Disable itself doesn't get a
+      // special exemption there), so this keeps the roll's real 1-3 meaning
+      // "turns disabled AFTER this one" rather than losing a turn to the
+      // immediate same-turn decrement.
+      defender.disableTurnsRemaining = static_cast<uint8_t>(rollStatusDuration(random, 1, 3) + 1U);
+      result.event = BattleLogEvent::MoveDisabled;
+    }
+  } else if (moveId == SUBSTITUTE_MOVE_ID) {
+    // Costs 1/4 of the user's own max HP (minimum 1) - fails if one is
+    // already up, or the user doesn't have enough HP left to spare.
+    const uint16_t cost = std::max<uint16_t>(1, static_cast<uint16_t>(attacker.maxHp / 4U));
+    if (attacker.substituteHp > 0 || attacker.currentHp <= cost) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      attacker.currentHp = static_cast<uint16_t>(attacker.currentHp - cost);
+      attacker.substituteHp = cost;
+      result.event = BattleLogEvent::SubstituteUp;
+    }
   }
 
   // PokeAPI's ailment_chance is 0 for a pure status move's guaranteed main
@@ -660,8 +933,8 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   // Thunder Shock's 10% paralysis). Treat 0 as "always" for Status moves.
   const uint8_t effectiveAilmentChance =
       (move->category == MoveCategory::Status && move->ailmentChance == 0) ? 100 : move->ailmentChance;
-  if (defender.status == Ailment::None && defender.currentHp > 0 && move->ailment != Ailment::None &&
-      rollPercentChance(random, effectiveAilmentChance)) {
+  if (defender.status == Ailment::None && defender.currentHp > 0 && defender.substituteHp == 0 &&
+      move->ailment != Ailment::None && rollPercentChance(random, effectiveAilmentChance)) {
     defender.status = move->ailment;
     if (move->ailment == Ailment::Sleep) {
       defender.statusTurns = rollStatusDuration(random, 1, 3);
@@ -684,6 +957,21 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
 // "opponent always uses one move" complaint this was written to fix.
 uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombatant& opponent,
                                const RandomSource& random) {
+  // Mid-charge (Fly/Dig/...), mid-trap (Wrap/Bind/...), or bracing for Bide -
+  // the AI has no real choice this turn, it must keep using the same move.
+  // PokemonActivity.cpp's Screen::Battle handling does the equivalent check
+  // for the player's own side.
+  if (opponent.bideTurnsRemaining > 0) {
+    for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+      if (opponent.moves[index].moveId == BIDE_MOVE_ID) return index;
+    }
+  }
+  if (opponent.forcedMoveId != 0) {
+    for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+      if (opponent.moves[index].moveId == opponent.forcedMoveId) return index;
+    }
+  }
+
   const SpeciesData* playerSpecies = speciesData(player.speciesId);
   std::array<uint8_t, BATTLE_MOVE_SLOTS> usable{};
   uint8_t usableCount = 0;
@@ -691,6 +979,7 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
   for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
     const BattleMoveSlot& slot = opponent.moves[index];
     if (slot.moveId == 0 || slot.currentPp == 0) continue;
+    if (opponent.disableTurnsRemaining > 0 && opponent.disabledMoveSlot == index) continue;
     usable[usableCount++] = index;
     const MoveData* move = moveData(slot.moveId);
     if (move == nullptr || playerSpecies == nullptr) continue;
@@ -733,10 +1022,15 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
 // the single opponent action, for the skip-player-turn case) already ran
 // and any immediate faint from those was already handled by the caller.
 void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnResult& result) {
+  if (player.disableTurnsRemaining > 0) --player.disableTurnsRemaining;
+  if (opponent.disableTurnsRemaining > 0) --opponent.disableTurnsRemaining;
+
   BattleLogEvent playerDotEvent = BattleLogEvent::None;
   BattleLogEvent opponentDotEvent = BattleLogEvent::None;
   applyEndOfTurnStatusDamage(player, playerDotEvent);
   applyEndOfTurnStatusDamage(opponent, opponentDotEvent);
+  applyLeechSeedDamage(player, opponent, playerDotEvent);
+  applyLeechSeedDamage(opponent, player, opponentDotEvent);
   if (playerDotEvent != BattleLogEvent::None) result.player.event = playerDotEvent;
   if (opponentDotEvent != BattleLogEvent::None) result.opponent.event = opponentDotEvent;
 

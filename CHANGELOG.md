@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-13
+
+### Added
+
+- Whirlwind and Roar now force a switch, matching the original games - ending a wild encounter, sending out a trainer's next Pokémon, or making you switch yourself if used against you.
+- Disable now really disables one of the target's moves for a few turns.
+- Substitute now works as intended - it creates a decoy that absorbs damage and blocks status and stat-lowering moves until it breaks.
+
+## [0.13.0] - 2026-09-13
+
+### Added
+
+- Fly, Dig, Solar Beam, Skull Bash, and Sky Attack now charge for a turn before attacking, matching the original games - Fly and Dig also make you briefly untouchable while airborne/underground.
+- Wrap, Bind, Fire Spin, and Clamp now trap the target for several turns, automatically striking again each turn without needing to be reselected.
+- Bide now works as intended - brace for 2 turns, then unleash double the damage taken back at the target.
+- Leech Seed now saps the target's HP each turn to heal the user (Grass-type Pokémon are immune, matching the original games).
+- Reflect and Light Screen now halve incoming Physical/Special damage respectively (a critical hit still gets through); Mist and Focus Energy are now real moves, matching what Guard Spec. and Dire Hit already do.
+- Recover, Soft-Boiled, and Rest now heal the user - Rest also cures status and puts you to sleep for a fixed 2 turns.
+
 ## [0.12.1] - 2026-09-12
 
 ### Added
