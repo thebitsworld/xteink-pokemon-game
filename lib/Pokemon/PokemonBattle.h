@@ -221,7 +221,9 @@ struct BattleCombatant {
   // BOTH sides at once - the attacker auto-repeats the move (the existing
   // forcedMoveId/forcedTurnsRemaining above already models that half) AND
   // the TARGET is immobilized (can't select or execute any move) for
-  // roughly the same duration. trappedTurnsRemaining > 0 means this
+  // roughly the same duration - unless a Substitute is up, which absorbs
+  // the hit and blocks this the same way it already blocks status/stat-
+  // lowering/flinch/Leech Seed. trappedTurnsRemaining > 0 means this
   // combatant can't act at all this turn; counted down once per turn in
   // finishTurn(), alongside disableTurnsRemaining. A documented
   // simplification: the real games also block switching while trapped,
@@ -278,6 +280,7 @@ enum class BattleLogEvent : uint8_t {
   ConversionApplied,  // Conversion copied the opponent's type
   MustRecharge,      // Hyper Beam's recharge turn - no action taken
   Trapped,           // immobilized by an opponent's Wrap/Bind/Fire Spin/Clamp - no action taken
+  NothingHappened,   // a pure-flavor status move with no ailment/effect (Splash, ...) - "But nothing happened!"
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with
