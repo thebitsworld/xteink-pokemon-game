@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-13
+
+### Added
+
+- Conversion now changes the user's type to match its target's, affecting STAB and type matchups for the rest of the battle.
+- Mimic now copies one of the target's moves into its own slot for the rest of the battle.
+- Metronome now triggers a completely random move.
+- Mirror Move now replays whatever move was last used against the user.
+- Transform now copies the target's species, stat stages, and moveset (keeping the user's own HP, level, and status) - the final piece of the Gen 1 mechanics gaps audit.
+
 ## [0.13.1] - 2026-09-13
 
 ### Added

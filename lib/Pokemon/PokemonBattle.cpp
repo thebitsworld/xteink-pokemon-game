@@ -319,6 +319,55 @@ constexpr uint8_t WHIRLWIND_MOVE_ID = 18;
 constexpr uint8_t ROAR_MOVE_ID = 46;
 constexpr uint8_t DISABLE_MOVE_ID = 50;
 constexpr uint8_t SUBSTITUTE_MOVE_ID = 164;
+// MIMIC_MOVE_ID (102) is declared publicly in PokemonBattle.h - see its own
+// doc comment for why.
+constexpr uint8_t METRONOME_MOVE_ID = 118;
+constexpr uint8_t MIRROR_MOVE_MOVE_ID = 119;
+constexpr uint8_t TRANSFORM_MOVE_ID = 144;
+constexpr uint8_t CONVERSION_MOVE_ID = 160;
+
+// True for the handful of moves whose effect needs context Metronome/Mirror
+// Move can't supply indirectly - a real move slot to spend PP from and
+// persist into (Mimic), the defender's actual moveset (Mimic), their own
+// separate multi-turn state machine (Bide), or their own recursive dispatch
+// (Metronome/Mirror Move themselves, and Transform/Conversion, whose
+// battle-duration side effects don't make sense triggered by proxy).
+// Excluded from Metronome's random pick and from what Mirror Move is willing
+// to replay back.
+bool isMoveCopyingOrSpecialMove(const uint8_t moveId) {
+  return moveId == MIMIC_MOVE_ID || moveId == METRONOME_MOVE_ID || moveId == MIRROR_MOVE_MOVE_ID ||
+         moveId == TRANSFORM_MOVE_ID || moveId == CONVERSION_MOVE_ID || moveId == BIDE_MOVE_ID;
+}
+
+// Rejection-samples a uniformly random real, selectable move id (1..
+// MOVE_COUNT) for Metronome, retrying (bounded, so a pathological RandomSource
+// can't loop forever) if it lands on Struggle or one of the special/move-
+// copying moves above.
+uint8_t pickRandomMetronomeMove(const RandomSource& random) {
+  for (uint8_t attempt = 0; attempt < 20U; ++attempt) {
+    uint32_t roll = 0;
+    if (!rollBelow(random, MOVE_COUNT, roll)) return 0;
+    const uint8_t candidate = static_cast<uint8_t>(roll + 1U);
+    if (candidate == STRUGGLE_MOVE_ID || isMoveCopyingOrSpecialMove(candidate)) continue;
+    return candidate;
+  }
+  return 0;
+}
+
+// A combatant's effective type for STAB/type-effectiveness purposes only -
+// Conversion overrides it with whatever it copied from the opponent (see
+// BattleCombatant::conversionType1's doc comment); every other combatant
+// just uses its species' real type.
+struct EffectiveTypes {
+  PokemonType primary;
+  PokemonType secondary;
+};
+EffectiveTypes effectiveTypesFor(const BattleCombatant& combatant, const SpeciesData& species) {
+  if (combatant.conversionType1 != PokemonType::None) {
+    return {combatant.conversionType1, combatant.conversionType2};
+  }
+  return {species.primaryType, species.secondaryType};
+}
 
 // Applies damage to whichever of `defender`'s two HP pools is currently
 // active - a Substitute (if one is up) absorbs it instead of the real
@@ -479,11 +528,12 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
   // to account for there.
   if (critical) damage *= 2U;
 
-  const bool stab = move.type == attackerSpecies->primaryType || move.type == attackerSpecies->secondaryType;
+  const EffectiveTypes attackerTypes = effectiveTypesFor(attacker, *attackerSpecies);
+  const bool stab = move.type == attackerTypes.primary || move.type == attackerTypes.secondary;
   if (stab) damage = damage * STAB_BONUS_PERCENT / 100U;
 
-  const uint16_t effectivenessPercent =
-      typeEffectivenessPercent(move.type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
+  const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+  const uint16_t effectivenessPercent = typeEffectivenessPercent(move.type, defenderTypes.primary, defenderTypes.secondary);
   damage = damage * effectivenessPercent / 100U;
   if (damage == 0) return 0;
 
@@ -507,6 +557,12 @@ BattleLogEvent effectivenessEvent(const uint16_t effectivenessPercent) {
   if (effectivenessPercent < 100) return BattleLogEvent::MoveNotVeryEffective;
   return BattleLogEvent::MoveHit;
 }
+
+// Forward-declared so resolveAction() (and this function's own recursive
+// Metronome/Mirror Move calls) can call it ahead of its definition below.
+void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defender, uint8_t moveId,
+                              const MoveData* move, const RandomSource& random, bool allowMultiTurnLock,
+                              uint8_t moveSlotOfMimicUser, BattleActionResult& result);
 
 BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& defender, const uint8_t moveSlot,
                                  const RandomSource& random) {
@@ -608,6 +664,40 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   // roll below, rather than alongside the damage-dealing block.
   if (isSelfDestructMove(moveId)) attacker.currentHp = 0;
 
+  // moveSlotOfMimicUser threads through which real slot (if any) this action
+  // started from - Mimic needs to know which of its own slots to overwrite,
+  // and it's also forwarded into a Metronome/Mirror Move-redirected
+  // recursive call so a redirected Mimic (excluded, see
+  // isMoveCopyingOrSpecialMove()) would still have it available in
+  // principle. BATTLE_MOVE_SLOTS itself means "no real slot" (a forced
+  // Struggle, or already inside a redirect).
+  resolveGenericMoveEffect(attacker, defender, moveId, move, random, /*allowMultiTurnLock=*/true,
+                           forcedStruggle ? BATTLE_MOVE_SLOTS : moveSlot, result);
+  return result;
+}
+
+// The shared tail of resolveAction(): everything from the invulnerability/
+// accuracy check through damage/ailment resolution, parameterized directly
+// on `moveId`/`move` rather than a slot index. Metronome and Mirror Move
+// both invoke this recursively for whatever move they end up executing,
+// bypassing resolveAction()'s own slot lookup/PP spend/Bide/two-turn-charge
+// preamble entirely - see their dispatch branches below.
+// `allowMultiTurnLock` is false for such a redirected call: a trapping move
+// picked this way has no real slot for the attacker to keep "choosing" it
+// from on a follow-up turn, so it only ever deals its one hit (a documented
+// simplification). `moveSlotOfMimicUser` is BATTLE_MOVE_SLOTS (no real slot)
+// for a redirected call.
+void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defender, const uint8_t moveId,
+                              const MoveData* move, const RandomSource& random, const bool allowMultiTurnLock,
+                              const uint8_t moveSlotOfMimicUser, BattleActionResult& result) {
+  // Mirror Move's memory: tracks the last real move id used against
+  // `defender`, regardless of hit/miss - see lastMoveUsedAgainstMe's doc
+  // comment. Recorded here (rather than in resolveAction()'s preamble) so a
+  // Metronome/Mirror Move redirect naturally overwrites this with the real
+  // underlying move actually executed, not the wrapper move's own id.
+  defender.lastMoveUsedAgainstMe = moveId;
+
+  const bool isContinuingTrap = isTrapMove(moveId) && attacker.forcedMoveId == moveId;
   const FixedDamageTableEntry* fixedDamage = fixedDamageEntryForMove(moveId);
   const bool isOhko = fixedDamage != nullptr && fixedDamage->kind == FixedDamageKind::Ohko;
 
@@ -616,7 +706,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   // specific real-game exceptions (Swift, Earthquake-vs-Dig, ...).
   if (defender.invulnerable) {
     result.event = BattleLogEvent::MoveMissed;
-    return result;
+    return;
   }
 
   // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style
@@ -634,14 +724,14 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     // essentially every time. Stat stages never apply to this roll.
     if (attacker.level < defender.level) {
       result.event = BattleLogEvent::MoveMissed;
-      return result;
+      return;
     }
     const int32_t hitChance = std::clamp<int32_t>(
         static_cast<int32_t>(move->accuracy) + (static_cast<int32_t>(attacker.level) - defender.level), 0, 100);
     uint32_t accuracyRoll = 0;
     if (rollBelow(random, 100U, accuracyRoll) && accuracyRoll >= static_cast<uint32_t>(hitChance)) {
       result.event = BattleLogEvent::MoveMissed;
-      return result;
+      return;
     }
   } else if (move->accuracy != 0) {
     const int8_t combinedStage =
@@ -650,7 +740,7 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     uint32_t accuracyRoll = 0;
     if (rollBelow(random, 100U, accuracyRoll) && accuracyRoll >= effectiveAccuracy) {
       result.event = BattleLogEvent::MoveMissed;
-      return result;
+      return;
     }
   }
 
@@ -663,10 +753,11 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   if (move->category != MoveCategory::Status) {
     const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
     const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
-    const uint16_t effectivenessPercent =
-        defenderSpecies == nullptr
-            ? 100
-            : typeEffectivenessPercent(move->type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
+    uint16_t effectivenessPercent = 100;
+    if (defenderSpecies != nullptr) {
+      const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+      effectivenessPercent = typeEffectivenessPercent(move->type, defenderTypes.primary, defenderTypes.secondary);
+    }
 
     if (fixedDamage != nullptr) {
       // These moves skip the normal level/power/Attack/Defense formula
@@ -802,7 +893,13 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       // rollMultiHitCount() already models). isContinuingTrap turns just
       // count down; the lock releases early if the target faints.
       if (isTrapMove(moveId)) {
-        if (!isContinuingTrap && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0) {
+        // allowMultiTurnLock is false for a Metronome/Mirror Move-redirected
+        // trap move: there's no real slot for the attacker to keep
+        // "choosing" it from on a follow-up turn, so it just deals its one
+        // hit instead of locking the attacker in - a documented
+        // simplification.
+        if (allowMultiTurnLock && !isContinuingTrap && effectivenessPercent != 0 && totalDamage > 0 &&
+            defender.currentHp > 0) {
           attacker.forcedMoveId = moveId;
           attacker.forcedTurnsRemaining = static_cast<uint8_t>(rollMultiHitCount(random) - 1U);
         } else if (isContinuingTrap) {
@@ -876,10 +973,14 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     result.event = BattleLogEvent::InflictedStatus;
     result.drainApplied = true;
   } else if (moveId == LEECH_SEED_MOVE_ID) {
-    // Grass-type targets are immune to Leech Seed in the real games.
+    // Grass-type targets are immune to Leech Seed in the real games (a
+    // Conversion-converted Grass type included - see effectiveTypesFor()).
     const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
-    const bool isGrassType = defenderSpecies != nullptr && (defenderSpecies->primaryType == PokemonType::Grass ||
-                                                            defenderSpecies->secondaryType == PokemonType::Grass);
+    bool isGrassType = false;
+    if (defenderSpecies != nullptr) {
+      const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+      isGrassType = defenderTypes.primary == PokemonType::Grass || defenderTypes.secondary == PokemonType::Grass;
+    }
     if (isGrassType || defender.seeded || defender.substituteHp > 0) {
       result.event = BattleLogEvent::MoveNoEffect;
     } else {
@@ -925,6 +1026,109 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
       attacker.substituteHp = cost;
       result.event = BattleLogEvent::SubstituteUp;
     }
+  } else if (moveId == MIMIC_MOVE_ID) {
+    // Picks one of the defender's known moves at random and temporarily
+    // overwrites the slot Mimic itself was used from - real Gen 1 sets that
+    // copy's PP to 5 (capped by the copied move's own base PP if lower,
+    // e.g. a 5-PP move stays 5); the slot reverts to Mimic once the battle
+    // ends or this combatant switches out (see mimicActive's doc comment
+    // and PokemonActivity::savePlayerBattleEntry()).
+    std::array<uint8_t, BATTLE_MOVE_SLOTS> candidates{};
+    uint8_t candidateCount = 0;
+    for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+      if (defender.moves[index].moveId == 0 || defender.moves[index].moveId == MIMIC_MOVE_ID) continue;
+      candidates[candidateCount++] = defender.moves[index].moveId;
+    }
+    if (candidateCount == 0 || moveSlotOfMimicUser == BATTLE_MOVE_SLOTS) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      uint32_t pick = 0;
+      if (!rollBelow(random, candidateCount, pick)) pick = 0;
+      const uint8_t copiedMoveId = candidates[pick];
+      const MoveData* copiedMove = moveData(copiedMoveId);
+      const uint8_t copiedPp = copiedMove == nullptr ? 0 : std::min<uint8_t>(copiedMove->pp, 5U);
+      attacker.mimicOriginalPp = attacker.moves[moveSlotOfMimicUser].currentPp;
+      attacker.moves[moveSlotOfMimicUser].moveId = copiedMoveId;
+      attacker.moves[moveSlotOfMimicUser].currentPp = copiedPp;
+      attacker.mimicActive = true;
+      attacker.mimicSlot = moveSlotOfMimicUser;
+      result.event = BattleLogEvent::MimicCopied;
+      result.redirectedMoveId = copiedMoveId;
+    }
+  } else if (moveId == TRANSFORM_MOVE_ID) {
+    // Copies the opponent's species (and so its type and, combined with the
+    // attacker's own unchanged level, its Attack/Defense/Special/Speed via
+    // the normal stat formula), current stat stages, and moveset (each copied
+    // move gets 5 PP, or its own base PP if lower - the real Gen 1 rule).
+    // HP, level, and status are deliberately left untouched, matching the
+    // real games; never persisted (see PokemonActivity::
+    // savePlayerBattleEntry()) since it only lasts this one battle.
+    const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
+    if (attacker.transformed || defenderSpecies == nullptr) {
+      result.event = BattleLogEvent::MoveFailed;
+    } else {
+      attacker.speciesId = defender.speciesId;
+      attacker.attackStage = defender.attackStage;
+      attacker.defenseStage = defender.defenseStage;
+      attacker.specialStage = defender.specialStage;
+      attacker.speedStage = defender.speedStage;
+      attacker.accuracyStage = defender.accuracyStage;
+      attacker.evasionStage = defender.evasionStage;
+      for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+        attacker.moves[index].moveId = defender.moves[index].moveId;
+        const MoveData* copiedMove = moveData(defender.moves[index].moveId);
+        attacker.moves[index].currentPp = copiedMove == nullptr ? 0 : std::min<uint8_t>(copiedMove->pp, 5U);
+        attacker.ppUp[index] = 0;
+      }
+      attacker.mimicActive = false;
+      attacker.transformed = true;
+      result.event = BattleLogEvent::Transformed;
+    }
+  } else if (moveId == CONVERSION_MOVE_ID) {
+    // Copies the defender's current effective type onto the attacker for
+    // the rest of the battle - see BattleCombatant::conversionType1's doc
+    // comment and effectiveTypesFor().
+    const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
+    if (defenderSpecies == nullptr) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+      attacker.conversionType1 = defenderTypes.primary;
+      attacker.conversionType2 = defenderTypes.secondary;
+      result.event = BattleLogEvent::ConversionApplied;
+    }
+  } else if (moveId == METRONOME_MOVE_ID) {
+    // Picks a uniformly random real move (excluding Struggle and the other
+    // move-copying/special moves - see pickRandomMetronomeMove()) and
+    // executes its full effect directly, without spending any PP beyond
+    // Metronome's own. A two-turn charge move or trapping move picked this
+    // way just resolves as a single instant hit rather than starting its
+    // usual multi-turn state machine - see allowMultiTurnLock's uses above
+    // and the two-turn charge check earlier in resolveAction(), which this
+    // recursive call bypasses entirely.
+    const uint8_t pickedMoveId = pickRandomMetronomeMove(random);
+    const MoveData* pickedMove = pickedMoveId == 0 ? nullptr : moveData(pickedMoveId);
+    if (pickedMove == nullptr) {
+      result.event = BattleLogEvent::MoveNoEffect;
+    } else {
+      result.redirectedMoveId = pickedMoveId;
+      resolveGenericMoveEffect(attacker, defender, pickedMoveId, pickedMove, random,
+                               /*allowMultiTurnLock=*/false, moveSlotOfMimicUser, result);
+    }
+  } else if (moveId == MIRROR_MOVE_MOVE_ID) {
+    // Replays the last real move used against this attacker, if anything
+    // qualifies (see lastMoveUsedAgainstMe's doc comment and
+    // isMoveCopyingOrSpecialMove()) - "But it failed!" otherwise.
+    const uint8_t mirroredMoveId = attacker.lastMoveUsedAgainstMe;
+    const MoveData* mirroredMove =
+        mirroredMoveId == 0 || isMoveCopyingOrSpecialMove(mirroredMoveId) ? nullptr : moveData(mirroredMoveId);
+    if (mirroredMove == nullptr) {
+      result.event = BattleLogEvent::MoveFailed;
+    } else {
+      result.redirectedMoveId = mirroredMoveId;
+      resolveGenericMoveEffect(attacker, defender, mirroredMoveId, mirroredMove, random,
+                               /*allowMultiTurnLock=*/false, moveSlotOfMimicUser, result);
+    }
   }
 
   // PokeAPI's ailment_chance is 0 for a pure status move's guaranteed main
@@ -945,8 +1149,6 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     }
     if (result.event == BattleLogEvent::MoveHit) result.event = BattleLogEvent::InflictedStatus;
   }
-
-  return result;
 }
 
 // A crude but serviceable AI: mostly prefers whichever usable move(s) are

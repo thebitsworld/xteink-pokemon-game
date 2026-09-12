@@ -314,10 +314,50 @@ than first estimated:
 
 7 new tests in `PokemonBattleTest.cpp`.
 
-**Still not done, deferred further**: Transform/Mimic/Metronome/Mirror Move/Conversion
-(move-copying/self-modifying mechanics - Metronome/Mirror Move need "execute an arbitrary
-move id not in the user's own moveset" infrastructure `resolveAction()` doesn't have yet;
-Transform copies the opponent's entire stat block/moveset/species, which the UI would also
-need to render differently; Mimic temporarily overwrites a real move slot - each is
-genuinely a separate, larger effort, not a quick follow-up like the items above turned out
-to be). See the Gen 1 mechanics gaps memory note for the up-to-date list.
+**`v0.14.0`, the final group - Transform/Mimic/Metronome/Mirror Move/Conversion
+(move-copying/self-modifying mechanics)**: `resolveAction()` was split into itself (slot
+lookup, PP spend, flinch/status checks, Bide/two-turn-charge/trap-continuation state) and a
+new `resolveGenericMoveEffect(attacker, defender, moveId, move, random, allowMultiTurnLock,
+moveSlotOfMimicUser, result)` covering everything from the invulnerability/accuracy check
+through damage/ailment resolution, parameterized directly on a move id instead of a slot
+index - this is the "execute an arbitrary move id" infrastructure Metronome/Mirror Move
+needed, and both invoke it recursively for whatever move they end up executing.
+`allowMultiTurnLock=false` on such a redirected call stops a picked/mirrored trapping move
+from locking the attacker into repeating it next turn (there's no real slot to keep
+"choosing" it from) - a documented simplification; a redirected two-turn charge move
+likewise just resolves as one instant hit rather than starting its usual charge, since that
+logic lives in `resolveAction()`'s own preamble, which a redirect bypasses entirely.
+- **Metronome**: `pickRandomMetronomeMove()` uniformly rolls a real move id (1..MOVE_COUNT),
+  rejecting Struggle and the other 5 special/move-copying moves (`isMoveCopyingOrSpecialMove()`).
+- **Mirror Move**: a new `BattleCombatant::lastMoveUsedAgainstMe` field is set at the top of
+  `resolveGenericMoveEffect()` (so a redirect naturally records the real underlying move, not
+  the wrapper's own id) - Mirror Move replays it, failing ("But it failed!") if nothing
+  qualifies yet or it isn't a plain replayable move.
+- **Conversion**: a new `conversionType1`/`conversionType2` override on `BattleCombatant`
+  (`PokemonType::None` = no override) copies the defender's current effective type for the
+  rest of the battle; a new `effectiveTypesFor()` helper is now the single place STAB,
+  type-effectiveness, and Leech Seed's Grass-immunity check look up a combatant's type,
+  consulting the override when present.
+- **Mimic**: copies one of the defender's known moves into the slot Mimic itself was used
+  from, at 5 PP (or the copied move's own base PP if lower - the real Gen 1 rule). A real
+  persistence risk was caught before writing any code: `PokemonActivity::
+  savePlayerBattleEntry()` serializes every move slot's live `moveId`/`currentPp`
+  unconditionally, which would have permanently saved the borrowed move over Mimic itself.
+  Fixed with new `mimicActive`/`mimicSlot`/`mimicOriginalPp` fields - the save function now
+  restores that one slot back to `MIMIC_MOVE_ID` (exposed publicly, like `BIDE_MOVE_ID`) with
+  its remembered pre-Mimic PP instead of persisting the copy.
+- **Transform**: copies the defender's species (so its type and, combined with the attacker's
+  own unchanged level, its Attack/Defense/Special/Speed via the normal stat formula), current
+  stat stages, and moveset (each copied move also capped at 5 PP) - HP, level, and status are
+  deliberately left untouched, matching the real games. A new `transformed` flag makes a
+  second use fail ("But it failed!"). Same persistence risk as Mimic, bigger blast radius
+  (all 4 slots, plus the species id): `savePlayerBattleEntry()` now skips the moves/PP/PP-Up
+  loop entirely when transformed, instead persisting whatever `peekBattleMoves()` already has
+  on record - `speciesId` itself was never part of `BattleRecordEntry` to begin with, so no
+  extra handling was needed there. Fixed a real, unrelated latent bug noticed while
+  restructuring this function: the per-turn save path never wrote `entry.ppUp` at all
+  (defaulting to all-zero every save, since `saveBattleEntry()` is a plain overwrite, not a
+  merge) - now carried through from `battlePlayer_.ppUp` alongside everything else.
+
+9 new tests in `PokemonBattleTest.cpp`. This closes out the Gen 1 mechanics gaps audit - see
+the memory note for the final status.
