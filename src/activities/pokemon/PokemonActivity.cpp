@@ -388,12 +388,16 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
     case pokemon::BattleLogEvent::ConfusionSelfHit:
     case pokemon::BattleLogEvent::StatusCured:
     case pokemon::BattleLogEvent::StatusDamage:
-    case pokemon::BattleLogEvent::Flinched: {
+    case pokemon::BattleLogEvent::Flinched:
+    case pokemon::BattleLogEvent::MustRecharge:
+    case pokemon::BattleLogEvent::Trapped: {
       const char* suffix =
           action.event == pokemon::BattleLogEvent::StatusPreventedMove ? tr(STR_POKEMON_STATUS_PREVENTED)
           : action.event == pokemon::BattleLogEvent::ConfusionSelfHit  ? tr(STR_POKEMON_CONFUSION_HURT_SELF)
           : action.event == pokemon::BattleLogEvent::StatusCured       ? tr(STR_POKEMON_STATUS_CURED)
           : action.event == pokemon::BattleLogEvent::Flinched          ? tr(STR_POKEMON_FLINCHED)
+          : action.event == pokemon::BattleLogEvent::MustRecharge      ? tr(STR_POKEMON_MUST_RECHARGE)
+          : action.event == pokemon::BattleLogEvent::Trapped           ? tr(STR_POKEMON_TRAPPED)
                                                                        : tr(STR_POKEMON_STATUS_DAMAGE);
       snprintf(buffer, size, "%s %s", name, suffix);
       return;

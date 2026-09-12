@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-13
+
+### Added
+
+- Burn now halves the burned Pokémon's Attack for physical moves, matching the original games.
+- Dream Eater now only works against a sleeping target.
+- Hyper Beam now forces a recharge turn after a hit, matching the original games.
+- Rage now raises the user's Attack every time it's hit while enraged, ending as soon as a different move is chosen.
+- Thrash and Petal Dance now lock the user into repeating the move for a couple of turns, then leave it confused.
+- Wrap, Bind, Fire Spin, and Clamp now also immobilize the target for as long as the user keeps attacking, on top of locking the user into repeating the move.
+
 ## [0.14.0] - 2026-09-13
 
 ### Added

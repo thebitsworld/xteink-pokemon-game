@@ -1365,6 +1365,122 @@ void metronomeSelectedTrapMoveDoesNotLockTheAttackerIn() {
   CHECK(metronomeUser.forcedMoveId == 0);
 }
 
+// --- Round-2 Gen 1 authenticity fixes: Burn halving Attack, Dream Eater's
+// sleep requirement, Hyper Beam's recharge turn, Rage, Thrash/Petal Dance,
+// and Wrap/Bind/Fire Spin/Clamp trapping the TARGET too (not just locking
+// the attacker in). ---
+
+void burnHalvesAttackerAttackForPhysicalMoves() {
+  BattleCombatant burned = makeCombatant(4, 20, {33});  // Tackle
+  burned.status = Ailment::Burn;
+  BattleCombatant healthy = makeCombatant(4, 20, {33});
+  BattleCombatant defenderForBurned = makeCombatant(7, 50, {45});
+  BattleCombatant defenderForHealthy = makeCombatant(7, 50, {45});
+  pokemon::stepOpponentOnlyTurn(defenderForBurned, burned, ZERO_RANDOM);
+  pokemon::stepOpponentOnlyTurn(defenderForHealthy, healthy, ZERO_RANDOM);
+  const uint16_t burnedDamage = defenderForBurned.maxHp - defenderForBurned.currentHp;
+  const uint16_t healthyDamage = defenderForHealthy.maxHp - defenderForHealthy.currentHp;
+  CHECK(burnedDamage < healthyDamage);
+}
+
+void burnDoesNotAffectSpecialMoveDamage() {
+  BattleCombatant burned = makeCombatant(7, 20, {55});  // Water Gun (Special)
+  burned.status = Ailment::Burn;
+  BattleCombatant healthy = makeCombatant(7, 20, {55});
+  BattleCombatant defenderForBurned = makeCombatant(4, 50, {45});
+  BattleCombatant defenderForHealthy = makeCombatant(4, 50, {45});
+  pokemon::stepOpponentOnlyTurn(defenderForBurned, burned, ZERO_RANDOM);
+  pokemon::stepOpponentOnlyTurn(defenderForHealthy, healthy, ZERO_RANDOM);
+  CHECK(defenderForBurned.currentHp == defenderForHealthy.currentHp);
+}
+
+void dreamEaterFailsUnlessTargetIsAsleep() {
+  BattleCombatant eater = makeCombatant(1, 30, {138});  // Dream Eater
+  BattleCombatant awakeTarget = makeCombatant(4, 30, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(awakeTarget, eater, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::MoveFailed);
+  CHECK(awakeTarget.currentHp == awakeTarget.maxHp);
+}
+
+void dreamEaterDamagesAndDrainsASleepingTarget() {
+  BattleCombatant eater = makeCombatant(1, 30, {138});
+  eater.currentHp = static_cast<uint16_t>(eater.maxHp / 2U);
+  BattleCombatant sleepingTarget = makeCombatant(4, 30, {45});
+  sleepingTarget.status = Ailment::Sleep;
+  sleepingTarget.statusTurns = 5;
+  const uint16_t eaterHpBefore = eater.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(sleepingTarget, eater, ZERO_RANDOM);
+  CHECK(result.opponent.event != BattleLogEvent::MoveFailed);
+  CHECK(sleepingTarget.currentHp < sleepingTarget.maxHp);
+  CHECK(eater.currentHp > eaterHpBefore);
+}
+
+void hyperBeamForcesARechargeTurnAfterHitting() {
+  BattleCombatant hyperBeamer = makeCombatant(4, 30, {63});  // Hyper Beam
+  BattleCombatant target = makeCombatant(7, 100, {45});      // durable enough to survive
+  pokemon::stepOpponentOnlyTurn(target, hyperBeamer, ZERO_RANDOM);
+  CHECK(hyperBeamer.mustRecharge);
+  const uint16_t targetHpAfterFirstHit = target.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(target, hyperBeamer, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::MustRecharge);
+  CHECK(target.currentHp == targetHpAfterFirstHit);
+  CHECK(!hyperBeamer.mustRecharge);
+}
+
+void rageRaisesAttackEachTimeItsUserIsHitWhileEnraged() {
+  // Same level for both - Charmander's higher base Speed acts first (uses
+  // Rage), then Squirtle's own Tackle (its only usable move, so the AI pick
+  // is deterministic) lands on the now-enraged Charmander. Same level also
+  // means Rage's low power doesn't risk one-shotting Squirtle before it
+  // gets to act.
+  BattleCombatant rager = makeCombatant(4, 50, {99});  // Rage - the player's explicit slot 0
+  BattleCombatant attacker2 = makeCombatant(7, 50, {33});
+  pokemon::stepBattle(rager, attacker2, 0, ZERO_RANDOM);
+  CHECK(rager.enraged);
+  CHECK(rager.attackStage == 1);
+}
+
+void ragingEndsAsSoonAsADifferentMoveIsChosen() {
+  BattleCombatant rager = makeCombatant(4, 50, {99, 33});  // slot 0 Rage, slot 1 Tackle
+  rager.enraged = true;
+  rager.attackStage = 2;
+  BattleCombatant dummy = makeCombatant(7, 5, {45});
+  pokemon::stepBattle(rager, dummy, 1, ZERO_RANDOM);  // explicitly picks Tackle, not Rage
+  CHECK(!rager.enraged);
+}
+
+void thrashLocksTheUserForTwoTurnsThenConfusesIt() {
+  BattleCombatant thrasher = makeCombatant(4, 50, {37});  // Thrash
+  BattleCombatant target = makeCombatant(7, 50, {45});
+  pokemon::stepOpponentOnlyTurn(target, thrasher, ZERO_RANDOM);
+  CHECK(thrasher.forcedMoveId == 37);
+  CHECK(thrasher.forcedTurnsRemaining == 1);
+  pokemon::stepOpponentOnlyTurn(target, thrasher, ZERO_RANDOM);
+  CHECK(thrasher.forcedMoveId == 0);
+  CHECK(thrasher.status == Ailment::Confusion);
+}
+
+void wrapImmobilizesTheTargetWhileTrapped() {
+  BattleCombatant wrapper = makeCombatant(4, 50, {35});  // Wrap
+  BattleCombatant target = makeCombatant(7, 50, {45});   // Growl - would lower wrapper's Attack if it ran
+  pokemon::stepOpponentOnlyTurn(target, wrapper, ZERO_RANDOM);
+  CHECK(target.trappedTurnsRemaining > 0);
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(target, wrapper, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::Trapped);
+  CHECK(wrapper.attackStage == 0);
+}
+
+void wrapReleasesTheTargetOnceTheAttackersLockEnds() {
+  BattleCombatant wrapper = makeCombatant(4, 50, {35});
+  BattleCombatant target = makeCombatant(7, 50, {45});
+  pokemon::stepOpponentOnlyTurn(target, wrapper, ZERO_RANDOM);
+  int guard = 0;
+  while (wrapper.forcedMoveId != 0 && guard++ < 10) {
+    pokemon::stepBattle(target, wrapper, 0, ZERO_RANDOM);
+  }
+  CHECK(target.trappedTurnsRemaining == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1460,5 +1576,15 @@ int main() {
   mirrorMoveFailsWithNothingRecordedYet();
   metronomeExecutesADifferentMovesEffectInsteadOfItsOwn();
   metronomeSelectedTrapMoveDoesNotLockTheAttackerIn();
+  burnHalvesAttackerAttackForPhysicalMoves();
+  burnDoesNotAffectSpecialMoveDamage();
+  dreamEaterFailsUnlessTargetIsAsleep();
+  dreamEaterDamagesAndDrainsASleepingTarget();
+  hyperBeamForcesARechargeTurnAfterHitting();
+  rageRaisesAttackEachTimeItsUserIsHitWhileEnraged();
+  ragingEndsAsSoonAsADifferentMoveIsChosen();
+  thrashLocksTheUserForTwoTurnsThenConfusesIt();
+  wrapImmobilizesTheTargetWhileTrapped();
+  wrapReleasesTheTargetOnceTheAttackersLockEnds();
   return failures == 0 ? 0 : 1;
 }
