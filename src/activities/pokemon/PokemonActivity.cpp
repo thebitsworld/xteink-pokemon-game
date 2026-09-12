@@ -515,11 +515,16 @@ int PokemonActivity::logicalCount() const {
     case Screen::PcOrder:
       return 3;
     case Screen::Bag:
-      return 5;
+      return 4;
     case Screen::BagEvolution:
       return static_cast<int>(ownedSlotCount(snapshot_.state.itemCounts));
     case Screen::BagMedicine:
-      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
+      // +1 for a trailing synthetic "PP Up" row - PP Up's count lives in its
+      // own ppUpCount field (not bagCounts, which is already a full,
+      // already-shipped array that can't be resized without breaking
+      // existing saves), so it can't join the generic bagItemCount() walk.
+      return static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory)) +
+             (snapshot_.state.ppUpCount > 0 ? 1 : 0);
     case Screen::BagBalls:
       return static_cast<int>(ownedSlotCount(std::span<const uint8_t>(snapshot_.state.bagCounts).first(4)));
     case Screen::BagMachine:
@@ -1120,18 +1125,6 @@ void PokemonActivity::activate() {
       setScreen(Screen::Pc);
       return;
     case Screen::Bag:
-      if (selected_ == 4) {
-        // PP Up: unlike every other category, there's only ever one PP Up
-        // "item" to pick from, so this skips straight to ItemTarget - no
-        // BagPpUp list screen needed.
-        if (snapshot_.state.ppUpCount == 0) {
-          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Bag);
-          return;
-        }
-        bagCategory_ = BagCategory::PpUp;
-        setScreen(Screen::ItemTarget);
-        return;
-      }
       setScreen(selected_ == 0   ? Screen::BagEvolution
                 : selected_ == 1 ? Screen::BagMedicine
                 : selected_ == 2 ? Screen::BagBalls
@@ -1155,6 +1148,18 @@ void PokemonActivity::activate() {
       return;
     }
     case Screen::BagMedicine: {
+      const auto realItemCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
+      if (selected_ == realItemCount) {
+        // Trailing synthetic "PP Up" row - its count lives in ppUpCount, not
+        // bagCounts, so it can't be resolved through bagItemIdAt().
+        if (snapshot_.state.ppUpCount == 0) {
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BagMedicine);
+          return;
+        }
+        bagCategory_ = BagCategory::PpUp;
+        setScreen(Screen::ItemTarget);
+        return;
+      }
       bagCategory_ = BagCategory::Medicine;
       const uint8_t itemId = bagItemIdAt(static_cast<size_t>(selected_), snapshot_.state.bagCounts, isMedicineCategory);
       const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
@@ -1185,7 +1190,7 @@ void PokemonActivity::activate() {
       const Screen bagScreen = bagCategory_ == BagCategory::Evolution        ? Screen::BagEvolution
                                : bagCategory_ == BagCategory::Medicine       ? Screen::BagMedicine
                                : bagCategory_ == BagCategory::BattleMedicine ? Screen::BattleBag
-                               : bagCategory_ == BagCategory::PpUp           ? Screen::Bag
+                               : bagCategory_ == BagCategory::PpUp           ? Screen::BagMedicine
                                                                              : Screen::BagMachine;
       if (bagCategory_ == BagCategory::PpUp) {
         // No MovesetFull-style branching - every occupied slot is always a
@@ -1316,22 +1321,22 @@ void PokemonActivity::activate() {
     }
     case Screen::PpUpSlot: {
       if (selected_ >= static_cast<int>(pokemon::BATTLE_MOVE_SLOTS)) {
-        setScreen(Screen::Bag);
+        setScreen(Screen::BagMedicine);
         return;
       }
       const pokemon::ServiceStatus outcome = service_.applyPpUp(focusedRecordId_, static_cast<uint8_t>(selected_));
       if (outcome == pokemon::ServiceStatus::NotApplicable) {
         // Empty slot or already at 3 uses - stay here so the player can pick
-        // a different slot instead of losing the item back to Bag.
+        // a different slot instead of losing the item back to the bag.
         showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::PpUpSlot);
         return;
       }
       if (outcome != pokemon::ServiceStatus::Ok) {
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMedicine);
         return;
       }
       if (service_.consumeBagItem(pokemon::PP_UP_ITEM_ID) != pokemon::ServiceStatus::Ok) {
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Bag);
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMedicine);
         return;
       }
       if (!refreshSnapshot()) return;
@@ -1648,7 +1653,7 @@ void PokemonActivity::goBack() {
       setScreen(Screen::BagMachine);
       return;
     case Screen::PpUpSlot:
-      setScreen(Screen::Bag);
+      setScreen(Screen::BagMedicine);
       return;
     case Screen::PcOrder:
       setScreen(Screen::Pc);
@@ -1657,7 +1662,7 @@ void PokemonActivity::goBack() {
       setScreen(bagCategory_ == BagCategory::Evolution        ? Screen::BagEvolution
                 : bagCategory_ == BagCategory::Medicine       ? Screen::BagMedicine
                 : bagCategory_ == BagCategory::BattleMedicine ? Screen::BattleBag
-                : bagCategory_ == BagCategory::PpUp           ? Screen::Bag
+                : bagCategory_ == BagCategory::PpUp           ? Screen::BagMedicine
                                                               : Screen::BagMachine);
       return;
     case Screen::BagEvolution:
@@ -1821,10 +1826,9 @@ void PokemonActivity::loop() {
   }
   if (screen_ == Screen::Bag) {
     // Same reasoning as the Menu grid above - bypasses buildList()/
-    // fui::list() (see isListScreen()). Always exactly 5 entries (one page,
-    // last row one column short), so the same column-wrap Up/Down as Menu
-    // (already generalized to a short last row), no pagination needed
-    // (unlike Pc below).
+    // fui::list() (see isListScreen()). Always exactly 4 entries (one page,
+    // a clean 2x2 grid), so the same column-wrap Up/Down as Menu handles it
+    // fine, no pagination needed (unlike Pc below).
     if (mappedInput.hasTouchHardware()) {
       for (int index = 0; index < count; ++index) {
         const Rect cell = buttonGridCellRect(index);
@@ -2146,13 +2150,12 @@ void PokemonActivity::buildRows() {
         break;
       // Unreachable in practice: isListScreen() excludes Screen::Bag (it
       // draws its own 2-column grid via renderBagGrid(), which has its own
-      // copy of these same 5 labels - see the comment there).
+      // copy of these same 4 labels - see the comment there).
       case Screen::Bag:
         row(local, index == 0   ? tr(STR_POKEMON_BAG_EVOLUTION)
                    : index == 1 ? tr(STR_POKEMON_BAG_MEDICINE)
                    : index == 2 ? tr(STR_POKEMON_BAG_BALLS)
-                   : index == 3 ? tr(STR_POKEMON_BAG_MACHINES)
-                                : tr(STR_POKEMON_BAG_PPUP));
+                                : tr(STR_POKEMON_BAG_MACHINES));
         break;
       case Screen::BagEvolution: {
         const int slot = ownedSlotAt(static_cast<size_t>(index), snapshot_.state.itemCounts);
@@ -2177,24 +2180,43 @@ void PokemonActivity::buildRows() {
         row(local, item == nullptr ? "?" : item->name, count);
         break;
       }
-      case Screen::BagMedicine:
-      case Screen::BagMachine: {
-        const bool machine = screen_ == Screen::BagMachine;
-        const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts,
-                                           machine ? isMachineCategory : isMedicineCategory);
+      case Screen::BagMedicine: {
+        const auto realItemCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
+        if (index == realItemCount) {
+          // Trailing synthetic "PP Up" row - its count lives in ppUpCount,
+          // not bagCounts, so it's appended here rather than through the
+          // generic bagItemIdAt()/bagItemCount() walk below.
+          char count[16];
+          snprintf(count, sizeof(count), "× %u", snapshot_.state.ppUpCount);
+          row(local, tr(STR_POKEMON_BAG_PPUP), count);
+          break;
+        }
+        const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isMedicineCategory);
         const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
         const pokemon::ItemData* data = pokemon::itemData(itemId);
         char count[16];
         snprintf(count, sizeof(count), "× %u",
                  bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
         char label[56];
-        if (machine && data != nullptr) {
+        snprintf(label, sizeof(label), "%s", data == nullptr ? "?" : data->name);
+        row(local, label, count);
+        break;
+      }
+      case Screen::BagMachine: {
+        const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isMachineCategory);
+        const auto bagIndex = static_cast<size_t>(itemId - pokemon::EVOLUTION_ITEM_COUNT - 1U);
+        const pokemon::ItemData* data = pokemon::itemData(itemId);
+        char count[16];
+        snprintf(count, sizeof(count), "× %u",
+                 bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
+        char label[56];
+        if (data != nullptr) {
           // TM/HM names alone ("TM01") don't say what they teach - show the
           // move name too so browsing the list doesn't require a lookup.
           const pokemon::MoveData* move = pokemon::moveData(data->teachesMoveId);
           snprintf(label, sizeof(label), "%s - %s", data->name, move == nullptr ? "?" : move->name);
         } else {
-          snprintf(label, sizeof(label), "%s", data == nullptr ? "?" : data->name);
+          snprintf(label, sizeof(label), "?");
         }
         row(local, label, count);
         break;
@@ -2309,19 +2331,25 @@ void PokemonActivity::buildRows() {
       case Screen::GymList: {
         const auto gymIndex = static_cast<uint8_t>(index + 1);
         const pokemon::GymData* gym = pokemon::gymData(gymIndex);
-        char label[40];
-        if (gymIndex <= 8U) {
-          snprintf(label, sizeof(label), "%s", gym == nullptr ? "?" : gym->leaderName);
-        } else if (gymIndex == pokemon::CHAMPION_GYM_INDEX) {
-          snprintf(label, sizeof(label), "%s - %s", tr(STR_POKEMON_CHAMPION), gym == nullptr ? "?" : gym->leaderName);
-        } else {
-          snprintf(label, sizeof(label), "%s - %s", tr(STR_POKEMON_ELITE_FOUR), gym == nullptr ? "?" : gym->leaderName);
+        // The trainer's name is the label on its own; "Elite Four"/"Champion"
+        // goes in the subtitle slot (its own line under the name, spanning
+        // the full row width) rather than being concatenated onto the label
+        // - a single "Elite Four - Lorelei"-style string was long enough to
+        // get clipped by the value slot ("Defeated"/"Locked") competing for
+        // the same line. Matches the same subtitle pattern the PC Box list
+        // already uses for its own "Lv N" line.
+        row(local, gym == nullptr ? "?" : gym->leaderName);
+        if (gymIndex > 8U) {
+          snprintf(values_[local].data(), values_[local].size(), "%s",
+                   gymIndex == pokemon::CHAMPION_GYM_INDEX ? tr(STR_POKEMON_CHAMPION) : tr(STR_POKEMON_ELITE_FOUR));
+          rows_[local].subtitle = values_[local].data();
         }
         const pokemon::GymProgress progress = pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex);
-        const char* value = progress == pokemon::GymProgress::Defeated ? tr(STR_POKEMON_GYM_DEFEATED)
-                            : progress == pokemon::GymProgress::Locked ? tr(STR_POKEMON_GYM_LOCKED)
-                                                                       : nullptr;
-        row(local, label, value);
+        if (progress == pokemon::GymProgress::Defeated) {
+          rows_[local].value = tr(STR_POKEMON_GYM_DEFEATED);
+        } else if (progress == pokemon::GymProgress::Locked) {
+          rows_[local].value = tr(STR_POKEMON_GYM_LOCKED);
+        }
         break;
       }
       case Screen::Badges: {
@@ -2544,7 +2572,10 @@ void PokemonActivity::renderFocused() {
       const int width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, pokemon::pokemonRightAlignedX(valueRight, width), fieldY, value);
     };
-    const pokemon::IvEvEntry ivEv = service_.peekIvEv(record.recordId);
+    // ensureIvEv(), not peekIvEv() - a Pokemon's IV should be visible the
+    // first time its own Summary is ever opened, not stay stuck at a
+    // never-been-battled-yet 0 until its first real fight rolls one.
+    const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId);
     {
       const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
       const pokemon::BaseStats* baseStats = pokemon::baseStatsFor(record.speciesId);
@@ -2832,8 +2863,7 @@ void PokemonActivity::renderBagGrid() {
     const char* label = index == 0   ? tr(STR_POKEMON_BAG_EVOLUTION)
                         : index == 1 ? tr(STR_POKEMON_BAG_MEDICINE)
                         : index == 2 ? tr(STR_POKEMON_BAG_BALLS)
-                        : index == 3 ? tr(STR_POKEMON_BAG_MACHINES)
-                                     : tr(STR_POKEMON_BAG_PPUP);
+                                     : tr(STR_POKEMON_BAG_MACHINES);
     drawGridButton(buttonGridCellRect(index), index == selected_, label);
   }
 }
@@ -3327,7 +3357,10 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
                                            const bool drawNameLine) {
   const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
-  const pokemon::IvEvEntry ivEv = service_.peekIvEv(record.recordId);
+  // ensureIvEv(), not peekIvEv() - the party list's max-HP figure should
+  // reflect a Pokemon's real (rolled) IV as soon as it's on the team, not
+  // stay at the IV-less-0 default until its first battle rolls one.
+  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId);
   constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
   const uint16_t maxHp = stats == nullptr ? 1
                                           : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp),

@@ -297,16 +297,15 @@ bool isStoneCategory(const ItemCategory category) { return category == ItemCateg
 // (ItemCategory::PpUp) is deliberately NOT included here - it's not part of
 // the automatic reading-time drop pool at all yet (see
 // docs/development/pokemon-gen1-authenticity-roadmap.md's PP Up item) since
-// folding a brand-new candidate into this shared pool shifts every
-// subsequent random draw from it, and this project's own hour-by-hour
-// scripted drop tests (PokemonGameTest.cpp) are pinned to the exact current
-// candidate-count/draw-index sequence. itemCountIsFull()/incrementItemCount()
-// above already handle PP_UP_ITEM_ID correctly regardless, for whenever a
-// future acquisition path (a dedicated pity track, a shop, a battle reward)
-// is added.
+// PP Up (ItemCategory::PpUp) is included here so it drops from reading the
+// same way every other medicine-track item does - itemCountIsFull()/
+// incrementItemCount() above already route it to state.ppUpCount instead of
+// bagCounts, so the generic buildItemCandidates()/incrementItemCount() flow
+// handles it correctly with no special-casing needed here.
 bool isMedicineCategory(const ItemCategory category) {
   return category == ItemCategory::Medicine || category == ItemCategory::StatusCure ||
-         category == ItemCategory::PPRestore || category == ItemCategory::Candy;
+         category == ItemCategory::PPRestore || category == ItemCategory::Candy ||
+         category == ItemCategory::PpUp;
 }
 
 bool isMachineCategory(const ItemCategory category) { return category == ItemCategory::Machine; }
