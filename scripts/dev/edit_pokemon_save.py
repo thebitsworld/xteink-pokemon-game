@@ -7,7 +7,7 @@ set up scenarios (queue a wild encounter, wipe HP/PP/status back to full,
 clear gym progress, hand a Pokemon some items) without waiting on real
 gameplay/RNG. See docs/file-formats.md for the on-disk layout this assumes;
 this tool only understands the CURRENT save format used by this branch
-(main save version 5, 199-byte state; battle-store version 2, 20-byte
+(main save version 6, 205-byte state; battle-store version 2, 20-byte
 entries) and refuses to touch anything else rather than risk corrupting an
 unfamiliar layout.
 
@@ -52,7 +52,7 @@ MAGIC = b"PKV2"
 HEADER_BYTES = 24
 OFF_HEADER_RECORD_COUNT = 16  # u32
 OFF_HEADER_PAYLOAD_BYTES = 20  # u32: stateBytes + recordCount * RECORD_BYTES - see decodeSnapshotHeader()
-STATE_BYTES_V5 = 199
+STATE_BYTES_V6 = 199
 RECORD_BYTES = 48
 POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
 PENDING_EVENT_BYTES = 10
@@ -60,11 +60,15 @@ PENDING_EVENT_COUNT = 3
 EVOLUTION_ITEM_COUNT = 6
 BAG_SLOT_COUNT = 77
 PP_UP_ITEM_ID = 84  # tracked in ppUpCount, not bagCounts - see PP_UP_ITEM_ID in lib/Pokemon/PokemonBattleTypes.h
+BATTLE_BOOST_ITEM_ID_FIRST = 85  # X Attack..Dire Hit (90) - tracked in battleBoostCounts, not bagCounts
+BATTLE_BOOST_ITEM_ID_LAST = 90
+BATTLE_BOOST_ITEM_COUNT = BATTLE_BOOST_ITEM_ID_LAST - BATTLE_BOOST_ITEM_ID_FIRST + 1
 
-# State-relative byte offsets (version 5 - see docs/file-formats.md). Bytes
+# State-relative byte offsets (version 6 - see docs/file-formats.md). Bytes
 # 0-194 are unchanged from version 3; 195-197 are version-4 pity counters for
 # the ball/medicine/TM-HM drop tracks (Stage 23); 198 is version 5's PP Up
-# item count.
+# item count; 199-204 are version 6's 6 battle-boost item counts (X Attack/
+# X Defense/X Speed/X Special/Guard Spec./Dire Hit).
 OFF_PARTY_IDS = 0  # 6 x u32
 OFF_PENDING_EVENTS = 24  # 3 x 10 bytes
 OFF_ITEM_COUNTS = 54  # 6 x u16 (evolution stones, ids 1-6)
@@ -82,6 +86,7 @@ OFF_BALL_MISSES = 195  # u8
 OFF_MEDICINE_MISSES = 196  # u8
 OFF_MACHINE_MISSES = 197  # u8
 OFF_PPUP_COUNT = 198  # u8 - how many PP Up items (id 84) the player holds, tracked outside bagCounts
+OFF_BATTLE_BOOST_COUNTS = 199  # 6 x u8 - ids 85-90, tracked outside bagCounts, same reason as PP Up
 
 # The battle-store side file (pokemon-battle-{a,b}.bin) - see
 # lib/Pokemon/PokemonBattleStoreCodec.h. Version 2 entries add a per-slot PP
@@ -337,9 +342,9 @@ def load_save(path: Path) -> SaveFile:
     state_size, record_size = struct.unpack_from("<HH", data, 12)
     if header_size != HEADER_BYTES:
         raise ToolError(f"{path}: unexpected header size {header_size} (expected {HEADER_BYTES})")
-    if state_size != STATE_BYTES_V5:
+    if state_size != STATE_BYTES_V6:
         raise ToolError(
-            f"{path}: this tool only understands version-5 saves (199-byte state), got {state_size} bytes "
+            f"{path}: this tool only understands version-6 saves (205-byte state), got {state_size} bytes "
             f"(version {version}) - refusing to touch an unfamiliar layout"
         )
     if record_size != RECORD_BYTES:
@@ -365,7 +370,7 @@ def set_header_record_count(save: SaveFile, new_count: int) -> None:
     load - writing recordCount alone leaves a stale payload size and the
     device rejects the whole file as corrupt on next boot."""
     struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
-    payload_bytes = STATE_BYTES_V5 + new_count * RECORD_BYTES
+    payload_bytes = STATE_BYTES_V6 + new_count * RECORD_BYTES
     struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
@@ -537,7 +542,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     print("\nparty record ids:", [rid for rid in party_ids if rid != 0])
 
     header_record_count, = struct.unpack_from("<I", active.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V5
+    records_offset = HEADER_BYTES + STATE_BYTES_V6
     print(f"\nrecords ({header_record_count}):")
     for i in range(header_record_count):
         offset = records_offset + i * RECORD_BYTES
@@ -577,6 +582,12 @@ def cmd_dump(args: argparse.Namespace) -> None:
     if ppup_count:
         item = item_map.get(PP_UP_ITEM_ID)
         print(f"  id {PP_UP_ITEM_ID} ({item.name if item else '?'}): {ppup_count}")
+    battle_boost_counts = struct.unpack_from("<6B", state_bytes(active, OFF_BATTLE_BOOST_COUNTS, BATTLE_BOOST_ITEM_COUNT))
+    for i, count in enumerate(battle_boost_counts):
+        if count:
+            item_id = BATTLE_BOOST_ITEM_ID_FIRST + i
+            item = item_map.get(item_id)
+            print(f"  id {item_id} ({item.name if item else '?'}): {count}")
 
     ball_misses, medicine_misses, machine_misses = struct.unpack_from("<BBB", state_bytes(active, OFF_BALL_MISSES, 3))
     print(
@@ -694,6 +705,13 @@ def set_bag_item_count(save: SaveFile, item: Item, count: int) -> int:
         before, = struct.unpack_from("<B", state_bytes(save, OFF_PPUP_COUNT, 1))
         set_state_bytes(save, OFF_PPUP_COUNT, struct.pack("<B", count))
         return before
+    if BATTLE_BOOST_ITEM_ID_FIRST <= item.id <= BATTLE_BOOST_ITEM_ID_LAST:
+        # Same reasoning as PP Up above - tracked in battleBoostCounts, not
+        # bagCounts.
+        offset = OFF_BATTLE_BOOST_COUNTS + (item.id - BATTLE_BOOST_ITEM_ID_FIRST)
+        before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
+        set_state_bytes(save, offset, struct.pack("<B", count))
+        return before
     offset = OFF_BAG_COUNTS + (item.id - EVOLUTION_ITEM_COUNT - 1)
     before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
     set_state_bytes(save, offset, struct.pack("<B", count))
@@ -717,11 +735,11 @@ def cmd_set_all_bag_items(args: argparse.Namespace) -> None:
         raise ToolError("--count must be 0-255 (the bag-item byte range - also applies to the 6 evolution items here)")
     item_map = load_items()
     saves = load_saves(args.save_dir)
-    # Every real item id 1..PP_UP_ITEM_ID except Master Ball is fair game -
-    # Master Ball is deliberately skipped (id 4, category Ball) since handing
-    # out 5 of a guaranteed-catch item defeats the point of ever needing one;
-    # everything else (stones, ordinary balls, medicine, TM/HM, PP Up) is set
-    # to the same count.
+    # Every real item id except Master Ball is fair game - Master Ball is
+    # deliberately skipped (id 4, category Ball) since handing out 5 of a
+    # guaranteed-catch item defeats the point of ever needing one; everything
+    # else (stones, ordinary balls, medicine, TM/HM, PP Up, battle-boost
+    # items) is set to the same count.
     for save in saves:
         for item_id in sorted(item_map):
             item = item_map[item_id]
@@ -740,7 +758,7 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         raise ToolError("--xp must be >= 0")
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, 16)
-        records_offset = HEADER_BYTES + STATE_BYTES_V5
+        records_offset = HEADER_BYTES + STATE_BYTES_V6
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES
@@ -773,7 +791,7 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
     nickname_bytes = nickname_text + b"\x00" * (POKEMON_NICKNAME_BYTES - len(nickname_text))
 
     saves = load_saves(args.save_dir)
-    records_offset = HEADER_BYTES + STATE_BYTES_V5
+    records_offset = HEADER_BYTES + STATE_BYTES_V6
 
     # pokemon-a.bin and pokemon-b.bin can legitimately hold different
     # generations of state (that is the whole point of the double buffer),
@@ -843,7 +861,7 @@ def cmd_set_moves(args: argparse.Namespace) -> None:
     saves = load_saves(args.save_dir)
     active = max(saves, key=lambda s: s.sequence)
     record_count, = struct.unpack_from("<I", active.data, OFF_HEADER_RECORD_COUNT)
-    records_offset = HEADER_BYTES + STATE_BYTES_V5
+    records_offset = HEADER_BYTES + STATE_BYTES_V6
     species_id = None
     total_xp = None
     for i in range(record_count):
