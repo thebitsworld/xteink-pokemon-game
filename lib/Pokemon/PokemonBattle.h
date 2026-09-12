@@ -11,6 +11,22 @@ namespace pokemon {
 constexpr uint8_t BATTLE_MOVE_SLOTS = 4;
 static_assert(BATTLE_MOVE_SLOTS == GYM_MOVE_SLOTS, "GymTeamMember::moves must match BATTLE_MOVE_SLOTS");
 
+// Gen 1's real "badge boost": owning the Boulder/Thunder/Soul/Volcano badge
+// gives a flat +12.5% to the corresponding stat (Attack/Defense/Speed/
+// Special) for the PLAYER's own Pokemon only - wild Pokemon and trainers
+// never have badges, and this project has no link battles for the other
+// real exception to apply to. Deliberately does NOT replicate the real
+// games' badge-boost STACKING glitch (re-applying the multiplier every
+// time any stat stage changes, compounding without limit until a stat
+// hits 999) - just the flat, one-time 12.5% baseline. See
+// BattleCombatant::badgeBoostMask's doc comment for how these bits get
+// set (PokemonActivity.cpp, from the player's own earned-badges state -
+// this engine has no idea about badges beyond this bitmask).
+constexpr uint8_t BADGE_BOOST_ATTACK = 1U << 0;
+constexpr uint8_t BADGE_BOOST_DEFENSE = 1U << 1;
+constexpr uint8_t BADGE_BOOST_SPEED = 1U << 2;
+constexpr uint8_t BADGE_BOOST_SPECIAL = 1U << 3;
+
 // The real Gen 1 move id for Struggle (already present in this game's own
 // move data, scripts/data/pokemon-moves.csv - a typeless-in-spirit,
 // fixed-power physical move with accuracy 0, meaning "never misses" per this
@@ -229,6 +245,14 @@ struct BattleCombatant {
   // simplification: the real games also block switching while trapped,
   // which this project doesn't enforce in the UI.
   uint8_t trappedTurnsRemaining = 0;
+  // Badge boost bitmask (BADGE_BOOST_ATTACK/_DEFENSE/_SPEED/_SPECIAL, see
+  // above) - always 0 for a wild/trainer opponent's own BattleCombatant;
+  // only ever set for the player's side, once at battle setup, from
+  // whichever of the 4 stat-boosting badges the player currently owns.
+  // Not reset by a fresh BattleCombatant the way most fields above are,
+  // since PokemonActivity.cpp re-sets it explicitly every time it builds
+  // battlePlayer_ (battle start and every switch) anyway.
+  uint8_t badgeBoostMask = 0;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -456,8 +480,15 @@ enum class BallKind : uint8_t {
 };
 
 // True if the throw succeeds. Master Ball always succeeds; the other three
-// scale with the wild Pokemon's SpeciesData::captureRate, its remaining HP
-// fraction, and a bonus for Sleep/Freeze/Paralysis/Poison/Burn.
+// follow Gen 1's real two-roll catch algorithm: a ball-ranged R1 roll
+// (narrower for a better ball) that status can push into an automatic
+// catch or, short of that, must still clear the species' own
+// SpeciesData::captureRate; then, only if that clears, a second roll
+// against an HP-based factor (higher for a more-damaged target, with
+// Great Ball using a more forgiving divisor than Poke/Ultra) decides the
+// catch. Does not model the real games' separate "how many times the ball
+// shakes before breaking free" cosmetic animation, since this project has
+// no such animation to drive.
 bool attemptCatch(const BattleCombatant& wild, BallKind ball, const RandomSource& random);
 
 // XP awarded to the Pokemon active when a battle is won (defeating or
