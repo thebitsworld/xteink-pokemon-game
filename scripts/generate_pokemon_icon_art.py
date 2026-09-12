@@ -60,6 +60,13 @@ def bag_item_slug(item, moves_by_id: dict) -> str | None:
         return f"tm-{move.type_.lower()}"
     if item.name.startswith("HM"):
         return item.name.lower()  # "HM01" -> "hm01"
+    if item.name == "X Special":
+        # PokeAPI Sprites has no standalone "x-special" icon - Gen 1's single
+        # Special stat item maps to the modern games' Sp. Atk slot in
+        # PokeAPI's own item slug scheme.
+        return "x-sp-atk"
+    if item.name == "Guard Spec.":
+        return "guard-spec"  # the trailing period isn't part of the PokeAPI Sprites filename
     return item.name.lower().replace(" ", "-")
 
 
