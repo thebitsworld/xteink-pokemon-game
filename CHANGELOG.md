@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-13
+
+### Added
+
+- Whirlwind and Roar now force a switch, matching the original games - ending a wild encounter, sending out a trainer's next Pokémon, or making you switch yourself if used against you.
+- Disable now really disables one of the target's moves for a few turns.
+- Substitute now works as intended - it creates a decoy that absorbs damage and blocks status and stat-lowering moves until it breaks.
+
 ## [0.13.0] - 2026-09-13
 
 ### Added

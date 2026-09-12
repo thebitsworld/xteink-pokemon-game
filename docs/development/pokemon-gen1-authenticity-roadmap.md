@@ -277,10 +277,47 @@ Struggle; `chooseOpponentMoveSlot()` got the equivalent check for the AI side.
 `BIDE_MOVE_ID` moved to the public header for this reason. 10 new tests in
 `PokemonBattleTest.cpp`.
 
-**Still not done, deferred further**: Whirlwind/Roar (forcing a switch touches the battle
-UI's win/loss/switch flow deeply, including "wild Pokemon flees"/"trainer sends out its next
-Pokemon" cases that don't otherwise exist in this engine), Substitute (needs new
-UI-visible HP-bar state), Disable (needs the move menu to grey out/reject a disabled
-move), and Transform/Mimic/Metronome/Mirror Move/Conversion (move-copying/self-modifying
-mechanics, genuinely a separate larger effort each). See the Gen 1 mechanics gaps memory
-note for the up-to-date list.
+**Whirlwind/Roar, Disable, and Substitute shipped too, as `v0.13.1`** - the three items
+above that looked like they'd need deep UI work turned out tractable with a narrower scope
+than first estimated:
+
+- **Whirlwind/Roar**: the engine can't know whether a switch is even possible (a roster
+  concern only `PokemonActivity.cpp` can answer), so `resolveAction()` just reports a new
+  `BattleLogEvent::ForcedSwitch` unconditionally on use (these moves have accuracy 0 -
+  "never misses" in this dataset) and leaves what actually happens to the caller.
+  `resolveBattlePlayerMoveTurn()` checks for it on either side: the opponent's own use
+  forces the player into `Screen::BattleSwitch` (the exact same flow a faint-forced switch
+  already uses, just without the active Pokemon fainting); the player's own use against a
+  wild Pokemon ends the encounter via the existing `resolveBattleAsPass()` (same outcome as
+  running away); against a trainer, it calls `advanceGymOpponentOrFinish()` directly
+  (skipping the XP award, since nothing was defeated) if there's a next team member,
+  otherwise it has no effect - matching the real games, where Whirlwind/Roar can't be used
+  to skip past a trainer's last Pokemon.
+- **Disable**: picks a random one of the target's moves that still has PP and isn't already
+  disabled (`BattleCombatant::disabledMoveSlot`/`disableTurnsRemaining`), for a simplified
+  1-3 turns (same range as this engine's own Sleep, down from the real 1-7).
+  `chooseOpponentMoveSlot()` skips it for the AI; the player's own `Screen::BattleMoves`
+  handler and `battlePlayerHasAnyUsablePp()` reject selecting it (falling back to Struggle
+  if it was the only move left) - no visual greying-out in the move list itself, a smaller,
+  disclosed simplification.
+- **Substitute**: creates a decoy for 1/4 of the user's own max HP (minimum 1, fails without
+  enough HP to spare or if one's already up). A new `applyDamageRespectingSubstitute()`
+  helper redirects every damage-application site (the generic hit loop, every
+  `FIXED_DAMAGE_TABLE` kind, and Bide's release) through `BattleCombatant::substituteHp`
+  instead of `currentHp` while one is up - a hit that would deal more than the remaining
+  substitute HP just breaks it outright, no overflow onto the real Pokemon, matching the
+  real games. Status infliction, opponent-debuff stat changes, flinch, and Leech Seed are
+  all blocked while a substitute holds (added as extra guard conditions on their existing
+  checks) - no new UI-visible HP-bar state was actually needed, since the existing HP bar
+  already just reflects `currentHp`, which correctly stays untouched while the substitute
+  absorbs hits.
+
+7 new tests in `PokemonBattleTest.cpp`.
+
+**Still not done, deferred further**: Transform/Mimic/Metronome/Mirror Move/Conversion
+(move-copying/self-modifying mechanics - Metronome/Mirror Move need "execute an arbitrary
+move id not in the user's own moveset" infrastructure `resolveAction()` doesn't have yet;
+Transform copies the opponent's entire stat block/moveset/species, which the UI would also
+need to render differently; Mimic temporarily overwrites a real move slot - each is
+genuinely a separate, larger effort, not a quick follow-up like the items above turned out
+to be). See the Gen 1 mechanics gaps memory note for the up-to-date list.
