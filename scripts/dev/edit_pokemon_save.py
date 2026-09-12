@@ -7,8 +7,9 @@ set up scenarios (queue a wild encounter, wipe HP/PP/status back to full,
 clear gym progress, hand a Pokemon some items) without waiting on real
 gameplay/RNG. See docs/file-formats.md for the on-disk layout this assumes;
 this tool only understands the CURRENT save format used by this branch
-(main save version 4, 198-byte state) and refuses to touch anything else
-rather than risk corrupting an unfamiliar layout.
+(main save version 5, 199-byte state; battle-store version 2, 20-byte
+entries) and refuses to touch anything else rather than risk corrupting an
+unfamiliar layout.
 
 Every write always patches BOTH pokemon-a.bin and pokemon-b.bin (when both
 exist) to the same content, mirroring the firmware's own double-buffer
@@ -22,7 +23,9 @@ Examples:
     python3 scripts/dev/edit_pokemon_save.py reset-gym-progress
     python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --level 5
     python3 scripts/dev/edit_pokemon_save.py set-bag-item --item "poke-ball" --count 10
+    python3 scripts/dev/edit_pokemon_save.py set-all-bag-items --count 5
     python3 scripts/dev/edit_pokemon_save.py set-record-xp --record-id 1 --xp 5000
+    python3 scripts/dev/edit_pokemon_save.py set-moves --record-id 1 --moves "33,45,52,84"
 """
 
 from __future__ import annotations
@@ -40,23 +43,28 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SAVE_DIR = ROOT / "fs_" / ".crosspoint"
 KANTO_CSV = ROOT / "scripts" / "data" / "pokemon-kanto-v2.csv"
 ITEMS_CSV = ROOT / "scripts" / "data" / "pokemon-items.csv"
+STATS_CSV = ROOT / "scripts" / "data" / "pokemon-stats.csv"
 GYMS_CSV = ROOT / "scripts" / "data" / "pokemon-gyms.csv"
+MOVES_CSV = ROOT / "scripts" / "data" / "pokemon-moves.csv"
+LEARNSETS_CSV = ROOT / "scripts" / "data" / "pokemon-learnsets.csv"
 
 MAGIC = b"PKV2"
 HEADER_BYTES = 24
 OFF_HEADER_RECORD_COUNT = 16  # u32
 OFF_HEADER_PAYLOAD_BYTES = 20  # u32: stateBytes + recordCount * RECORD_BYTES - see decodeSnapshotHeader()
-STATE_BYTES_V4 = 198
+STATE_BYTES_V5 = 199
 RECORD_BYTES = 48
 POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
 PENDING_EVENT_BYTES = 10
 PENDING_EVENT_COUNT = 3
 EVOLUTION_ITEM_COUNT = 6
 BAG_SLOT_COUNT = 77
+PP_UP_ITEM_ID = 84  # tracked in ppUpCount, not bagCounts - see PP_UP_ITEM_ID in lib/Pokemon/PokemonBattleTypes.h
 
-# State-relative byte offsets (version 4 - see docs/file-formats.md). Bytes
-# 0-194 are unchanged from version 3; 195-197 are new pity counters for the
-# ball/medicine/TM-HM drop tracks (Stage 23).
+# State-relative byte offsets (version 5 - see docs/file-formats.md). Bytes
+# 0-194 are unchanged from version 3; 195-197 are version-4 pity counters for
+# the ball/medicine/TM-HM drop tracks (Stage 23); 198 is version 5's PP Up
+# item count.
 OFF_PARTY_IDS = 0  # 6 x u32
 OFF_PENDING_EVENTS = 24  # 3 x 10 bytes
 OFF_ITEM_COUNTS = 54  # 6 x u16 (evolution stones, ids 1-6)
@@ -73,6 +81,18 @@ OFF_BATTLE_PROGRESS = 193  # u16
 OFF_BALL_MISSES = 195  # u8
 OFF_MEDICINE_MISSES = 196  # u8
 OFF_MACHINE_MISSES = 197  # u8
+OFF_PPUP_COUNT = 198  # u8 - how many PP Up items (id 84) the player holds, tracked outside bagCounts
+
+# The battle-store side file (pokemon-battle-{a,b}.bin) - see
+# lib/Pokemon/PokemonBattleStoreCodec.h. Version 2 entries add a per-slot PP
+# Up counter after the version-1 layout.
+BATTLE_MAGIC = b"PKBT"
+BATTLE_HEADER_BYTES = 10  # magic(4) + version(1) + entryCount(1) + sequence(4)
+BATTLE_ENTRY_BYTES_V1 = 16
+BATTLE_ENTRY_BYTES = 20  # version 2: adds ppUp[4]
+BATTLE_MOVE_SLOTS = 4
+BATTLE_STORE_VERSION_V1 = 1
+BATTLE_STORE_VERSION = 2
 
 PENDING_KIND_NONE = 0
 PENDING_KIND_ENCOUNTER = 1
@@ -159,6 +179,80 @@ def find_species(species_map: dict[int, Species], query: str) -> Species:
     raise ToolError(f"no species named {query!r} (try a numeric id, or check spelling)")
 
 
+@dataclass(frozen=True)
+class Move:
+    id: int
+    name: str
+    pp: int
+
+
+def load_moves() -> dict[int, Move]:
+    moves: dict[int, Move] = {}
+    with MOVES_CSV.open(encoding="utf-8") as f:
+        f.readline()
+        for row in csv.DictReader(f):
+            move_id = int(row["id"])
+            moves[move_id] = Move(move_id, row["name"], int(row["pp"]))
+    return moves
+
+
+def find_move(move_map: dict[int, Move], query: str) -> Move:
+    if query.isdigit():
+        move_id = int(query)
+        if move_id not in move_map:
+            raise ToolError(f"no move with id {move_id}")
+        return move_map[move_id]
+    needle = query.strip().lower().replace(" ", "").replace("-", "")
+    for move in move_map.values():
+        if move.name.lower().replace(" ", "").replace("-", "") == needle:
+            return move
+    raise ToolError(f"no move named {query!r} (try a numeric id, or check spelling)")
+
+
+def load_learnsets() -> dict[int, list[tuple[int, int]]]:
+    """species_id -> [(level, move_id), ...] in ascending level order, exactly
+    as scripts/data/pokemon-learnsets.csv stores them (already ascending by
+    construction - see fetch_pokemon_battle_data.py)."""
+    learnsets: dict[int, list[tuple[int, int]]] = {}
+    with LEARNSETS_CSV.open(encoding="utf-8") as f:
+        f.readline()
+        for row in csv.DictReader(f):
+            learnsets.setdefault(int(row["species_id"]), []).append((int(row["level"]), int(row["move_id"])))
+    return learnsets
+
+
+def default_moveset_for(learnsets: dict[int, list[tuple[int, int]]], species_id: int, level: int) -> list[int]:
+    """Mirrors defaultMovesetForLevel() (PokemonBattle.cpp) exactly: walk the
+    species' learnset backwards (most-recently-learned-at-or-below-level
+    first) taking up to BATTLE_MOVE_SLOTS moves, packed at the front."""
+    entries = learnsets.get(species_id, [])
+    picked: list[int] = []
+    for entry_level, move_id in reversed(entries):
+        if entry_level > level:
+            continue
+        picked.append(move_id)
+        if len(picked) == BATTLE_MOVE_SLOTS:
+            break
+    return picked
+
+
+def load_base_hp() -> dict[int, int]:
+    base_hp: dict[int, int] = {}
+    with STATS_CSV.open(encoding="utf-8") as f:
+        f.readline()
+        for row in csv.DictReader(f):
+            base_hp[int(row["id"])] = int(row["hp"])
+    return base_hp
+
+
+def battle_max_hp(base_hp: int, level: int, iv: int = 0, ev: int = 0) -> int:
+    """Mirrors battleMaxHp() (PokemonBattle.cpp) exactly - iv/ev default to 0
+    since this tool doesn't touch pokemon-ivev-{a,b}.bin (a freshly-created
+    record has no IV/EV entry yet either, until PokemonService::ensureIvEv()
+    lazily rolls one on first real use - same starting point)."""
+    return (2 * (base_hp + iv) + ev // 4) * level // 100 + level + 10
+
+
 def find_item(item_map: dict[int, Item], query: str) -> Item:
     if query.isdigit():
         item_id = int(query)
@@ -179,6 +273,18 @@ def xp_required(level: int) -> int:
     clamped = max(1, min(100, level))
     n = clamped - 1
     return 10 * n + (3 * n * n) // 4
+
+
+def level_for_xp(total_xp: int) -> int:
+    """Mirrors levelForXp() (PokemonTypes.cpp) - a plain linear scan is fine
+    here (only 100 levels, this tool isn't performance-sensitive)."""
+    level = 1
+    for candidate in range(1, 101):
+        if xp_required(candidate) <= total_xp:
+            level = candidate
+        else:
+            break
+    return level
 
 
 def default_gender_for(species: Species) -> int:
@@ -231,9 +337,9 @@ def load_save(path: Path) -> SaveFile:
     state_size, record_size = struct.unpack_from("<HH", data, 12)
     if header_size != HEADER_BYTES:
         raise ToolError(f"{path}: unexpected header size {header_size} (expected {HEADER_BYTES})")
-    if state_size != STATE_BYTES_V4:
+    if state_size != STATE_BYTES_V5:
         raise ToolError(
-            f"{path}: this tool only understands version-4 saves (198-byte state), got {state_size} bytes "
+            f"{path}: this tool only understands version-5 saves (199-byte state), got {state_size} bytes "
             f"(version {version}) - refusing to touch an unfamiliar layout"
         )
     if record_size != RECORD_BYTES:
@@ -259,7 +365,7 @@ def set_header_record_count(save: SaveFile, new_count: int) -> None:
     load - writing recordCount alone leaves a stale payload size and the
     device rejects the whole file as corrupt on next boot."""
     struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
-    payload_bytes = STATE_BYTES_V4 + new_count * RECORD_BYTES
+    payload_bytes = STATE_BYTES_V5 + new_count * RECORD_BYTES
     struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
@@ -288,6 +394,102 @@ def write_saves(saves: list[SaveFile], backup: bool) -> None:
                 bak.write_bytes(save.path.read_bytes())
         save.path.write_bytes(save.data)
         print(f"wrote {save.path}")
+
+
+# --------------------------------------------------------------------------
+# Battle store (pokemon-battle-{a,b}.bin) - live moveset/HP/PP/status,
+# separate from the main save. See lib/Pokemon/PokemonBattleStoreCodec.h.
+# --------------------------------------------------------------------------
+
+BATTLE_STORE_NAMES_CURRENT = ("pokemon-battle-a.bin", "pokemon-battle-b.bin")
+
+
+@dataclass
+class BattleEntry:
+    record_id: int
+    moves: list[int]  # 4, 0 = empty slot
+    pp: list[int]  # 4, current PP
+    current_hp: int
+    status: int
+    status_turns: int
+    ppup: list[int]  # 4, 0-3 each
+
+
+def read_battle_store(save_dir: Path) -> tuple[list[BattleEntry], int]:
+    """Reads whichever of pokemon-battle-{a,b}.bin decodes with the higher
+    sequence (mirroring PokemonBattleStore::load()'s own pick), tolerating a
+    v1 (16-byte, no ppUp) file by defaulting ppUp to 0. Returns (entries, the
+    sequence number the NEXT write should use). An empty/missing/corrupt pair
+    of files is not an error here - matches the firmware's own "just starts
+    empty" behavior - and returns ([], 1)."""
+    best: Optional[tuple[int, list[BattleEntry]]] = None
+    for name in BATTLE_STORE_NAMES_CURRENT:
+        path = save_dir / name
+        if not path.exists():
+            continue
+        data = path.read_bytes()
+        if len(data) < BATTLE_HEADER_BYTES + 4 or data[0:4] != BATTLE_MAGIC:
+            continue
+        version = data[4]
+        count = data[5]
+        if version not in (BATTLE_STORE_VERSION_V1, BATTLE_STORE_VERSION):
+            continue
+        sequence, = struct.unpack_from("<I", data, 6)
+        entry_bytes = BATTLE_ENTRY_BYTES_V1 if version == BATTLE_STORE_VERSION_V1 else BATTLE_ENTRY_BYTES
+        payload_size = BATTLE_HEADER_BYTES + count * entry_bytes
+        if len(data) != payload_size + 4 or sequence == 0:
+            continue
+        crc_expected, = struct.unpack_from("<I", data, payload_size)
+        if (zlib.crc32(data[:payload_size]) & 0xFFFFFFFF) != crc_expected:
+            continue
+        entries = []
+        offset = BATTLE_HEADER_BYTES
+        for _ in range(count):
+            record_id, = struct.unpack_from("<I", data, offset)
+            moves = list(data[offset + 4 : offset + 8])
+            pp = list(data[offset + 8 : offset + 12])
+            current_hp, = struct.unpack_from("<H", data, offset + 12)
+            status = data[offset + 14]
+            status_turns = data[offset + 15]
+            ppup = list(data[offset + 16 : offset + 20]) if version == BATTLE_STORE_VERSION else [0, 0, 0, 0]
+            entries.append(BattleEntry(record_id, moves, pp, current_hp, status, status_turns, ppup))
+            offset += entry_bytes
+        if best is None or sequence > best[0]:
+            best = (sequence, entries)
+    if best is None:
+        return [], 1
+    sequence, entries = best
+    next_sequence = 1 if sequence == 0xFFFFFFFF else sequence + 1
+    return entries, next_sequence
+
+
+def write_battle_store(save_dir: Path, entries: list[BattleEntry], sequence: int, backup: bool, dry_run: bool) -> None:
+    entries = sorted(entries, key=lambda e: e.record_id)
+    body = bytearray(BATTLE_MAGIC)
+    body.append(BATTLE_STORE_VERSION)
+    body.append(len(entries))
+    body += struct.pack("<I", sequence)
+    for e in entries:
+        body += struct.pack("<I", e.record_id)
+        body += bytes(e.moves)
+        body += bytes(e.pp)
+        body += struct.pack("<H", e.current_hp)
+        body.append(e.status)
+        body.append(e.status_turns)
+        body += bytes(e.ppup)
+    crc = zlib.crc32(bytes(body)) & 0xFFFFFFFF
+    body += struct.pack("<I", crc)
+    if dry_run:
+        return
+    save_dir.mkdir(parents=True, exist_ok=True)
+    for name in BATTLE_STORE_NAMES_CURRENT:
+        path = save_dir / name
+        if backup and path.exists():
+            bak = path.with_suffix(path.suffix + ".bak")
+            if not bak.exists():
+                bak.write_bytes(path.read_bytes())
+        path.write_bytes(bytes(body))
+        print(f"wrote {path}")
 
 
 # --------------------------------------------------------------------------
@@ -335,7 +537,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     print("\nparty record ids:", [rid for rid in party_ids if rid != 0])
 
     header_record_count, = struct.unpack_from("<I", active.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V4
+    records_offset = HEADER_BYTES + STATE_BYTES_V5
     print(f"\nrecords ({header_record_count}):")
     for i in range(header_record_count):
         offset = records_offset + i * RECORD_BYTES
@@ -371,6 +573,10 @@ def cmd_dump(args: argparse.Namespace) -> None:
         if count:
             item = item_map.get(i + EVOLUTION_ITEM_COUNT + 1)
             print(f"  id {i + EVOLUTION_ITEM_COUNT + 1} ({item.name if item else '?'}): {count}")
+    ppup_count, = struct.unpack_from("<B", state_bytes(active, OFF_PPUP_COUNT, 1))
+    if ppup_count:
+        item = item_map.get(PP_UP_ITEM_ID)
+        print(f"  id {PP_UP_ITEM_ID} ({item.name if item else '?'}): {ppup_count}")
 
     ball_misses, medicine_misses, machine_misses = struct.unpack_from("<BBB", state_bytes(active, OFF_BALL_MISSES, 3))
     print(
@@ -390,6 +596,23 @@ def cmd_dump(args: argparse.Namespace) -> None:
             f"  slot {slot}: {PENDING_KIND_NAMES.get(kind, kind)} - recordId={record_id}, species={species_name}, "
             f"level={level}, gender={GENDER_NAMES.get(gender, gender)}, item={item}"
         )
+
+    move_map = load_moves()
+    battle_entries, _ = read_battle_store(args.save_dir)
+    print("\nbattle entries (moveset/HP/PP/status - only Pokemon that have ever fought have one):")
+    if not battle_entries:
+        print("  none yet")
+    for entry in sorted(battle_entries, key=lambda e: e.record_id):
+        move_descs = []
+        for move_id, pp, ppup in zip(entry.moves, entry.pp, entry.ppup):
+            if move_id == 0:
+                move_descs.append("-")
+                continue
+            move = move_map.get(move_id)
+            name = move.name if move else f"?{move_id}"
+            suffix = f" (x{ppup})" if ppup else ""
+            move_descs.append(f"{name} {pp}{suffix}")
+        print(f"  #{entry.record_id}: HP {entry.current_hp}, status={entry.status}, moves = {move_descs}")
 
 
 def cmd_reset_battle_store(args: argparse.Namespace) -> None:
@@ -449,25 +672,64 @@ def cmd_queue_encounter(args: argparse.Namespace) -> None:
         write_saves(saves, backup=not args.no_backup)
 
 
+def set_bag_item_count(save: SaveFile, item: Item, count: int) -> int:
+    """Writes `count` for one item on one already-loaded save, returning the
+    previous value. Does NOT recompute the CRC or write the file - callers
+    doing several items at once (cmd_set_all_bag_items) recompute once at the
+    end instead of once per item."""
+    if item.id <= EVOLUTION_ITEM_COUNT:
+        if not (0 <= count <= 0xFFFF):
+            raise ToolError("count must be 0-65535 for an evolution item")
+        offset = OFF_ITEM_COUNTS + (item.id - 1) * 2
+        before, = struct.unpack_from("<H", state_bytes(save, offset, 2))
+        set_state_bytes(save, offset, struct.pack("<H", count))
+        return before
+    if not (0 <= count <= 0xFF):
+        raise ToolError("count must be 0-255 for a bag item")
+    if item.id == PP_UP_ITEM_ID:
+        # Tracked in its own ppUpCount field, not bagCounts - PokemonRecord's
+        # bagCounts array is exactly 77 bytes (ids 7-83) with nothing spare,
+        # so writing PP Up's count there the same way every other bag item
+        # works would silently corrupt whatever follows it (battleProgress).
+        before, = struct.unpack_from("<B", state_bytes(save, OFF_PPUP_COUNT, 1))
+        set_state_bytes(save, OFF_PPUP_COUNT, struct.pack("<B", count))
+        return before
+    offset = OFF_BAG_COUNTS + (item.id - EVOLUTION_ITEM_COUNT - 1)
+    before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
+    set_state_bytes(save, offset, struct.pack("<B", count))
+    return before
+
+
 def cmd_set_bag_item(args: argparse.Namespace) -> None:
     item_map = load_items()
     item = find_item(item_map, args.item)
     saves = load_saves(args.save_dir)
     for save in saves:
-        if item.id <= EVOLUTION_ITEM_COUNT:
-            if not (0 <= args.count <= 0xFFFF):
-                raise ToolError("--count must be 0-65535 for an evolution item")
-            offset = OFF_ITEM_COUNTS + (item.id - 1) * 2
-            before, = struct.unpack_from("<H", state_bytes(save, offset, 2))
-            set_state_bytes(save, offset, struct.pack("<H", args.count))
-        else:
-            if not (0 <= args.count <= 0xFF):
-                raise ToolError("--count must be 0-255 for a bag item")
-            offset = OFF_BAG_COUNTS + (item.id - EVOLUTION_ITEM_COUNT - 1)
-            before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
-            set_state_bytes(save, offset, struct.pack("<B", args.count))
+        before = set_bag_item_count(save, item, args.count)
         recompute_crc(save)
         print(f"{save.path.name}: {item.name} (id {item.id}) {before} -> {args.count}")
+    if not args.dry_run:
+        write_saves(saves, backup=not args.no_backup)
+
+
+def cmd_set_all_bag_items(args: argparse.Namespace) -> None:
+    if not (0 <= args.count <= 0xFF):
+        raise ToolError("--count must be 0-255 (the bag-item byte range - also applies to the 6 evolution items here)")
+    item_map = load_items()
+    saves = load_saves(args.save_dir)
+    # Every real item id 1..PP_UP_ITEM_ID except Master Ball is fair game -
+    # Master Ball is deliberately skipped (id 4, category Ball) since handing
+    # out 5 of a guaranteed-catch item defeats the point of ever needing one;
+    # everything else (stones, ordinary balls, medicine, TM/HM, PP Up) is set
+    # to the same count.
+    for save in saves:
+        for item_id in sorted(item_map):
+            item = item_map[item_id]
+            if item.name == "Master Ball":
+                continue
+            set_bag_item_count(save, item, args.count)
+        recompute_crc(save)
+        print(f"{save.path.name}: set every item (except Master Ball) to {args.count}")
     if not args.dry_run:
         write_saves(saves, backup=not args.no_backup)
 
@@ -478,7 +740,7 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         raise ToolError("--xp must be >= 0")
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, 16)
-        records_offset = HEADER_BYTES + STATE_BYTES_V4
+        records_offset = HEADER_BYTES + STATE_BYTES_V5
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES
@@ -511,7 +773,7 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
     nickname_bytes = nickname_text + b"\x00" * (POKEMON_NICKNAME_BYTES - len(nickname_text))
 
     saves = load_saves(args.save_dir)
-    records_offset = HEADER_BYTES + STATE_BYTES_V4
+    records_offset = HEADER_BYTES + STATE_BYTES_V5
 
     # pokemon-a.bin and pokemon-b.bin can legitimately hold different
     # generations of state (that is the whole point of the double buffer),
@@ -576,6 +838,53 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
         write_saves(saves, backup=not args.no_backup)
 
 
+def cmd_set_moves(args: argparse.Namespace) -> None:
+    move_map = load_moves()
+    saves = load_saves(args.save_dir)
+    active = max(saves, key=lambda s: s.sequence)
+    record_count, = struct.unpack_from("<I", active.data, OFF_HEADER_RECORD_COUNT)
+    records_offset = HEADER_BYTES + STATE_BYTES_V5
+    species_id = None
+    total_xp = None
+    for i in range(record_count):
+        offset = records_offset + i * RECORD_BYTES
+        rid, xp, sid = struct.unpack_from("<IIH", active.data, offset)
+        if rid == args.record_id:
+            species_id, total_xp = sid, xp
+            break
+    if species_id is None:
+        raise ToolError(f"no record with id {args.record_id}")
+    level = level_for_xp(total_xp)
+
+    if args.moves:
+        move_ids = [find_move(move_map, token.strip()).id for token in args.moves.split(",")]
+        if not (1 <= len(move_ids) <= BATTLE_MOVE_SLOTS):
+            raise ToolError(f"--moves must list 1-{BATTLE_MOVE_SLOTS} moves")
+    else:
+        move_ids = default_moveset_for(load_learnsets(), species_id, level)
+        if not move_ids:
+            raise ToolError(
+                f"species {species_id} has no learnset move at or below level {level} - pass --moves explicitly"
+            )
+
+    moves = move_ids + [0] * (BATTLE_MOVE_SLOTS - len(move_ids))
+    pp = [move_map[m].pp if m else 0 for m in moves]
+
+    entries, next_sequence = read_battle_store(args.save_dir)
+    entry = next((e for e in entries if e.record_id == args.record_id), None)
+    if entry is None:
+        max_hp = battle_max_hp(load_base_hp().get(species_id, 1), level)
+        entry = BattleEntry(args.record_id, [0, 0, 0, 0], [0, 0, 0, 0], max_hp, 0, 0, [0, 0, 0, 0])
+        entries.append(entry)
+    entry.moves = moves
+    entry.pp = pp
+    entry.ppup = [0, 0, 0, 0]  # a freshly (re)taught moveset starts with no PP Up on any slot
+
+    move_names = [move_map[m].name if m else "-" for m in moves]
+    print(f"record #{args.record_id} (species {species_id}, level {level}): moves = {move_names}")
+    write_battle_store(args.save_dir, entries, next_sequence, backup=not args.no_backup, dry_run=args.dry_run)
+
+
 GENDER_NAMES_REVERSE = {"male": GENDER_MALE, "female": GENDER_FEMALE, "genderless": GENDER_GENDERLESS}
 
 
@@ -617,6 +926,12 @@ def build_parser() -> argparse.ArgumentParser:
     bag.add_argument("--count", type=int, required=True)
     bag.set_defaults(func=cmd_set_bag_item)
 
+    all_bag = subparsers.add_parser(
+        "set-all-bag-items", help="set every item's count to the same value in one shot (except Master Ball)"
+    )
+    all_bag.add_argument("--count", type=int, required=True, help="0-255")
+    all_bag.set_defaults(func=cmd_set_all_bag_items)
+
     xp = subparsers.add_parser("set-record-xp", help="set a Pokemon record's totalXp directly (party or PC)")
     xp.add_argument("--record-id", type=int, required=True)
     xp.add_argument("--xp", type=int, required=True)
@@ -630,6 +945,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_member.add_argument("--gender", choices=sorted(GENDER_NAMES_REVERSE), help="default: auto-picked to satisfy the species")
     add_member.add_argument("--nickname", help="default: none")
     add_member.set_defaults(func=cmd_add_party_member)
+
+    moves = subparsers.add_parser(
+        "set-moves", help="set a record's 4 battle move slots (auto-picked from its real learnset if --moves is omitted)"
+    )
+    moves.add_argument("--record-id", type=int, required=True)
+    moves.add_argument(
+        "--moves", help="comma-separated move ids/names, e.g. '33,45,52,84' - default: auto-pick from the species' own learnset at its current level"
+    )
+    moves.set_defaults(func=cmd_set_moves)
 
     return parser
 
