@@ -95,4 +95,4 @@ Pokémon and related names, characters, and artwork belong to their respective r
 
 ### TODO / future consideration
 
-- Battle stats are currently the plain Gen 1 formula with no IVs/EVs (individual stat variation) and no critical hits - revisit whether adding either is worth the complexity for a future phase.
+- [Pokémon Red authenticity gap analysis](docs/development/pokemon-gen1-authenticity-roadmap.md) - a prioritized list of real Gen 1 mechanics not yet modeled (stat stages, critical hits, IVs/EVs, recoil/multi-hit moves), with impact/cost notes for tackling them in future phases.
