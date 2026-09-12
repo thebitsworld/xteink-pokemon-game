@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-12
+
+### Added
+
+- Pokémon now have Individual Values (IVs) and Effort Values (EVs) - two same-species, same-level Pokémon caught at different times can now have genuinely different stats, and defeating other Pokémon in battle gradually raises your fighter's stats over time. Both are visible on the Summary screen.
+
 ## [0.9.0] - 2026-09-12
 
 ### Added

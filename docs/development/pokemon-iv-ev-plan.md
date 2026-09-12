@@ -9,8 +9,12 @@ nav_order: 9
 The last item on [the Gen 1 authenticity roadmap](pokemon-gen1-authenticity-roadmap.md).
 Written after a read-only research pass over the current save-format, stat-pipeline, and
 data-fetch code — see that research folded into the decisions below rather than duplicated
-as a separate document. **Nothing has been implemented yet — this is the plan to review
-before branching off real code.**
+as a separate document.
+
+**✅ Implemented in `v0.10.0`, branch `feat/iv-ev-system`** - this doc is kept as the design
+record (why the new side file, why EVs are simplified the way they are, why trainer teams
+get fixed values) rather than a still-open proposal. See the roadmap doc's own item 3 for a
+short summary of what shipped and exactly which files changed.
 
 ## Decisions already made (with the user, before writing this plan)
 

@@ -98,37 +98,40 @@ hit!" (`STR_POKEMON_CRITICAL_HIT`) as its own clause. One pre-existing test need
 `ZERO_RANDOM` (always rolls 0) now also means "always crit" for any Pokemon with positive
 Speed, which changed an old test's assumptions about who acts first and survives.
 
-### 3. No IVs/EVs (individual stat variance)
+### 3. IVs/EVs — ✅ done (`v0.10.0`, branch `feat/iv-ev-system`)
 
-**Real Gen 1 behavior**: each Pokémon has a hidden IV (0-15) per stat rolled once at
-capture/hatch, and EVs (0-65,535 internally, effectively capped per stat) gained from
-defeating other Pokémon in battle, both added into the stat formula. Two same-species,
-same-level Pokémon are almost never identical.
+Implemented per [the IV/EV implementation plan](pokemon-iv-ev-plan.md) (read that doc for
+the full design/staging reasoning) - summary of what shipped:
 
-**Current behavior**: fully deterministic — confirmed directly, `battleMaxHp()`/
-`battleWorkingStat()` take only `(baseStat, level)`. Two same-species, same-level Pokémon
-in this game are byte-for-byte identical in every stat, always.
+- **Storage**: a new side file, `pokemon-ivev-{a,b}.bin` (`PokemonIvEvStoreCodec.h/.cpp`,
+  `PokemonIvEvStore.h/.cpp`), double-buffered exactly like the existing
+  `pokemon-battle-{a,b}.bin`/`pokemon-{a,b}.bin` stores, keyed by `recordId`, covering every
+  record (party and PC box both) up to 1024 entries - the same hard cap
+  `PokemonService::resolveEncounter()` already enforces on total records. `PokemonRecord`
+  itself was untouched (it only had 1 spare byte, nowhere near enough).
+- **IVs**: 0-15 per stat, rolled once via `rollIvSet()` the first time a record is looked up
+  with no existing entry (`PokemonService::ensureIvEv()`) - this covers both a brand-new
+  catch/starter and backfilling a record created before this feature existed, with no
+  separate migration step needed.
+- **EVs**: a deliberate simplification of real Gen 1 (which ran 0-65,535 per stat with a
+  `floor(sqrt(EV)/4)` bonus curve): capped at 0-255 with a flat `EV/4` bonus instead. Both
+  formulas reach the same maximum bonus (63), so the ceiling is authentic even though the
+  climb curve and the on-disk cost (1 byte/stat instead of 2) are simpler. EV yield per
+  species comes from PokeAPI's own `effort` field (a modern-games mechanic, not literally
+  Gen 1's own "Stat Experience" formula - see `BaseStats`'s doc comment in
+  `PokemonBattleTypes.h`), fetched into `scripts/data/pokemon-stats.csv` alongside base
+  stats, and accumulated in `PokemonService::awardBattleXp()` on every battle win,
+  independent of the XP/level-100 cap.
+- **Trainer teams** (Gym/Elite Four/Champion, defined in `PokemonGymData.cpp`, never
+  persisted as records): fixed IV 15 in every stat, EV 0 - mirrors the real games' own
+  "trainer Pokemon have high, fixed DVs" convention, and needs no persistence.
+- **Display**: the Summary screen gained two new compact rows (one line each for IV/EV,
+  order spelled out in the value itself - `HP12 A3 D15 S0 Sp8`) rather than a wholly new
+  screen, reusing the existing `drawField()` helper.
 
-**Why this is lower priority despite being the most "authentic" gap**: it's the most
-expensive of the four to add correctly, and the return on investment is smaller than it
-first looks:
-- **IVs** need a new persisted field per record (`PokemonRecord` is already at its
-  documented 48-byte hard ceiling — see the battle roadmap's constraint 3; adding IVs means
-  either fitting them into unused bits or moving them to the same kind of separate
-  side-file `pokemon-battle-{a,b}.bin` already uses for moveset/HP, since a per-record IV
-  set (6 stats × 4 bits = 3 bytes) is small but the record has zero spare bytes documented).
-- **EVs** need a new "which stat did the defeated Pokémon yield EVs in" data column (real
-  Gen 1 species have an EV yield per stat — not currently fetched from PokeAPI at all) and
-  a whole new accumulation/cap system, on top of whatever battle-EXP bookkeeping already
-  exists.
-- With a 6-Pokémon party cap and this game's actual pace (leveling take real hours of
-  reading, not instant grinding), the "min-maxing IVs by resetting a save" meta from the
-  real games doesn't really apply here — the value of IVs here would mostly be "each caught
-  Pokémon feels a little different," a flavor improvement, not a balance-critical one.
-
-**Recommendation**: do stat stages and crit hits first (cheaper, higher move-roster
-impact); revisit IVs/EVs as a separate, larger initiative once there's a concrete plan for
-where the extra bytes live.
+**Backward compatibility**: `battleMaxHp()`/`battleWorkingStat()` both default `iv`/`ev` to
+`0`, reproducing the exact pre-this-feature formula for any caller that hasn't been taught a
+Pokemon's real IV/EV yet.
 
 ### 4. Recoil, multi-hit moves, Struggle — ✅ done (`v0.9.0`, branch `feat/recoil-multihit-struggle`)
 
@@ -170,13 +173,12 @@ turn). New i18n strings for the hit-count and recoil messages.
 2. ✅ **Stat stages** — done (`v0.8.0`). Biggest move-roster impact (revives ~25% of the moveset), moderate
    cost, no save-format changes (battle-only state).
 3. ✅ **Recoil / multi-hit moves / a real player-facing Struggle** — done (`v0.9.0`).
-4. **PP Up** — trivial once picked up, low priority on its own.
-5. **IVs/EVs** — biggest authenticity win but also the biggest cost. The save-format
-   question is now answered: see
-   [the IV/EV implementation plan](pokemon-iv-ev-plan.md) (a new side file, not a
-   `PokemonRecord` change - `PokemonRecord` only has 1 spare byte, nowhere near enough).
-   That doc has the full staged plan; implement it as its own multi-stage effort rather than
-   folding it into a quick follow-up.
+4. **PP Up** — trivial once picked up, low priority on its own. The one item left on this
+   list.
+5. ✅ **IVs/EVs** — done (`v0.10.0`). See
+   [the IV/EV implementation plan](pokemon-iv-ev-plan.md) for the full design (a new side
+   file, not a `PokemonRecord` change - `PokemonRecord` only had 1 spare byte, nowhere near
+   enough).
 
 None of this needs to happen at once — each item above is written to stand alone, so a
 future session can pick up exactly one and ship it, same as the battle-EXP work did.
