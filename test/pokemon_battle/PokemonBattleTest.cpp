@@ -636,6 +636,153 @@ void battleVictoryXpScalesWithLevelAndTrainerBonus() {
   CHECK(pokemon::battleVictoryXp(0, false) == 0);
 }
 
+// Move ids for the fixed-damage moves below (PokeAPI's own data stores
+// power=0 for every one of these - see FIXED_DAMAGE_TABLE's doc comment in
+// PokemonBattle.cpp): 12 Guillotine, 32 Horn Drill, 90 Fissure (OHKO);
+// 69 Seismic Toss, 101 Night Shade (damage = user's level); 82 Dragon Rage
+// (flat 40), 49 Sonic Boom (flat 20); 149 Psywave (random, scaled to level);
+// 162 Super Fang (halves target's current HP); 68 Counter (reflects 2x the
+// last physical damage taken this turn); 67 Low Kick (simplified fixed
+// power, since this project has no per-species weight data).
+
+void ohkoMoveInstantlyFaintsWhenAttackerLevelIsAtLeastDefenders() {
+  // Guillotine at equal level: real Gen 1 hit chance is exactly the move's
+  // listed accuracy (30) plus the level difference (0 here) - ZERO_RANDOM
+  // (always rolls 0, below any positive threshold) connects and instantly
+  // faints the target regardless of its remaining HP.
+  BattleCombatant charmander = makeCombatant(4, 20, {12});
+  BattleCombatant squirtle = makeCombatant(7, 20, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, squirtle, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::OneHitKo);
+  CHECK(squirtle.currentHp == 0);
+}
+
+void ohkoMoveNeverConnectsWhenAttackerIsALowerLevel() {
+  // A real Gen 1 rule: an OHKO move always misses if the user's level is
+  // below the target's, no matter how favorable the random roll is. Keep the
+  // level gap small so Squirtle's own (normal, non-OHKO) Tackle can't just
+  // faint Charmander outright before Guillotine gets a chance to whiff.
+  BattleCombatant charmander = makeCombatant(4, 20, {12});
+  BattleCombatant squirtle = makeCombatant(7, 25, {33});
+  const uint16_t hpBefore = squirtle.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, squirtle, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveMissed);
+  CHECK(squirtle.currentHp == hpBefore);
+}
+
+void ohkoMoveHasNoEffectOnAnImmuneType() {
+  // Guillotine/Horn Drill are Normal-type - Gastly (Ghost/Poison) is immune
+  // to Normal, and that immunity applies to an OHKO move exactly like any
+  // other move.
+  BattleCombatant charmander = makeCombatant(4, 50, {12});
+  BattleCombatant gastly = makeCombatant(92, 5, {33});
+  const uint16_t hpBefore = gastly.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, gastly, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(gastly.currentHp == hpBefore);
+}
+
+void seismicTossAndNightShadeDealDamageEqualToUsersLevel() {
+  // Charmander (base Speed 65) is faster than Bulbasaur (base Speed 45) at
+  // the same level, so its fixed-damage move always resolves this turn
+  // regardless of the random source.
+  BattleCombatant charmander = makeCombatant(4, 20, {69});  // Seismic Toss
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33});
+  const uint16_t hpBefore = bulbasaur.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(hpBefore - bulbasaur.currentHp == 20);
+  CHECK(result.player.event == BattleLogEvent::MoveHit);
+
+  BattleCombatant charmander2 = makeCombatant(4, 20, {101});  // Night Shade
+  BattleCombatant bulbasaur2 = makeCombatant(1, 20, {33});
+  const uint16_t hpBefore2 = bulbasaur2.currentHp;
+  pokemon::stepBattle(charmander2, bulbasaur2, 0, ZERO_RANDOM);
+  CHECK(hpBefore2 - bulbasaur2.currentHp == 20);
+}
+
+void dragonRageAndSonicBoomDealFixedFlatDamage() {
+  BattleCombatant charmander = makeCombatant(4, 30, {82});  // Dragon Rage
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {33});
+  const uint16_t hpBefore = bulbasaur.currentHp;
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(hpBefore - bulbasaur.currentHp == 40);
+
+  BattleCombatant charmander2 = makeCombatant(4, 30, {49});  // Sonic Boom
+  BattleCombatant bulbasaur2 = makeCombatant(1, 30, {33});
+  const uint16_t hpBefore2 = bulbasaur2.currentHp;
+  pokemon::stepBattle(charmander2, bulbasaur2, 0, ZERO_RANDOM);
+  CHECK(hpBefore2 - bulbasaur2.currentHp == 20);
+}
+
+void psywaveDamageIsBoundedBetweenOneAndOnePointFiveTimesLevel() {
+  // Real Gen 1 Psywave: random damage from 1 up to 1.5x the user's level.
+  BattleCombatant charmander = makeCombatant(4, 20, {149});
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33});
+  const uint16_t hpBefore = bulbasaur.currentHp;
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(hpBefore - bulbasaur.currentHp == 1);
+
+  BattleCombatant charmander2 = makeCombatant(4, 20, {149});
+  BattleCombatant bulbasaur2 = makeCombatant(1, 20, {33});
+  const uint16_t hpBefore2 = bulbasaur2.currentHp;
+  pokemon::stepBattle(charmander2, bulbasaur2, 0, MAX_RANDOM);
+  CHECK(hpBefore2 - bulbasaur2.currentHp == 30);  // floor(20 * 1.5)
+}
+
+void superFangHalvesDefendersCurrentHp() {
+  BattleCombatant charmander = makeCombatant(4, 30, {162});  // Super Fang
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});
+  bulbasaur.currentHp = 50;  // override to a clean, easy-to-halve value
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(bulbasaur.currentHp == 25);
+}
+
+void lowKickDealsRealDamageInsteadOfTheOldFlatBug() {
+  // Before FIXED_DAMAGE_TABLE/LOW_KICK_SIMPLIFIED_POWER existed, Low Kick's
+  // power=0 in the source data meant it fell through to the normal formula
+  // and dealt a useless ~2 flat damage. It should now deal real damage,
+  // comfortably more than that old bug's amount.
+  BattleCombatant charmander = makeCombatant(4, 30, {67});
+  BattleCombatant bulbasaur = makeCombatant(1, 30, {33});
+  const uint16_t hpBefore = bulbasaur.currentHp;
+  pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(hpBefore - bulbasaur.currentHp > 5);
+}
+
+void counterReflectsDoubleTheLastPhysicalDamageTakenThisTurn() {
+  // Charmander (higher base Speed, so faster even at an equal level) uses
+  // Tackle; Squirtle's only move is Counter - it should reflect exactly 2x
+  // the damage Tackle just dealt, back at Charmander, this same turn. Keep
+  // the level gap small so Tackle doesn't just faint Squirtle outright
+  // before its own Counter gets a turn.
+  BattleCombatant charmander = makeCombatant(4, 6, {33});  // Tackle
+  BattleCombatant squirtle = makeCombatant(7, 5, {68});    // Counter
+  const uint16_t squirtleHpBefore = squirtle.currentHp;
+  const uint16_t charmanderHpBefore = charmander.currentHp;
+
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(squirtle, charmander, 0, ZERO_RANDOM);
+
+  const uint16_t tackleDamage = squirtleHpBefore - squirtle.currentHp;
+  CHECK(tackleDamage > 0);
+  const uint16_t counterDamage = charmanderHpBefore - charmander.currentHp;
+  CHECK(counterDamage == tackleDamage * 2U);
+  CHECK(result.player.event != BattleLogEvent::MoveFailed);
+}
+
+void counterFailsWhenUserHasNotTakenPhysicalDamageThisTurn() {
+  // Squirtle (much higher level, so faster) uses Counter before Charmander's
+  // Tackle has landed - nothing to reflect yet this turn, so it fails
+  // ("But it failed!") instead of dealing damage.
+  BattleCombatant squirtle = makeCombatant(7, 30, {68});   // Counter
+  BattleCombatant charmander = makeCombatant(4, 5, {33});  // Tackle
+  const uint16_t charmanderHpBefore = charmander.currentHp;
+
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(squirtle, charmander, 0, ZERO_RANDOM);
+
+  CHECK(result.player.event == BattleLogEvent::MoveFailed);
+  CHECK(charmander.currentHp == charmanderHpBefore);
+}
+
 }  // namespace
 
 int main() {
@@ -682,5 +829,15 @@ int main() {
   rollIvSetProducesValuesInTheRealGen1Range();
   maxPpForMatchesTheRealGen1PpUpProgression();
   battleVictoryXpScalesWithLevelAndTrainerBonus();
+  ohkoMoveInstantlyFaintsWhenAttackerLevelIsAtLeastDefenders();
+  ohkoMoveNeverConnectsWhenAttackerIsALowerLevel();
+  ohkoMoveHasNoEffectOnAnImmuneType();
+  seismicTossAndNightShadeDealDamageEqualToUsersLevel();
+  dragonRageAndSonicBoomDealFixedFlatDamage();
+  psywaveDamageIsBoundedBetweenOneAndOnePointFiveTimesLevel();
+  superFangHalvesDefendersCurrentHp();
+  lowKickDealsRealDamageInsteadOfTheOldFlatBug();
+  counterReflectsDoubleTheLastPhysicalDamageTakenThisTurn();
+  counterFailsWhenUserHasNotTakenPhysicalDamageThisTurn();
   return failures == 0 ? 0 : 1;
 }

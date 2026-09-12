@@ -80,6 +80,15 @@ struct BattleCombatant {
   // 0 at battle setup (no record exists for them to persist against).
   std::array<uint8_t, STAT_COUNT> iv{};
   std::array<uint8_t, STAT_COUNT> ev{};
+  // How much damage this combatant took from a physical hit so far *this
+  // turn* - reset to 0 at the start of every stepBattle()/stepOpponentOnlyTurn()
+  // call, before either side acts (see PokemonBattle.cpp). Counter (a fixed-
+  // damage move, see FIXED_DAMAGE_TABLE) reads its own copy of this to decide
+  // whether it has anything to reflect - it only succeeds if the opponent
+  // already moved first this same turn and hit with a physical move. Like
+  // the stat stages above, this is purely transient battle state, never
+  // persisted to the side-file store.
+  uint16_t lastPhysicalDamageTaken = 0;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -117,6 +126,8 @@ enum class BattleLogEvent : uint8_t {
   StatLowered,      // a stat-changing move successfully lowered a stage
   StatChangeFailed,  // the target stat was already at +6/-6 - no further change possible
   StatsReset,       // Haze - both sides' stages (and this engine's status slot) reset
+  OneHitKo,          // Fissure/Horn Drill/Guillotine connected - instant faint
+  MoveFailed,        // Counter with nothing to reflect this turn ("But it failed!")
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with
