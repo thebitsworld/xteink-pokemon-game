@@ -168,6 +168,11 @@ class PokemonService {
   // Battle HUD can still show it. Falls back to Gender::Unknown (shown as
   // nothing) if speciesId is invalid.
   Gender rollGenderFor(uint16_t speciesId);
+  // Grants battleVictoryXp(opponentLevel, isTrainerBattle) to recordId (the
+  // Pokemon active when the battle was won), capped at MAXIMUM_TOTAL_XP same
+  // as reading credit, and queues any move newly available from the level(s)
+  // gained. A no-op (still ServiceStatus::Ok) once already at level 100.
+  ServiceStatus awardBattleXp(uint32_t recordId, uint8_t opponentLevel, bool isTrainerBattle);
 
  private:
   ServiceStatus prepareStore();

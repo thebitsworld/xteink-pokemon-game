@@ -1000,6 +1000,42 @@ TEST(PokemonService, UseConsumablePPRestoreTopsUpEveryKnownMoveSlot) {
   EXPECT_EQ(service.useConsumable(1, 26), pokemon::UseConsumableOutcome::NotApplicable);  // both slots now full
 }
 
+TEST(PokemonService, AwardBattleXpAppliesWildOrTrainerMultiplierAndCapsAtLevel100) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  seedStarter(store);  // Pikachu, level 5, totalXp starts at xpRequired(5)
+  pokemon::PokemonService service(store, battleStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  const uint32_t startingXp = leader.totalXp;
+
+  ASSERT_EQ(service.awardBattleXp(1, 5, false), pokemon::ServiceStatus::Ok);  // wild win: 5*4=20 XP
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(leader.totalXp, startingXp + 20U);
+
+  ASSERT_EQ(service.awardBattleXp(1, 12, true), pokemon::ServiceStatus::Ok);  // trainer win: 12*6=72 XP
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(leader.totalXp, startingXp + 20U + 72U);
+
+  // A gain that would overshoot the level-100 ceiling clamps exactly to it,
+  // matching how reading credit (applyCreditedMinutes) never exceeds it either.
+  leader.totalXp = pokemon::xpRequired(100) - 10U;
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+  ASSERT_EQ(service.awardBattleXp(1, 65, true), pokemon::ServiceStatus::Ok);  // 65*6=390, far past the remaining 10
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(leader.totalXp, pokemon::xpRequired(100));
+  EXPECT_EQ(pokemon::levelForXp(leader.totalXp), 100U);
+
+  // Already at level 100 - a further award is a no-op, not an error.
+  ASSERT_EQ(service.awardBattleXp(1, 65, true), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(leader.totalXp, pokemon::xpRequired(100));
+}
+
 TEST(PokemonService, UseConsumableRareCandyAddsOneLevelAndRejectsAtLevel100) {
   Storage.clear();
   pokemon::PokemonStore store;

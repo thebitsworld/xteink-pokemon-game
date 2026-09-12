@@ -684,6 +684,31 @@ Gender PokemonService::rollGenderFor(const uint16_t speciesId) {
   return gender;
 }
 
+ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8_t opponentLevel,
+                                            const bool isTrainerBattle) {
+  PokemonRecord record{};
+  const ServiceStatus readStatus = readRecord(recordId, record);
+  if (readStatus != ServiceStatus::Ok) return readStatus;
+
+  const uint8_t previousLevel = levelForXp(record.totalXp);
+  if (record.totalXp >= MAXIMUM_TOTAL_XP) return ServiceStatus::Ok;  // already level 100 - nothing to gain
+
+  const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
+  record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
+  const uint8_t currentLevel = levelForXp(record.totalXp);
+
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  queueMoveLearnIfNeeded(state, record, previousLevel, currentLevel);
+  const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
+  if (!store_.commit(state, mutation)) {
+    LOG_ERR("PokemonService", "Failed to award battle XP");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
 ServiceStatus PokemonService::reset() {
   readingSessionActive_ = false;
   if (!store_.reset()) {

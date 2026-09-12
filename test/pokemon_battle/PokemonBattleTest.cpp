@@ -238,6 +238,14 @@ void pokeBallCatchOddsScaleWithHpAndCaptureRate() {
   CHECK(pokemon::attemptCatch(wounded, BallKind::Poke, midRandom));
 }
 
+void battleVictoryXpScalesWithLevelAndTrainerBonus() {
+  CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
+  CHECK(pokemon::battleVictoryXp(25, false) == 100);
+  CHECK(pokemon::battleVictoryXp(12, true) == 72);    // trainer: level * 6
+  CHECK(pokemon::battleVictoryXp(65, true) == 390);
+  CHECK(pokemon::battleVictoryXp(0, false) == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -256,5 +264,6 @@ int main() {
   opponentOnlyTurnShortCircuitsWhenAlreadyFainted();
   masterBallAlwaysCatchesRegardlessOfRandomness();
   pokeBallCatchOddsScaleWithHpAndCaptureRate();
+  battleVictoryXpScalesWithLevelAndTrainerBonus();
   return failures == 0 ? 0 : 1;
 }
