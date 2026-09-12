@@ -3373,19 +3373,31 @@ void PokemonActivity::renderRowArt() {
                                   : -1;
     // Same row->item-id mapping buildRows() uses for these screens - see the
     // matching cases there (BagBalls/BattleBalls share the fixed 4-slot ball
-    // range; BagMedicine/BagMachine/BattleBag walk the full item table by
-    // category via bagItemIdAt()).
+    // range; BagMachine walks the full item table by category via
+    // bagItemIdAt(); BagMedicine/BattleBag also fall back to extraItemIdAt()
+    // for their trailing synthetic rows - PP Up/battle-boost items - since
+    // bagItemIdAt() alone would just return 0 for those, same as it does for
+    // any TM/HM/potion: no icon asset exists to draw either way, except
+    // these DO have one now, so the fallback actually matters here).
     uint8_t bagItemId = 0;
     if (screen_ == Screen::BagBalls || screen_ == Screen::BattleBalls) {
       const int slot = ownedSlotAt(static_cast<size_t>(start + local),
                                    std::span<const uint8_t>(snapshot_.state.bagCounts).first(4));
       if (slot >= 0) bagItemId = static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + slot);
     } else if (screen_ == Screen::BagMedicine) {
-      bagItemId = bagItemIdAt(static_cast<size_t>(start + local), snapshot_.state.bagCounts, isMedicineCategory);
+      const auto realCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isMedicineCategory));
+      const int index = start + local;
+      bagItemId = index < realCount
+                      ? bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isMedicineCategory)
+                      : extraItemIdAt(snapshot_.state, static_cast<size_t>(index - realCount), isMedicineExtraCategory);
     } else if (screen_ == Screen::BagMachine) {
       bagItemId = bagItemIdAt(static_cast<size_t>(start + local), snapshot_.state.bagCounts, isMachineCategory);
     } else if (screen_ == Screen::BattleBag) {
-      bagItemId = bagItemIdAt(static_cast<size_t>(start + local), snapshot_.state.bagCounts, isBattleUsableCategory);
+      const auto realCount = static_cast<int>(bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory));
+      const int index = start + local;
+      bagItemId = index < realCount
+                      ? bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isBattleUsableCategory)
+                      : extraItemIdAt(snapshot_.state, static_cast<size_t>(index - realCount), isBattleUsableCategory);
     }
     if (screen_ == Screen::BagEvolution && evolutionSlot >= 0) {
       // No icon assets exist for TM/HM/potions/etc - only the 6 evolution
