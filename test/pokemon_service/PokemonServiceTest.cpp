@@ -562,7 +562,10 @@ TEST(PokemonService, MarkGymDefeatedEnforcesLinearUnlockAndIsIdempotent) {
   EXPECT_EQ(service.markGymDefeated(2), pokemon::ServiceStatus::NotApplicable);  // gym 1 not yet defeated
   EXPECT_EQ(service.markGymDefeated(9), pokemon::ServiceStatus::NotApplicable);  // no gyms defeated yet
   EXPECT_EQ(service.markGymDefeated(0), pokemon::ServiceStatus::Invalid);
-  EXPECT_EQ(service.markGymDefeated(13), pokemon::ServiceStatus::Invalid);
+  // GYM_COUNT is 13 since the Champion was added (8 gyms + 4 Elite Four + the
+  // Champion) - index 13 is a real, valid gym index now, so the first
+  // genuinely out-of-range one is 14.
+  EXPECT_EQ(service.markGymDefeated(14), pokemon::ServiceStatus::Invalid);
 
   for (uint8_t gym = 1; gym <= 8; ++gym) {
     ASSERT_EQ(service.markGymDefeated(gym), pokemon::ServiceStatus::Ok);
