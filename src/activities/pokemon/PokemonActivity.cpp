@@ -336,10 +336,17 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                            ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
                        : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
                                                                                   : "";
-  if (suffix[0] == '\0') {
+  // A crit is orthogonal to the effectiveness suffix above (a hit can be
+  // both critical and super-effective at once), so it's appended as its own
+  // clause rather than folded into the ternary chain.
+  if (suffix[0] == '\0' && !action.critical) {
     snprintf(buffer, size, "%s", used);
-  } else {
+  } else if (!action.critical) {
     snprintf(buffer, size, "%s %s", used, suffix);
+  } else if (suffix[0] == '\0') {
+    snprintf(buffer, size, "%s %s", used, tr(STR_POKEMON_CRITICAL_HIT));
+  } else {
+    snprintf(buffer, size, "%s %s %s", used, tr(STR_POKEMON_CRITICAL_HIT), suffix);
   }
 }
 

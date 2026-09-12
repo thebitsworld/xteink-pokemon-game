@@ -81,25 +81,28 @@ entries — which stat, how many stages, self or opponent target), stage-to-mult
 and stage state living in `BattleCombatant` for the duration of one battle only (never
 persisted, matching how HP/status *are* persisted but this wouldn't need to be).
 
-### 2. No critical hits
+### 2. Critical hits — ✅ done (`v0.7.0`, branch `feat/critical-hits`)
 
 **Real Gen 1 behavior**: crit chance is `baseSpeed / 512` (or `/64` for a handful of
 "high-crit" moves like Slash, Razor Leaf, Crabhammer, Karate Chop), and a crit does 2x
 damage using the attacker's *unboosted* stats (a real, well-known Gen 1 quirk — negative
 stat stages on the attacker are ignored on a crit).
 
-**Current behavior**: no crit chance is ever rolled; every hit does its base-formula damage
-and nothing more.
+**Implemented as designed**: `rollCriticalHit()` in `PokemonBattle.cpp` uses the simplified
+`baseSpeed/512` / `baseSpeed/64` thresholds against a 512-wide roll, capped at 511 (no real
+Gen 1 base Speed comes close to needing the cap). The high-crit list is the real 4 Gen 1
+moves (Karate Chop id 2, Razor Leaf id 75, Crabhammer id 152, Slash id 163), hand-authored
+rather than a new CSV column — same rationale as `PokemonTypeChart.cpp`. A crit doubles the
+already-computed base damage in `computeDamage()`, before STAB/type/the random 85-100%
+variance roll — mathematically equivalent to doubling Gen 1's level term, since level is a
+pure multiplicative factor in the real formula. The "ignore negative stat stages on crit"
+quirk doesn't apply yet since stat stages (item 1 below) aren't modeled.
 
-**Measured impact**: affects every damaging move (110 of 165 moves have nonzero power), but
-the *baseline* crit rate for most Pokémon is fairly low (a Speed-100 Pokémon crits about
-1-in-5, a Speed-50 one about 1-in-10) — a real but secondary source of damage variance
-compared to stat stages above.
-
-**Estimated cost**: low. No new data needed — `baseStatsFor(speciesId)->speed` is already
-available at damage-calc time. The "high-crit move" list needs re-fetching one field from
-PokeAPI (`meta.crit_rate`) into the moves CSV/generator, or can be hand-authored short-term
-(it's a fixed, well-known list of ~6-8 Gen 1 moves).
+`BattleActionResult` gained a `critical` bool (kept separate from the `event` enum, since a
+hit can be both critical and super/not-very effective at once); the UI shows "A critical
+hit!" (`STR_POKEMON_CRITICAL_HIT`) as its own clause. One pre-existing test needed a fix:
+`ZERO_RANDOM` (always rolls 0) now also means "always crit" for any Pokemon with positive
+Speed, which changed an old test's assumptions about who acts first and survives.
 
 ### 3. No IVs/EVs (individual stat variance)
 
@@ -160,7 +163,7 @@ rather than as one big change.
 
 ## Suggested order (cheapest + highest-impact first)
 
-1. **Critical hits** — self-contained, no new data, touches only the damage formula.
+1. ✅ **Critical hits** — done (`v0.7.0`).
 2. **Stat stages** — biggest move-roster impact (revives ~25% of the moveset), moderate
    cost, no save-format changes (battle-only state).
 3. **Recoil / multi-hit moves / a real player-facing Struggle** — small, scoped additions,

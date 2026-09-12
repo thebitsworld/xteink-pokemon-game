@@ -72,6 +72,11 @@ struct BattleActionResult {
   bool acted = false;  // false if this side had already fainted or was skipped (opponent already won, etc.)
   BattleLogEvent event = BattleLogEvent::None;
   uint8_t moveSlot = 0;
+  // True on a damaging move that landed a critical hit (2x damage) - kept
+  // separate from `event` rather than folded into it, since a hit can be
+  // both critical and super/not-very effective at once. Never true for a
+  // Status move or a miss/immune hit (nothing to double).
+  bool critical = false;
 };
 
 struct BattleTurnResult {
