@@ -130,22 +130,31 @@ first looks:
 impact); revisit IVs/EVs as a separate, larger initiative once there's a concrete plan for
 where the extra bytes live.
 
-### 4. No recoil, no multi-hit moves, no Struggle for the player
+### 4. Recoil, multi-hit moves, Struggle — ✅ done (`v0.9.0`, branch `feat/recoil-multihit-struggle`)
 
-**Real Gen 1 behavior**: Take Down/Double-Edge/Submission deal recoil damage to the user;
-Fury Attack/Pin Missile/Double Slap/Comet Punch hit 2-5 times in one turn; a Pokémon with
-every move at 0 PP is forced to use Struggle (typeless, fixed power, recoils).
+Take Down/Double-Edge/Submission now recoil 1/4 of the damage they deal (Struggle recoils a
+full 1/2 — both real Gen 1 fractions), via a hand-authored `RECOIL_TABLE` in
+`PokemonBattle.cpp`. Comet Punch/Fury Attack/Double Slap/Pin Missile/Barrage/Fury Swipes now
+roll the real Gen 1 2/3/4/5-hit distribution (3/8, 3/8, 1/8, 1/8 via `rollMultiHitCount()`,
+not a flat spread); Twineedle always hits exactly twice rather than rolling. Each hit gets
+its own independent crit roll and damage-variance roll, and the sequence stops early if the
+defender faints partway through (matching Gen 1 — a multi-hit move never "overhits" a fainted
+target).
 
-**Current behavior**: confirmed via grep — no recoil or multi-hit logic exists anywhere in
-`PokemonBattle.cpp`. There is a `// Struggle-equivalent fallback` comment
-(`PokemonBattle.cpp:241`) but it's scoped to the **opponent AI's** move-selection fallback
-when it has no PP left, not a real Struggle move available to the player — a player whose
-whole team is out of PP currently has no forced-action fallback modeled explicitly (worth
-double-checking exact player-side behavior before prioritizing this one).
+Struggle (move id 165, already present in this game's own move data) is now a real forced
+action rather than a silent skipped turn: passing `pokemon::BATTLE_MOVE_SLOTS` itself as a
+move slot to `stepBattle()`/`stepOpponentOnlyTurn()` forces it — the exact same sentinel
+`chooseOpponentMoveSlot()` already returned for "the AI has no usable move," so the opponent
+side got real Struggle for free just by making `resolveAction()` honor that sentinel instead
+of treating it as `MoveHadNoPp`. The player side needed a small `PokemonActivity.cpp` change:
+once every learned move is out of PP, selecting FIGHT no longer opens the move-picker menu at
+all — it resolves a forced Struggle turn immediately, matching how the real games never offer
+a choice once you're fully out of PP.
 
-**Estimated cost**: low-to-moderate per sub-feature; these are the kind of "each one is a
-handful of specific moves" additions that are easy to scope small and ship incrementally
-rather than as one big change.
+`BattleActionResult` gained `hitCount` (0 for any non-multi-hit move) and `recoilApplied`,
+both surfaced as independent message clauses in `formatBattleActionLine()` alongside the
+existing `critical` clause (a hit can be multi-hit, critical, and recoiling all in the same
+turn). New i18n strings for the hit-count and recoil messages.
 
 ### 5. Minor real-Gen-1 items not yet in the item set
 
@@ -160,8 +169,7 @@ rather than as one big change.
 1. ✅ **Critical hits** — done (`v0.7.0`).
 2. ✅ **Stat stages** — done (`v0.8.0`). Biggest move-roster impact (revives ~25% of the moveset), moderate
    cost, no save-format changes (battle-only state).
-3. **Recoil / multi-hit moves / a real player-facing Struggle** — small, scoped additions,
-   good candidates to interleave with the above rather than doing as one big batch.
+3. ✅ **Recoil / multi-hit moves / a real player-facing Struggle** — done (`v0.9.0`).
 4. **PP Up** — trivial once picked up, low priority on its own.
 5. **IVs/EVs** — biggest authenticity win but also the biggest cost and the one most likely
    to need a save-format decision first (where do IVs live given `PokemonRecord`'s 48-byte

@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-12
+
+### Added
+
+- Take Down, Double-Edge, and Submission now recoil - dealing damage to the user, matching the original games. Comet Punch, Fury Attack, Double Slap, Pin Missile, Barrage, and Fury Swipes now hit multiple times per turn instead of once, and Twineedle always hits exactly twice. Once every one of a Pokémon's moves runs out of PP, it now Struggles instead of being stuck with no options.
+
 ## [0.8.0] - 2026-09-12
 
 ### Added
