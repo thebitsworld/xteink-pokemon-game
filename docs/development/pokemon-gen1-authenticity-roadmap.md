@@ -195,3 +195,41 @@ as a synthetic row rather than joining the generic per-category item list).
 
 **Every item on this roadmap is now done, including PP Up's acquisition path** (`v0.11.1`) -
 no open threads left.
+
+---
+
+## Addendum: a second audit found real move-data bugs, not just gaps
+
+After this roadmap's own 5 items shipped, a follow-up audit of `PokemonBattle.cpp` against
+`scripts/data/pokemon-moves.csv` (prompted by comparing this game's full item/move set
+against real Pokémon Red rather than just its battle-formula math) found something sharper
+than an authenticity gap: **12 real Gen 1 moves store `power = 0`** in the move data because
+their real damage isn't power-based (OHKO moves, fixed/level-based damage, Counter, Bide,
+weight-based Low Kick) - and since `computeDamage()` multiplies straight by `move.power`,
+every one of them was dealing a useless ~2 flat damage regardless of the target. Not a
+"less authentic" shortcut - a real bug, unnoticed because nothing exercised these specific
+moves before.
+
+**Fixed** (`v0.11.2`, branch `feat/fixed-damage-moves`): a new `FIXED_DAMAGE_TABLE`/
+`FixedDamageKind` in `PokemonBattle.cpp` gives 9 of these their real Gen 1 behavior -
+Guillotine/Horn Drill/Fissure (OHKO, with the real level-based accuracy rule: always misses
+if the user's level is below the target's, otherwise `30 + level difference`% to connect,
+and it still respects type immunity), Seismic Toss/Night Shade (damage = user's level),
+Dragon Rage (40)/Sonic Boom (20) (fixed flat damage), Psywave (random 1 to 1.5x the user's
+level), Super Fang (halves the target's current HP), and Counter (reflects 2x the last
+physical damage taken this same turn - needed one new transient field,
+`BattleCombatant::lastPhysicalDamageTaken`, reset at the top of every turn). Low Kick gets a
+simplified fixed power (50) instead of its real weight-based formula, since this project has
+no per-species weight data and can't fetch it from PokeAPI in this environment - a
+documented simplification, not the exact mechanic. Bide is deliberately NOT included here -
+it needs the same multi-turn charge state as two-turn moves like Solar Beam, tracked as a
+separate, larger follow-up rather than a one-off formula fix. New
+`BattleLogEvent::OneHitKo`/`MoveFailed` events surface "It's a one-hit KO!" and "But it
+failed!" (Counter with nothing to reflect). 10 new tests in `PokemonBattleTest.cpp`.
+
+This came out of a broader "what's still missing vs. real Pokémon Red" review that also
+flagged flinch, in-battle stat-boost items (X Attack/Defense/Speed/Special, Guard Spec.,
+Dire Hit), drain moves, and Explosion/Self-Destruct's faint+halve-Defense quirk as cheap
+follow-ups, and trapping/two-turn/Substitute/Disable/Transform/self-heal/screen moves as
+larger ones - not tracked in this doc since they're beyond this roadmap's original battle-
+formula scope, but worth knowing this fix came from the same review.
