@@ -958,8 +958,13 @@ TEST(PokemonService, UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequir
   EXPECT_EQ(untouched->status, pokemon::Ailment::Poison);
 
   // Revive (id 15) restores half max HP; a second faint then requires Max
-  // Revive (id 16) to come back at full HP. Neither item cures status - the
-  // real games leave that to a dedicated status cure once the Pokemon is up.
+  // Revive (id 16) to come back at full HP. This test injects a fainted-
+  // but-still-poisoned entry directly (bypassing the battle engine, which
+  // now clears status the instant HP hits 0 via faintCombatant() -
+  // matching the real games, where a fainted Pokemon has no status left to
+  // cure) to confirm useConsumable() itself doesn't need to touch status
+  // either way - it's purely a defensive/synthetic scenario, not something
+  // real gameplay produces anymore.
   EXPECT_EQ(service.useConsumable(1, 15), pokemon::UseConsumableOutcome::Applied);
   const pokemon::BattleRecordEntry* revived = battleStore.findEntry(1);
   ASSERT_NE(revived, nullptr);

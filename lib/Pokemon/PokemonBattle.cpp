@@ -1384,6 +1384,18 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
 // win/loss/still-in-progress outcome. Assumes both actions for the turn (or
 // the single opponent action, for the skip-player-turn case) already ran
 // and any immediate faint from those was already handled by the caller.
+// Real Gen 1: a fainted Pokemon has no status - 0 HP means there's nothing
+// left to be poisoned/paralyzed/burned/asleep about, and Revive/Max Revive
+// bring it back status-free rather than leaving a stale ailment for a
+// dedicated cure item to fix (previously a genuine divergence here - this
+// project's own `useConsumable()` comment had incorrectly claimed the real
+// games require a separate status cure after reviving).
+void faintCombatant(BattleCombatant& combatant, BattleLogEvent& event) {
+  combatant.status = Ailment::None;
+  combatant.statusTurns = 0;
+  event = BattleLogEvent::Fainted;
+}
+
 void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnResult& result) {
   if (player.disableTurnsRemaining > 0) --player.disableTurnsRemaining;
   if (opponent.disableTurnsRemaining > 0) --opponent.disableTurnsRemaining;
@@ -1402,10 +1414,10 @@ void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnRe
   if (player.currentHp == 0 && opponent.currentHp == 0) {
     result.outcome = BattleOutcome::OpponentWon;  // simultaneous KO: wild Pokemon is still standing in spirit
   } else if (player.currentHp == 0) {
-    result.player.event = BattleLogEvent::Fainted;
+    faintCombatant(player, result.player.event);
     result.outcome = BattleOutcome::OpponentWon;
   } else if (opponent.currentHp == 0) {
-    result.opponent.event = BattleLogEvent::Fainted;
+    faintCombatant(opponent, result.opponent.event);
     result.outcome = BattleOutcome::PlayerWon;
   }
 }
@@ -1568,48 +1580,48 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
     // finishTurn()'s own "wild Pokemon still standing in spirit" convention
     // for the equivalent end-of-turn case.
     if (player.currentHp == 0 && opponent.currentHp == 0) {
-      result.player.event = BattleLogEvent::Fainted;
-      result.opponent.event = BattleLogEvent::Fainted;
+      faintCombatant(player, result.player.event);
+      faintCombatant(opponent, result.opponent.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     if (opponent.currentHp == 0) {
-      result.opponent.event = BattleLogEvent::Fainted;
+      faintCombatant(opponent, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     if (player.currentHp == 0) {
-      result.player.event = BattleLogEvent::Fainted;
+      faintCombatant(player, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
     if (player.currentHp == 0) {
-      result.player.event = BattleLogEvent::Fainted;
+      faintCombatant(player, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
   } else {
     result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
     if (player.currentHp == 0 && opponent.currentHp == 0) {
-      result.player.event = BattleLogEvent::Fainted;
-      result.opponent.event = BattleLogEvent::Fainted;
+      faintCombatant(player, result.player.event);
+      faintCombatant(opponent, result.opponent.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     if (player.currentHp == 0) {
-      result.player.event = BattleLogEvent::Fainted;
+      faintCombatant(player, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     if (opponent.currentHp == 0) {
-      result.opponent.event = BattleLogEvent::Fainted;
+      faintCombatant(opponent, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
     if (opponent.currentHp == 0) {
-      result.opponent.event = BattleLogEvent::Fainted;
+      faintCombatant(opponent, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
@@ -1639,7 +1651,7 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
 
   result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
   if (player.currentHp == 0) {
-    result.player.event = BattleLogEvent::Fainted;
+    faintCombatant(player, result.player.event);
     result.outcome = BattleOutcome::OpponentWon;
     return result;
   }
@@ -1668,7 +1680,7 @@ BattleTurnResult stepPlayerOnlyTurn(BattleCombatant& player, BattleCombatant& op
 
   result.player = resolveAction(player, opponent, playerMoveSlot, random);
   if (opponent.currentHp == 0) {
-    result.opponent.event = BattleLogEvent::Fainted;
+    faintCombatant(opponent, result.opponent.event);
     result.outcome = BattleOutcome::PlayerWon;
     return result;
   }

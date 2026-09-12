@@ -1615,6 +1615,34 @@ void wildOrTrainerOpponentsNeverGetABadgeBoost() {
   CHECK(freshOpponent.badgeBoostMask == 0);
 }
 
+// --- Round-8 Gen 1 authenticity fix: fainting clears status, matching real
+// Gen 1 (0 HP means nothing left to be poisoned/paralyzed/burned/asleep
+// about) - previously a status could persist through a faint and come back
+// with the Pokemon after a Revive/Max Revive. ---
+
+void faintingFromADirectHitClearsStatus() {
+  BattleCombatant strong = makeCombatant(4, 100, {52});  // Ember, way overleveled - guaranteed KO
+  BattleCombatant weak = makeCombatant(1, 2, {33});
+  weak.status = Ailment::Poison;
+  weak.statusTurns = 3;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(strong, weak, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::PlayerWon);
+  CHECK(result.opponent.event == BattleLogEvent::Fainted);
+  CHECK(weak.status == Ailment::None);
+  CHECK(weak.statusTurns == 0);
+}
+
+void faintingFromAnEndOfTurnPoisonTickAlsoClearsStatus() {
+  BattleCombatant player = makeCombatant(1, 20, {45});  // Growl - harmless filler, deals no damage
+  player.status = Ailment::Poison;
+  player.currentHp = 1;  // the end-of-turn poison tick alone finishes it off
+  BattleCombatant opponent = makeCombatant(4, 20, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(player, opponent, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::OpponentWon);
+  CHECK(player.currentHp == 0);
+  CHECK(player.status == Ailment::None);
+}
+
 }  // namespace
 
 int main() {
@@ -1730,5 +1758,7 @@ int main() {
   badgeBoostRaisesTheCorrespondingStatByTwelvePointFivePercent();
   speedBadgeBoostCanFlipWhichSideActsFirst();
   wildOrTrainerOpponentsNeverGetABadgeBoost();
+  faintingFromADirectHitClearsStatus();
+  faintingFromAnEndOfTurnPoisonTickAlsoClearsStatus();
   return failures == 0 ? 0 : 1;
 }
