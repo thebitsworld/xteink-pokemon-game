@@ -171,10 +171,12 @@ turn). New i18n strings for the hit-count and recoil messages.
    cost, no save-format changes (battle-only state).
 3. ✅ **Recoil / multi-hit moves / a real player-facing Struggle** — done (`v0.9.0`).
 4. **PP Up** — trivial once picked up, low priority on its own.
-5. **IVs/EVs** — biggest authenticity win but also the biggest cost and the one most likely
-   to need a save-format decision first (where do IVs live given `PokemonRecord`'s 48-byte
-   ceiling). Do this last, and treat it as its own planning pass rather than folding it into
-   whichever of the above ships next.
+5. **IVs/EVs** — biggest authenticity win but also the biggest cost. The save-format
+   question is now answered: see
+   [the IV/EV implementation plan](pokemon-iv-ev-plan.md) (a new side file, not a
+   `PokemonRecord` change - `PokemonRecord` only has 1 spare byte, nowhere near enough).
+   That doc has the full staged plan; implement it as its own multi-stage effort rather than
+   folding it into a quick follow-up.
 
 None of this needs to happen at once — each item above is written to stand alone, so a
 future session can pick up exactly one and ship it, same as the battle-EXP work did.
