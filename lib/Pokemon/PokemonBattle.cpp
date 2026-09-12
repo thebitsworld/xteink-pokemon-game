@@ -156,6 +156,68 @@ uint8_t rollMultiHitCount(const RandomSource& random) {
   return 5;
 }
 
+// A handful of real Gen 1 moves compute their damage a completely different
+// way than the normal level/power/Attack/Defense formula in computeDamage()
+// - PokeAPI's own move data (scripts/data/pokemon-moves.csv) reflects this by
+// storing `power = 0` for every one of them, since there's no single "power"
+// number that would produce their real behavior. Before this table existed,
+// that meant these moves fell through to the normal formula anyway and dealt
+// a useless ~2 flat damage regardless of the target - a real bug, not just
+// an authenticity gap. Hand-authored rather than a new CSV column, same
+// rationale as the crit/stat-change/multi-hit/recoil tables above.
+//
+// Low Kick (id 67) is deliberately NOT in this table: its real damage scales
+// with the target's weight, but this project has no per-species weight data
+// (nothing here fetches it from PokeAPI, and this sandbox can't reach the
+// network to add it). It's handled as a simpler fixed-power override instead
+// - see LOW_KICK_MOVE_ID below - a documented simplification, not the exact
+// mechanic.
+//
+// Bide (id 117) is also deliberately NOT here: it stores damage across two
+// turns before releasing it, which needs the same kind of multi-turn
+// persisted state that trapping/two-turn moves do - tracked as a separate,
+// larger follow-up (see the Gen 1 mechanics gaps note), not this pass.
+enum class FixedDamageKind : uint8_t {
+  Ohko,             // Fissure/Horn Drill/Guillotine - always faints on a hit
+  LevelDamage,      // Seismic Toss/Night Shade - damage equals the user's level
+  FlatDamage,       // Dragon Rage/Sonic Boom - a fixed amount regardless of level or stats
+  Psywave,          // random damage from 1 up to 1.5x the user's level
+  HalveDefenderHp,  // Super Fang - halves the target's current HP
+  Counter,          // reflects 2x the last physical damage this user took, this same turn
+};
+struct FixedDamageTableEntry {
+  uint8_t moveId;
+  FixedDamageKind kind;
+  uint16_t flatAmount;  // only meaningful for FlatDamage
+};
+constexpr FixedDamageTableEntry FIXED_DAMAGE_TABLE[] = {
+    {12, FixedDamageKind::Ohko, 0},              // Guillotine
+    {32, FixedDamageKind::Ohko, 0},              // Horn Drill
+    {90, FixedDamageKind::Ohko, 0},              // Fissure
+    {69, FixedDamageKind::LevelDamage, 0},       // Seismic Toss
+    {101, FixedDamageKind::LevelDamage, 0},      // Night Shade
+    {82, FixedDamageKind::FlatDamage, 40},       // Dragon Rage
+    {49, FixedDamageKind::FlatDamage, 20},       // Sonic Boom
+    {149, FixedDamageKind::Psywave, 0},          // Psywave
+    {162, FixedDamageKind::HalveDefenderHp, 0},  // Super Fang
+    {68, FixedDamageKind::Counter, 0},           // Counter
+};
+
+const FixedDamageTableEntry* fixedDamageEntryForMove(const uint8_t moveId) {
+  for (const FixedDamageTableEntry& entry : FIXED_DAMAGE_TABLE) {
+    if (entry.moveId == moveId) return &entry;
+  }
+  return nullptr;
+}
+
+// Low Kick's real Gen 1 damage scales with the target's weight (20-120
+// power across 5 weight bands) - simplified here to a fixed mid-band power,
+// since this project has no per-species weight data (see FIXED_DAMAGE_TABLE's
+// doc comment above). Still goes through the normal damage formula/type
+// chart/STAB/crit, unlike the table above - only its power is overridden.
+constexpr uint8_t LOW_KICK_MOVE_ID = 67;
+constexpr uint8_t LOW_KICK_SIMPLIFIED_POWER = 50;
+
 int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
   switch (stat) {
     case StatKind::Attack:
@@ -338,10 +400,29 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   }
   if (slot != nullptr) --slot->currentPp;
 
+  const FixedDamageTableEntry* fixedDamage = fixedDamageEntryForMove(moveId);
+  const bool isOhko = fixedDamage != nullptr && fixedDamage->kind == FixedDamageKind::Ohko;
+
   // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style
   // moves, and also how Struggle's own accuracy is recorded) - stat stages
   // never apply to those either, matching the real games.
-  if (move->accuracy != 0) {
+  if (isOhko) {
+    // Real Gen 1 OHKO accuracy: always misses if the user's level is lower
+    // than the target's, otherwise hit chance is the move's listed accuracy
+    // (30) plus the level difference - a Pokemon 20 levels higher connects
+    // essentially every time. Stat stages never apply to this roll.
+    if (attacker.level < defender.level) {
+      result.event = BattleLogEvent::MoveMissed;
+      return result;
+    }
+    const int32_t hitChance = std::clamp<int32_t>(
+        static_cast<int32_t>(move->accuracy) + (static_cast<int32_t>(attacker.level) - defender.level), 0, 100);
+    uint32_t accuracyRoll = 0;
+    if (rollBelow(random, 100U, accuracyRoll) && accuracyRoll >= static_cast<uint32_t>(hitChance)) {
+      result.event = BattleLogEvent::MoveMissed;
+      return result;
+    }
+  } else if (move->accuracy != 0) {
     const int8_t combinedStage =
         std::clamp<int8_t>(attacker.accuracyStage - defender.evasionStage, -6, 6);
     const uint32_t effectiveAccuracy = applyAccuracyEvasionStage(move->accuracy, combinedStage);
@@ -366,42 +447,104 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
             ? 100
             : typeEffectivenessPercent(move->type, defenderSpecies->primaryType, defenderSpecies->secondaryType);
 
-    // A move that's immune (0% effectiveness) never gets to try more than
-    // once - real Gen 1 shows "doesn't affect" a single time, not per hit.
-    const MultiHitTableEntry* multiHit = effectivenessPercent == 0 ? nullptr : multiHitEntryForMove(moveId);
-    const uint8_t hitsToAttempt =
-        multiHit == nullptr ? 1 : multiHit->fixedHits != 0 ? multiHit->fixedHits : rollMultiHitCount(random);
+    if (fixedDamage != nullptr) {
+      // These moves skip the normal level/power/Attack/Defense formula
+      // entirely (see FIXED_DAMAGE_TABLE's doc comment) - no crit, no STAB,
+      // no multi-hit, no random 85-100% damage roll - but still respect type
+      // immunity (0% effectiveness) the same way the real games do, e.g.
+      // Ghost blocks Guillotine/Horn Drill, Flying blocks Fissure.
+      bool noEffect = effectivenessPercent == 0;
+      uint32_t damage = 0;
+      if (!noEffect) {
+        switch (fixedDamage->kind) {
+          case FixedDamageKind::Ohko:
+            damage = defender.currentHp;
+            result.event = BattleLogEvent::OneHitKo;
+            break;
+          case FixedDamageKind::LevelDamage:
+            damage = attacker.level;
+            break;
+          case FixedDamageKind::FlatDamage:
+            damage = fixedDamage->flatAmount;
+            break;
+          case FixedDamageKind::Psywave: {
+            // Real Gen 1: random damage from 1 up to 1.5x the user's level.
+            const uint32_t upperExclusive = std::max<uint32_t>(1U, static_cast<uint32_t>(attacker.level) * 3U / 2U);
+            uint32_t roll = 0;
+            damage = (rollBelow(random, upperExclusive, roll) ? roll : 0) + 1U;
+            break;
+          }
+          case FixedDamageKind::HalveDefenderHp:
+            damage = std::max<uint32_t>(1U, defender.currentHp / 2U);
+            break;
+          case FixedDamageKind::Counter:
+            // Only succeeds if this attacker already took physical damage
+            // earlier this same turn (the opponent moved first and hit with
+            // a physical move) - "But it failed!" otherwise. No chaining off
+            // a Counter itself, since lastPhysicalDamageTaken is reset at the
+            // top of every turn (see stepBattle()/stepOpponentOnlyTurn()) and
+            // only ever set again by that turn's own physical hits.
+            if (attacker.lastPhysicalDamageTaken == 0) {
+              noEffect = true;
+              result.event = BattleLogEvent::MoveFailed;
+            } else {
+              damage = static_cast<uint32_t>(attacker.lastPhysicalDamageTaken) * 2U;
+            }
+            break;
+        }
+      }
+      if (noEffect && result.event != BattleLogEvent::MoveFailed) result.event = BattleLogEvent::MoveNoEffect;
+      const uint16_t clampedDamage = clampToUint16(damage);
+      defender.currentHp = defender.currentHp > clampedDamage ? static_cast<uint16_t>(defender.currentHp - clampedDamage)
+                                                               : 0;
+      if (move->category == MoveCategory::Physical && clampedDamage > 0) {
+        defender.lastPhysicalDamageTaken = clampedDamage;
+      }
+    } else {
+      const uint8_t effectivePower = moveId == LOW_KICK_MOVE_ID ? LOW_KICK_SIMPLIFIED_POWER : move->power;
+      MoveData effectiveMove = *move;
+      effectiveMove.power = effectivePower;
 
-    bool anyCritical = false;
-    uint8_t hitsLanded = 0;
-    uint32_t totalDamage = 0;
-    for (uint8_t hit = 0; hit < hitsToAttempt && defender.currentHp > 0; ++hit) {
-      const bool critical = attackerStats != nullptr &&
-                            rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId), random);
-      const uint16_t damage = computeDamage(attacker, defender, *move, random, critical);
-      defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
-      totalDamage += damage;
-      if (critical) anyCritical = true;
-      ++hitsLanded;
-    }
+      // A move that's immune (0% effectiveness) never gets to try more than
+      // once - real Gen 1 shows "doesn't affect" a single time, not per hit.
+      const MultiHitTableEntry* multiHit = effectivenessPercent == 0 ? nullptr : multiHitEntryForMove(moveId);
+      const uint8_t hitsToAttempt =
+          multiHit == nullptr ? 1 : multiHit->fixedHits != 0 ? multiHit->fixedHits : rollMultiHitCount(random);
 
-    result.event = effectivenessEvent(effectivenessPercent);
-    if (totalDamage == 0 && effectivenessPercent != 0) result.event = BattleLogEvent::MoveHit;
-    // Immune (0% effectiveness) hits never actually land, so there's nothing
-    // to have been "critical" about even if a roll succeeded.
-    result.critical = anyCritical && effectivenessPercent != 0;
-    result.hitCount = multiHit != nullptr && effectivenessPercent != 0 ? hitsLanded : 0;
+      bool anyCritical = false;
+      uint8_t hitsLanded = 0;
+      uint32_t totalDamage = 0;
+      for (uint8_t hit = 0; hit < hitsToAttempt && defender.currentHp > 0; ++hit) {
+        const bool critical = attackerStats != nullptr &&
+                              rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId), random);
+        const uint16_t damage = computeDamage(attacker, defender, effectiveMove, random, critical);
+        defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+        totalDamage += damage;
+        if (critical) anyCritical = true;
+        ++hitsLanded;
+      }
 
-    // Recoil is based on the *total* damage this action dealt (all hits
-    // summed, for the rare case a recoil move were ever also multi-hit -
-    // none of Take Down/Double-Edge/Submission/Struggle actually are, but the
-    // formula generalizes), floored, minimum 1 if any damage landed at all.
-    if (const RecoilTableEntry* recoil = recoilEntryForMove(moveId); recoil != nullptr && totalDamage > 0) {
-      const uint16_t recoilDamage =
-          clampToUint16(std::max<uint32_t>(1U, totalDamage * recoil->recoilNumerator / recoil->recoilDenominator));
-      attacker.currentHp =
-          attacker.currentHp > recoilDamage ? static_cast<uint16_t>(attacker.currentHp - recoilDamage) : 0;
-      result.recoilApplied = true;
+      result.event = effectivenessEvent(effectivenessPercent);
+      if (totalDamage == 0 && effectivenessPercent != 0) result.event = BattleLogEvent::MoveHit;
+      // Immune (0% effectiveness) hits never actually land, so there's nothing
+      // to have been "critical" about even if a roll succeeded.
+      result.critical = anyCritical && effectivenessPercent != 0;
+      result.hitCount = multiHit != nullptr && effectivenessPercent != 0 ? hitsLanded : 0;
+      if (move->category == MoveCategory::Physical && totalDamage > 0) {
+        defender.lastPhysicalDamageTaken = clampToUint16(totalDamage);
+      }
+
+      // Recoil is based on the *total* damage this action dealt (all hits
+      // summed, for the rare case a recoil move were ever also multi-hit -
+      // none of Take Down/Double-Edge/Submission/Struggle actually are, but the
+      // formula generalizes), floored, minimum 1 if any damage landed at all.
+      if (const RecoilTableEntry* recoil = recoilEntryForMove(moveId); recoil != nullptr && totalDamage > 0) {
+        const uint16_t recoilDamage =
+            clampToUint16(std::max<uint32_t>(1U, totalDamage * recoil->recoilNumerator / recoil->recoilDenominator));
+        attacker.currentHp =
+            attacker.currentHp > recoilDamage ? static_cast<uint16_t>(attacker.currentHp - recoilDamage) : 0;
+        result.recoilApplied = true;
+      }
     }
   }
 
@@ -614,6 +757,12 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
   if (opponent.status == Ailment::Paralysis) opponentSpeed /= 2U;
   const bool playerFirst = playerSpeed >= opponentSpeed;
 
+  // Counter only reflects a physical hit taken *this same turn* - clear last
+  // turn's record before either side acts (see BattleCombatant::
+  // lastPhysicalDamageTaken's doc comment).
+  player.lastPhysicalDamageTaken = 0;
+  opponent.lastPhysicalDamageTaken = 0;
+
   if (playerFirst) {
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
     if (opponent.currentHp == 0) {
@@ -652,6 +801,13 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
     result.outcome = player.currentHp == 0 ? BattleOutcome::OpponentWon : BattleOutcome::PlayerWon;
     return result;
   }
+
+  // See stepBattle()'s matching reset - the player skips their own action
+  // here (using an item mid-battle), so only the opponent's own Counter
+  // could ever have anything to reflect, and only from a hit earlier this
+  // same turn (there isn't one, since the opponent is the only one acting).
+  player.lastPhysicalDamageTaken = 0;
+  opponent.lastPhysicalDamageTaken = 0;
 
   result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
   if (player.currentHp == 0) {

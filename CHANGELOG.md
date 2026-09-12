@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.11.2] - 2026-09-12
+
+### Fixed
+
+- Guillotine, Horn Drill, Fissure, Seismic Toss, Night Shade, Dragon Rage, Sonic Boom, Psywave, Super Fang, Low Kick, and Counter now deal real damage matching the original games, instead of a useless flat amount regardless of the target.
+
 ## [0.11.1] - 2026-09-12
 
 ### Fixed

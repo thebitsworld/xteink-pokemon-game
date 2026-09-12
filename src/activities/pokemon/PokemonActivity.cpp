@@ -378,6 +378,8 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
                        : action.event == pokemon::BattleLogEvent::MoveNotVeryEffective
                            ? tr(STR_POKEMON_NOT_VERY_EFFECTIVE)
                        : action.event == pokemon::BattleLogEvent::InflictedStatus ? tr(STR_POKEMON_INFLICTED_STATUS)
+                       : action.event == pokemon::BattleLogEvent::OneHitKo        ? tr(STR_POKEMON_ONE_HIT_KO)
+                       : action.event == pokemon::BattleLogEvent::MoveFailed      ? tr(STR_POKEMON_MOVE_FAILED)
                                                                                   : "";
   // Hit count, crit, the effectiveness suffix, and recoil are all
   // independent of one another (a multi-hit move can also crit and also
