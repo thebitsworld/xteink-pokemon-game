@@ -69,6 +69,9 @@
 #include "components/TouchHeaderBackButton.h"
 #endif
 #include "fontIds.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonService.h"
+#endif
 #include "util/BookCacheUtils.h"
 #include "util/BookMoveUtils.h"
 #include "util/Dictionary.h"
@@ -2184,6 +2187,13 @@ void EpubReaderActivity::onEnter() {
 
   globalStats = GlobalReadingStats::load();
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Returns false when there's no starter yet (party empty) or the save isn't
+  // ready - both routine, not worth logging; PokemonService itself already
+  // logs the one real failure case (store I/O error).
+  pokemon::devicePokemonService().beginReadingSession();
+#endif
+
   initializeCompletionPromptTrigger();
 
   // Save current epub as last opened epub and add to recent books
@@ -2260,6 +2270,13 @@ void EpubReaderActivity::onExit() {
     }
     globalStats.save();
   }
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Independent of SETTINGS.shouldTrackReadingStats() above - that setting only
+  // controls CrossInk's own reading-stats feature, not Pokemon crediting. Flushes
+  // any not-yet-checkpointed credited minutes so a normal exit loses nothing.
+  pokemon::devicePokemonService().flushOnExit(millis());
+#endif
 
   // Leaving mid-footnote loses the in-RAM return stack on deep sleep; persist the
   // pre-footnote position so the book reopens at the link origin, not the footnote.
@@ -2525,6 +2542,12 @@ bool EpubReaderActivity::transientFeedbackDismissed(const unsigned long showTime
 }
 
 void EpubReaderActivity::loop() {
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Checked every loop iteration (not just on page turns) so credited time
+  // accrues, and gets checkpointed to disk, even across a long stretch of
+  // reading without an actual page turn in between.
+  pokemon::devicePokemonService().checkpointIfDue(millis());
+#endif
   bool rawTouchInput = false;
 #if CROSSINK_APP_CAP_TOUCH
   int touchDownX = 0;
@@ -5396,6 +5419,16 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
       }
     }
   }
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Auto-page-turn is not the player actively reading - excluded from credit,
+  // matching docs/development/pokemon-mechanics.md's anti-cheat design.
+  if (!(source && strcmp(source, "auto") == 0)) {
+    auto& pokemonService = pokemon::devicePokemonService();
+    pokemonService.setBookProgressPercent(
+        static_cast<uint8_t>(clampPercent(static_cast<int>(getCurrentBookProgressPercent() + 0.5f))));
+    pokemonService.onSuccessfulPageTurn(millis());
+  }
+#endif
   lastPageTurnTime = millis();
   requestUpdate();
 }
