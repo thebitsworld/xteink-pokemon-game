@@ -252,6 +252,34 @@ bool isDrainMove(const uint8_t moveId) {
          moveId == 141;     // Leech Life
 }
 
+// Dream Eater's real Gen 1 quirk: it fails outright ("But it failed!", no
+// damage/drain at all) unless the target is currently asleep - checked
+// separately from isDrainMove() above, which only governs the HP-drain
+// side effect once a hit is already known to land.
+constexpr uint8_t DREAM_EATER_MOVE_ID = 138;
+
+// Hyper Beam's real Gen 1 recharge turn: a hit (not a miss) forces the user
+// to skip its entire next turn ("must recharge!") before it can act again -
+// see BattleCombatant::mustRecharge's doc comment.
+constexpr uint8_t HYPER_BEAM_MOVE_ID = 63;
+
+// Rage's real Gen 1 quirk: while enraged (see BattleCombatant::enraged),
+// every hit taken raises the user's own Attack by one stage - checked
+// wherever damage lands on a combatant, alongside the Bide-damage-
+// accumulation check those same sites already do.
+constexpr uint8_t RAGE_MOVE_ID = 99;
+
+// Thrash/Petal Dance: like the two-turn-charge/trapping moves below, lock
+// the ATTACKER into automatically repeating the same move for 2-3 turns
+// (BattleCombatant::forcedMoveId/forcedTurnsRemaining, shared storage) -
+// but unlike a trapping move, the user becomes confused once the lock ends,
+// and each turn (including repeats) still rolls accuracy normally rather
+// than auto-hitting.
+bool isThrashMove(const uint8_t moveId) {
+  return moveId == 37 ||  // Thrash
+         moveId == 80;    // Petal Dance
+}
+
 // Explosion/Self-Destruct: two real Gen 1 quirks modeled here - the target's
 // Defense is halved for this one hit (see computeDamage()'s moveId parameter),
 // and the user faints as an unconditional side effect of using the move,
@@ -289,11 +317,13 @@ const TwoTurnTableEntry* twoTurnEntryForMove(const uint8_t moveId) {
 // normal formula (nonzero power in the move data), but on a successful first
 // hit also lock the ATTACKER into automatically repeating the same move for
 // 1-4 further turns (2-5 total, the same real Gen 1 duration distribution as
-// rollMultiHitCount()) without a fresh accuracy roll - see resolveAction().
-// It's the attacker's own freedom that's restricted, not the target's (the
-// target can still act normally); BattleCombatant::forcedMoveId/
-// forcedTurnsRemaining double as the storage for this, same as the two-turn
-// moves above.
+// rollMultiHitCount()) without a fresh accuracy roll - see resolveAction();
+// BattleCombatant::forcedMoveId/forcedTurnsRemaining double as the storage
+// for this, same as the two-turn moves above. Real Gen 1 traps BOTH sides at
+// once, though: the TARGET is also immobilized for roughly the same
+// duration (BattleCombatant::trappedTurnsRemaining) - see
+// resolveGenericMoveEffect()'s dispatch and resolveAction()'s own
+// trapped-immobilization check.
 bool isTrapMove(const uint8_t moveId) {
   return moveId == 20 ||   // Bind
          moveId == 35 ||   // Wrap
@@ -380,6 +410,17 @@ void applyDamageRespectingSubstitute(BattleCombatant& defender, const uint16_t d
     return;
   }
   defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+}
+
+// Rage (move 99): raises the attacked combatant's own Attack stage by 1
+// every time it takes nonzero damage while enraged (see
+// BattleCombatant::enraged's doc comment) - called from both damage-
+// application paths in resolveGenericMoveEffect() (the FIXED_DAMAGE_TABLE
+// branch and the generic per-hit loop), same as the Bide-damage-
+// accumulation check those already do.
+void raiseAttackIfEnraged(BattleCombatant& target, const uint16_t damage) {
+  if (!target.enraged || damage == 0) return;
+  target.attackStage = std::clamp<int8_t>(static_cast<int8_t>(target.attackStage + 1), -6, 6);
 }
 
 int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
@@ -501,8 +542,13 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
       physical ? static_cast<size_t>(StatIndex::Attack) : static_cast<size_t>(StatIndex::Special);
   const size_t defenseStatIndex =
       physical ? static_cast<size_t>(StatIndex::Defense) : static_cast<size_t>(StatIndex::Special);
-  const uint16_t attackWorking =
+  uint16_t attackWorking =
       battleWorkingStat(attackBase, attacker.level, attacker.iv[attackStatIndex], attacker.ev[attackStatIndex]);
+  // Real Gen 1 quirk: Burn halves the burned Pokemon's Attack for physical
+  // damage (the same way Paralysis halves Speed for turn order, see
+  // stepBattle()) - applied to the raw stat before staging, so unlike a
+  // negative stat stage, a critical hit does NOT bypass this.
+  if (physical && attacker.status == Ailment::Burn) attackWorking = std::max<uint16_t>(1, attackWorking / 2U);
   uint16_t defenseWorking =
       battleWorkingStat(defenseBase, defender.level, defender.iv[defenseStatIndex], defender.ev[defenseStatIndex]);
   // Real Gen 1 quirk: Explosion/Self-Destruct halve the target's Defense for
@@ -570,6 +616,21 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   result.acted = true;
   result.moveSlot = moveSlot;
 
+  // Hyper Beam's recharge turn takes priority over everything else below -
+  // no move selection even matters this turn, matching the real games.
+  if (attacker.mustRecharge) {
+    attacker.mustRecharge = false;
+    result.event = BattleLogEvent::MustRecharge;
+    return result;
+  }
+  // A Wrap/Bind/Fire Spin/Clamp target is fully immobilized while trapped -
+  // checked next (ahead of flinch/status), same reasoning as mustRecharge
+  // above: nothing else about this turn's chosen move matters.
+  if (attacker.trappedTurnsRemaining > 0) {
+    result.event = BattleLogEvent::Trapped;
+    return result;
+  }
+
   // moveSlot >= BATTLE_MOVE_SLOTS is the Struggle sentinel (STRUGGLE_MOVE_ID's
   // doc comment) rather than a real slot index - both stepBattle()'s player
   // path (once every learned move is out of PP, PokemonActivity.cpp forces
@@ -614,7 +675,8 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   const TwoTurnTableEntry* twoTurn = twoTurnEntryForMove(moveId);
   const bool isReleasingTwoTurn = twoTurn != nullptr && attacker.forcedMoveId == moveId;
   const bool isContinuingTrap = isTrapMove(moveId) && attacker.forcedMoveId == moveId;
-  if (!isContinuingBide && !isReleasingTwoTurn && !isContinuingTrap && slot != nullptr) {
+  const bool isContinuingThrash = isThrashMove(moveId) && attacker.forcedMoveId == moveId;
+  if (!isContinuingBide && !isReleasingTwoTurn && !isContinuingTrap && !isContinuingThrash && slot != nullptr) {
     --slot->currentPp;
   }
 
@@ -697,7 +759,14 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   // underlying move actually executed, not the wrapper move's own id.
   defender.lastMoveUsedAgainstMe = moveId;
 
+  // Rage: using any other move cancels it; using Rage (re)activates it -
+  // see BattleCombatant::enraged's doc comment. A redirected Metronome/
+  // Mirror Move call re-executes this same line with the real underlying
+  // moveId, so it naturally cancels/activates correctly there too.
+  attacker.enraged = moveId == RAGE_MOVE_ID;
+
   const bool isContinuingTrap = isTrapMove(moveId) && attacker.forcedMoveId == moveId;
+  const bool isContinuingThrash = isThrashMove(moveId) && attacker.forcedMoveId == moveId;
   const FixedDamageTableEntry* fixedDamage = fixedDamageEntryForMove(moveId);
   const bool isOhko = fixedDamage != nullptr && fixedDamage->kind == FixedDamageKind::Ohko;
 
@@ -706,6 +775,13 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   // specific real-game exceptions (Swift, Earthquake-vs-Dig, ...).
   if (defender.invulnerable) {
     result.event = BattleLogEvent::MoveMissed;
+    return;
+  }
+
+  // Dream Eater's real Gen 1 quirk: fails outright, no accuracy roll or
+  // damage at all, unless the target is currently asleep.
+  if (moveId == DREAM_EATER_MOVE_ID && defender.status != Ailment::Sleep) {
+    result.event = BattleLogEvent::MoveFailed;
     return;
   }
 
@@ -808,6 +884,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       if (noEffect && result.event != BattleLogEvent::MoveFailed) result.event = BattleLogEvent::MoveNoEffect;
       const uint16_t clampedDamage = clampToUint16(damage);
       applyDamageRespectingSubstitute(defender, clampedDamage);
+      raiseAttackIfEnraged(defender, clampedDamage);
       if (move->category == MoveCategory::Physical && clampedDamage > 0) {
         defender.lastPhysicalDamageTaken = clampedDamage;
       }
@@ -835,6 +912,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
             rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId) || attacker.direHitActive, random);
         const uint16_t damage = computeDamage(attacker, defender, effectiveMove, moveId, random, critical);
         applyDamageRespectingSubstitute(defender, damage);
+        raiseAttackIfEnraged(defender, damage);
         totalDamage += damage;
         // Bide (move 117) accumulates whatever damage its user takes while
         // bracing - only from this generic power-based path, not the
@@ -902,13 +980,47 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
             defender.currentHp > 0) {
           attacker.forcedMoveId = moveId;
           attacker.forcedTurnsRemaining = static_cast<uint8_t>(rollMultiHitCount(random) - 1U);
+          // Real Gen 1 traps BOTH sides at once: the target is immobilized
+          // for roughly the same duration the attacker keeps auto-repeating
+          // (+1, same off-by-one reasoning as Disable's own duration, so it
+          // survives finishTurn()'s unconditional same-turn decrement rather
+          // than losing a turn to it).
+          defender.trappedTurnsRemaining = static_cast<uint8_t>(attacker.forcedTurnsRemaining + 1U);
         } else if (isContinuingTrap) {
           if (attacker.forcedTurnsRemaining > 0) --attacker.forcedTurnsRemaining;
           if (attacker.forcedTurnsRemaining == 0 || defender.currentHp == 0) attacker.forcedMoveId = 0;
         }
       }
+
+      // Thrash/Petal Dance: a successful use locks the ATTACKER into
+      // repeating this same move automatically for 1-2 more turns (2-3
+      // total), same forcedMoveId/forcedTurnsRemaining mechanism the trap
+      // moves above use - but unlike those, each repeat still rolls
+      // accuracy normally (no auto-hit), and the user becomes confused the
+      // instant the lock ends, matching the real games.
+      if (isThrashMove(moveId)) {
+        if (allowMultiTurnLock && !isContinuingThrash) {
+          attacker.forcedMoveId = moveId;
+          attacker.forcedTurnsRemaining = rollStatusDuration(random, 1, 2);
+        } else if (isContinuingThrash) {
+          if (attacker.forcedTurnsRemaining > 0) --attacker.forcedTurnsRemaining;
+          if (attacker.forcedTurnsRemaining == 0) {
+            attacker.forcedMoveId = 0;
+            if (attacker.status == Ailment::None) {
+              attacker.status = Ailment::Confusion;
+              attacker.statusTurns = rollStatusDuration(random, 2, 4);
+            }
+          }
+        }
+      }
     }
   }
+
+  // Hyper Beam: reaching this point means the move already didn't miss (a
+  // miss returns early above), so a real hit - including one that's immune
+  // for 0 damage - always forces a recharge next turn, matching the real
+  // games.
+  if (moveId == HYPER_BEAM_MOVE_ID) attacker.mustRecharge = true;
 
   if (moveId == HAZE_MOVE_ID) {
     resetBattleStages(attacker);
@@ -1226,6 +1338,8 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
 void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnResult& result) {
   if (player.disableTurnsRemaining > 0) --player.disableTurnsRemaining;
   if (opponent.disableTurnsRemaining > 0) --opponent.disableTurnsRemaining;
+  if (player.trappedTurnsRemaining > 0) --player.trappedTurnsRemaining;
+  if (opponent.trappedTurnsRemaining > 0) --opponent.trappedTurnsRemaining;
 
   BattleLogEvent playerDotEvent = BattleLogEvent::None;
   BattleLogEvent opponentDotEvent = BattleLogEvent::None;

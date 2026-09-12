@@ -203,6 +203,30 @@ struct BattleCombatant {
   // otherwise (SpeciesData::primaryType is never None for a real species).
   PokemonType conversionType1 = PokemonType::None;
   PokemonType conversionType2 = PokemonType::None;
+  // Rage (move 99): while true, this combatant's Attack stage rises by 1
+  // every time it's hit by an opposing move (checked wherever damage is
+  // applied to a combatant). Ends the instant this combatant uses any move
+  // other than Rage (including a forced Struggle) - the real Gen 1 rule is
+  // that picking a different move cancels it, unlike Thrash/Petal Dance's
+  // hard multi-turn lock below, so no separate "turns remaining" field is
+  // needed here.
+  bool enraged = false;
+  // Hyper Beam (move 63): true for exactly one turn after Hyper Beam lands
+  // a hit (not set on a miss) - the next turn's action is skipped entirely
+  // ("must recharge"), matching the real games. Checked first, before even
+  // flinch/status, since a recharge turn always takes priority over
+  // everything else.
+  bool mustRecharge = false;
+  // Wrap/Bind/Fire Spin/Clamp (partial-trapping moves): real Gen 1 traps
+  // BOTH sides at once - the attacker auto-repeats the move (the existing
+  // forcedMoveId/forcedTurnsRemaining above already models that half) AND
+  // the TARGET is immobilized (can't select or execute any move) for
+  // roughly the same duration. trappedTurnsRemaining > 0 means this
+  // combatant can't act at all this turn; counted down once per turn in
+  // finishTurn(), alongside disableTurnsRemaining. A documented
+  // simplification: the real games also block switching while trapped,
+  // which this project doesn't enforce in the UI.
+  uint8_t trappedTurnsRemaining = 0;
 };
 
 // Index into BattleCombatant::iv/ev (and BaseStats' own fields) - HP,
@@ -252,6 +276,8 @@ enum class BattleLogEvent : uint8_t {
   Transformed,       // Transform copied the opponent's form
   MimicCopied,       // Mimic copied one of the opponent's moves into a slot
   ConversionApplied,  // Conversion copied the opponent's type
+  MustRecharge,      // Hyper Beam's recharge turn - no action taken
+  Trapped,           // immobilized by an opponent's Wrap/Bind/Fire Spin/Clamp - no action taken
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with
