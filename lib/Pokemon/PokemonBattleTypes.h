@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -52,12 +53,30 @@ struct MoveData {
 
 // Generation I base stats. Special stands in for the single Gen I "Special"
 // stat (PokeAPI's special-attack). All Gen I base stats fit uint8_t (max 255).
+// Shared stat order for BaseStats and every IV/EV array in this project: HP,
+// Attack, Defense, Special, Speed.
+constexpr size_t STAT_COUNT = 5;
+
 struct BaseStats {
   uint8_t hp;
   uint8_t attack;
   uint8_t defense;
   uint8_t special;
   uint8_t speed;
+  // EV yield per stat (0-3 in practice) - how much of that stat's Effort
+  // Value a Pokemon of this species grants when defeated. Not a real Gen 1
+  // mechanic (Gen 1 accumulated "Stat Experience" directly from a defeated
+  // Pokemon's base stats, no per-species yield table existed yet) - this
+  // project's own simplified EV model deliberately borrows the modern
+  // games' small per-species yield table instead of Gen 1's own formula, the
+  // same way it already rejected Gen 1's real battle-XP formula as
+  // oversized for this game's pace. See
+  // docs/development/pokemon-iv-ev-plan.md.
+  uint8_t evHp;
+  uint8_t evAttack;
+  uint8_t evDefense;
+  uint8_t evSpecial;
+  uint8_t evSpeed;
 };
 
 struct LearnsetEntry {

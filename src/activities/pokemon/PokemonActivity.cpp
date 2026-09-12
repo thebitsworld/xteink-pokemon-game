@@ -722,8 +722,15 @@ bool PokemonActivity::setupBattlePlayer(const int slot) {
   battlePlayer_.speciesId = fighter.speciesId;
   battlePlayer_.gender = fighter.gender;
   battlePlayer_.level = pokemon::levelForXp(fighter.totalXp);
+  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(fighter.recordId);
+  battlePlayer_.iv = ivEv.iv;
+  battlePlayer_.ev = ivEv.ev;
   const pokemon::BaseStats* playerStats = pokemon::baseStatsFor(fighter.speciesId);
-  battlePlayer_.maxHp = playerStats == nullptr ? 1 : pokemon::battleMaxHp(playerStats->hp, battlePlayer_.level);
+  constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
+  battlePlayer_.maxHp = playerStats == nullptr
+                           ? 1
+                           : pokemon::battleMaxHp(playerStats->hp, battlePlayer_.level, battlePlayer_.iv[hpIndex],
+                                                  battlePlayer_.ev[hpIndex]);
   battlePlayer_.currentHp = std::min<uint16_t>(entry.currentHp, battlePlayer_.maxHp);
   battlePlayer_.status = entry.status;
   battlePlayer_.statusTurns = entry.statusTurns;
@@ -739,8 +746,22 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
   battleOpponent_.speciesId = speciesId;
   battleOpponent_.level = level;
   battleOpponent_.gender = gender;
+  if (fixedMoves.empty()) {
+    // Wild encounter: a fresh, unpersisted IV roll for this fight - if the
+    // catch succeeds, the new record's IVs are rolled independently via
+    // service_.ensureIvEv() rather than reusing this exact roll (a
+    // deliberate simplification - see docs/development/pokemon-iv-ev-plan.md).
+    battleOpponent_.iv = service_.rollWildIv();
+  } else {
+    // Gym/Elite Four/Champion trainer: fixed "perfect" IVs, no EVs - matches
+    // the real games' own "trainer Pokemon have high, fixed DVs" convention,
+    // and there is no PokemonRecord for them to persist against anyway.
+    battleOpponent_.iv.fill(15);
+  }
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(speciesId);
-  battleOpponent_.maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, level);
+  constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
+  battleOpponent_.maxHp =
+      stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, level, battleOpponent_.iv[hpIndex], 0);
   battleOpponent_.currentHp = battleOpponent_.maxHp;
   if (!fixedMoves.empty()) {
     // Gym/Elite Four trainer - real Pokemon Red teams never derive their
@@ -836,7 +857,7 @@ void PokemonActivity::finishBattleAfterWildFainted() {
   // reach here with the just-defeated opponent's level still valid.
   if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
     service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level,
-                           gymChallengeIndex_ != 0);
+                           gymChallengeIndex_ != 0, battleOpponent_.speciesId);
   }
   if (gymChallengeIndex_ != 0) {
     advanceGymOpponentOrFinish();
@@ -1493,7 +1514,8 @@ void PokemonActivity::activate() {
       // faint would have (always the wild multiplier; BattleBalls is gym-gated
       // out above, so this path is never a trainer battle).
       if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
-        service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level, false);
+        service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level, false,
+                               battleOpponent_.speciesId);
       }
       const uint16_t caughtSpecies = battleOpponent_.speciesId;
       uint32_t caughtRecordId = 0;
@@ -2446,11 +2468,15 @@ void PokemonActivity::renderFocused() {
       const int width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, pokemon::pokemonRightAlignedX(valueRight, width), fieldY, value);
     };
+    const pokemon::IvEvEntry ivEv = service_.peekIvEv(record.recordId);
     {
       const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
       const pokemon::BaseStats* baseStats = pokemon::baseStatsFor(record.speciesId);
-      const uint16_t maxHp =
-          baseStats == nullptr ? 1 : pokemon::battleMaxHp(baseStats->hp, pokemon::levelForXp(record.totalXp));
+      constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
+      const uint16_t maxHp = baseStats == nullptr
+                                ? 1
+                                : pokemon::battleMaxHp(baseStats->hp, pokemon::levelForXp(record.totalXp),
+                                                       ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
       renderer.drawText(UI_10_FONT_ID, textX, y, "HP", true, EpdFontFamily::BOLD);
       char hpText[16];
       snprintf(hpText, sizeof(hpText), "%u/%u", entry.currentHp, maxHp);
@@ -2473,6 +2499,21 @@ void PokemonActivity::renderFocused() {
       snprintf(types, sizeof(types), "%s / %s", typeName(species->primaryType), typeName(species->secondaryType));
     }
     drawField(y, tr(STR_POKEMON_TYPE), types);
+    y += 26;
+    // One compact line each for IV/EV rather than 5 separate stat rows - the
+    // landscape layout's vertical budget is already tight (see the moves
+    // block's own 2-per-line note further down). Order (HP/Atk/Def/Spc/Spd)
+    // is spelled out in the value itself since the label column has no room
+    // for a legend.
+    char ivLine[40];
+    snprintf(ivLine, sizeof(ivLine), "HP%u A%u D%u S%u Sp%u", ivEv.iv[0], ivEv.iv[1], ivEv.iv[2], ivEv.iv[3],
+             ivEv.iv[4]);
+    drawField(y, tr(STR_POKEMON_IV), ivLine);
+    y += 26;
+    char evLine[40];
+    snprintf(evLine, sizeof(evLine), "HP%u A%u D%u S%u Sp%u", ivEv.ev[0], ivEv.ev[1], ivEv.ev[2], ivEv.ev[3],
+             ivEv.ev[4]);
+    drawField(y, tr(STR_POKEMON_EV), evLine);
     y += 26;
     const pokemon::LevelXpProgress progress = pokemon::levelXpProgress(record.totalXp);
     if (progress.required == 0) {
@@ -3195,7 +3236,11 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
                                            const bool drawNameLine) {
   const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
-  const uint16_t maxHp = stats == nullptr ? 1 : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp));
+  const pokemon::IvEvEntry ivEv = service_.peekIvEv(record.recordId);
+  constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
+  const uint16_t maxHp = stats == nullptr ? 1
+                                          : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp),
+                                                                 ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
 
   // Matches the generic list widget's own sidePadding for artwork rows
   // (pokemonListPresentation()) - the icon sits at ROW_ICON_X and this

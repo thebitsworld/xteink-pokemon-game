@@ -416,7 +416,9 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
   if (stats == nullptr) return UseConsumableOutcome::Failed;
   BattleRecordEntry entry{};
   if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
-  const uint16_t maxHp = battleMaxHp(stats->hp, level);
+  const IvEvEntry ivEv = ensureIvEv(recordId);
+  constexpr size_t hpIndex = static_cast<size_t>(StatIndex::Hp);
+  const uint16_t maxHp = battleMaxHp(stats->hp, level, ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
 
   // Revive/Max Revive (ids 15/16, pinned in scripts/data/pokemon-items.csv) are
   // the only items that can act on a fainted Pokemon, and only a fainted one -
@@ -536,12 +538,13 @@ ServiceStatus PokemonService::markGymDefeated(const uint8_t gymIndex) {
   return ServiceStatus::Ok;
 }
 
-BattleRecordEntry PokemonService::synthesizeBattleEntry(const PokemonRecord& record) const {
+BattleRecordEntry PokemonService::synthesizeBattleEntry(const PokemonRecord& record, const IvEvEntry& ivEv) const {
   BattleRecordEntry entry{};
   entry.recordId = record.recordId;
   const uint8_t level = levelForXp(record.totalXp);
   const BaseStats* stats = baseStatsFor(record.speciesId);
-  entry.currentHp = stats == nullptr ? 1 : battleMaxHp(stats->hp, level);
+  constexpr size_t hpIndex = static_cast<size_t>(StatIndex::Hp);
+  entry.currentHp = stats == nullptr ? 1 : battleMaxHp(stats->hp, level, ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
   defaultMovesetForLevel(record.speciesId, level, entry.moves, entry.pp);
   entry.status = Ailment::None;
   entry.statusTurns = 0;
@@ -552,7 +555,7 @@ BattleRecordEntry PokemonService::peekBattleMoves(const PokemonRecord& record) c
   if (const BattleRecordEntry* existing = battleStore_.findEntry(record.recordId); existing != nullptr) {
     return *existing;
   }
-  return synthesizeBattleEntry(record);
+  return synthesizeBattleEntry(record, peekIvEv(record.recordId));
 }
 
 ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRecordEntry& output) {
@@ -565,13 +568,31 @@ ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRec
     return ServiceStatus::Ok;
   }
 
-  const BattleRecordEntry synthesized = synthesizeBattleEntry(record);
+  const BattleRecordEntry synthesized = synthesizeBattleEntry(record, ensureIvEv(recordId));
   if (!battleStore_.upsertEntry(synthesized)) {
     LOG_ERR("PokemonService", "Failed to persist synthesized battle entry");
     return ServiceStatus::StorageError;
   }
   output = synthesized;
   return ServiceStatus::Ok;
+}
+
+IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId) {
+  if (recordId == 0) return {};
+  if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) return *existing;
+
+  IvEvEntry fresh{};
+  fresh.recordId = recordId;
+  rollIvSet(random_, fresh.iv);
+  if (!ivEvStore_.upsertEntry(fresh)) {
+    LOG_ERR("PokemonService", "Failed to persist rolled IV/EV for record %u", recordId);
+  }
+  return fresh;
+}
+
+IvEvEntry PokemonService::peekIvEv(const uint32_t recordId) const {
+  if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) return *existing;
+  return {};
 }
 
 ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
@@ -597,7 +618,9 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
     if (!store_.readRecord(recordId, record)) continue;
     const BaseStats* stats = baseStatsFor(record.speciesId);
     if (stats == nullptr) continue;
-    const uint16_t maxHp = battleMaxHp(stats->hp, levelForXp(record.totalXp));
+    const IvEvEntry ivEv = ensureIvEv(recordId);
+    constexpr size_t hpIndex = static_cast<size_t>(StatIndex::Hp);
+    const uint16_t maxHp = battleMaxHp(stats->hp, levelForXp(record.totalXp), ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
 
     BattleRecordEntry healed = *existing;
     const uint32_t healedHp =
@@ -684,11 +707,33 @@ Gender PokemonService::rollGenderFor(const uint16_t speciesId) {
   return gender;
 }
 
+std::array<uint8_t, STAT_COUNT> PokemonService::rollWildIv() {
+  std::array<uint8_t, STAT_COUNT> iv{};
+  rollIvSet(random_, iv);
+  return iv;
+}
+
 ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8_t opponentLevel,
-                                            const bool isTrainerBattle) {
+                                            const bool isTrainerBattle, const uint16_t opponentSpeciesId) {
   PokemonRecord record{};
   const ServiceStatus readStatus = readRecord(recordId, record);
   if (readStatus != ServiceStatus::Ok) return readStatus;
+
+  // EVs accumulate independently of the XP/level cap below - unlike XP,
+  // real Gen 1 EVs keep accruing even once a Pokemon is at its maximum
+  // level, so this runs first and unconditionally.
+  if (const BaseStats* opponentStats = baseStatsFor(opponentSpeciesId); opponentStats != nullptr) {
+    IvEvEntry ivEv = ensureIvEv(recordId);
+    const std::array<uint8_t, STAT_COUNT> yield{opponentStats->evHp, opponentStats->evAttack,
+                                                 opponentStats->evDefense, opponentStats->evSpecial,
+                                                 opponentStats->evSpeed};
+    for (size_t index = 0; index < STAT_COUNT; ++index) {
+      ivEv.ev[index] = static_cast<uint8_t>(std::min<uint32_t>(255U, ivEv.ev[index] + yield[index]));
+    }
+    if (!ivEvStore_.upsertEntry(ivEv)) {
+      LOG_ERR("PokemonService", "Failed to persist EV gain for record %u", recordId);
+    }
+  }
 
   const uint8_t previousLevel = levelForXp(record.totalXp);
   if (record.totalXp >= MAXIMUM_TOTAL_XP) return ServiceStatus::Ok;  // already level 100 - nothing to gain
@@ -725,6 +770,12 @@ ServiceStatus PokemonService::reset() {
   // for real.
   if (!battleStore_.reset()) {
     LOG_ERR("PokemonService", "Failed to reset Pokemon battle store");
+  }
+  // Same best-effort spirit as the battle store reset above - a stray
+  // leftover IV/EV entry under a reused record id just gets overwritten the
+  // moment ensureIvEv() runs for that id again.
+  if (!ivEvStore_.reset()) {
+    LOG_ERR("PokemonService", "Failed to reset Pokemon IV/EV store");
   }
   return ServiceStatus::Ok;
 }
@@ -812,7 +863,8 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
 PokemonService& devicePokemonService() {
   static PokemonStore store;
   static PokemonBattleStore battleStore;
-  static PokemonService service(store, battleStore, {nullptr, deviceRandomBelow});
+  static PokemonIvEvStore ivEvStore;
+  static PokemonService service(store, battleStore, ivEvStore, {nullptr, deviceRandomBelow});
   return service;
 }
 #endif

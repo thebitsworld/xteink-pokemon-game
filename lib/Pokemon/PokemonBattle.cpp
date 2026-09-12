@@ -255,8 +255,14 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
   const bool physical = move.category == MoveCategory::Physical;
   const uint8_t attackBase = physical ? attackerStats->attack : attackerStats->special;
   const uint8_t defenseBase = physical ? defenderStats->defense : defenderStats->special;
-  const uint16_t attackWorking = battleWorkingStat(attackBase, attacker.level);
-  const uint16_t defenseWorking = battleWorkingStat(defenseBase, defender.level);
+  const size_t attackStatIndex =
+      physical ? static_cast<size_t>(StatIndex::Attack) : static_cast<size_t>(StatIndex::Special);
+  const size_t defenseStatIndex =
+      physical ? static_cast<size_t>(StatIndex::Defense) : static_cast<size_t>(StatIndex::Special);
+  const uint16_t attackWorking =
+      battleWorkingStat(attackBase, attacker.level, attacker.iv[attackStatIndex], attacker.ev[attackStatIndex]);
+  const uint16_t defenseWorking =
+      battleWorkingStat(defenseBase, defender.level, defender.iv[defenseStatIndex], defender.ev[defenseStatIndex]);
   const uint16_t attackStaged =
       applyStatStage(attackWorking, physical ? attacker.attackStage : attacker.specialStage);
   const uint16_t defenseStaged =
@@ -512,12 +518,23 @@ void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnRe
 
 }  // namespace
 
-uint16_t battleMaxHp(const uint8_t baseHp, const uint8_t level) {
-  return static_cast<uint16_t>((2U * baseHp * level) / 100U + level + 10U);
+uint16_t battleMaxHp(const uint8_t baseHp, const uint8_t level, const uint8_t iv, const uint8_t ev) {
+  const uint32_t effectiveBase = static_cast<uint32_t>(baseHp) + std::min<uint32_t>(iv, 15U);
+  const uint32_t evBonus = std::min<uint32_t>(ev, 255U) / 4U;
+  return static_cast<uint16_t>((2U * effectiveBase + evBonus) * level / 100U + level + 10U);
 }
 
-uint16_t battleWorkingStat(const uint8_t baseStat, const uint8_t level) {
-  return static_cast<uint16_t>((2U * baseStat * level) / 100U + 5U);
+uint16_t battleWorkingStat(const uint8_t baseStat, const uint8_t level, const uint8_t iv, const uint8_t ev) {
+  const uint32_t effectiveBase = static_cast<uint32_t>(baseStat) + std::min<uint32_t>(iv, 15U);
+  const uint32_t evBonus = std::min<uint32_t>(ev, 255U) / 4U;
+  return static_cast<uint16_t>((2U * effectiveBase + evBonus) * level / 100U + 5U);
+}
+
+void rollIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& output) {
+  for (uint8_t& iv : output) {
+    uint32_t roll = 0;
+    iv = rollBelow(random, 16U, roll) ? static_cast<uint8_t>(roll) : 0;
+  }
 }
 
 uint16_t applyStatStage(const uint16_t baseValue, int8_t stage) {
@@ -575,13 +592,18 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
 
   const BaseStats* playerStats = baseStatsFor(player.speciesId);
   const BaseStats* opponentStats = baseStatsFor(opponent.speciesId);
+  constexpr size_t speedIndex = static_cast<size_t>(StatIndex::Speed);
   uint16_t playerSpeed = playerStats == nullptr
                              ? 0
-                             : applyStatStage(battleWorkingStat(playerStats->speed, player.level), player.speedStage);
+                             : applyStatStage(battleWorkingStat(playerStats->speed, player.level,
+                                                                player.iv[speedIndex], player.ev[speedIndex]),
+                                              player.speedStage);
   uint16_t opponentSpeed =
       opponentStats == nullptr
           ? 0
-          : applyStatStage(battleWorkingStat(opponentStats->speed, opponent.level), opponent.speedStage);
+          : applyStatStage(battleWorkingStat(opponentStats->speed, opponent.level, opponent.iv[speedIndex],
+                                             opponent.ev[speedIndex]),
+                           opponent.speedStage);
   if (player.status == Ailment::Paralysis) playerSpeed /= 2U;
   if (opponent.status == Ailment::Paralysis) opponentSpeed /= 2U;
   const bool playerFirst = playerSpeed >= opponentSpeed;

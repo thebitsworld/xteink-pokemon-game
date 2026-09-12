@@ -564,6 +564,53 @@ void opponentStrugglesWhenAllOfItsLearnedMovesAreOutOfPp() {
   CHECK(result.opponent.recoilApplied);
 }
 
+void ivZeroEvZeroReproducesTheOriginalFormulaExactly() {
+  // The backward-compat invariant: every caller that hasn't been taught a
+  // Pokemon's real IV/EV yet can pass 0/0 (or rely on the defaults) and see
+  // no behavior change from before IV/EV existed.
+  CHECK(pokemon::battleMaxHp(45, 50) == static_cast<uint16_t>((2U * 45U * 50U) / 100U + 50U + 10U));
+  CHECK(pokemon::battleWorkingStat(49, 50) == static_cast<uint16_t>((2U * 49U * 50U) / 100U + 5U));
+  CHECK(pokemon::battleMaxHp(45, 50, 0, 0) == pokemon::battleMaxHp(45, 50));
+  CHECK(pokemon::battleWorkingStat(49, 50, 0, 0) == pokemon::battleWorkingStat(49, 50));
+}
+
+void ivAndEvRaiseStatsAboveTheZeroBaseline() {
+  const uint16_t baseline = pokemon::battleWorkingStat(49, 50);
+  CHECK(pokemon::battleWorkingStat(49, 50, 15, 0) > baseline);   // max IV alone helps
+  CHECK(pokemon::battleWorkingStat(49, 50, 0, 255) > baseline);  // max EV alone helps
+  CHECK(pokemon::battleWorkingStat(49, 50, 15, 255) > pokemon::battleWorkingStat(49, 50, 15, 0));
+
+  const uint16_t hpBaseline = pokemon::battleMaxHp(45, 50);
+  CHECK(pokemon::battleMaxHp(45, 50, 15, 0) > hpBaseline);
+  CHECK(pokemon::battleMaxHp(45, 50, 0, 255) > hpBaseline);
+}
+
+void evBonusMatchesTheFlatDivideByFourFormula() {
+  // ev/4 exactly, not the real Gen 1 sqrt(ev)/4 curve - see
+  // docs/development/pokemon-iv-ev-plan.md. 100/4=25, 255/4=63 (both floored).
+  CHECK(pokemon::battleWorkingStat(50, 100, 0, 100) == static_cast<uint16_t>((2U * 50U + 25U) * 100U / 100U + 5U));
+  CHECK(pokemon::battleWorkingStat(50, 100, 0, 255) == static_cast<uint16_t>((2U * 50U + 63U) * 100U / 100U + 5U));
+}
+
+void outOfRangeIvIsClampedToTheRealGen1Ceiling() {
+  // A caller passing an IV above the real 0-15 ceiling (shouldn't happen -
+  // IvEvStoreCodec's own validateIvEvEntry() already rejects it before it's
+  // ever persisted - but the formula itself still guards independently)
+  // must not get more bonus than a real IV of 15 would give.
+  CHECK(pokemon::battleWorkingStat(50, 100, 200, 0) == pokemon::battleWorkingStat(50, 100, 15, 0));
+}
+
+void rollIvSetProducesValuesInTheRealGen1Range() {
+  uint32_t context = 15;  // saturates a 16-wide roll to its max, 15
+  const RandomSource maxIvRandom{&context, fixedRoll};
+  std::array<uint8_t, pokemon::STAT_COUNT> iv{};
+  pokemon::rollIvSet(maxIvRandom, iv);
+  for (const uint8_t value : iv) CHECK(value == 15);
+
+  pokemon::rollIvSet(ZERO_RANDOM, iv);
+  for (const uint8_t value : iv) CHECK(value == 0);
+}
+
 void battleVictoryXpScalesWithLevelAndTrainerBonus() {
   CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
   CHECK(pokemon::battleVictoryXp(25, false) == 100);
@@ -611,6 +658,11 @@ int main() {
   multiHitMoveStopsEarlyIfTheDefenderFaintsPartway();
   forcedStruggleSentinelDealsDamageAndRecoilsWithNoLearnedMove();
   opponentStrugglesWhenAllOfItsLearnedMovesAreOutOfPp();
+  ivZeroEvZeroReproducesTheOriginalFormulaExactly();
+  ivAndEvRaiseStatsAboveTheZeroBaseline();
+  evBonusMatchesTheFlatDivideByFourFormula();
+  outOfRangeIvIsClampedToTheRealGen1Ceiling();
+  rollIvSetProducesValuesInTheRealGen1Range();
   battleVictoryXpScalesWithLevelAndTrainerBonus();
   return failures == 0 ? 0 : 1;
 }
