@@ -159,11 +159,19 @@ both surfaced as independent message clauses in `formatBattleActionLine()` along
 existing `critical` clause (a hit can be multi-hit, critical, and recoiling all in the same
 turn). New i18n strings for the hit-count and recoil messages.
 
-### 5. Minor real-Gen-1 items not yet in the item set
+### 5. Minor real-Gen-1 items not yet in the item set — ✅ done (`v0.11.0`)
 
-- **PP Up** (raises a move's max PP by 20%, real Gen 1 item) — confirmed absent from
-  `scripts/data/pokemon-items.csv`. Currently the item set only restores PP (Ether/Elixir),
-  never permanently raises the ceiling.
+**PP Up** (raises a move's max PP by 20% per use, up to 3 uses, real Gen 1 item) now exists
+(item id 84, `PP_UP_ITEM_ID`). `maxPpFor(basePp, ppUpCount)` in `PokemonBattle.h/.cpp` is the
+real Gen 1 formula (`floor(basePp/5)` per use - a 40-PP move goes 40→48→56→64).
+`BattleRecordEntry` gained a per-slot `ppUp[4]` counter (bumping the battle-store file to a
+new version, v2, handled the same append-and-branch-on-version way `PokemonState`'s own
+ladder already does); `PokemonState` itself gained a new `ppUpCount` field (v5) rather than
+growing `bagCounts` (which would have shifted every byte after it in every already-shipped
+save). **Not yet wired into the automatic reading-time item-drop pool** - doing so would
+perturb `PokemonGameTest.cpp`'s fragile, hand-scripted hour-by-hour drop sequence, so this
+was deliberately left as a follow-up; a real acquisition path (its own pity track, a shop, a
+battle reward) is still open for whoever picks that up next.
 
 ---
 
@@ -173,12 +181,12 @@ turn). New i18n strings for the hit-count and recoil messages.
 2. ✅ **Stat stages** — done (`v0.8.0`). Biggest move-roster impact (revives ~25% of the moveset), moderate
    cost, no save-format changes (battle-only state).
 3. ✅ **Recoil / multi-hit moves / a real player-facing Struggle** — done (`v0.9.0`).
-4. **PP Up** — trivial once picked up, low priority on its own. The one item left on this
-   list.
+4. ✅ **PP Up** — done (`v0.11.0`).
 5. ✅ **IVs/EVs** — done (`v0.10.0`). See
    [the IV/EV implementation plan](pokemon-iv-ev-plan.md) for the full design (a new side
    file, not a `PokemonRecord` change - `PokemonRecord` only had 1 spare byte, nowhere near
    enough).
 
-None of this needs to happen at once — each item above is written to stand alone, so a
-future session can pick up exactly one and ship it, same as the battle-EXP work did.
+**Every item on this roadmap is now done.** The one open thread left behind is PP Up's own
+acquisition path (see item 5 above) - worth its own small follow-up whenever picked up, but
+not itself a gap in Gen 1 authenticity the way everything above was.

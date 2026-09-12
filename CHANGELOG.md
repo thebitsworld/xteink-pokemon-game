@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-12
+
+### Added
+
+- PP Up is now a real item - use it on one of a Pokémon's moves to permanently raise that move's max PP, up to 3 times.
+
 ## [0.10.0] - 2026-09-12
 
 ### Added
