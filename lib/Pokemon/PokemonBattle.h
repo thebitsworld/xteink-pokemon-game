@@ -40,6 +40,17 @@ struct BattleCombatant {
   // opponent (whose fixed roster carries no gender of its own) gets one
   // rolled fresh via chooseGenderForSpecies() at battle setup.
   Gender gender = Gender::Unknown;
+  // Gen 1 stat stages, -6..+6, reset to 0 whenever a fresh BattleCombatant is
+  // built (a new battle, or either side switching) - matching how the real
+  // games never carry stat stages across a switch/battle boundary. Never
+  // persisted to the side-file store, unlike HP/status/moveset above, since
+  // there's nothing to reconstruct: a battle always starts every stage at 0.
+  int8_t attackStage = 0;
+  int8_t defenseStage = 0;
+  int8_t specialStage = 0;
+  int8_t speedStage = 0;
+  int8_t accuracyStage = 0;
+  int8_t evasionStage = 0;
 };
 
 enum class BattleOutcome : uint8_t {
@@ -62,7 +73,58 @@ enum class BattleLogEvent : uint8_t {
   StatusCured,   // woke up / thawed / snapped out of confusion
   StatusDamage,  // poison/burn tick
   Fainted,
+  StatRaised,       // a stat-changing move successfully raised a stage
+  StatLowered,      // a stat-changing move successfully lowered a stage
+  StatChangeFailed,  // the target stat was already at +6/-6 - no further change possible
+  StatsReset,       // Haze - both sides' stages (and this engine's status slot) reset
 };
+
+// Which stat/accuracy-or-evasion axis a status move affects. Combined with
+// Special (not split into Attack/Defense-style special stats - Gen 1 has one
+// shared Special stat, see the Gen 1 authenticity roadmap doc).
+enum class StatKind : uint8_t {
+  Attack = 0,
+  Defense,
+  Special,
+  Speed,
+  Accuracy,
+  Evasion,
+};
+
+// A hand-authored table entry for one of the ~22 Gen 1 status moves that
+// change a stat stage (Growl, Swords Dance, Reflect-adjacent moves like
+// Barrier/Acid-Armor, etc.) - see statChangeForMove(). `stages` is signed
+// (negative = lowers); `targetsSelf` distinguishes Swords-Dance-style
+// self-buffs from Growl-style opponent-debuffs. Exposed publicly (not just
+// to the engine) so the UI can name which stat changed for its log line,
+// the same way it already looks up MoveData for the "X used Y!" line.
+struct StatChangeEffect {
+  StatKind stat = StatKind::Attack;
+  int8_t stages = 0;
+  bool targetsSelf = true;
+};
+
+// nullptr if moveId isn't one of the ~22 hand-authored stat-changing status
+// moves (or is Haze, id 114, handled as a special case in stepBattle()/
+// resolveAction() since it resets every stage on both sides rather than
+// changing one stat by one amount).
+const StatChangeEffect* statChangeForMove(uint8_t moveId);
+
+// Applies Gen 1's real stat-stage multiplier table to a computed Attack/
+// Defense/Special/Speed value: stage>=0 multiplies by (2+stage)/2, stage<0
+// divides by (2-stage)/2 - i.e. 25% at -6 up to 400% at +6. `stage` is
+// clamped to [-6,6] first in case of caller error.
+uint16_t applyStatStage(uint16_t baseValue, int8_t stage);
+
+// Same idea but Gen 1's separate Accuracy/Evasion table (25% floor is 33% here
+// instead, and the ceiling is 300% instead of 400%): stage>=0 multiplies by
+// (3+stage)/3, stage<0 divides by (3-stage)/3.
+uint32_t applyAccuracyEvasionStage(uint32_t baseValue, int8_t stage);
+
+// Haze (move id 114) - the one stat-changing status move that doesn't fit
+// StatChangeEffect's single-stat model: resets all 6 of a combatant's
+// stages to 0.
+void resetBattleStages(BattleCombatant& combatant);
 
 // One combat side's result for a single simultaneous turn: which side acted,
 // what happened, and whether either combatant fainted or was cured by the

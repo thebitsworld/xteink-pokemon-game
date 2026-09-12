@@ -55,6 +55,61 @@ bool rollCriticalHit(const uint8_t baseSpeed, const bool highCritRatio, const Ra
   return roll < threshold;
 }
 
+constexpr uint8_t HAZE_MOVE_ID = 114;
+
+// The ~22 real Gen 1 status moves that change a single stat stage - see
+// docs/development/pokemon-gen1-authenticity-roadmap.md item 1 for why this
+// list stops here (screens/Mist/self-heal/switch-forcing/move-copying moves
+// are separate, larger features tracked as follow-ups on that same doc).
+// Hand-authored rather than a new CSV column, same rationale as
+// PokemonTypeChart.cpp and the crit move list above.
+struct StatChangeTableEntry {
+  uint8_t moveId;
+  StatChangeEffect effect;
+};
+constexpr StatChangeTableEntry STAT_CHANGE_TABLE[] = {
+    {14, {StatKind::Attack, 2, true}},     // Swords Dance
+    {28, {StatKind::Accuracy, -1, false}},  // Sand Attack
+    {39, {StatKind::Defense, -1, false}},   // Tail Whip
+    {43, {StatKind::Defense, -1, false}},   // Leer
+    {45, {StatKind::Attack, -1, false}},    // Growl
+    {74, {StatKind::Special, 1, true}},    // Growth
+    {81, {StatKind::Speed, -1, false}},     // String Shot
+    {96, {StatKind::Attack, 1, true}},     // Meditate
+    {97, {StatKind::Speed, 2, true}},      // Agility
+    {103, {StatKind::Defense, -2, false}},  // Screech
+    {104, {StatKind::Evasion, 1, true}},   // Double Team
+    {106, {StatKind::Defense, 1, true}},   // Harden
+    {107, {StatKind::Evasion, 1, true}},   // Minimize
+    {108, {StatKind::Accuracy, -1, false}}, // Smokescreen
+    {110, {StatKind::Defense, 1, true}},   // Withdraw
+    {111, {StatKind::Defense, 1, true}},   // Defense Curl
+    {112, {StatKind::Defense, 2, true}},   // Barrier
+    {133, {StatKind::Special, 2, true}},   // Amnesia
+    {134, {StatKind::Accuracy, -1, false}}, // Kinesis
+    {148, {StatKind::Accuracy, -1, false}}, // Flash
+    {151, {StatKind::Defense, 2, true}},   // Acid Armor
+    {159, {StatKind::Attack, 1, true}},    // Sharpen
+};
+
+int8_t& statStageRef(BattleCombatant& combatant, const StatKind stat) {
+  switch (stat) {
+    case StatKind::Attack:
+      return combatant.attackStage;
+    case StatKind::Defense:
+      return combatant.defenseStage;
+    case StatKind::Special:
+      return combatant.specialStage;
+    case StatKind::Speed:
+      return combatant.speedStage;
+    case StatKind::Accuracy:
+      return combatant.accuracyStage;
+    case StatKind::Evasion:
+      return combatant.evasionStage;
+  }
+  return combatant.attackStage;  // unreachable - silences a missing-return warning
+}
+
 // Sleep/confusion durations: 1-3 turns average, kept short because a turn
 // here also costs a full e-ink refresh.
 uint8_t rollStatusDuration(const RandomSource& random, const uint8_t minTurns, const uint8_t maxTurns) {
@@ -136,15 +191,26 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
   const bool physical = move.category == MoveCategory::Physical;
   const uint8_t attackBase = physical ? attackerStats->attack : attackerStats->special;
   const uint8_t defenseBase = physical ? defenderStats->defense : defenderStats->special;
-  const uint16_t attackStat = battleWorkingStat(attackBase, attacker.level);
-  const uint16_t defenseStat = std::max<uint16_t>(1, battleWorkingStat(defenseBase, defender.level));
+  const uint16_t attackWorking = battleWorkingStat(attackBase, attacker.level);
+  const uint16_t defenseWorking = battleWorkingStat(defenseBase, defender.level);
+  const uint16_t attackStaged =
+      applyStatStage(attackWorking, physical ? attacker.attackStage : attacker.specialStage);
+  const uint16_t defenseStaged =
+      applyStatStage(defenseWorking, physical ? defender.defenseStage : defender.specialStage);
+  // Real Gen 1 crit quirk: a critical hit ignores a stage that would hurt the
+  // attacker - a negative Attack/Special stage on the attacker, or a
+  // positive Defense/Special stage on the defender - while still applying
+  // any stage that helps. Not an approximation; this is the actual rule.
+  const uint16_t attackStat = critical ? std::max(attackWorking, attackStaged) : attackStaged;
+  const uint16_t defenseStat =
+      std::max<uint16_t>(1, critical ? std::min(defenseWorking, defenseStaged) : defenseStaged);
 
   uint32_t damage = ((2U * attacker.level / 5U + 2U) * move.power * attackStat) / (50U * defenseStat) + 2U;
   // A crit effectively doubles Gen 1's level term in the formula above -
   // mathematically equivalent to doubling the whole base result here, since
-  // level only ever appears as that one multiplicative factor. No IVs/EVs or
-  // stat stages are modeled yet, so there's no "ignore negative stages on
-  // crit" quirk to reproduce (see the Gen 1 authenticity roadmap).
+  // level only ever appears as that one multiplicative factor. No IVs/EVs are
+  // modeled (see the Gen 1 authenticity roadmap), so there's nothing further
+  // to account for there.
   if (critical) damage *= 2U;
 
   const bool stab = move.type == attackerSpecies->primaryType || move.type == attackerSpecies->secondaryType;
@@ -194,10 +260,14 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   }
   --slot.currentPp;
 
-  // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style moves).
+  // accuracy == 0 in this dataset means "never misses" (Swift, Aerial Ace-style moves)
+  // - stat stages never apply to those either, matching the real games.
   if (move->accuracy != 0) {
+    const int8_t combinedStage =
+        std::clamp<int8_t>(attacker.accuracyStage - defender.evasionStage, -6, 6);
+    const uint32_t effectiveAccuracy = applyAccuracyEvasionStage(move->accuracy, combinedStage);
     uint32_t accuracyRoll = 0;
-    if (rollBelow(random, 100U, accuracyRoll) && accuracyRoll >= move->accuracy) {
+    if (rollBelow(random, 100U, accuracyRoll) && accuracyRoll >= effectiveAccuracy) {
       result.event = BattleLogEvent::MoveMissed;
       return result;
     }
@@ -225,6 +295,20 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     // Immune (0% effectiveness) hits never actually land, so there's nothing
     // to have been "critical" about even if the roll succeeded.
     result.critical = critical && effectivenessPercent != 0;
+  }
+
+  if (slot.moveId == HAZE_MOVE_ID) {
+    resetBattleStages(attacker);
+    resetBattleStages(defender);
+    result.event = BattleLogEvent::StatsReset;
+  } else if (const StatChangeEffect* statEffect = statChangeForMove(slot.moveId); statEffect != nullptr) {
+    BattleCombatant& target = statEffect->targetsSelf ? attacker : defender;
+    int8_t& stage = statStageRef(target, statEffect->stat);
+    const int8_t before = stage;
+    stage = std::clamp<int8_t>(static_cast<int8_t>(stage + statEffect->stages), -6, 6);
+    result.event = stage == before ? BattleLogEvent::StatChangeFailed
+                   : statEffect->stages > 0 ? BattleLogEvent::StatRaised
+                                            : BattleLogEvent::StatLowered;
   }
 
   // PokeAPI's ailment_chance is 0 for a pure status move's guaranteed main
@@ -331,6 +415,35 @@ uint16_t battleWorkingStat(const uint8_t baseStat, const uint8_t level) {
   return static_cast<uint16_t>((2U * baseStat * level) / 100U + 5U);
 }
 
+uint16_t applyStatStage(const uint16_t baseValue, int8_t stage) {
+  stage = std::clamp<int8_t>(stage, -6, 6);
+  const uint32_t value = stage >= 0 ? static_cast<uint32_t>(baseValue) * (2U + static_cast<uint32_t>(stage)) / 2U
+                                    : static_cast<uint32_t>(baseValue) * 2U / (2U + static_cast<uint32_t>(-stage));
+  return clampToUint16(value);
+}
+
+uint32_t applyAccuracyEvasionStage(const uint32_t baseValue, int8_t stage) {
+  stage = std::clamp<int8_t>(stage, -6, 6);
+  return stage >= 0 ? baseValue * (3U + static_cast<uint32_t>(stage)) / 3U
+                    : baseValue * 3U / (3U + static_cast<uint32_t>(-stage));
+}
+
+const StatChangeEffect* statChangeForMove(const uint8_t moveId) {
+  for (const StatChangeTableEntry& entry : STAT_CHANGE_TABLE) {
+    if (entry.moveId == moveId) return &entry.effect;
+  }
+  return nullptr;
+}
+
+void resetBattleStages(BattleCombatant& combatant) {
+  combatant.attackStage = 0;
+  combatant.defenseStage = 0;
+  combatant.specialStage = 0;
+  combatant.speedStage = 0;
+  combatant.accuracyStage = 0;
+  combatant.evasionStage = 0;
+}
+
 void defaultMovesetForLevel(const uint16_t speciesId, const uint8_t level,
                             std::array<uint8_t, BATTLE_MOVE_SLOTS>& moveIds,
                             std::array<uint8_t, BATTLE_MOVE_SLOTS>& pp) {
@@ -357,8 +470,13 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
 
   const BaseStats* playerStats = baseStatsFor(player.speciesId);
   const BaseStats* opponentStats = baseStatsFor(opponent.speciesId);
-  uint16_t playerSpeed = playerStats == nullptr ? 0 : battleWorkingStat(playerStats->speed, player.level);
-  uint16_t opponentSpeed = opponentStats == nullptr ? 0 : battleWorkingStat(opponentStats->speed, opponent.level);
+  uint16_t playerSpeed = playerStats == nullptr
+                             ? 0
+                             : applyStatStage(battleWorkingStat(playerStats->speed, player.level), player.speedStage);
+  uint16_t opponentSpeed =
+      opponentStats == nullptr
+          ? 0
+          : applyStatStage(battleWorkingStat(opponentStats->speed, opponent.level), opponent.speedStage);
   if (player.status == Ailment::Paralysis) playerSpeed /= 2U;
   if (opponent.status == Ailment::Paralysis) opponentSpeed /= 2U;
   const bool playerFirst = playerSpeed >= opponentSpeed;
