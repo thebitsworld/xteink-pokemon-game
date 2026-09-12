@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.17.1] - 2026-09-13
+
+### Fixed
+
+- A trainer's Pokemon can no longer heal or switch out to escape being trapped (Wrap, Bind, Fire Spin, Clamp), mid-charge, or bracing for Bide - matching the same rule already enforced on the player's own side.
+
 ## [0.17.0] - 2026-09-13
 
 ### Added

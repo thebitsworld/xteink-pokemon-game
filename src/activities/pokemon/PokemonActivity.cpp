@@ -785,6 +785,17 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
   // gymTeamOrder_'s doc comment), so this only ever runs for a gym/Elite
   // Four challenge.
   if (gymChallengeIndex_ == 0 || battleOpponent_.currentHp == 0) return false;
+  // A trainer's Pokemon that's trapped by the player (Wrap/Bind/Fire Spin/
+  // Clamp), or itself mid-charge/mid-trap/bracing for Bide, must not heal
+  // or switch out - the exact same reasoning as the player-side guard in
+  // the Screen::Battle activate() case (see lockedIntoContinuation there):
+  // doing so would let it escape a lock that's supposed to cost a real
+  // turn, making the player's own trapping moves a no-op against any
+  // switch-capable trainer.
+  if (battleOpponent_.trappedTurnsRemaining > 0 || battleOpponent_.forcedMoveId != 0 ||
+      battleOpponent_.bideTurnsRemaining > 0) {
+    return false;
+  }
   const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
   const char* leaderName = gym == nullptr ? "?" : gym->leaderName;
 

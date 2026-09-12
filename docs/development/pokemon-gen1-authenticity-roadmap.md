@@ -565,3 +565,32 @@ set for the new `stepPlayerOnlyTurn()` primitive (the trainer-AI decision logic 
 in `PokemonActivity.cpp`, uncovered by the native suite - verified by clean `pio run -e
 pokemon-x3`/`pokemon-simulator-X3` builds only, same as every other UI-level change). Full
 native suite 496/496.
+
+## Round 7: a real bug in round 6 itself (`v0.17.1`)
+
+The user asked for a seventh pass, this time comparing against Pokémon Red/Green/Blue/Yellow
+collectively rather than just Red/Blue. Confirmed the project's Red/Blue-specific scope
+remains correct (`scripts/data/pokemon-gyms.csv` still encodes the real Red/Blue rosters
+verbatim; Yellow's/Green's own divergences from that are out of scope by design, not a gap)
+and re-confirmed Confusion correctly gives no catch-rate bonus (only Sleep/Freeze/Paralysis/
+Poison/Burn do, matching real Gen 1). A full end-to-end re-read of `PokemonBattle.cpp` (now
+over 1700 lines across 6 rounds of additions) turned up one genuine, previously-uncovered bug
+- introduced by round 6 itself, not something six earlier passes had missed independently:
+
+- **A trainer's proactive switch (round 6) could bypass a trap/multi-turn lock, unlike the
+  matching player-side guard (round 4).** `trainerAiShouldActInsteadOfMoveThisTurn()` decided
+  whether to heal/switch purely from HP% and type-matchup danger, never checking
+  `battleOpponent_.trappedTurnsRemaining` (the player's own Wrap/Bind/Fire Spin/Clamp holding
+  it in place), `forcedMoveId` (the opponent itself mid-charge or mid-trap-lock), or
+  `bideTurnsRemaining` (bracing) before calling `setupBattleOpponent()`'s full combatant
+  reset. Round 4 added the exact matching guard for the player's own Bag/Switch/Run/Back
+  options specifically because the same escape was possible there - but round 6 didn't carry
+  that same reasoning over to the newly-added opponent side, silently making the player's own
+  trapping moves a no-op against any switch-capable trainer (trap it, and the AI just
+  "switches" away for free the very next turn). Fixed with the identical three-field check,
+  early-returning `false` before either the heal or switch branch can fire.
+
+No dedicated new test - the trainer-AI decision logic lives entirely in `PokemonActivity.cpp`,
+uncovered by the native suite (same situation as round 6's own switch logic); verified via
+clean `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds. Full native suite 496/496
+(unaffected, confirming no regression elsewhere).
