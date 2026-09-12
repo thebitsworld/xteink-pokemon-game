@@ -220,21 +220,28 @@ void masterBallAlwaysCatchesRegardlessOfRandomness() {
 }
 
 void pokeBallCatchOddsScaleWithHpAndCaptureRate() {
-  // Bulbasaur: SpeciesData::captureRate == 45, level 20 -> maxHp 48. At full
-  // HP with a Poke Ball, catchValue works out to exactly 15/255 (hpFactor
-  // 85%, 45*85/255=15). ZERO_RANDOM rolls 0 (< 15, caught); MAX_RANDOM rolls
-  // 254 (>= 15, not caught).
+  // Real Gen 1's two-roll algorithm (see attemptCatch()'s doc comment):
+  // ZERO_RANDOM rolls 0 for both R1 and R2 - R1=0 never exceeds Bulbasaur's
+  // own captureRate (45), and R2=0 never exceeds the HP factor (capped at
+  // 255 for a full-HP target with the deterministic ZERO_RANDOM species/
+  // level here) - so it always catches, same as every other ZERO_RANDOM
+  // "best case" convention this test suite already relies on elsewhere.
+  // MAX_RANDOM's R1 (255 for a Poke Ball's 0-255 range) exceeds 45
+  // immediately - an instant breakout before R2 is even relevant.
   BattleCombatant fullHp = makeCombatant(1, 20, {});
   CHECK(pokemon::attemptCatch(fullHp, BallKind::Poke, ZERO_RANDOM));
   CHECK(!pokemon::attemptCatch(fullHp, BallKind::Poke, MAX_RANDOM));
 
-  // A wounded (HP/10), paralyzed target's catchValue works out to 63/255 -
-  // strictly higher than the full-HP case above. A fixed roll of 20 sits
-  // between the two thresholds: it must fail against the healthy target but
-  // succeed against the wounded, statused one, demonstrating the intended
-  // "easier to catch when hurt/statused" effect without relying on an
-  // extreme roll that would swamp the difference either way.
-  uint32_t roll = 20;
+  // A fixed roll of 50 (used for both R1 and R2, since fixedRoll always
+  // returns the same context value): against the healthy, unstatused
+  // target, R*=50 already exceeds Bulbasaur's captureRate (45) - an
+  // instant breakout, regardless of R2. Against a badly wounded (HP/10),
+  // paralyzed target, the same R1=50 minus Paralysis's status bonus (12)
+  // gives R*=38, which clears the captureRate check - and the wounded
+  // target's much smaller current-HP quarter pushes its HP factor to the
+  // 255 cap, so R2=50 comfortably catches. Demonstrates the intended
+  // "easier to catch when hurt/statused" effect end to end.
+  uint32_t roll = 50;
   const RandomSource midRandom{&roll, fixedRoll};
   CHECK(!pokemon::attemptCatch(fullHp, BallKind::Poke, midRandom));
 
@@ -1514,6 +1521,52 @@ void substituteBlocksTheTargetImmobilizationFromATrapMove() {
   CHECK(target.trappedTurnsRemaining == 0);   // but the real Pokemon was never touched
 }
 
+// --- Round-4 Gen 1 authenticity fixes: real badge stat boosts and the
+// real two-roll catch algorithm. ---
+
+void badgeBoostRaisesTheCorrespondingStatByTwelvePointFivePercent() {
+  BattleCombatant boosted = makeCombatant(4, 20, {33});  // Tackle (physical)
+  boosted.badgeBoostMask = pokemon::BADGE_BOOST_ATTACK;
+  BattleCombatant unboosted = makeCombatant(4, 20, {33});
+  BattleCombatant defenderForBoosted = makeCombatant(7, 50, {45});
+  BattleCombatant defenderForUnboosted = makeCombatant(7, 50, {45});
+  pokemon::stepOpponentOnlyTurn(defenderForBoosted, boosted, ZERO_RANDOM);
+  pokemon::stepOpponentOnlyTurn(defenderForUnboosted, unboosted, ZERO_RANDOM);
+  const uint16_t boostedDamage = defenderForBoosted.maxHp - defenderForBoosted.currentHp;
+  const uint16_t unboostedDamage = defenderForUnboosted.maxHp - defenderForUnboosted.currentHp;
+  CHECK(boostedDamage > unboostedDamage);
+}
+
+void speedBadgeBoostCanFlipWhichSideActsFirst() {
+  // Squirtle's own base Speed (43) is lower than Bulbasaur's (45); at the
+  // same level, Bulbasaur normally acts first. Explosion faints its own
+  // user unconditionally, so whichever side acts first here ends the turn
+  // immediately - result.opponent.acted stays false if Bulbasaur never got
+  // a turn (Squirtle went first), or becomes true if Bulbasaur's own
+  // harmless Growl already fired before Squirtle's Explosion ended things.
+  BattleCombatant boostedSquirtle = makeCombatant(7, 50, {153});  // Explosion
+  boostedSquirtle.badgeBoostMask = pokemon::BADGE_BOOST_SPEED;
+  BattleCombatant bulbasaurVsBoosted = makeCombatant(1, 50, {45});  // Growl
+  const pokemon::BattleTurnResult boostedResult =
+      pokemon::stepBattle(boostedSquirtle, bulbasaurVsBoosted, 0, ZERO_RANDOM);
+  CHECK(!boostedResult.opponent.acted);
+
+  BattleCombatant unboostedSquirtle = makeCombatant(7, 50, {153});
+  BattleCombatant bulbasaurVsUnboosted = makeCombatant(1, 50, {45});
+  const pokemon::BattleTurnResult unboostedResult =
+      pokemon::stepBattle(unboostedSquirtle, bulbasaurVsUnboosted, 0, ZERO_RANDOM);
+  CHECK(unboostedResult.opponent.acted);
+}
+
+void wildOrTrainerOpponentsNeverGetABadgeBoost() {
+  // Sanity check: a fresh BattleCombatant (however setupBattleOpponent()
+  // builds one) always defaults badgeBoostMask to 0 - only
+  // PokemonActivity::setupBattlePlayer() ever sets it, and only from the
+  // player's own earned badges.
+  const BattleCombatant freshOpponent{};
+  CHECK(freshOpponent.badgeBoostMask == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1622,5 +1675,8 @@ int main() {
   confusionSelfHitUsesTheRealDamageFormulaNotAFlatMaxHpFraction();
   splashReportsNothingHappenedInsteadOfMoveHit();
   substituteBlocksTheTargetImmobilizationFromATrapMove();
+  badgeBoostRaisesTheCorrespondingStatByTwelvePointFivePercent();
+  speedBadgeBoostCanFlipWhichSideActsFirst();
+  wildOrTrainerOpponentsNeverGetABadgeBoost();
   return failures == 0 ? 0 : 1;
 }

@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-13
+
+### Added
+
+- Badges now give their real Gen 1 stat boost: Boulder (Attack), Thunder (Defense), Soul (Speed), and Volcano (Special), each +12.5% for your own Pokémon.
+
+### Fixed
+
+- You can no longer escape a forced move (mid-charge, mid-trap, or bracing for Bide) for free by opening Bag/Switch/Run - matching the original games, there's no menu at all on a turn like that.
+- Catching now uses the real Gen 1 two-roll algorithm instead of a simplified single-roll approximation.
+
 ## [0.15.1] - 2026-09-13
 
 ### Fixed

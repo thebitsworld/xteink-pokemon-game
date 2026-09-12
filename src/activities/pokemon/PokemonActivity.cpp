@@ -850,6 +850,20 @@ bool PokemonActivity::setupBattlePlayer(const int slot) {
     battlePlayer_.moves[i] = pokemon::BattleMoveSlot{entry.moves[i], entry.pp[i]};
   }
   battlePlayer_.ppUp = entry.ppUp;
+  // Badge boost (Gen 1's real +12.5% per stat-boosting badge, see
+  // BADGE_BOOST_ATTACK's doc comment in PokemonBattle.h) - only ever set on
+  // the player's own side, recomputed every time battlePlayer_ is (re)built
+  // (battle start and every switch) from whichever of the 4 badges are
+  // currently owned. battleProgress bit N (0-7) = gym N+1 defeated - gym 1
+  // (Brock/Boulder) boosts Attack, gym 3 (Lt. Surge/Thunder) boosts
+  // Defense, gym 5 (Koga/Soul) boosts Speed, gym 7 (Blaine/Volcano) boosts
+  // Special (see scripts/data/pokemon-gyms.csv for the badge-to-leader
+  // mapping this relies on staying in that same order).
+  battlePlayer_.badgeBoostMask = 0;
+  if ((snapshot_.state.battleProgress & (1U << 0)) != 0) battlePlayer_.badgeBoostMask |= pokemon::BADGE_BOOST_ATTACK;
+  if ((snapshot_.state.battleProgress & (1U << 2)) != 0) battlePlayer_.badgeBoostMask |= pokemon::BADGE_BOOST_DEFENSE;
+  if ((snapshot_.state.battleProgress & (1U << 4)) != 0) battlePlayer_.badgeBoostMask |= pokemon::BADGE_BOOST_SPEED;
+  if ((snapshot_.state.battleProgress & (1U << 6)) != 0) battlePlayer_.badgeBoostMask |= pokemon::BADGE_BOOST_SPECIAL;
   return true;
 }
 
@@ -1549,6 +1563,21 @@ void PokemonActivity::activate() {
     }
     case Screen::Battle: {
       const bool isGym = gymChallengeIndex_ != 0;
+      // Mid-charge (Fly/Dig/...), mid-trap (Wrap/Bind/...), bracing for
+      // Bide, or immobilized by an opponent's own Wrap/Bind/... - real
+      // Gen 1 doesn't offer a menu at all on a turn like this, so BAG/
+      // BALL/SWITCH/RUN are all blocked the same way FIGHT already forces
+      // straight into repeating the same move below. Without this, a
+      // player could freely Switch out (for free - setupBattlePlayer()
+      // just resets the combatant) or Run to escape a lock that's
+      // supposed to cost a real turn.
+      const bool lockedIntoContinuation =
+          battlePlayer_.forcedMoveId != 0 || battlePlayer_.bideTurnsRemaining > 0 ||
+          battlePlayer_.trappedTurnsRemaining > 0;
+      if (lockedIntoContinuation && selected_ != 0) {
+        showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
+        return;
+      }
       if (selected_ == 0) {
         if (battlePlayerMoveCount() == 0) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
@@ -1859,6 +1888,14 @@ void PokemonActivity::goBack() {
     case Screen::Battle:
       // Back out of a battle the same way RUN does - never leaves the
       // player stuck mid-fight with no way to exit via hardware Back.
+      // Blocked while locked into a forced continuation (mid-charge,
+      // mid-trap, bracing for Bide, or immobilized by the opponent's own
+      // trap) for the same reason the on-screen RUN option is - see the
+      // matching check in the Screen::Battle activate() case.
+      if (battlePlayer_.forcedMoveId != 0 || battlePlayer_.bideTurnsRemaining > 0 ||
+          battlePlayer_.trappedTurnsRemaining > 0) {
+        return;
+      }
       resolveBattleAsPass();
       return;
     case Screen::BattleMoves:

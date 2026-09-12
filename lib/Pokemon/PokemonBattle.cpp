@@ -543,6 +543,13 @@ void applyLeechSeedDamage(BattleCombatant& seededSide, BattleCombatant& otherSid
   event = BattleLogEvent::Seeded;
 }
 
+// Gen 1's real badge boost: a flat +12.5% (see BADGE_BOOST_ATTACK's doc
+// comment in PokemonBattle.h for what this deliberately doesn't replicate).
+uint16_t applyBadgeBoost(const uint16_t value, const uint8_t badgeBoostMask, const uint8_t bit) {
+  if ((badgeBoostMask & bit) == 0) return value;
+  return clampToUint16(static_cast<uint32_t>(value) + value / 8U);
+}
+
 uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& defender, const MoveData& move,
                        const uint8_t moveId, const RandomSource& random, const bool critical) {
   const SpeciesData* attackerSpecies = speciesData(attacker.speciesId);
@@ -563,6 +570,10 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
       physical ? static_cast<size_t>(StatIndex::Defense) : static_cast<size_t>(StatIndex::Special);
   uint16_t attackWorking =
       battleWorkingStat(attackBase, attacker.level, attacker.iv[attackStatIndex], attacker.ev[attackStatIndex]);
+  // Badge boost (Attack/Special, whichever this move actually uses) -
+  // applied to the raw stat, same tier as Burn's halving just below.
+  attackWorking = applyBadgeBoost(attackWorking, attacker.badgeBoostMask,
+                                  physical ? BADGE_BOOST_ATTACK : BADGE_BOOST_SPECIAL);
   // Real Gen 1 quirk: Burn halves the burned Pokemon's Attack for physical
   // damage (the same way Paralysis halves Speed for turn order, see
   // stepBattle()) - applied to the raw stat before staging, so unlike a
@@ -570,6 +581,8 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
   if (physical && attacker.status == Ailment::Burn) attackWorking = std::max<uint16_t>(1, attackWorking / 2U);
   uint16_t defenseWorking =
       battleWorkingStat(defenseBase, defender.level, defender.iv[defenseStatIndex], defender.ev[defenseStatIndex]);
+  defenseWorking = applyBadgeBoost(defenseWorking, defender.badgeBoostMask,
+                                   physical ? BADGE_BOOST_DEFENSE : BADGE_BOOST_SPECIAL);
   // Real Gen 1 quirk: Explosion/Self-Destruct halve the target's Defense for
   // this one hit.
   if (isSelfDestructMove(moveId)) defenseWorking = std::max<uint16_t>(1, defenseWorking / 2U);
@@ -1525,6 +1538,15 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
           : applyStatStage(battleWorkingStat(opponentStats->speed, opponent.level, opponent.iv[speedIndex],
                                              opponent.ev[speedIndex]),
                            opponent.speedStage);
+  // Soul Badge boost (see BADGE_BOOST_SPEED's doc comment) - only ever set
+  // on the player's own side, applied before paralysis's halving (same
+  // ordering as Burn/badge-boost-Attack in computeDamage()).
+  if ((player.badgeBoostMask & BADGE_BOOST_SPEED) != 0) {
+    playerSpeed = static_cast<uint16_t>(playerSpeed + playerSpeed / 8U);
+  }
+  if ((opponent.badgeBoostMask & BADGE_BOOST_SPEED) != 0) {
+    opponentSpeed = static_cast<uint16_t>(opponentSpeed + opponentSpeed / 8U);
+  }
   if (player.status == Ailment::Paralysis) playerSpeed /= 2U;
   if (opponent.status == Ailment::Paralysis) opponentSpeed /= 2U;
   const bool playerFirst = playerSpeed >= opponentSpeed;
@@ -1633,24 +1655,41 @@ bool attemptCatch(const BattleCombatant& wild, const BallKind ball, const Random
   const SpeciesData* species = speciesData(wild.speciesId);
   if (species == nullptr) return false;
 
-  const uint32_t hpFactor = ((3U * wild.maxHp - 2U * wild.currentHp) * 255U) / (3U * wild.maxHp);
-  uint32_t catchValue = (static_cast<uint32_t>(species->captureRate) * hpFactor) / 255U;
+  // Real Gen 1 catch algorithm (two rolls, not one) - a previous version of
+  // this project used a simplified single-roll formula that turned out to
+  // actually be a LATER generation's HP-based formula, not Gen 1's own.
+  // R1 is drawn from a ball-specific range (narrower for a better ball);
+  // status can auto-catch outright (R1 < statusBonus) or, short of that,
+  // makes the catch-rate breakout check below more forgiving.
+  const uint32_t r1UpperExclusive = ball == BallKind::Great ? 201U : ball == BallKind::Ultra ? 151U : 256U;
+  uint32_t r1 = 0;
+  if (!rollBelow(random, r1UpperExclusive, r1)) return false;
 
-  const uint32_t ballPercent = ball == BallKind::Great ? 150U : ball == BallKind::Ultra ? 200U : 100U;
-  catchValue = catchValue * ballPercent / 100U;
-
-  uint32_t statusPercent = 100U;
+  uint32_t statusBonus = 0;
   if (wild.status == Ailment::Sleep || wild.status == Ailment::Freeze) {
-    statusPercent = 200U;
+    statusBonus = 25U;
   } else if (wild.status == Ailment::Paralysis || wild.status == Ailment::Poison || wild.status == Ailment::Burn) {
-    statusPercent = 150U;
+    statusBonus = 12U;
   }
-  catchValue = catchValue * statusPercent / 100U;
-  catchValue = std::min<uint32_t>(catchValue, 255U);
+  if (r1 < statusBonus) return true;  // R* would be negative - an automatic catch
+  const uint32_t rStar = r1 - statusBonus;
 
-  uint32_t roll = 0;
-  if (!rollBelow(random, 255U, roll)) return false;
-  return roll < catchValue;
+  // Breaks free immediately if the species' own base catch rate can't even
+  // clear this ball/status-adjusted threshold - no second roll needed.
+  if (static_cast<uint32_t>(species->captureRate) < rStar) return false;
+
+  // HP factor: higher for a more-damaged target, capped at 255. Great Ball
+  // uses a smaller divisor (8 vs 12) - real Gen 1's actual reason Great
+  // Ball catches meaningfully better than its narrower R1 range alone
+  // would suggest.
+  const uint32_t ballDivisor = ball == BallKind::Great ? 8U : 12U;
+  const uint32_t hpQuarter = std::max<uint32_t>(1U, static_cast<uint32_t>(wild.currentHp) / 4U);
+  const uint32_t hpFactor =
+      std::min<uint32_t>(255U, (static_cast<uint32_t>(wild.maxHp) * 255U / ballDivisor) / hpQuarter);
+
+  uint32_t r2 = 0;
+  if (!rollBelow(random, 256U, r2)) return false;
+  return r2 <= hpFactor;
 }
 
 uint32_t battleVictoryXp(const uint8_t opponentLevel, const bool isTrainerBattle) {
