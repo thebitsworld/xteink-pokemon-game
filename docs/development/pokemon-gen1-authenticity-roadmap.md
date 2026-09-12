@@ -168,10 +168,16 @@ real Gen 1 formula (`floor(basePp/5)` per use - a 40-PP move goes 40→48→56�
 new version, v2, handled the same append-and-branch-on-version way `PokemonState`'s own
 ladder already does); `PokemonState` itself gained a new `ppUpCount` field (v5) rather than
 growing `bagCounts` (which would have shifted every byte after it in every already-shipped
-save). **Not yet wired into the automatic reading-time item-drop pool** - doing so would
-perturb `PokemonGameTest.cpp`'s fragile, hand-scripted hour-by-hour drop sequence, so this
-was deliberately left as a follow-up; a real acquisition path (its own pity track, a shop, a
-battle reward) is still open for whoever picks that up next.
+save). **Now wired into the automatic reading-time item-drop pool** (`v0.11.1`) - PP Up
+joined the shared "Medicine" drop track (`isMedicineCategory()` in `PokemonGame.cpp`), the
+same way every other medicine item drops from reading; `itemCountIsFull()`/
+`incrementItemCount()` already routed it to `state.ppUpCount` instead of `bagCounts`, so no
+special-casing was needed in the drop logic itself. This did perturb
+`PokemonGameTest.cpp`'s fragile, hand-scripted hour-by-hour drop sequence as expected, fixed
+by capping `ppUpCount` alongside `bagCounts` in the one test that relies on "every medicine
+item is sold out." In the Bag UI, PP Up moved from its own dedicated category to a trailing
+row inside Bag → Medicine (its count lives in `ppUpCount`, not `bagCounts`, so it's appended
+as a synthetic row rather than joining the generic per-category item list).
 
 ---
 
@@ -187,6 +193,5 @@ battle reward) is still open for whoever picks that up next.
    file, not a `PokemonRecord` change - `PokemonRecord` only had 1 spare byte, nowhere near
    enough).
 
-**Every item on this roadmap is now done.** The one open thread left behind is PP Up's own
-acquisition path (see item 5 above) - worth its own small follow-up whenever picked up, but
-not itself a gap in Gen 1 authenticity the way everything above was.
+**Every item on this roadmap is now done, including PP Up's acquisition path** (`v0.11.1`) -
+no open threads left.

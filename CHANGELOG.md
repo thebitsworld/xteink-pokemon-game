@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-12
+
+### Fixed
+
+- PP Up can now be found while reading, the same way every other medicine item can, and it's listed inside the Bag's Medicine category instead of its own separate one.
+- A newly caught or hatched Pokémon's Individual Values are now visible right away on the Summary screen and party list, instead of showing as 0 until it fought its first battle.
+- Elite Four and Champion names on the Gym Battle list no longer get cut off.
+
 ## [0.11.0] - 2026-09-12
 
 ### Added
