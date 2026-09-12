@@ -214,6 +214,54 @@ void opponentOnlyTurnShortCircuitsWhenAlreadyFainted() {
   CHECK(!result.opponent.acted);
 }
 
+void playerOnlyTurnActsRegardlessOfSpeedSinceTheOpponentAlreadySpentTheTurn() {
+  // Mirror image of opponentOnlyTurnActsRegardlessOfSpeedSinceThePlayerAlreadySpentTheTurn():
+  // a trainer AI healing or switching mid-battle costs its whole turn, so
+  // stepPlayerOnlyTurn() never compares Speed either - only the player's
+  // own chosen move resolves. Squirtle (7, slower) as "opponent" proves
+  // this: if Speed were compared, the faster Charmander "player" would
+  // still go first anyway here, so use the slower side as player instead -
+  // Squirtle (7, faster than Bulbasaur) as opponent never acts even though
+  // it would normally win a Speed comparison against Bulbasaur.
+  BattleCombatant bulbasaur = makeCombatant(1, 20, {33});  // Tackle
+  BattleCombatant squirtle = makeCombatant(7, 50, {55});
+  const uint16_t opponentHpBefore = squirtle.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepPlayerOnlyTurn(bulbasaur, squirtle, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::InProgress);
+  CHECK(result.player.acted);
+  CHECK(!result.opponent.acted);
+  CHECK(squirtle.currentHp < opponentHpBefore);
+  CHECK(bulbasaur.currentHp == bulbasaur.maxHp);  // opponent's side never acted, so it's untouched
+}
+
+void playerOnlyTurnCanFaintTheOpponent() {
+  BattleCombatant player = makeCombatant(4, 60, {52});  // Ember, way overleveled
+  BattleCombatant opponent = makeCombatant(1, 5, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepPlayerOnlyTurn(player, opponent, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::PlayerWon);
+  CHECK(result.opponent.event == BattleLogEvent::Fainted);
+}
+
+void playerOnlyTurnStillAppliesEndOfTurnStatusDamage() {
+  BattleCombatant player = makeCombatant(1, 20, {33});
+  player.status = Ailment::Poison;
+  BattleCombatant opponent = makeCombatant(4, 20, {33});
+  const uint16_t playerHpBefore = player.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepPlayerOnlyTurn(player, opponent, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::InProgress);
+  CHECK(player.currentHp < playerHpBefore);
+}
+
+void playerOnlyTurnShortCircuitsWhenAlreadyFainted() {
+  BattleCombatant player = makeCombatant(1, 10, {33});
+  BattleCombatant opponent = makeCombatant(4, 10, {33});
+  opponent.currentHp = 0;
+  const pokemon::BattleTurnResult result = pokemon::stepPlayerOnlyTurn(player, opponent, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::PlayerWon);
+  CHECK(!result.player.acted);
+  CHECK(!result.opponent.acted);
+}
+
 void masterBallAlwaysCatchesRegardlessOfRandomness() {
   BattleCombatant wild = makeCombatant(1, 50, {});
   CHECK(pokemon::attemptCatch(wild, BallKind::Master, MAX_RANDOM));
@@ -1583,6 +1631,10 @@ int main() {
   opponentOnlyTurnCanFaintThePlayer();
   opponentOnlyTurnStillAppliesEndOfTurnStatusDamage();
   opponentOnlyTurnShortCircuitsWhenAlreadyFainted();
+  playerOnlyTurnActsRegardlessOfSpeedSinceTheOpponentAlreadySpentTheTurn();
+  playerOnlyTurnCanFaintTheOpponent();
+  playerOnlyTurnStillAppliesEndOfTurnStatusDamage();
+  playerOnlyTurnShortCircuitsWhenAlreadyFainted();
   masterBallAlwaysCatchesRegardlessOfRandomness();
   pokeBallCatchOddsScaleWithHpAndCaptureRate();
   criticalHitExactlyDoublesDamageForAHighCritRatioMove();

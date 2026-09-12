@@ -472,6 +472,16 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
 // exactly as it does after a normal stepBattle() turn.
 BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& opponent, const RandomSource& random);
 
+// The mirror image of stepOpponentOnlyTurn(): the OPPONENT spent its whole
+// turn on something other than a move (a trainer AI using a healing item or
+// proactively switching Pokemon mid-battle - see PokemonActivity.cpp's
+// trainer-AI decision logic), so only the player's own chosen move resolves
+// here (`result.opponent` stays acted=false/None). End-of-turn status damage
+// still applies to both sides exactly as it does after a normal stepBattle()
+// turn.
+BattleTurnResult stepPlayerOnlyTurn(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot,
+                                    const RandomSource& random);
+
 enum class BallKind : uint8_t {
   Poke = 0,
   Great = 1,
