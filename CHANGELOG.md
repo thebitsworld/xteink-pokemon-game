@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.7] - 2026-09-13
+
+### Fixed
+
+- Fixed text being cut off with "…" on the Pokedex, Bag > Machine (TM/HM), and Badges screens - the dex number, taught-move name, and Defeated/Locked status now show on their own line instead of squeezing onto the same line as the name.
+
 ## [0.18.6] - 2026-09-13
 
 ### Fixed
