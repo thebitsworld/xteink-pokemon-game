@@ -1008,6 +1008,12 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
       const pokemon::MoveData* move = pokemon::moveData(moveId);
       battleOpponent_.moves[i] = pokemon::BattleMoveSlot{moveId, move == nullptr ? 0 : move->pp};
     }
+    // Wild encounters already get marked "seen" the moment the encounter
+    // itself is generated (finalizeEncounter(), well before battle starts) -
+    // a trainer's fixed roster has no equivalent earlier step, so mark it
+    // here instead. Best-effort: purely a Pokedex-completeness nicety, not
+    // worth failing the battle setup over a rare SD write error.
+    service_.markSpeciesSeen(speciesId);
     return;
   }
   std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> moveIds{};

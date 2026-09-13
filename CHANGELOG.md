@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-13
+
+### Fixed
+
+- A Pokémon now immediately learns its evolved form's own early moves when it evolves (by level or with an evolution stone), instead of keeping only what it already knew before evolving.
+- Depositing a Pokémon into the PC no longer leaves its battle data taking up a permanent slot - previously, once 6 different Pokémon had ever fought, no other Pokémon could be withdrawn to fight again.
+- Defeating a Gym Leader/Elite Four/Champion's Pokémon now marks that species as seen in the Pokédex, even if you've never encountered it in the wild.
+
 ## [0.17.2] - 2026-09-13
 
 ### Fixed
