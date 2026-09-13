@@ -215,10 +215,15 @@ class PokemonService {
   // for a given recordId - covers both a brand-new record (just caught/
   // picked as a starter) and backfilling a record created before this
   // mechanic existed (both cases look identical: no side-file entry yet).
-  // Best-effort: if persisting the fresh roll fails, still returns it for
-  // this call (the caller sees correct values this once) but tries again
-  // next call rather than silently caching a value that never made it to
-  // disk.
+  // Best-effort: if persisting the fresh roll fails, the SAME rolled value
+  // is still returned and reused on every subsequent call (see
+  // pendingIvEvRolls_) rather than rolling a brand new one each time -
+  // callers like the Party/Summary screens call this on every render, so
+  // re-rolling on every failed attempt showed up as a Pokemon's displayed
+  // max HP flickering between values on every redraw once the store's
+  // write could genuinely fail under real-device heap pressure (see
+  // CHANGELOG v0.18.x). Persistence itself is still retried each call, so
+  // it catches up to disk as soon as a write succeeds.
   IvEvEntry ensureIvEv(uint32_t recordId);
   // Read-only: never rolls or persists anything, for display/HP-calc paths
   // that must not write just from being looked at (mirrors peekBattleMoves()
@@ -241,6 +246,9 @@ class PokemonService {
   void queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader, uint8_t previousLevel,
                               uint8_t currentLevel);
   static bool creditFromTracker(void* context, uint16_t minutes, uint8_t bookProgressPercent);
+  IvEvEntry* findPendingIvEvRoll(uint32_t recordId);
+  void cachePendingIvEvRoll(const IvEvEntry& entry);
+  void clearPendingIvEvRoll(uint32_t recordId);
 
   PokemonStore& store_;
   PokemonBattleStore& battleStore_;
@@ -248,6 +256,16 @@ class PokemonService {
   RandomSource random_{};
   PokemonTracker tracker_;
   bool readingSessionActive_ = false;
+  // See ensureIvEv()'s doc comment - a small in-memory-only cache of rolled
+  // IV/EV entries that haven't made it to ivEvStore_ yet, keyed by recordId.
+  // 16 is comfortably above PARTY_SIZE (6) with headroom for the Party
+  // screen, a Summary, and a battle setup all touching different records in
+  // the same session; a full cache just evicts the oldest entry rather than
+  // failing, which only brings back the (rare, pre-existing) reroll
+  // possibility for whichever record gets evicted.
+  static constexpr size_t PENDING_IV_EV_CAPACITY = 16;
+  std::array<IvEvEntry, PENDING_IV_EV_CAPACITY> pendingIvEvRolls_{};
+  size_t pendingIvEvCount_ = 0;
 };
 
 PokemonService& devicePokemonService();

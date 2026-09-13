@@ -659,15 +659,57 @@ ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRec
   return ServiceStatus::Ok;
 }
 
+IvEvEntry* PokemonService::findPendingIvEvRoll(const uint32_t recordId) {
+  for (size_t index = 0; index < pendingIvEvCount_; ++index) {
+    if (pendingIvEvRolls_[index].recordId == recordId) return &pendingIvEvRolls_[index];
+  }
+  return nullptr;
+}
+
+void PokemonService::cachePendingIvEvRoll(const IvEvEntry& entry) {
+  if (IvEvEntry* existing = findPendingIvEvRoll(entry.recordId); existing != nullptr) {
+    *existing = entry;
+    return;
+  }
+  if (pendingIvEvCount_ < pendingIvEvRolls_.size()) {
+    pendingIvEvRolls_[pendingIvEvCount_++] = entry;
+    return;
+  }
+  // Full - evict the oldest tracked roll rather than failing outright; see
+  // the member's own doc comment in the header.
+  std::move(pendingIvEvRolls_.begin() + 1, pendingIvEvRolls_.begin() + pendingIvEvCount_, pendingIvEvRolls_.begin());
+  pendingIvEvRolls_[pendingIvEvCount_ - 1] = entry;
+}
+
+void PokemonService::clearPendingIvEvRoll(const uint32_t recordId) {
+  for (size_t index = 0; index < pendingIvEvCount_; ++index) {
+    if (pendingIvEvRolls_[index].recordId == recordId) {
+      pendingIvEvRolls_[index] = pendingIvEvRolls_[pendingIvEvCount_ - 1];
+      --pendingIvEvCount_;
+      return;
+    }
+  }
+}
+
 IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId) {
   if (recordId == 0) return {};
-  if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) return *existing;
+  if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) {
+    clearPendingIvEvRoll(recordId);
+    return *existing;
+  }
 
   IvEvEntry fresh{};
   fresh.recordId = recordId;
-  rollIvSet(random_, fresh.iv);
+  if (const IvEvEntry* pending = findPendingIvEvRoll(recordId); pending != nullptr) {
+    fresh = *pending;  // reuse the same not-yet-persisted roll rather than rolling a new one
+  } else {
+    rollIvSet(random_, fresh.iv);
+  }
   if (!ivEvStore_.upsertEntry(fresh)) {
     LOG_ERR("PokemonService", "Failed to persist rolled IV/EV for record %u", recordId);
+    cachePendingIvEvRoll(fresh);
+  } else {
+    clearPendingIvEvRoll(recordId);
   }
   return fresh;
 }
