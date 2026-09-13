@@ -1238,6 +1238,44 @@ TEST(PokemonService, EnsureIvEvRollsOnceAndPersistsForSubsequentCalls) {
   EXPECT_TRUE(first.ev == second.ev);
 }
 
+// Regression test for a real-device bug: once PokemonIvEvStore's writes could
+// genuinely fail (v0.18.1+'s heap-allocation-based OOM safety, see CHANGELOG
+// v0.18.x), ensureIvEv() used to re-roll a brand new random IV on every call
+// for a record that never managed to persist - since Party/Summary screens
+// call ensureIvEv() on every render, this showed up as a Pokemon's displayed
+// max HP flickering between values on every redraw. It must instead keep
+// returning the SAME rolled value across repeated failed-to-persist calls.
+TEST(PokemonService, EnsureIvEvReturnsAStableRollEvenWhilePersistingKeepsFailing) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  Storage.setFailWritableOpen(true);
+  const pokemon::IvEvEntry first = service.ensureIvEv(1);
+  const pokemon::IvEvEntry second = service.ensureIvEv(1);
+  const pokemon::IvEvEntry third = service.ensureIvEv(1);
+  EXPECT_TRUE(first.iv == second.iv);
+  EXPECT_TRUE(first.iv == third.iv);
+  EXPECT_TRUE(first.ev == second.ev);
+  EXPECT_TRUE(first.ev == third.ev);
+  // Confirms this scenario never actually persisted while the fault was
+  // active - the stability above is genuinely from the pending-roll cache,
+  // not from the store having quietly succeeded anyway.
+  EXPECT_EQ(ivEvStore.findEntry(1), nullptr);
+
+  // Once writes can succeed again, the exact same rolled value (not a new
+  // roll) finally makes it to disk.
+  Storage.setFailWritableOpen(false);
+  const pokemon::IvEvEntry fourth = service.ensureIvEv(1);
+  EXPECT_TRUE(first.iv == fourth.iv);
+  const pokemon::IvEvEntry* persisted = ivEvStore.findEntry(1);
+  ASSERT_NE(persisted, nullptr);
+  EXPECT_TRUE(persisted->iv == first.iv);
+}
+
 TEST(PokemonService, AwardBattleXpAccumulatesEvYieldAndSaturatesAt255) {
   Storage.clear();
   pokemon::PokemonStore store;

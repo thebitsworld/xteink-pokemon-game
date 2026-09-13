@@ -123,26 +123,41 @@ bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, I
                          size_t& outputSize) {
   if (sequence == 0 || !validateIvEvStoreState(state)) return false;
   const size_t count = ivEvEntryCount(state);
-  IvEvStoreFileBytes candidate{};
-  candidate[0] = 'P';
-  candidate[1] = 'K';
-  candidate[2] = 'I';
-  candidate[3] = 'V';
-  candidate[4] = POKEMON_IVEV_STORE_VERSION;
-  write16(candidate.data(), 5, static_cast<uint16_t>(count));
-  write32(candidate.data(), 7, sequence);
+  // Writes directly into the caller-provided `output` rather than building
+  // a second, same-sized local first: an earlier fix already had this
+  // function heap-allocate its own candidate buffer to get it off the
+  // stack (a real field crash traced to these buffers' combined stack
+  // depth), but that meant `output` (already heap-allocated by the caller,
+  // see PokemonIvEvStore.cpp's writeState()) and this function's own
+  // candidate were BOTH alive at once - doubling the peak heap this write
+  // path needs, which is exactly what later made the allocation itself
+  // start failing under real heap pressure (a second field crash, this
+  // time an uncaught std::bad_alloc). Writing straight into `output`
+  // removes this function's own allocation entirely. Unlike decode (see
+  // its own comment below), this can't actually leave `output` partially
+  // written on a real failure: validateIvEvStoreState(state) above already
+  // validates every entry via the exact same check encodeIvEvEntry() uses,
+  // so the loop's own `if (!encodeIvEvEntry(...)) return false;` can never
+  // trigger in practice once that top check has passed - it stays only as
+  // a cheap, defensive backstop.
+  output[0] = 'P';
+  output[1] = 'K';
+  output[2] = 'I';
+  output[3] = 'V';
+  output[4] = POKEMON_IVEV_STORE_VERSION;
+  write16(output.data(), 5, static_cast<uint16_t>(count));
+  write32(output.data(), 7, sequence);
 
-  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, candidate.data(), POKEMON_IVEV_HEADER_BYTES);
+  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, output.data(), POKEMON_IVEV_HEADER_BYTES);
   size_t offset = POKEMON_IVEV_HEADER_BYTES;
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     if (!encodeIvEvEntry(state.entries[index], entryBytes)) return false;
-    std::memcpy(candidate.data() + offset, entryBytes.data(), entryBytes.size());
+    std::memcpy(output.data() + offset, entryBytes.data(), entryBytes.size());
     crc = updateIvEvStoreCrc32(crc, entryBytes.data(), entryBytes.size());
     offset += POKEMON_IVEV_ENTRY_BYTES;
   }
-  write32(candidate.data(), offset, finishIvEvStoreCrc32(crc));
-  output = candidate;
+  write32(output.data(), offset, finishIvEvStoreCrc32(crc));
   outputSize = offset + POKEMON_IVEV_FILE_CRC_BYTES;
   return true;
 }
@@ -163,15 +178,45 @@ bool decodeIvEvStoreFile(const uint8_t* data, const size_t size, IvEvStoreState&
   const uint32_t actualCrc = finishIvEvStoreCrc32(updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, data, payloadSize));
   if (expectedCrc != actualCrc) return false;
 
-  IvEvStoreState candidate{};
+  // Validate every entry - and the whole array's ascending-recordId
+  // invariant - using only small per-entry scratch values, BEFORE writing
+  // anything into the caller-provided `output`. This matters because
+  // `output` is written to directly rather than via a second, same-sized
+  // (~16KB) internal copy (see encodeIvEvStoreFile()'s matching comment for
+  // why that duplicate was itself a real crash risk): without this
+  // validate-first pass, a failure partway through decoding entries would
+  // leave `output` part freshly-written/part however it looked before this
+  // call, instead of the clean "untouched on failure" guarantee a second
+  // internal copy used to provide for free. A valid CRC (which covers the
+  // entire payload) makes it effectively certain this pass agrees with
+  // validateIvEvStoreState() below, which stays only as a cheap defensive
+  // backstop.
+  uint32_t previousRecordId = 0;
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     std::memcpy(entryBytes.data(), data + POKEMON_IVEV_HEADER_BYTES + index * POKEMON_IVEV_ENTRY_BYTES,
                 entryBytes.size());
-    if (!decodeIvEvEntry(entryBytes, candidate.entries[index])) return false;
+    IvEvEntry scratch{};
+    if (!decodeIvEvEntry(entryBytes, scratch)) return false;
+    if (scratch.recordId <= previousRecordId) return false;  // validateIvEvEntry() already ruled out 0
+    previousRecordId = scratch.recordId;
   }
-  if (!validateIvEvStoreState(candidate)) return false;
-  output = candidate;
+
+  // Every entry already proved valid above, so this pass cannot fail -
+  // `output` is only ever mutated once decoding as a whole is guaranteed to
+  // succeed. `output` may hold stale data from a previous decode into the
+  // same buffer, so every entry past `count` is explicitly cleared too,
+  // rather than relying on it starting zeroed.
+  for (size_t index = 0; index < count; ++index) {
+    IvEvEntryBytes entryBytes{};
+    std::memcpy(entryBytes.data(), data + POKEMON_IVEV_HEADER_BYTES + index * POKEMON_IVEV_ENTRY_BYTES,
+                entryBytes.size());
+    decodeIvEvEntry(entryBytes, output.entries[index]);
+  }
+  for (size_t index = count; index < output.entries.size(); ++index) {
+    output.entries[index] = IvEvEntry{};
+  }
+  if (!validateIvEvStoreState(output)) return false;  // defensive backstop only, see comment above
   sequence = candidateSequence;
   return true;
 }

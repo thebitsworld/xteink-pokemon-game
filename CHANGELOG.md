@@ -1,5 +1,41 @@
 ## [Unreleased]
 
+## [0.18.6] - 2026-09-13
+
+### Fixed
+
+- Closed a narrow gap `0.18.5` left open: if loading a corrupted IV/EV save file ever failed partway through, the in-memory copy it was decoding into could end up part old data/part new data instead of being left completely untouched.
+
+## [0.18.5] - 2026-09-13
+
+### Changed
+
+- Reduced how much memory the IV/EV store needs at once when saving/loading, on top of `0.18.4`'s stability fix - lowers the odds of that save ever failing in the first place while other things (like drawing the Party screen) are also competing for memory.
+
+## [0.18.4] - 2026-09-13
+
+### Fixed
+
+- Fixed a Pokemon's displayed max HP flickering between two different values every time the Party/Summary screen redrew - a side effect of `0.18.3`'s crash fix, where a save that kept failing (instead of crashing) meant its Individual Values got re-rolled fresh on every redraw instead of staying the same. The rolled value now stays stable and simply keeps retrying to save until it succeeds.
+
+## [0.18.3] - 2026-09-13
+
+### Fixed
+
+- Fixed a third real-device crash in the IV/EV store: `0.18.1`/`0.18.2` moved its large buffers off the stack and onto the heap, but didn't handle the heap running low (e.g. while rendering) - an allocation failure there could still crash the device instead of just failing that one save/load attempt gracefully.
+
+## [0.18.2] - 2026-09-13
+
+### Fixed
+
+- Fixed a second real-device crash in the same IV/EV store area that `0.18.1` missed - saving a Pokémon's IV/EV data (not just loading it) could still overflow the device's task stack.
+
+## [0.18.1] - 2026-09-13
+
+### Fixed
+
+- Fixed a crash on real devices when loading or saving a Pokémon's Individual/Effort Values - the IV/EV store was using tens of kilobytes of stack space per call, enough to overflow the device's task stack.
+
 ## [0.18.0] - 2026-09-13
 
 ### Fixed
