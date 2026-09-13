@@ -624,3 +624,65 @@ previously-unnoticed bug found and fixed:
 2 new tests (a direct-hit faint and an end-of-turn-poison-tick faint, covering both major
 code paths that detect fainting). Full native suite 496/496, clean `pio run -e pokemon-x3`
 build.
+
+## Round 9: a wide, consolidated review beyond battle mechanics (`v0.18.0`)
+
+At the user's request, this round deliberately took a broad, non-piecemeal approach: a single
+wide investigation covering PC/storage, evolution, TM/HM, move-learning edge cases, Pokedex
+tracking, nickname/gender/met-level display, and reading-time drop rates all at once,
+producing one consolidated list before any fix was made. Re-confirmed correct or already
+covered: move-learning replace-prompt behavior, nickname/gender/met-level display, legendary/
+Mew encounter gating, item-drop rate weighting, and the level-100 cap. Confirmed HM
+consumption behaving like a TM (no reusable/one-time distinction) **is a deliberate choice,
+not a bug** - the user chose to keep it as-is when asked. Three genuine, previously-uncovered
+bugs were found and fixed:
+
+- **Evolving never granted the evolved form's own early moves.** `evolveCandidate()`
+  (`lib/Pokemon/PokemonGame.cpp`) only ever swapped `speciesId`; nothing called
+  `queueMoveLearnIfNeeded()` for the new species at the current level, at either of its two
+  real call sites (`PokemonService::resolveEvolution()` for level-up evolution,
+  `PokemonService::useEvolutionItem()` for stone/Link-Cable evolution). Concretely: Eevee's
+  three stone evolutions could never learn their own level-1 signature move (Water Gun/
+  Thunder Shock/Ember), and Caterpie→Metapod/Weedle→Kakuna could never learn Harden - real
+  Gen 1 grants these the instant the evolution happens. Fixed by calling
+  `queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp))` right after each of
+  the two evolution paths succeeds (before their own `store_.commit()`) -
+  `previousLevel=0` correctly means "treat every one of the new species' learnset entries up
+  to the current level as newly available," since none of its own level-up history has been
+  walked through yet; the existing helper already knows how to silently fill an empty move
+  slot or queue a replace-prompt `PendingEvent` if the moveset is already full, so no new
+  branching was needed for either case.
+- **Depositing a Pokemon into the PC never freed its slot in the battle-store side file.**
+  That file caps at `POKEMON_BATTLE_MAX_ENTRIES` (6, matching party size, since only the
+  active party ever needs live battle state) - `PokemonBattleStore::removeEntry()` existed
+  for exactly this ("frees this recordId's slot") but was never called anywhere before this
+  fix. Once 6 distinct Pokemon had ever fought across the save's whole lifetime, the file
+  stayed permanently full; withdrawing a 7th distinct fighter failed outright with
+  `StorageError`, silently blocking it from battle. Fixed by calling `battleStore_.
+  removeEntry(recordId)` in `PokemonService::depositPokemon()` after a successful deposit
+  (best-effort). Documented trade-off: this Pokemon's exact HP/status/PP now resets to full/
+  clean the next time it's withdrawn and fights (a fresh `BattleRecordEntry` synthesizes from
+  its species/level, the same as if it had never fought before) rather than being preserved
+  exactly through PC storage the way the real games do - judged a reasonable trade for fixing
+  a hard capacity bug.
+- **Trainer battles never marked the opponent species "seen" in the Pokedex.** Wild
+  encounters already mark "seen" the moment the encounter itself is generated
+  (`finalizeEncounter()`, well before battle starts) - a gym/Elite Four/Champion trainer's
+  fixed roster has no equivalent earlier step, so a player who only ever fights, say, a gym's
+  Arcanine without ever meeting a wild Growlithe would see "???" for it forever. Fixed with a
+  new `PokemonService::markSpeciesSeen(speciesId)` (a no-op if already seen), called from
+  `PokemonActivity::setupBattleOpponent()`'s trainer-roster branch (best-effort, purely a
+  Pokedex-completeness nicety).
+
+Separately verified, no change needed: whether losing or fleeing a gym/Elite Four/Champion
+challenge leaves any stale state that would carry into a later attempt - it doesn't.
+`gymChallengeIndex_`/`gymChallengeTeamProgress_` both already reset to 0 on both paths, and
+the only way back into a gym battle is `enterGymBattle()`, which always rebuilds the entire
+opponent team from scratch (full HP, no status, no stat stages, `gymTeamOrder_`/
+`opponentHealChargesRemaining_` both reset) - already correct, nothing to fix.
+
+4 new tests (battle-store slot freed on deposit; evolution backfilling moves via both the
+level-up and stone paths, in each case landing in an empty move slot rather than exercising
+the separate "moveset already full → queues a replace prompt" branch, since both test species
+had room; `markSpeciesSeen()`'s mark-once/no-op-when-already-seen behavior). Full native
+suite 496/496, clean `pio run -e pokemon-x3`/`pokemon-simulator-X3` builds.
