@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 
 namespace pokemon {
 namespace {
@@ -123,26 +124,32 @@ bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, I
                          size_t& outputSize) {
   if (sequence == 0 || !validateIvEvStoreState(state)) return false;
   const size_t count = ivEvEntryCount(state);
-  IvEvStoreFileBytes candidate{};
-  candidate[0] = 'P';
-  candidate[1] = 'K';
-  candidate[2] = 'I';
-  candidate[3] = 'V';
-  candidate[4] = POKEMON_IVEV_STORE_VERSION;
-  write16(candidate.data(), 5, static_cast<uint16_t>(count));
-  write32(candidate.data(), 7, sequence);
+  // Heap-allocated rather than a stack local: at POKEMON_IVEV_MAX_ENTRIES
+  // (1024) this is ~14KB, which combined with the same-sized scratch buffers
+  // this function's own callers (PokemonIvEvStore.cpp) already need at
+  // nested call depths was large enough to overflow a real device's task
+  // stack (confirmed via a field crash report - see docs/development's
+  // roadmap addendum). ~170KB of free heap at boot comfortably covers this.
+  auto candidate = std::make_unique<IvEvStoreFileBytes>();
+  (*candidate)[0] = 'P';
+  (*candidate)[1] = 'K';
+  (*candidate)[2] = 'I';
+  (*candidate)[3] = 'V';
+  (*candidate)[4] = POKEMON_IVEV_STORE_VERSION;
+  write16(candidate->data(), 5, static_cast<uint16_t>(count));
+  write32(candidate->data(), 7, sequence);
 
-  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, candidate.data(), POKEMON_IVEV_HEADER_BYTES);
+  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, candidate->data(), POKEMON_IVEV_HEADER_BYTES);
   size_t offset = POKEMON_IVEV_HEADER_BYTES;
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     if (!encodeIvEvEntry(state.entries[index], entryBytes)) return false;
-    std::memcpy(candidate.data() + offset, entryBytes.data(), entryBytes.size());
+    std::memcpy(candidate->data() + offset, entryBytes.data(), entryBytes.size());
     crc = updateIvEvStoreCrc32(crc, entryBytes.data(), entryBytes.size());
     offset += POKEMON_IVEV_ENTRY_BYTES;
   }
-  write32(candidate.data(), offset, finishIvEvStoreCrc32(crc));
-  output = candidate;
+  write32(candidate->data(), offset, finishIvEvStoreCrc32(crc));
+  output = *candidate;
   outputSize = offset + POKEMON_IVEV_FILE_CRC_BYTES;
   return true;
 }
@@ -163,15 +170,24 @@ bool decodeIvEvStoreFile(const uint8_t* data, const size_t size, IvEvStoreState&
   const uint32_t actualCrc = finishIvEvStoreCrc32(updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, data, payloadSize));
   if (expectedCrc != actualCrc) return false;
 
-  IvEvStoreState candidate{};
+  // Heap-allocated (see encodeIvEvStoreFile()'s matching comment) - at
+  // POKEMON_IVEV_MAX_ENTRIES (1024) entries this is ~16KB, and this
+  // function is itself called from within PokemonIvEvStore.cpp's own
+  // large-buffer call chain, so keeping it off the stack is what actually
+  // fixes the real device crash, not just a defensive precaution.
+  // std::make_unique<T>() value-initializes T, so every entry starts at
+  // its default (recordId=0) - required here since only the first `count`
+  // of them get written below and validateIvEvStoreState()/the eventual
+  // `output = *candidate` both depend on the rest staying zeroed.
+  auto candidate = std::make_unique<IvEvStoreState>();
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     std::memcpy(entryBytes.data(), data + POKEMON_IVEV_HEADER_BYTES + index * POKEMON_IVEV_ENTRY_BYTES,
                 entryBytes.size());
-    if (!decodeIvEvEntry(entryBytes, candidate.entries[index])) return false;
+    if (!decodeIvEvEntry(entryBytes, candidate->entries[index])) return false;
   }
-  if (!validateIvEvStoreState(candidate)) return false;
-  output = candidate;
+  if (!validateIvEvStoreState(*candidate)) return false;
+  output = *candidate;
   sequence = candidateSequence;
   return true;
 }

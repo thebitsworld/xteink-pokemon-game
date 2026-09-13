@@ -5,6 +5,8 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include <memory>
+
 namespace pokemon {
 namespace {
 
@@ -40,14 +42,20 @@ bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& output
     file.close();
     return false;
   }
-  IvEvStoreFileBytes bytes{};
-  const bool readOk = readExact(file, bytes.data(), static_cast<size_t>(fileSize));
+  // Heap-allocated, not a stack local - at POKEMON_IVEV_FILE_MAX_BYTES
+  // (~14KB) this, combined with the same-sized buffers this function's own
+  // caller/callee both need at the same time (PokemonIvEvStore::load()'s
+  // stateA/stateB, decodeIvEvStoreFile()'s own candidate), was large enough
+  // to overflow a real device's task stack - confirmed via a field crash
+  // report symbolized back to this exact call chain.
+  auto bytes = std::make_unique<IvEvStoreFileBytes>();
+  const bool readOk = readExact(file, bytes->data(), static_cast<size_t>(fileSize));
   file.close();
   if (!readOk) {
     LOG_ERR("PokemonIvEvStore", "Short read on %s, discarding", path);
     return false;
   }
-  return decodeIvEvStoreFile(bytes.data(), static_cast<size_t>(fileSize), outputState, outputSequence);
+  return decodeIvEvStoreFile(bytes->data(), static_cast<size_t>(fileSize), outputState, outputSequence);
 }
 
 }  // namespace
@@ -59,15 +67,20 @@ void PokemonIvEvStore::load() const {
   sequence_ = 0;
   loaded_ = true;  // even a fully-empty result leaves us in a valid, usable state
 
-  IvEvStoreState stateA{};
-  IvEvStoreState stateB{};
+  // Heap-allocated, not stack locals - two of these (~16KB each) alive at
+  // once, on top of the same-sized scratch buffers inspectSlot()/
+  // decodeIvEvStoreFile() need at the nested call depths this function
+  // reaches, was enough to overflow a real device's task stack (confirmed
+  // via a field crash report symbolized back to exactly this function).
+  auto stateA = std::make_unique<IvEvStoreState>();
+  auto stateB = std::make_unique<IvEvStoreState>();
   uint32_t sequenceA = 0;
   uint32_t sequenceB = 0;
-  const bool readyA = inspectSlot(STORE_PATH_A, stateA, sequenceA);
-  const bool readyB = inspectSlot(STORE_PATH_B, stateB, sequenceB);
+  const bool readyA = inspectSlot(STORE_PATH_A, *stateA, sequenceA);
+  const bool readyB = inspectSlot(STORE_PATH_B, *stateB, sequenceB);
   if (!readyA && !readyB) return;  // fresh install, or both slots lost - stay empty, not an error
   activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
-  state_ = activeIsA_ ? stateA : stateB;
+  state_ = activeIsA_ ? *stateA : *stateB;
   sequence_ = activeIsA_ ? sequenceA : sequenceB;
   ready_ = true;
 }
@@ -83,9 +96,13 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
     return false;
   }
   const uint32_t nextSequence = !ready_ ? 1U : (sequence_ == UINT32_MAX ? 1U : sequence_ + 1U);
-  IvEvStoreFileBytes bytes{};
+  // Heap-allocated, not stack locals - see load()'s matching comment; this
+  // function reaches similarly deep nested call depths (encode, then
+  // write, then inspectSlot -> decode again to verify) that overflowed a
+  // real device's task stack.
+  auto bytes = std::make_unique<IvEvStoreFileBytes>();
   size_t size = 0;
-  if (!encodeIvEvStoreFile(state, nextSequence, bytes, size)) return false;
+  if (!encodeIvEvStoreFile(state, nextSequence, *bytes, size)) return false;
 
   const bool destinationIsA = !ready_ || !activeIsA_;
   const char* destinationPath = destinationIsA ? STORE_PATH_A : STORE_PATH_B;
@@ -94,17 +111,17 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
     LOG_ERR("PokemonIvEvStore", "Failed to open %s for write", destinationPath);
     return false;
   }
-  const bool writeOk = writeExact(file, bytes.data(), size) && file.sync();
+  const bool writeOk = writeExact(file, bytes->data(), size) && file.sync();
   const bool closeOk = file.close();
   if (!writeOk || !closeOk) {
     LOG_ERR("PokemonIvEvStore", "Failed to write %s", destinationPath);
     return false;
   }
 
-  IvEvStoreState verified{};
+  auto verified = std::make_unique<IvEvStoreState>();
   uint32_t verifiedSequence = 0;
-  if (!inspectSlot(destinationPath, verified, verifiedSequence) || verifiedSequence != nextSequence ||
-      !(verified == state)) {
+  if (!inspectSlot(destinationPath, *verified, verifiedSequence) || verifiedSequence != nextSequence ||
+      !(*verified == state)) {
     LOG_ERR("PokemonIvEvStore", "Inactive IV/EV store slot verification failed");
     return false;
   }
