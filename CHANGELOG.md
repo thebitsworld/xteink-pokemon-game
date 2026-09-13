@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.4] - 2026-09-13
+
+### Fixed
+
+- Fixed a Pokemon's displayed max HP flickering between two different values every time the Party/Summary screen redrew - a side effect of `0.18.3`'s crash fix, where a save that kept failing (instead of crashing) meant its Individual Values got re-rolled fresh on every redraw instead of staying the same. The rolled value now stays stable and simply keeps retrying to save until it succeeds.
+
 ## [0.18.3] - 2026-09-13
 
 ### Fixed
