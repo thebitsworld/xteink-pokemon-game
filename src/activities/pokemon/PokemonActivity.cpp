@@ -2288,6 +2288,7 @@ void PokemonActivity::buildRows() {
     rows_[i] = {};
     labels_[i].fill('\0');
     values_[i].fill('\0');
+    subtitles_[i].fill('\0');
   }
   const int start = pageStart();
   const int total = logicalCount();
@@ -2558,25 +2559,41 @@ void PokemonActivity::buildRows() {
         char count[16];
         snprintf(count, sizeof(count), "× %u",
                  bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
-        char label[56];
-        if (data != nullptr) {
-          // TM/HM names alone ("TM01") don't say what they teach - show the
-          // move name too so browsing the list doesn't require a lookup.
-          const pokemon::MoveData* move = pokemon::moveData(data->teachesMoveId);
-          snprintf(label, sizeof(label), "%s - %s", data->name, move == nullptr ? "?" : move->name);
-        } else {
-          snprintf(label, sizeof(label), "?");
-        }
-        row(local, label, count);
+        // TM/HM names alone ("TM01") don't say what they teach, so the move
+        // name still needs to show - but concatenating it onto the same
+        // line as the label ("TM01 - Move Name") plus the × count value
+        // overflowed and got ellipsis-truncated for several real TM/HM +
+        // move-name combinations (e.g. "TM45 - Thunder-Wave", "TM36 -
+        // Self-Destruct"; measured against the real inter_12 font metrics
+        // and this list's actual available width). Moving the move name to
+        // a subtitle line beneath the TM/HM id (mirroring GymList's
+        // leaderName/"Elite Four" split) fixes it without needing extra
+        // width: the subtitle gets the full row content width, not just
+        // whatever the value slot leaves over.
+        const pokemon::MoveData* move = data == nullptr ? nullptr : pokemon::moveData(data->teachesMoveId);
+        row(local, data == nullptr ? "?" : data->name, count);
+        snprintf(subtitles_[local].data(), subtitles_[local].size(), "%s", move == nullptr ? "?" : move->name);
+        rows_[local].subtitle = subtitles_[local].data();
         break;
       }
       case Screen::Pokedex: {
         const uint16_t speciesId = static_cast<uint16_t>(index + 1);
         const bool caught = pokemon::isSpeciesMarked(snapshot_.state.caughtSpecies, speciesId);
         const bool seen = pokemon::isSpeciesMarked(snapshot_.state.seenSpecies, speciesId);
-        char label[40];
-        snprintf(label, sizeof(label), "No. %03u  %s", speciesId, seen ? speciesName(speciesId) : "???");
-        row(local, label, caught ? tr(STR_POKEMON_CAUGHT) : seen ? tr(STR_POKEMON_SEEN) : nullptr);
+        // The dex number used to be folded into the same line as the name
+        // ("No. 004  Charmander"), which combined with a long species name
+        // and the "Caught"/"Seen" value overflowed and got
+        // ellipsis-truncated for real species (e.g. Charmander, Tentacruel,
+        // Farfetch'd - measured against the real inter_12 font metrics and
+        // this list's actual available width). Moving the number to a
+        // subtitle line beneath the name (mirroring GymList's
+        // leaderName/"Elite Four" split) fixes it without needing extra
+        // width: the name-only label comfortably fits next to the value,
+        // and the subtitle gets the full row content width.
+        row(local, seen ? speciesName(speciesId) : "???");
+        snprintf(subtitles_[local].data(), subtitles_[local].size(), "No. %03u", speciesId);
+        rows_[local].subtitle = subtitles_[local].data();
+        rows_[local].value = caught ? tr(STR_POKEMON_CAUGHT) : seen ? tr(STR_POKEMON_SEEN) : nullptr;
         break;
       }
       case Screen::Event:
@@ -2719,8 +2736,16 @@ void PokemonActivity::buildRows() {
         const pokemon::GymData* gym = pokemon::gymData(gymIndex);
         const bool earned =
             pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) == pokemon::GymProgress::Defeated;
-        row(local, gym == nullptr ? "?" : gym->badgeName,
-            earned ? tr(STR_POKEMON_GYM_DEFEATED) : tr(STR_POKEMON_GYM_LOCKED));
+        // Defeated/Locked used to be the row's value, sharing the label's
+        // line with the full badge name ("Cascade Badge" etc) - several
+        // real badge names overflowed that combination and got
+        // ellipsis-truncated (measured against the real inter_12 font
+        // metrics and this list's actual available width). Moving it to a
+        // subtitle line instead (mirroring GymList's own leaderName/"Elite
+        // Four" split just above) fixes it: the badge name gets the full
+        // row content width instead of sharing it with the value slot.
+        row(local, gym == nullptr ? "?" : gym->badgeName);
+        rows_[local].subtitle = earned ? tr(STR_POKEMON_GYM_DEFEATED) : tr(STR_POKEMON_GYM_LOCKED);
         break;
       }
       case Screen::Summary:
