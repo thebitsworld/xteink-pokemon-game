@@ -150,6 +150,50 @@ void fileRoundTripsCarriesSequenceAndDetectsCorruption() {
   CHECK(!pokemon::decodeIvEvStoreFile(badVersion.data(), size, decoded, sequence));
 }
 
+// decodeIvEvStoreFile() writes directly into the caller's `output` (no
+// internal duplicate buffer, to keep the write path's peak memory down -
+// see the .cpp's own comment). This locks in that a failure partway
+// through decoding entries still leaves `output` completely untouched, not
+// half-overwritten with a mix of freshly-decoded and stale data.
+void aCrcValidButOutOfRangeIvFailsWithoutTouchingOutput() {
+  IvEvStoreState state{};
+  CHECK(pokemon::upsertIvEvEntry(state, makeEntry(5)));
+  CHECK(pokemon::upsertIvEvEntry(state, makeEntry(12)));
+
+  pokemon::IvEvStoreFileBytes bytes{};
+  size_t size = 0;
+  CHECK(pokemon::encodeIvEvStoreFile(state, 7, bytes, size));
+
+  // Decode the still-valid bytes first, to get a known-good baseline in the
+  // exact buffer we'll reuse below (mirrors a real double-buffered slot
+  // read, which decodes into the same long-lived IvEvStoreState instance
+  // more than once over its lifetime).
+  IvEvStoreState decoded{};
+  uint32_t sequence = 0;
+  CHECK(pokemon::decodeIvEvStoreFile(bytes.data(), size, decoded, sequence));
+  const IvEvStoreState beforeFailedDecode = decoded;
+
+  // Now corrupt the second entry's first IV byte to an out-of-range value
+  // (16), and recompute the CRC over the tampered payload so the file-level
+  // CRC check still passes and the failure comes from per-entry validation
+  // instead.
+  const size_t secondEntryIvOffset =
+      pokemon::POKEMON_IVEV_HEADER_BYTES + pokemon::POKEMON_IVEV_ENTRY_BYTES + 4;
+  bytes[secondEntryIvOffset] = 16;
+  const size_t payloadSize = size - pokemon::POKEMON_IVEV_FILE_CRC_BYTES;
+  const uint32_t fixedUpCrc = pokemon::finishIvEvStoreCrc32(
+      pokemon::updateIvEvStoreCrc32(pokemon::IVEV_STORE_CRC32_INITIAL, bytes.data(), payloadSize));
+  bytes[payloadSize] = static_cast<uint8_t>(fixedUpCrc);
+  bytes[payloadSize + 1] = static_cast<uint8_t>(fixedUpCrc >> 8U);
+  bytes[payloadSize + 2] = static_cast<uint8_t>(fixedUpCrc >> 16U);
+  bytes[payloadSize + 3] = static_cast<uint8_t>(fixedUpCrc >> 24U);
+
+  // Decoding the corrupted-but-CRC-valid bytes into the SAME already-
+  // populated buffer must fail without touching it at all.
+  CHECK(!pokemon::decodeIvEvStoreFile(bytes.data(), size, decoded, sequence));
+  CHECK(decoded == beforeFailedDecode);
+}
+
 void emptyStateEncodesToJustTheHeaderAndCrc() {
   IvEvStoreState state{};
   pokemon::IvEvStoreFileBytes bytes{};
@@ -174,6 +218,7 @@ int main() {
   upsertKeepsAscendingOrderAndReplacesInPlace();
   upsertFailsPastCapacityForAnUnseenRecordId();
   fileRoundTripsCarriesSequenceAndDetectsCorruption();
+  aCrcValidButOutOfRangeIvFailsWithoutTouchingOutput();
   emptyStateEncodesToJustTheHeaderAndCrc();
   return failures == 0 ? 0 : 1;
 }
