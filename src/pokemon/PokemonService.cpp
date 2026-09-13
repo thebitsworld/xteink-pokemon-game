@@ -172,6 +172,34 @@ ServiceStatus PokemonService::depositPokemon(const uint32_t recordId) {
     LOG_ERR("PokemonService", "Failed to deposit Pokemon");
     return ServiceStatus::StorageError;
   }
+  // Frees this recordId's slot in the battle-store side file - without
+  // this, the file's small fixed capacity (POKEMON_BATTLE_MAX_ENTRIES, 6 -
+  // matching the party's own size, since only the active party ever needs
+  // live battle state at all) fills up with every DISTINCT Pokemon that's
+  // ever fought, forever, across the save's whole lifetime; a 7th distinct
+  // fighter would then hard-fail withdrawPokemon() with StorageError. A
+  // small, deliberate simplification vs. the real games: this Pokemon's
+  // exact HP/status/PP get reset to full/no-status/max the next time it's
+  // withdrawn and fights (loadBattleEntry() synthesizes a fresh entry from
+  // its species/level, same as if it had never fought before), rather than
+  // being preserved exactly through PC storage the way the real games do -
+  // judged a reasonable trade for fixing a hard capacity bug. Best-effort:
+  // a rare SD write failure here shouldn't block the deposit itself, which
+  // already succeeded above.
+  battleStore_.removeEntry(recordId);
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::markSpeciesSeen(const uint16_t speciesId) {
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  if (pokemon::isSpeciesMarked(state.seenSpecies, speciesId)) return ServiceStatus::Ok;
+  if (!pokemon::markSpecies(state.seenSpecies, speciesId)) return ServiceStatus::Invalid;
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to mark species seen");
+    return ServiceStatus::StorageError;
+  }
   return ServiceStatus::Ok;
 }
 
@@ -271,6 +299,17 @@ ServiceStatus PokemonService::resolveEvolution(const EvolutionChoice choice) {
   if (!store_.readRecord(pending->recordId, record)) return ServiceStatus::StorageError;
   RecordMutation mutation{};
   if (!pokemon::resolveEvolution(state, record, choice, mutation)) return ServiceStatus::NotApplicable;
+  // The evolved species' own learnset is entirely different from what it
+  // evolved from - real Gen 1 has an evolved form immediately know any of
+  // its own level-appropriate moves the pre-evolution didn't already have
+  // (e.g. Eevee -> Vaporeon/Jolteon/Flareon each know their own level-1
+  // signature move the instant they evolve). previousLevel=0 means "treat
+  // every learnset entry up to the current level as newly available,"
+  // exactly right here since none of the new species' own level-up history
+  // has been walked through yet - queueMoveLearnIfNeeded() already knows
+  // how to silently fill an empty slot or queue a replace-prompt if the
+  // moveset is full, so no separate handling is needed for either case.
+  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp));
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to resolve evolution");
     return ServiceStatus::StorageError;
@@ -522,6 +561,10 @@ ServiceStatus PokemonService::useEvolutionItem(const uint32_t recordId, const Ev
   if (!store_.readRecord(recordId, record)) return ServiceStatus::NotFound;
   RecordMutation mutation{};
   if (!pokemon::useEvolutionItem(state, record, item, mutation)) return ServiceStatus::NotApplicable;
+  // Same reasoning as resolveEvolution()'s own call: a stone/Link-Cable-item
+  // evolution needs its own species' level-appropriate moves backfilled
+  // too, since it's an entirely different learnset from the pre-evolution.
+  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp));
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to use evolution item");
     return ServiceStatus::StorageError;

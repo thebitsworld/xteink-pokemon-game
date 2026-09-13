@@ -76,6 +76,13 @@ class PokemonService {
   ServiceStatus movePartyMember(uint8_t fromSlot, uint8_t toSlot);
   ServiceStatus depositPokemon(uint32_t recordId);
   ServiceStatus withdrawPokemon(uint32_t recordId);
+  // Marks a species "seen" in the Pokedex directly - wild encounters
+  // already do this the moment the encounter is generated
+  // (finalizeEncounter(), before battle even starts), but a gym/Elite
+  // Four/Champion trainer's fixed roster has no equivalent earlier step,
+  // so PokemonActivity::setupBattleOpponent() calls this instead. A no-op
+  // (still ServiceStatus::Ok) if the species is already marked.
+  ServiceStatus markSpeciesSeen(uint16_t speciesId);
   ServiceStatus loadDashboardSnapshot(PokemonDashboardSnapshot& output);
   ServiceStatus readPcPage(PcOrder order, size_t offset, std::span<PokemonRecord> output, size_t& count);
   ServiceStatus resolveEncounter(EncounterChoice choice, uint32_t& caughtRecordId);

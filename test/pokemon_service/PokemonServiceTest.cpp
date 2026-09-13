@@ -272,6 +272,30 @@ TEST(PokemonService, ProtectsTheLastPartyMemberAndSupportsDepositWithdraw) {
   EXPECT_EQ(snapshot.state.partyRecordIds[1], 1U);
 }
 
+TEST(PokemonService, DepositingAPokemonFreesItsBattleStoreSlot) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 4), true);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  // Give recordId 1 a real battle-store entry, matching a Pokemon that's
+  // actually fought at least once (loadBattleEntry synthesizes and persists
+  // one on first lookup).
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  ASSERT_NE(battleStore.findEntry(1), nullptr);
+
+  // Without freeing this slot, POKEMON_BATTLE_MAX_ENTRIES (6) worth of
+  // distinct Pokemon that have EVER fought would permanently exhaust the
+  // side file's fixed capacity, hard-blocking withdrawPokemon() for a 7th
+  // distinct fighter with StorageError - depositing must free it instead.
+  ASSERT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(battleStore.findEntry(1), nullptr);
+}
+
 TEST(PokemonService, RejectsWithdrawalWhenThePartyIsFull) {
   Storage.clear();
   pokemon::PokemonStore store;
@@ -409,6 +433,105 @@ TEST(PokemonService, EvolvesByLevelAndCanDisableFuturePrompts) {
   ASSERT_EQ(service.setEvolutionPrompts(1, false), pokemon::ServiceStatus::Ok);
   ASSERT_EQ(service.readRecord(1, evolved), pokemon::ServiceStatus::Ok);
   EXPECT_NE(evolved.flags & pokemon::recordFlag(pokemon::RecordFlag::EvolutionPromptsDisabled), 0U);
+}
+
+TEST(PokemonService, EvolvingByLevelBackfillsTheNewSpeciesLevelAppropriateMoves) {
+  // Metapod's entire real Gen 1 learnset is a single level-1 move, Harden
+  // (id 106) - not in Caterpie's own set (Tackle/String Shot) - so
+  // evolving at the real level-7 trigger should silently fill one of
+  // Caterpie's 2 empty move slots with it, matching the real games (a
+  // freshly-evolved Metapod already knows Harden, not "no moves at all").
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  ASSERT_EQ(store.begin(), pokemon::StoreBeginResult::Empty);
+  pokemon::PokemonRecord caterpie = caughtPokemon(1, 10);
+  caterpie.totalXp = pokemon::xpRequired(7);
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = 1;
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Evolution;
+  state.pendingEvents[0].recordId = 1;
+  state.pendingEvents[0].speciesId = 11;
+  ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 10));
+  ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 10));
+  ASSERT_TRUE(store.commit(state, {1, caterpie, pokemon::RecordMutationKind::Append}));
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  // defaultMovesetForLevel() walks the learnset backwards to fill slots
+  // (most-recently-learned first), so among Caterpie's two same-level
+  // moves, String Shot (81) lands in slot 0 and Tackle (33) in slot 1.
+  pokemon::BattleRecordEntry beforeEntry{};
+  ASSERT_EQ(service.loadBattleEntry(1, beforeEntry), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(beforeEntry.moves[0], 81U);
+  EXPECT_EQ(beforeEntry.moves[1], 33U);
+  EXPECT_EQ(beforeEntry.moves[2], 0U);
+
+  ASSERT_EQ(service.resolveEvolution(pokemon::EvolutionChoice::Evolve), pokemon::ServiceStatus::Ok);
+  pokemon::PokemonRecord evolved{};
+  ASSERT_EQ(service.readRecord(1, evolved), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(evolved.speciesId, 11U);
+
+  const pokemon::BattleRecordEntry* afterEntry = battleStore.findEntry(1);
+  ASSERT_NE(afterEntry, nullptr);
+  EXPECT_EQ(afterEntry->moves[2], 106U);  // Harden, backfilled into the first empty slot
+}
+
+TEST(PokemonService, EvolvingViaStoneBackfillsTheNewSpeciesLevelAppropriateMoves) {
+  // Vaporeon's own level-1 moves (Sand Attack/Tackle/Water Gun/Quick Attack)
+  // include 2 Eevee doesn't already know at level 5 (Water Gun/Quick
+  // Attack) - both should backfill into Eevee's 2 empty move slots the
+  // instant the Water Stone evolution happens, not stay unlearned.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 133), true);  // Eevee, level 5: Sand Attack(28)/Tackle(33) only
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.itemCounts[3] = 1;  // Water Stone (EvolutionItem::WaterStone == 4, itemCounts index 3)
+  ASSERT_TRUE(store.commit(state));
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  // Same backwards-fill ordering as above: Tackle (33) lands in slot 0,
+  // Sand Attack (28) in slot 1.
+  pokemon::BattleRecordEntry beforeEntry{};
+  ASSERT_EQ(service.loadBattleEntry(2, beforeEntry), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(beforeEntry.moves[0], 33U);
+  EXPECT_EQ(beforeEntry.moves[1], 28U);
+  EXPECT_EQ(beforeEntry.moves[2], 0U);
+
+  ASSERT_EQ(service.useEvolutionItem(2, pokemon::EvolutionItem::WaterStone), pokemon::ServiceStatus::Ok);
+  pokemon::PokemonRecord evolved{};
+  ASSERT_EQ(service.readRecord(2, evolved), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(evolved.speciesId, 134U);  // Vaporeon
+
+  const pokemon::BattleRecordEntry* afterEntry = battleStore.findEntry(2);
+  ASSERT_NE(afterEntry, nullptr);
+  EXPECT_EQ(afterEntry->moves[2], 55U);  // Water Gun
+  EXPECT_EQ(afterEntry->moves[3], 98U);  // Quick Attack
+}
+
+TEST(PokemonService, MarkSpeciesSeenMarksOnceAndIsANoOpIfAlreadySeen) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonSnapshot before{};
+  ASSERT_EQ(service.loadSnapshot(before), pokemon::ServiceStatus::Ok);
+  EXPECT_FALSE(pokemon::isSpeciesMarked(before.state.seenSpecies, 4));
+
+  ASSERT_EQ(service.markSpeciesSeen(4), pokemon::ServiceStatus::Ok);
+  pokemon::PokemonSnapshot after{};
+  ASSERT_EQ(service.loadSnapshot(after), pokemon::ServiceStatus::Ok);
+  EXPECT_TRUE(pokemon::isSpeciesMarked(after.state.seenSpecies, 4));
+
+  // Already seen - a no-op (still Ok), not a redundant write.
+  EXPECT_EQ(service.markSpeciesSeen(4), pokemon::ServiceStatus::Ok);
 }
 
 TEST(PokemonService, ConsumesStoneOnlyForApplicableEvolution) {
