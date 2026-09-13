@@ -204,6 +204,13 @@ class PokemonActivity final : public Activity {
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};
   std::array<std::array<char, 56>, ROW_CAPACITY> labels_{};
   std::array<std::array<char, 32>, ROW_CAPACITY> values_{};
+  // Backing storage for ListItem::subtitle on rows that need one (Pokedex's
+  // dex number, BagMachine's taught-move name) - mirrors labels_/values_.
+  // GymList's own subtitle ("Elite Four"/"Champion") reuses values_ instead
+  // since its value slot is a static tr() string with no buffer of its own
+  // to free up; these screens' value slots aren't always free that way, so
+  // they get this dedicated buffer.
+  std::array<std::array<char, 24>, ROW_CAPACITY> subtitles_{};
   Rect listBounds_{};
   int rowHeight_ = 0;
   bool cleanRefreshNeeded_ = true;
