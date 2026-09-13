@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <new>
 
 namespace pokemon {
 namespace {
@@ -129,8 +130,16 @@ bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, I
   // this function's own callers (PokemonIvEvStore.cpp) already need at
   // nested call depths was large enough to overflow a real device's task
   // stack (confirmed via a field crash report - see docs/development's
-  // roadmap addendum). ~170KB of free heap at boot comfortably covers this.
-  auto candidate = std::make_unique<IvEvStoreFileBytes>();
+  // roadmap addendum).
+  // Non-throwing new, not std::make_unique: a plain `new` that fails to
+  // find ~14KB throws std::bad_alloc, and nothing in this codebase catches
+  // exceptions - that propagates to std::terminate()/abort() and crashes
+  // the whole device (confirmed via a second field crash report, once heap
+  // pressure during rendering made this allocation fail). Failing this one
+  // encode attempt gracefully (the caller already treats `false` as a
+  // normal, retryable failure) is far better than a hard device crash.
+  std::unique_ptr<IvEvStoreFileBytes> candidate(new (std::nothrow) IvEvStoreFileBytes());
+  if (!candidate) return false;
   (*candidate)[0] = 'P';
   (*candidate)[1] = 'K';
   (*candidate)[2] = 'I';
@@ -175,11 +184,12 @@ bool decodeIvEvStoreFile(const uint8_t* data, const size_t size, IvEvStoreState&
   // function is itself called from within PokemonIvEvStore.cpp's own
   // large-buffer call chain, so keeping it off the stack is what actually
   // fixes the real device crash, not just a defensive precaution.
-  // std::make_unique<T>() value-initializes T, so every entry starts at
-  // its default (recordId=0) - required here since only the first `count`
-  // of them get written below and validateIvEvStoreState()/the eventual
-  // `output = *candidate` both depend on the rest staying zeroed.
-  auto candidate = std::make_unique<IvEvStoreState>();
+  // Non-throwing new (see encodeIvEvStoreFile()'s matching comment) - a
+  // failed allocation must fail this decode gracefully, not crash the
+  // device. `new (std::nothrow) T()` value-initializes T on success just
+  // like std::make_unique<T>() did, so every entry still starts zeroed.
+  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState());
+  if (!candidate) return false;
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     std::memcpy(entryBytes.data(), data + POKEMON_IVEV_HEADER_BYTES + index * POKEMON_IVEV_ENTRY_BYTES,

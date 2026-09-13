@@ -6,6 +6,7 @@
 #include <Logging.h>
 
 #include <memory>
+#include <new>
 
 namespace pokemon {
 namespace {
@@ -48,7 +49,18 @@ bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& output
   // stateA/stateB, decodeIvEvStoreFile()'s own candidate), was large enough
   // to overflow a real device's task stack - confirmed via a field crash
   // report symbolized back to this exact call chain.
-  auto bytes = std::make_unique<IvEvStoreFileBytes>();
+  // Non-throwing new, not std::make_unique - a plain `new` failing to find
+  // ~14KB throws std::bad_alloc, and nothing in this codebase catches
+  // exceptions, so it would propagate to std::terminate()/abort() and
+  // crash the device instead of just failing this one read (confirmed via
+  // a second field crash report, once heap pressure during rendering made
+  // an allocation in this call chain fail).
+  std::unique_ptr<IvEvStoreFileBytes> bytes(new (std::nothrow) IvEvStoreFileBytes());
+  if (!bytes) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory reading %s", path);
+    file.close();
+    return false;
+  }
   const bool readOk = readExact(file, bytes->data(), static_cast<size_t>(fileSize));
   file.close();
   if (!readOk) {
@@ -72,8 +84,16 @@ void PokemonIvEvStore::load() const {
   // decodeIvEvStoreFile() need at the nested call depths this function
   // reaches, was enough to overflow a real device's task stack (confirmed
   // via a field crash report symbolized back to exactly this function).
-  auto stateA = std::make_unique<IvEvStoreState>();
-  auto stateB = std::make_unique<IvEvStoreState>();
+  // Non-throwing new, not std::make_unique - see inspectSlot()'s matching
+  // comment. On failure we just stay in the already-set fresh-install/empty
+  // state above instead of crashing; a future call retries once more heap
+  // is free.
+  std::unique_ptr<IvEvStoreState> stateA(new (std::nothrow) IvEvStoreState());
+  std::unique_ptr<IvEvStoreState> stateB(new (std::nothrow) IvEvStoreState());
+  if (!stateA || !stateB) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory loading IV/EV store, staying empty");
+    return;
+  }
   uint32_t sequenceA = 0;
   uint32_t sequenceB = 0;
   const bool readyA = inspectSlot(STORE_PATH_A, *stateA, sequenceA);
@@ -100,7 +120,14 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
   // function reaches similarly deep nested call depths (encode, then
   // write, then inspectSlot -> decode again to verify) that overflowed a
   // real device's task stack.
-  auto bytes = std::make_unique<IvEvStoreFileBytes>();
+  // Non-throwing new, not std::make_unique - see inspectSlot()'s matching
+  // comment; a failed allocation here must fail this write attempt, not
+  // crash the device.
+  std::unique_ptr<IvEvStoreFileBytes> bytes(new (std::nothrow) IvEvStoreFileBytes());
+  if (!bytes) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory encoding IV/EV store");
+    return false;
+  }
   size_t size = 0;
   if (!encodeIvEvStoreFile(state, nextSequence, *bytes, size)) return false;
 
@@ -118,7 +145,15 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
     return false;
   }
 
-  auto verified = std::make_unique<IvEvStoreState>();
+  // Free bytes (~14KB) before allocating verified (~16KB) rather than
+  // holding both at once - lowers the peak concurrent heap this function
+  // needs, on top of failing gracefully (below) if the heap is tight.
+  bytes.reset();
+  std::unique_ptr<IvEvStoreState> verified(new (std::nothrow) IvEvStoreState());
+  if (!verified) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory verifying IV/EV store write");
+    return false;
+  }
   uint32_t verifiedSequence = 0;
   if (!inspectSlot(destinationPath, *verified, verifiedSequence) || verifiedSequence != nextSequence ||
       !(*verified == state)) {
@@ -141,14 +176,28 @@ bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
   // exactly this line) - a reminder to grep the whole file for every
   // IvEvStoreState/IvEvStoreFileBytes local, not just the ones already
   // known about.
-  auto candidate = std::make_unique<IvEvStoreState>(state_);
+  // Non-throwing new, not std::make_unique - see inspectSlot()'s matching
+  // comment. A third field crash report showed even this heap allocation
+  // can itself fail (and, un-guarded against throwing, crash the device)
+  // when the heap is under pressure elsewhere (e.g. mid-render) - failing
+  // this one upsert gracefully is the correct behavior, matching how the
+  // caller (PokemonService::ensureIvEv) already treats a `false` return.
+  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(state_));
+  if (!candidate) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory upserting IV/EV entry");
+    return false;
+  }
   if (!pokemon::upsertIvEvEntry(*candidate, entry)) return false;
   return writeState(*candidate);
 }
 
 bool PokemonIvEvStore::reset() {
   if (!loaded_) load();
-  auto empty = std::make_unique<IvEvStoreState>();
+  std::unique_ptr<IvEvStoreState> empty(new (std::nothrow) IvEvStoreState());
+  if (!empty) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory resetting IV/EV store");
+    return false;
+  }
   return writeState(*empty);
 }
 
