@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.1] - 2026-09-13
+
+### Fixed
+
+- Fixed a crash on real devices when loading or saving a Pokémon's Individual/Effort Values - the IV/EV store was using tens of kilobytes of stack space per call, enough to overflow the device's task stack.
+
 ## [0.18.0] - 2026-09-13
 
 ### Fixed
