@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.6] - 2026-09-13
+
+### Fixed
+
+- Closed a narrow gap `0.18.5` left open: if loading a corrupted IV/EV save file ever failed partway through, the in-memory copy it was decoding into could end up part old data/part new data instead of being left completely untouched.
+
 ## [0.18.5] - 2026-09-13
 
 ### Changed
