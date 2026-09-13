@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.5] - 2026-09-13
+
+### Changed
+
+- Reduced how much memory the IV/EV store needs at once when saving/loading, on top of `0.18.4`'s stability fix - lowers the odds of that save ever failing in the first place while other things (like drawing the Party screen) are also competing for memory.
+
 ## [0.18.4] - 2026-09-13
 
 ### Fixed
