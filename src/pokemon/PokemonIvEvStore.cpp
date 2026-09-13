@@ -135,14 +135,21 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
 
 bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
   if (!loaded_) load();
-  IvEvStoreState candidate = state_;
-  if (!pokemon::upsertIvEvEntry(candidate, entry)) return false;
-  return writeState(candidate);
+  // Heap-allocated, not a stack local copy of state_ - see load()'s
+  // matching comment. This one was missed in the first pass at this fix
+  // (found via a second real-device crash report, symbolized back to
+  // exactly this line) - a reminder to grep the whole file for every
+  // IvEvStoreState/IvEvStoreFileBytes local, not just the ones already
+  // known about.
+  auto candidate = std::make_unique<IvEvStoreState>(state_);
+  if (!pokemon::upsertIvEvEntry(*candidate, entry)) return false;
+  return writeState(*candidate);
 }
 
 bool PokemonIvEvStore::reset() {
   if (!loaded_) load();
-  return writeState(IvEvStoreState{});
+  auto empty = std::make_unique<IvEvStoreState>();
+  return writeState(*empty);
 }
 
 PokemonIvEvStore& devicePokemonIvEvStore() {
