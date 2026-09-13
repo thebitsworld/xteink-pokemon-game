@@ -4,8 +4,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <memory>
-#include <new>
 
 namespace pokemon {
 namespace {
@@ -125,40 +123,37 @@ bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, I
                          size_t& outputSize) {
   if (sequence == 0 || !validateIvEvStoreState(state)) return false;
   const size_t count = ivEvEntryCount(state);
-  // Heap-allocated rather than a stack local: at POKEMON_IVEV_MAX_ENTRIES
-  // (1024) this is ~14KB, which combined with the same-sized scratch buffers
-  // this function's own callers (PokemonIvEvStore.cpp) already need at
-  // nested call depths was large enough to overflow a real device's task
-  // stack (confirmed via a field crash report - see docs/development's
-  // roadmap addendum).
-  // Non-throwing new, not std::make_unique: a plain `new` that fails to
-  // find ~14KB throws std::bad_alloc, and nothing in this codebase catches
-  // exceptions - that propagates to std::terminate()/abort() and crashes
-  // the whole device (confirmed via a second field crash report, once heap
-  // pressure during rendering made this allocation fail). Failing this one
-  // encode attempt gracefully (the caller already treats `false` as a
-  // normal, retryable failure) is far better than a hard device crash.
-  std::unique_ptr<IvEvStoreFileBytes> candidate(new (std::nothrow) IvEvStoreFileBytes());
-  if (!candidate) return false;
-  (*candidate)[0] = 'P';
-  (*candidate)[1] = 'K';
-  (*candidate)[2] = 'I';
-  (*candidate)[3] = 'V';
-  (*candidate)[4] = POKEMON_IVEV_STORE_VERSION;
-  write16(candidate->data(), 5, static_cast<uint16_t>(count));
-  write32(candidate->data(), 7, sequence);
+  // Writes directly into the caller-provided `output` rather than building
+  // a second, same-sized local first: an earlier fix already had this
+  // function heap-allocate its own candidate buffer to get it off the
+  // stack (a real field crash traced to these buffers' combined stack
+  // depth), but that meant `output` (already heap-allocated by the caller,
+  // see PokemonIvEvStore.cpp's writeState()) and this function's own
+  // candidate were BOTH alive at once - doubling the peak heap this write
+  // path needs, which is exactly what later made the allocation itself
+  // start failing under real heap pressure (a second field crash, this
+  // time an uncaught std::bad_alloc). Writing straight into `output`
+  // removes this function's own allocation entirely. A failed validation/
+  // entry-encode below leaves `output` partially written, which is
+  // harmless: every caller only reads it after this function returns true.
+  output[0] = 'P';
+  output[1] = 'K';
+  output[2] = 'I';
+  output[3] = 'V';
+  output[4] = POKEMON_IVEV_STORE_VERSION;
+  write16(output.data(), 5, static_cast<uint16_t>(count));
+  write32(output.data(), 7, sequence);
 
-  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, candidate->data(), POKEMON_IVEV_HEADER_BYTES);
+  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, output.data(), POKEMON_IVEV_HEADER_BYTES);
   size_t offset = POKEMON_IVEV_HEADER_BYTES;
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     if (!encodeIvEvEntry(state.entries[index], entryBytes)) return false;
-    std::memcpy(candidate->data() + offset, entryBytes.data(), entryBytes.size());
+    std::memcpy(output.data() + offset, entryBytes.data(), entryBytes.size());
     crc = updateIvEvStoreCrc32(crc, entryBytes.data(), entryBytes.size());
     offset += POKEMON_IVEV_ENTRY_BYTES;
   }
-  write32(candidate->data(), offset, finishIvEvStoreCrc32(crc));
-  output = *candidate;
+  write32(output.data(), offset, finishIvEvStoreCrc32(crc));
   outputSize = offset + POKEMON_IVEV_FILE_CRC_BYTES;
   return true;
 }
@@ -179,25 +174,25 @@ bool decodeIvEvStoreFile(const uint8_t* data, const size_t size, IvEvStoreState&
   const uint32_t actualCrc = finishIvEvStoreCrc32(updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, data, payloadSize));
   if (expectedCrc != actualCrc) return false;
 
-  // Heap-allocated (see encodeIvEvStoreFile()'s matching comment) - at
-  // POKEMON_IVEV_MAX_ENTRIES (1024) entries this is ~16KB, and this
-  // function is itself called from within PokemonIvEvStore.cpp's own
-  // large-buffer call chain, so keeping it off the stack is what actually
-  // fixes the real device crash, not just a defensive precaution.
-  // Non-throwing new (see encodeIvEvStoreFile()'s matching comment) - a
-  // failed allocation must fail this decode gracefully, not crash the
-  // device. `new (std::nothrow) T()` value-initializes T on success just
-  // like std::make_unique<T>() did, so every entry still starts zeroed.
-  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState());
-  if (!candidate) return false;
+  // Writes directly into the caller-provided `output` rather than building
+  // a second, same-sized (~16KB) local first - see encodeIvEvStoreFile()'s
+  // matching comment for why an extra internal copy on top of the buffer
+  // the caller (PokemonIvEvStore.cpp) already heap-allocates is itself a
+  // real crash risk, not just wasteful. `output` may already hold stale
+  // data from a previous decode into the same buffer, so every entry past
+  // `count` is explicitly cleared below rather than relying on it starting
+  // zeroed (which std::make_unique<T>() used to guarantee for free, back
+  // when this function allocated its own candidate).
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     std::memcpy(entryBytes.data(), data + POKEMON_IVEV_HEADER_BYTES + index * POKEMON_IVEV_ENTRY_BYTES,
                 entryBytes.size());
-    if (!decodeIvEvEntry(entryBytes, candidate->entries[index])) return false;
+    if (!decodeIvEvEntry(entryBytes, output.entries[index])) return false;
   }
-  if (!validateIvEvStoreState(*candidate)) return false;
-  output = *candidate;
+  for (size_t index = count; index < output.entries.size(); ++index) {
+    output.entries[index] = IvEvEntry{};
+  }
+  if (!validateIvEvStoreState(output)) return false;
   sequence = candidateSequence;
   return true;
 }
