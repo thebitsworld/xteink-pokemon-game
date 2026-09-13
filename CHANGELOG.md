@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.2] - 2026-09-13
+
+### Fixed
+
+- Fixed a second real-device crash in the same IV/EV store area that `0.18.1` missed - saving a Pokémon's IV/EV data (not just loading it) could still overflow the device's task stack.
+
 ## [0.18.1] - 2026-09-13
 
 ### Fixed
