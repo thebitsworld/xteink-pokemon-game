@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.18.3] - 2026-09-13
+
+### Fixed
+
+- Fixed a third real-device crash in the IV/EV store: `0.18.1`/`0.18.2` moved its large buffers off the stack and onto the heap, but didn't handle the heap running low (e.g. while rendering) - an allocation failure there could still crash the device instead of just failing that one save/load attempt gracefully.
+
 ## [0.18.2] - 2026-09-13
 
 ### Fixed
