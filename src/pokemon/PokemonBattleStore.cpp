@@ -172,9 +172,16 @@ bool PokemonBattleStore::upsertEntry(const BattleRecordEntry& entry) {
 bool PokemonBattleStore::upsertEntries(const std::span<const BattleRecordEntry> entries) {
   if (!loaded_) load();
   BattleStoreState candidate = state_;
+  // Skip past (rather than abort on) any single entry that fails validation
+  // - one corrupt/invalid entry must not discard every other, otherwise-good
+  // entry in the same batch (round 3 audit bug 2.7; this regressed
+  // healPartyOnRead() specifically, where one bad persisted entry used to
+  // silently stop healing the entire party on every checkpoint, forever).
+  bool anyApplied = false;
   for (const BattleRecordEntry& entry : entries) {
-    if (!pokemon::upsertBattleEntry(candidate, entry)) return false;
+    if (pokemon::upsertBattleEntry(candidate, entry)) anyApplied = true;
   }
+  if (!anyApplied) return false;
   return writeState(candidate);
 }
 

@@ -38,9 +38,11 @@ class PokemonBattleStore {
   // Applies every entry to a single candidate state, then writes it once -
   // one file rewrite+verify total instead of one per entry. Used by
   // PokemonService::healPartyOnRead() so healing a full 6-member party
-  // costs one write instead of up to 6. Same all-or-nothing semantics as
-  // upsertEntry(): if any entry fails validation, nothing is written and
-  // the in-memory state/on-disk files are untouched.
+  // costs one write instead of up to 6. Unlike upsertEntry(), this is
+  // best-effort per entry, not all-or-nothing: an entry that fails
+  // validation is skipped rather than aborting the whole batch, so one bad
+  // entry can't silently discard every other, otherwise-good one. Returns
+  // false (nothing written) only if NOT ONE entry could be applied.
   bool upsertEntries(std::span<const BattleRecordEntry> entries);
   bool removeEntry(uint32_t recordId);
   // Writes an empty state (same double-buffer commit as upsertEntry/

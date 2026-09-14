@@ -481,6 +481,35 @@ void applyBattleBoostItemRejectsAnUnknownItemId() {
   CHECK(!pokemon::applyBattleBoostItem(combatant, 11));  // Potion - not a battle-boost item at all
 }
 
+void battleBoostItemWouldApplyMatchesApplyWithoutMutating() {
+  // battleBoostItemWouldApply() exists so a caller can confirm an item
+  // would do something BEFORE spending it (round 3 audit bug 2.5) - it
+  // must agree with applyBattleBoostItem()'s own applicability check in
+  // every case, and must never itself change the combatant.
+  BattleCombatant combatant{};
+  CHECK(pokemon::battleBoostItemWouldApply(combatant, pokemon::ITEM_X_ATTACK));
+  CHECK(combatant.attackStage == 0);  // unmutated - only checked, not applied
+  CHECK(pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_ATTACK));
+  CHECK(combatant.attackStage == 1);
+
+  combatant.attackStage = 6;
+  CHECK(!pokemon::battleBoostItemWouldApply(combatant, pokemon::ITEM_X_ATTACK));  // already at the +6 cap
+  CHECK(!pokemon::applyBattleBoostItem(combatant, pokemon::ITEM_X_ATTACK));
+
+  BattleCombatant guardSpecUser{};
+  CHECK(pokemon::battleBoostItemWouldApply(guardSpecUser, pokemon::ITEM_GUARD_SPEC));
+  CHECK(!guardSpecUser.guardSpecActive);  // unmutated
+  guardSpecUser.guardSpecActive = true;
+  CHECK(!pokemon::battleBoostItemWouldApply(guardSpecUser, pokemon::ITEM_GUARD_SPEC));  // already active
+
+  BattleCombatant direHitUser{};
+  CHECK(pokemon::battleBoostItemWouldApply(direHitUser, pokemon::ITEM_DIRE_HIT));
+  direHitUser.direHitActive = true;
+  CHECK(!pokemon::battleBoostItemWouldApply(direHitUser, pokemon::ITEM_DIRE_HIT));  // already active
+
+  CHECK(!pokemon::battleBoostItemWouldApply(combatant, 11));  // Potion - not a battle-boost item at all
+}
+
 void speedStageCanFlipWhichSideActsFirst() {
   // Bulbasaur (base Speed 45) is normally slower than Charmander (65) at the
   // same level, so Charmander acts first and its Ember faints a 1-HP
@@ -1024,18 +1053,21 @@ void selfDestructHalvesDefendersDefenseForThisHit() {
   CHECK(expected > withoutHalving);
 }
 
-void selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget() {
+void selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTargetAndCountsAsAWin() {
   // Both the user (always, from using the move) and the low-level, low-HP
-  // target (from the hit itself) faint the same turn - stepBattle() must
-  // report this via the same "simultaneous KO -> OpponentWon" convention
-  // finishTurn() already uses for the equivalent end-of-turn case, not
-  // misreport it as a plain PlayerWon.
+  // target (from the hit itself) faint the same turn. Regression test for
+  // round 3 audit bug 2.4: this mid-turn simultaneous KO was directly
+  // caused by the PLAYER's own action, so - unlike finishTurn()'s
+  // end-of-turn tie, where genuinely neither side "won" (a shared status/
+  // Leech Seed tick) - it must count as a win, not a loss: real Gen 1
+  // resolves a mutual KO in favor of whoever's attack caused it, and the
+  // UI must not force a switch/gym-loss against an opponent already at 0 HP.
   BattleCombatant charmander = makeCombatant(4, 100, {153});  // Explosion
   BattleCombatant bulbasaur = makeCombatant(1, 2, {33});
   const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
   CHECK(charmander.currentHp == 0);
   CHECK(bulbasaur.currentHp == 0);
-  CHECK(result.outcome == pokemon::BattleOutcome::OpponentWon);
+  CHECK(result.outcome == pokemon::BattleOutcome::PlayerWon);
 }
 
 void damagingMoveWithAilmentDoesNotInflictItAgainstAnImmuneType() {
@@ -1764,6 +1796,7 @@ int main() {
   guardSpecDoesNotBlockSelfBuffingStatMoves();
   direHitItemActivatesOnceAndRaisesCritRatioToTheHighTier();
   applyBattleBoostItemRejectsAnUnknownItemId();
+  battleBoostItemWouldApplyMatchesApplyWithoutMutating();
   speedStageCanFlipWhichSideActsFirst();
   accuracyStageLoweringCanCauseAMissThatWouldOtherwiseHit();
   evasionStageRaisingCanCauseAMissThatWouldOtherwiseHit();
@@ -1800,7 +1833,7 @@ int main() {
   drainMoveHealsHalfTheDamageDealtAndCapsAtMaxHp();
   selfDestructMoveFaintsTheUserRegardlessOfHitOrMiss();
   selfDestructHalvesDefendersDefenseForThisHit();
-  selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget();
+  selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTargetAndCountsAsAWin();
   damagingMoveWithAilmentDoesNotInflictItAgainstAnImmuneType();
   statusMoveWithAilmentRespectsTypeImmunity();
   twoTurnMoveChargesThenReleasesOnTheFollowingTurn();

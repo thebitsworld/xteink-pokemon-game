@@ -527,6 +527,16 @@ bool PokemonActivity::refreshSnapshot() {
     showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
     return false;
   }
+  // Keep focusedRecord_ (cached at its 3 assignment sites purely to avoid
+  // re-reading the same Pokemon's record on every row/frame - see its doc
+  // comment in the header) from ever going stale across a mutation. Without
+  // this, e.g. toggling Evolution prompts off then back on while staying on
+  // Screen::Actions read the pre-toggle cached flags both times, so the
+  // second toggle silently no-opped instead of turning prompts back on -
+  // ignoring the read failure here on purpose: if it fails, the cache just
+  // keeps its previous (already slightly stale, no worse than before this
+  // fix existed) contents rather than failing the whole refresh over it.
+  if (focusedRecordId_ != 0) service_.readRecord(focusedRecordId_, focusedRecord_);
   return true;
 }
 
@@ -1792,6 +1802,15 @@ void PokemonActivity::activate() {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
           return;
         }
+        // Same gate resolveEncounter() itself enforces on a successful catch
+        // (party full AND Box at its cap) - checked here too so a throw
+        // never spends a ball/awards XP only to find out afterward that
+        // there was nowhere to put the catch (round 3 audit bug 2.6).
+        if (snapshot_.partyCount == pokemon::PARTY_SIZE &&
+            snapshot_.ownedCount - snapshot_.partyCount >= pokemon::PC_BOX_MAX_RECORDS) {
+          showMessage(tr(STR_POKEMON_BOX_FULL), Screen::Battle);
+          return;
+        }
         setScreen(Screen::BattleBalls);
         return;
       }
@@ -1884,7 +1903,12 @@ void PokemonActivity::activate() {
         // can't buff a benched Pokemon).
         const uint8_t itemId =
             extraItemIdAt(snapshot_.state, static_cast<size_t>(selected_ - realItemCount), isBattleUsableCategory);
-        if (itemId == 0 || !pokemon::applyBattleBoostItem(battlePlayer_, itemId)) {
+        // Confirm applicability AND consume the item before mutating
+        // battlePlayer_ - applying the buff first and only checking
+        // consumeBagItem() afterward let a failed SD write leave the effect
+        // applied with the item still in the bag, stackable for free on
+        // every retry (round 3 audit bug 2.5).
+        if (itemId == 0 || !pokemon::battleBoostItemWouldApply(battlePlayer_, itemId)) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::BattleBag);
           return;
         }
@@ -1892,6 +1916,7 @@ void PokemonActivity::activate() {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BattleBag);
           return;
         }
+        pokemon::applyBattleBoostItem(battlePlayer_, itemId);
         if (!refreshSnapshot()) return;
         const pokemon::ItemData* item = pokemon::itemData(itemId);
         char usedLine[80];

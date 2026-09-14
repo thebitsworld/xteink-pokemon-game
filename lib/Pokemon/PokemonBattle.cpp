@@ -1538,6 +1538,25 @@ bool raiseStageByOne(int8_t& stage) {
 }
 }  // namespace
 
+bool battleBoostItemWouldApply(const BattleCombatant& combatant, const uint8_t itemId) {
+  switch (itemId) {
+    case ITEM_X_ATTACK:
+      return combatant.attackStage < 6;
+    case ITEM_X_DEFENSE:
+      return combatant.defenseStage < 6;
+    case ITEM_X_SPEED:
+      return combatant.speedStage < 6;
+    case ITEM_X_SPECIAL:
+      return combatant.specialStage < 6;
+    case ITEM_GUARD_SPEC:
+      return !combatant.guardSpecActive;
+    case ITEM_DIRE_HIT:
+      return !combatant.direHitActive;
+    default:
+      return false;
+  }
+}
+
 bool applyBattleBoostItem(BattleCombatant& combatant, const uint8_t itemId) {
   switch (itemId) {
     case ITEM_X_ATTACK:
@@ -1624,14 +1643,19 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
 
   if (playerFirst) {
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
-    // Explosion/Self-Destruct can now faint the attacker too - check for a
-    // simultaneous KO before either side-specific branch below, matching
-    // finishTurn()'s own "wild Pokemon still standing in spirit" convention
-    // for the equivalent end-of-turn case.
+    // Explosion/Self-Destruct, or recoil, can now faint the attacker too -
+    // check for a simultaneous KO before either side-specific branch below.
+    // Unlike finishTurn()'s end-of-turn tie (genuinely nobody's move - a
+    // shared status/Leech Seed tick), THIS simultaneous KO was directly
+    // caused by the player's own action, so it counts as a win: real Gen 1
+    // resolves a mutual KO in favor of whoever's attack caused it, and the
+    // battle must not force a switch/gym-loss against an opponent that's
+    // already at 0 HP (see docs/development/pokemon-gen1-audit-round3.md
+    // bug 2.4 for the UI-side consequences of getting this wrong).
     if (player.currentHp == 0 && opponent.currentHp == 0) {
       faintCombatant(player, result.player.event);
       faintCombatant(opponent, result.opponent.event);
-      result.outcome = BattleOutcome::OpponentWon;
+      result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     if (opponent.currentHp == 0) {

@@ -369,6 +369,15 @@ void resetBattleStages(BattleCombatant& combatant);
 // active on this combatant) - the same "NotApplicable" meaning
 // UseConsumableOutcome::NotApplicable carries for every other item category.
 bool applyBattleBoostItem(BattleCombatant& combatant, uint8_t itemId);
+// A read-only version of the same applicability check applyBattleBoostItem()
+// does internally, without mutating anything - lets a caller confirm an
+// item would actually do something BEFORE spending it (consumeBagItem()),
+// rather than mutating the live combatant first and only finding out
+// afterward whether the item could be safely deducted (see round 3 audit
+// bug 2.5 - applying before confirming consumption let a failed SD write
+// leave the buff applied with the item still in the bag, stackable for
+// free on every retry).
+bool battleBoostItemWouldApply(const BattleCombatant& combatant, uint8_t itemId);
 
 // One combat side's result for a single simultaneous turn: which side acted,
 // what happened, and whether either combatant fainted or was cured by the

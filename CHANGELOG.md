@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.20.3] - 2026-09-14
+
+### Fixed
+
+- Fixed a Pokémon's cached party-screen data (Moveset/TM-HM/PP Up) sometimes not refreshing right away after a move was taught, forgotten, or a PP Up used.
+- Raised the individual-stats storage limit from 512 to 518 so it always covers the full 512-Pokémon Box plus a full 6-member party at the same time, instead of undercounting by a party's worth of Pokémon.
+- A battle that ended in a simultaneous knockout caused by your own move (like Self-Destruct/Explosion) now correctly counts as a win instead of a loss.
+- Fixed a rare case where an X Item or Guard Spec./Dire Hit could be applied for free if the save failed right after using it.
+- The "throw a Ball" option in battle now correctly checks whether your Box has room before letting you spend a Ball, instead of only checking after.
+- Healing your whole party while reading no longer silently stops for everyone if just one Pokémon's saved data was invalid - the rest still get healed.
+
 ## [0.20.2] - 2026-09-14
 
 ### Fixed
