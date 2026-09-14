@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.19.1] - 2026-09-14
+
+### Fixed
+
+- Fixed a battle softlock: a Pokémon using Fly or Dig with exactly 1 PP left on that move could get stuck permanently mid-air/underground after using its last PP to charge - unable to attack, unable to be hit, and unable to Switch, use an item, Run, or even back out of the battle screen. Landing the attack now works correctly no matter how little PP was left when it started.
+
 ## [0.19.0] - 2026-09-14
 
 ### Changed
