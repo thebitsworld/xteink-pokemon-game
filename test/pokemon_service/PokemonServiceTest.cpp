@@ -296,6 +296,60 @@ TEST(PokemonService, DepositingAPokemonFreesItsBattleStoreSlot) {
   EXPECT_EQ(battleStore.findEntry(1), nullptr);
 }
 
+TEST(PokemonService, ReleasePokemonRemovesTheRecordAndFreesItsSideStoreSlots) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 4), false);  // Box record, not party
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  // Give recordId 2 real battle-store and IV/EV entries, matching a Pokemon
+  // that's actually fought and had its IV/EV rolled at least once.
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(2, entry), pokemon::ServiceStatus::Ok);
+  ASSERT_NE(battleStore.findEntry(2), nullptr);
+  service.ensureIvEv(2);
+  ASSERT_NE(ivEvStore.findEntry(2), nullptr);
+
+  ASSERT_EQ(service.releasePokemon(2), pokemon::ServiceStatus::Ok);
+  pokemon::PokemonRecord loaded{};
+  EXPECT_FALSE(store.readRecord(2, loaded));
+  EXPECT_EQ(battleStore.findEntry(2), nullptr);
+  EXPECT_EQ(ivEvStore.findEntry(2), nullptr);
+
+  // Stays in the Pokedex forever, matching every mainline game.
+  pokemon::PokemonSnapshot snapshot{};
+  ASSERT_EQ(service.loadSnapshot(snapshot), pokemon::ServiceStatus::Ok);
+  EXPECT_TRUE(pokemon::isSpeciesMarked(snapshot.state.seenSpecies, 4));
+  EXPECT_TRUE(pokemon::isSpeciesMarked(snapshot.state.caughtSpecies, 4));
+}
+
+TEST(PokemonService, ReleasePokemonRejectsAPartyMember) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.releasePokemon(1), pokemon::ServiceStatus::NotApplicable);
+  pokemon::PokemonRecord stillThere{};
+  EXPECT_TRUE(store.readRecord(1, stillThere));
+}
+
+TEST(PokemonService, ReleasePokemonRejectsAnUnknownRecordId) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.releasePokemon(999), pokemon::ServiceStatus::NotFound);
+}
+
 TEST(PokemonService, RejectsWithdrawalWhenThePartyIsFull) {
   Storage.clear();
   pokemon::PokemonStore store;
@@ -342,6 +396,47 @@ TEST(PokemonService, ResolvesEncounterCatchThenAllowsNickname) {
   EXPECT_EQ(snapshot.state.dashboardNotice, pokemon::DashboardNotice::None);
   EXPECT_EQ(snapshot.party[1].speciesId, 133U);
   EXPECT_STREQ(snapshot.party[1].nickname.data(), "Nova");
+}
+
+TEST(PokemonService, ResolveEncounterBlockedOnlyWhenPartyAndBoxAreBothFull) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // recordId 1, party slot 0 (1/6)
+  uint32_t nextId = 2;
+  for (uint8_t i = 1; i < pokemon::PARTY_SIZE - 1U; ++i) {  // fill the party to 5/6
+    appendOwnedPokemon(store, caughtPokemon(nextId++, 4), true);
+  }
+  for (uint32_t i = 0; i < pokemon::PC_BOX_MAX_RECORDS; ++i) {  // fill the Box to its own cap
+    appendOwnedPokemon(store, caughtPokemon(nextId++, 4), false);
+  }
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  // Party still has one empty slot (5/6) - a full Box must not block this
+  // catch, since it goes into the party, not the Box.
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Encounter;
+  state.pendingEvents[0].speciesId = 133;
+  state.pendingEvents[0].level = 12;
+  state.pendingEvents[0].gender = pokemon::Gender::Female;
+  ASSERT_TRUE(store.commit(state));
+  uint32_t caughtRecordId = 0;
+  ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId), pokemon::ServiceStatus::Ok);
+  EXPECT_NE(caughtRecordId, 0U);
+
+  // Now the party is full too (6/6) - the next catch has nowhere to go.
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Encounter;
+  state.pendingEvents[0].speciesId = 133;
+  state.pendingEvents[0].level = 12;
+  state.pendingEvents[0].gender = pokemon::Gender::Female;
+  ASSERT_TRUE(store.commit(state));
+  caughtRecordId = 0;
+  EXPECT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId),
+            pokemon::ServiceStatus::BoxFull);
+  EXPECT_EQ(caughtRecordId, 0U);
 }
 
 TEST(PokemonService, ResolvesEncounterPassWithoutCreatingARecord) {

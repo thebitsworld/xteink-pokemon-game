@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-14
+
+### Added
+
+- The PC Box can now hold up to 512 Pokémon at once, shown as a count in the Box screen's own title (e.g. "PC Box (487/512)"). Select a Box Pokémon's Release action to permanently free up space for it - it stays recorded in your Pokédex, but nothing else about it can be recovered afterward, so it asks for confirmation first.
+- If the Box is full and your party has no room either, catching a new Pokémon is blocked with a message asking you to release one first, instead of silently failing.
+
+### Changed
+
+- Reduced the game's memory use for tracking each Pokémon's individual stats (IVs/EVs), freeing up RAM for smoother performance elsewhere.
+- The party screen's own action list (Moveset, TM/HM teaching, PP Up) responds a little faster - it no longer re-reads the same Pokémon's data from the SD card on every screen redraw.
+
 ## [0.19.3] - 2026-09-14
 
 ### Changed

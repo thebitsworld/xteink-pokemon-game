@@ -258,6 +258,55 @@ void replacementChangesOnlyTheRequestedRecord() {
   CHECK(loadedState.lifetimeMinutes == 15);
 }
 
+void removeMutationShrinksRecordCountAndLeavesOtherRecordsIntact() {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
+  const pokemon::PokemonRecord pikachu = starterPikachu();
+  const pokemon::PokemonRecord abra = caughtAbra(2);
+  const pokemon::PokemonRecord bulbasaur = caughtBulbasaur(3);
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = pikachu.recordId;
+  for (const pokemon::PokemonRecord& record : {pikachu, abra, bulbasaur}) {
+    CHECK(pokemon::markSpecies(state.seenSpecies, record.speciesId));
+    CHECK(pokemon::markSpecies(state.caughtSpecies, record.speciesId));
+    CHECK(store.commit(state, {record.recordId, record, pokemon::RecordMutationKind::Append}));
+  }
+  CHECK(store.recordCount() == 3);
+
+  // Release the middle (Box, not party) record - abra.
+  const pokemon::RecordMutation removeMutation{abra.recordId, {}, pokemon::RecordMutationKind::Remove};
+  CHECK(store.commit(state, removeMutation));
+  CHECK(store.recordCount() == 2);
+
+  pokemon::PokemonRecord loaded{};
+  CHECK(!store.readRecord(abra.recordId, loaded));
+  CHECK(store.readRecord(pikachu.recordId, loaded));
+  CHECK(loaded == pikachu);
+  CHECK(store.readRecord(bulbasaur.recordId, loaded));
+  CHECK(loaded == bulbasaur);
+
+  std::array<pokemon::PokemonRecord, 2> page{};
+  size_t count = 0;
+  CHECK(store.readPcPage(pokemon::PcOrder::CatchDate, 0, page, count));
+  CHECK(count == 1);  // only bulbasaur is left in the Box (pikachu is in the party)
+  CHECK(page[0] == bulbasaur);
+
+  // A second commit (round-trip through a reopened store) must still see
+  // the shrunk, correct record set - the header's recordCount itself must
+  // have actually decremented on disk, not just in the in-memory instance.
+  pokemon::PokemonStore reopened;
+  CHECK(reopened.begin() == pokemon::StoreBeginResult::Ready);
+  CHECK(reopened.recordCount() == 2);
+  CHECK(!reopened.readRecord(abra.recordId, loaded));
+
+  // Removing a record that doesn't exist fails outright, rather than
+  // silently succeeding as a no-op.
+  const pokemon::RecordMutation removeMissing{999U, {}, pokemon::RecordMutationKind::Remove};
+  CHECK(!store.commit(state, removeMissing));
+  CHECK(store.recordCount() == 2);
+}
+
 void pcPagesExcludeThePartyAndSupportAllThreeOrders() {
   Storage.clear();
   pokemon::PokemonStore store;
@@ -728,6 +777,7 @@ int main() {
   initialAppendPersistsAReadableRecord();
   laterAppendStreamsExistingRecordsIntoTheInactiveSlot();
   replacementChangesOnlyTheRequestedRecord();
+  removeMutationShrinksRecordCountAndLeavesOtherRecordsIntact();
   pcPagesExcludeThePartyAndSupportAllThreeOrders();
   largeSaveSurvivesBatchedIoAcrossMultipleBufferChunks();
   pcReadFailureIsDistinctFromAValidEmptyPage();

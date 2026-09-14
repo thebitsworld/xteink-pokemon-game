@@ -50,6 +50,9 @@ enum class CollectionAction : uint8_t {
   Withdraw = 4,
   Rename = 5,
   EvolutionPrompts = 6,
+  // Box context only (collectionActions()'s !party branch) - permanently
+  // deletes the Pokemon, see releaseRecord().
+  Release = 7,
 };
 
 struct CollectionActionSet {
@@ -61,6 +64,11 @@ enum class RecordMutationKind : uint8_t {
   None = 0,
   Append = 1,
   Replace = 2,
+  // Removes the record matching `requestedRecordId` entirely - see
+  // releaseRecord()'s doc comment. Introduced for the Release feature; every
+  // earlier mutation kind only ever added or changed a record, never
+  // deleted one.
+  Remove = 3,
 };
 
 struct RecordMutation {
@@ -81,6 +89,18 @@ bool acknowledgeMoveLearn(PokemonState& state, const PokemonRecord& record);
 bool setEvolutionPrompts(PokemonState& state, PokemonRecord& record, bool enabled, RecordMutation& mutation);
 bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, EncounterChoice choice, const char* nickname,
                       RecordMutation& mutation);
+// Releases (permanently deletes) a PC Box Pokemon - the Box-capacity
+// counterpart to catching one. Rejects (returns false, no mutation) a
+// record currently in the party - withdraw to the Box first, matching real
+// games. Any pending Evolution event for this record is silently dropped
+// (same as disabling evolution prompts already does via
+// removePendingEvolutionsForRecord()) rather than blocking the release -
+// no other PendingEventKind can reference a non-party record (Encounter
+// carries no meaningful recordId of its own, and MoveLearn only ever
+// targets the party leader, since only party members gain XP). Does NOT
+// clear seenSpecies/caughtSpecies - a released Pokemon stays in the
+// Pokedex forever, matching every mainline game.
+bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutation& mutation);
 bool resolveEvolution(PokemonState& state, PokemonRecord& record, EvolutionChoice choice, RecordMutation& mutation);
 bool useEvolutionItem(PokemonState& state, PokemonRecord& record, EvolutionItem item, RecordMutation& mutation);
 CollectionActionSet collectionActions(bool party, uint8_t partyCount);

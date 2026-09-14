@@ -28,6 +28,14 @@ class PokemonIvEvStore {
   // failure; the in-memory state and both on-disk files are left as they
   // were before the call in either case.
   bool upsertEntry(const IvEvEntry& entry);
+  // Removes one entry (same double-buffer commit as upsertEntry). Returns
+  // false if no entry with that recordId exists, or on a write failure -
+  // the in-memory state and both on-disk files are left as they were
+  // before the call either way. Called by PokemonService::releasePokemon()
+  // so a released Pokemon's slot actually frees up, not just its main-save
+  // record - otherwise the capacity problem Release exists to solve would
+  // only be half-solved.
+  bool removeEntry(uint32_t recordId);
   // Writes an empty state (same double-buffer commit as upsertEntry). Used
   // by PokemonService::reset() so a fresh game doesn't read back a previous
   // playthrough's leftover IV/EV data once record ids start over from 1.

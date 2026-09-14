@@ -1,4 +1,6 @@
 #include <cstdio>
+#include <cstring>
+#include <memory>
 
 #include "PokemonIvEvStoreCodec.h"
 
@@ -8,6 +10,18 @@ using pokemon::IvEvEntry;
 using pokemon::IvEvStoreState;
 
 int failures = 0;
+
+void write16(uint8_t* bytes, const size_t offset, const uint16_t value) {
+  bytes[offset] = static_cast<uint8_t>(value);
+  bytes[offset + 1] = static_cast<uint8_t>(value >> 8U);
+}
+
+void write32(uint8_t* bytes, const size_t offset, const uint32_t value) {
+  bytes[offset] = static_cast<uint8_t>(value);
+  bytes[offset + 1] = static_cast<uint8_t>(value >> 8U);
+  bytes[offset + 2] = static_cast<uint8_t>(value >> 16U);
+  bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
+}
 
 #define CHECK(condition)                                                                \
   do {                                                                                  \
@@ -91,7 +105,7 @@ void upsertFailsPastCapacityForAnUnseenRecordId() {
   for (uint32_t id = 1; id <= 8; ++id) {
     CHECK(pokemon::upsertIvEvEntry(state, makeEntry(id)));
   }
-  // Fill the rest of capacity quickly without 1024 individual CHECKs.
+  // Fill the rest of capacity quickly without one CHECK per entry.
   for (uint32_t id = 9; id <= pokemon::POKEMON_IVEV_MAX_ENTRIES; ++id) {
     if (!pokemon::upsertIvEvEntry(state, makeEntry(id))) {
       std::fprintf(stderr, "upsert unexpectedly failed at id=%u\n", id);
@@ -148,6 +162,64 @@ void fileRoundTripsCarriesSequenceAndDetectsCorruption() {
   pokemon::IvEvStoreFileBytes badVersion = bytes;
   badVersion[4] = pokemon::POKEMON_IVEV_STORE_VERSION + 1;
   CHECK(!pokemon::decodeIvEvStoreFile(badVersion.data(), size, decoded, sequence));
+}
+
+// Regression test for the 1024->512 cap reduction: a file written by a
+// previous build (when POKEMON_IVEV_MAX_ENTRIES was still 1024) can
+// genuinely carry more entries than this build's IvEvStoreState array has
+// room for. decodeIvEvStoreFile() must keep the first
+// POKEMON_IVEV_MAX_ENTRIES (lowest recordId) entries and drop the rest,
+// rather than rejecting the whole file as corrupt - dropping some already-
+// rolled IV/EV data is a real, accepted regression for anyone who somehow
+// exceeded the old 1024 cap before upgrading, but it must not make every
+// OTHER Pokemon's real data unreadable too.
+void decodeClampsALegacyFileWithMoreEntriesThanTheCurrentCap() {
+  constexpr uint16_t entryCount = static_cast<uint16_t>(pokemon::POKEMON_IVEV_MAX_ENTRIES + 50);
+  static_assert(entryCount <= pokemon::POKEMON_IVEV_LEGACY_MAX_ENTRIES, "test entry count must stay in range");
+
+  auto bytes = std::make_unique<pokemon::IvEvStoreFileBytes>();
+  (*bytes)[0] = 'P';
+  (*bytes)[1] = 'K';
+  (*bytes)[2] = 'I';
+  (*bytes)[3] = 'V';
+  (*bytes)[4] = pokemon::POKEMON_IVEV_STORE_VERSION;
+  write16(bytes->data(), 5, entryCount);
+  write32(bytes->data(), 7, 3);  // sequence
+
+  size_t offset = pokemon::POKEMON_IVEV_HEADER_BYTES;
+  for (uint16_t id = 1; id <= entryCount; ++id) {
+    pokemon::IvEvEntryBytes entryBytes{};
+    CHECK(pokemon::encodeIvEvEntry(makeEntry(id), entryBytes));
+    std::memcpy(bytes->data() + offset, entryBytes.data(), entryBytes.size());
+    offset += entryBytes.size();
+  }
+  const uint32_t crc = pokemon::finishIvEvStoreCrc32(
+      pokemon::updateIvEvStoreCrc32(pokemon::IVEV_STORE_CRC32_INITIAL, bytes->data(), offset));
+  write32(bytes->data(), offset, crc);
+  const size_t size = offset + pokemon::POKEMON_IVEV_FILE_CRC_BYTES;
+
+  IvEvStoreState decoded{};
+  uint32_t sequence = 0;
+  CHECK(pokemon::decodeIvEvStoreFile(bytes->data(), size, decoded, sequence));
+  CHECK(sequence == 3);
+  CHECK(pokemon::ivEvEntryCount(decoded) == pokemon::POKEMON_IVEV_MAX_ENTRIES);
+  CHECK(decoded.entries[0].recordId == 1);
+  CHECK(decoded.entries[pokemon::POKEMON_IVEV_MAX_ENTRIES - 1].recordId ==
+        static_cast<uint32_t>(pokemon::POKEMON_IVEV_MAX_ENTRIES));
+  // The highest-recordId entries (past the cap) were dropped, not kept.
+  CHECK(pokemon::findIvEvEntry(decoded, entryCount) == nullptr);
+
+  // A file that exceeds even the legacy ceiling is rejected outright, not
+  // silently clamped further - that's a genuinely oversized/corrupt file,
+  // not a "written by an older, larger-capped build" one.
+  constexpr uint16_t tooManyEntries = static_cast<uint16_t>(pokemon::POKEMON_IVEV_LEGACY_MAX_ENTRIES + 1);
+  uint8_t header[pokemon::POKEMON_IVEV_HEADER_BYTES]{'P', 'K', 'I', 'V', pokemon::POKEMON_IVEV_STORE_VERSION};
+  write16(header, 5, tooManyEntries);
+  write32(header, 7, 1);
+  IvEvStoreState rejectedOutput{};
+  uint32_t rejectedSequence = 0;
+  CHECK(!pokemon::decodeIvEvStoreFile(header, sizeof(header) + pokemon::POKEMON_IVEV_FILE_CRC_BYTES, rejectedOutput,
+                                      rejectedSequence));
 }
 
 // decodeIvEvStoreFile() writes directly into the caller's `output` (no
@@ -218,6 +290,7 @@ int main() {
   upsertKeepsAscendingOrderAndReplacesInPlace();
   upsertFailsPastCapacityForAnUnseenRecordId();
   fileRoundTripsCarriesSequenceAndDetectsCorruption();
+  decodeClampsALegacyFileWithMoreEntriesThanTheCurrentCap();
   aCrcValidButOutOfRangeIvFailsWithoutTouchingOutput();
   emptyStateEncodesToJustTheHeaderAndCrc();
   return failures == 0 ? 0 : 1;

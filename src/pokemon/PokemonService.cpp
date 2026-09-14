@@ -223,6 +223,28 @@ ServiceStatus PokemonService::withdrawPokemon(const uint32_t recordId) {
   return ServiceStatus::Ok;
 }
 
+ServiceStatus PokemonService::releasePokemon(const uint32_t recordId) {
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  PokemonRecord record{};
+  if (!store_.readRecord(recordId, record)) return ServiceStatus::NotFound;
+  RecordMutation mutation{};
+  if (!pokemon::releaseRecord(state, record, mutation)) return ServiceStatus::NotApplicable;
+  if (!store_.commit(state, mutation)) {
+    LOG_ERR("PokemonService", "Failed to release Pokemon");
+    return ServiceStatus::StorageError;
+  }
+  // Best-effort, same reasoning as depositPokemon()'s own battleStore_
+  // cleanup just above: a rare SD write failure here shouldn't undo the
+  // release itself, which already succeeded. Frees the IV/EV slot too, not
+  // just the battle-store one - otherwise Release would only solve half of
+  // the capacity problem it exists for (see PC_BOX_MAX_RECORDS's comment).
+  battleStore_.removeEntry(recordId);
+  ivEvStore_.removeEntry(recordId);
+  return ServiceStatus::Ok;
+}
+
 ServiceStatus PokemonService::loadDashboardSnapshot(PokemonDashboardSnapshot& output) {
   output = {};
   PokemonState state{};
@@ -260,6 +282,17 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
   RecordMutation mutation{};
   if (choice == EncounterChoice::Catch) {
     if (store_.recordCount() >= 1024U) return ServiceStatus::StorageError;
+    // The Box only matters once the party can't take the catch itself - a
+    // full Box never blocks catching into an empty party slot, matching
+    // every mainline game's own rule (only blocked when BOTH the party and
+    // the target storage are full).
+    uint8_t partyCount = 0;
+    for (const uint32_t partyRecordId : state.partyRecordIds) {
+      if (partyRecordId != 0) ++partyCount;
+    }
+    const bool partyFull = partyCount == PARTY_SIZE;
+    const uint32_t boxCount = store_.recordCount() - partyCount;
+    if (partyFull && boxCount >= PC_BOX_MAX_RECORDS) return ServiceStatus::BoxFull;
     mutation.requestedRecordId = store_.recordCount() + 1U;
   }
   if (!pokemon::resolveEncounter(state, leader, choice, "", mutation)) return ServiceStatus::NotApplicable;

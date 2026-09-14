@@ -103,6 +103,17 @@ bool upsertIvEvEntry(IvEvStoreState& state, const IvEvEntry& entry) {
   return true;
 }
 
+bool removeIvEvEntry(IvEvStoreState& state, const uint32_t recordId) {
+  const size_t count = ivEvEntryCount(state);
+  for (size_t index = 0; index < count; ++index) {
+    if (state.entries[index].recordId != recordId) continue;
+    for (size_t shift = index; shift + 1 < count; ++shift) state.entries[shift] = state.entries[shift + 1];
+    state.entries[count - 1] = IvEvEntry{};
+    return true;
+  }
+  return false;
+}
+
 bool validateIvEvStoreState(const IvEvStoreState& state) {
   uint32_t previousRecordId = 0;
   bool sawEmptySlot = false;
@@ -167,7 +178,7 @@ bool decodeIvEvStoreFile(const uint8_t* data, const size_t size, IvEvStoreState&
   if (data[0] != 'P' || data[1] != 'K' || data[2] != 'I' || data[3] != 'V') return false;
   if (data[4] != POKEMON_IVEV_STORE_VERSION) return false;
   const uint16_t count = read16(data, 5);
-  if (count > POKEMON_IVEV_MAX_ENTRIES) return false;
+  if (count > POKEMON_IVEV_LEGACY_MAX_ENTRIES) return false;
   const uint32_t candidateSequence = read32(data, 7);
   if (candidateSequence == 0) return false;  // 0 is reserved for "no valid slot written yet"
 
@@ -205,15 +216,28 @@ bool decodeIvEvStoreFile(const uint8_t* data, const size_t size, IvEvStoreState&
   // Every entry already proved valid above, so this pass cannot fail -
   // `output` is only ever mutated once decoding as a whole is guaranteed to
   // succeed. `output` may hold stale data from a previous decode into the
-  // same buffer, so every entry past `count` is explicitly cleared too,
+  // same buffer, so every entry past `keptCount` is explicitly cleared too,
   // rather than relying on it starting zeroed.
-  for (size_t index = 0; index < count; ++index) {
+  //
+  // `keptCount` (not `count`) bounds this pass: a file written under a
+  // higher POKEMON_IVEV_MAX_ENTRIES than this build's (see
+  // POKEMON_IVEV_LEGACY_MAX_ENTRIES's doc comment) can have more entries
+  // than `output.entries` has room for. The CRC/ordering validation above
+  // already covered the file's FULL contents (using `count`), so this isn't
+  // silently accepting a corrupt file - it's deliberately keeping only the
+  // first `keptCount` (lowest recordId, i.e. oldest) entries of an
+  // otherwise-valid one and dropping the rest, the same "doesn't crash,
+  // just re-rolls next time it's looked up" degradation
+  // PokemonService::ensureIvEv() already handles for a store that's simply
+  // full.
+  const size_t keptCount = std::min<size_t>(count, output.entries.size());
+  for (size_t index = 0; index < keptCount; ++index) {
     IvEvEntryBytes entryBytes{};
     std::memcpy(entryBytes.data(), data + POKEMON_IVEV_HEADER_BYTES + index * POKEMON_IVEV_ENTRY_BYTES,
                 entryBytes.size());
     decodeIvEvEntry(entryBytes, output.entries[index]);
   }
-  for (size_t index = count; index < output.entries.size(); ++index) {
+  for (size_t index = keptCount; index < output.entries.size(); ++index) {
     output.entries[index] = IvEvEntry{};
   }
   if (!validateIvEvStoreState(output)) return false;  // defensive backstop only, see comment above

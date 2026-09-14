@@ -39,6 +39,7 @@ class PokemonActivity final : public Activity {
     TmReplaceSlot,
     Pc,
     PcOrder,
+    PcReleaseConfirm,
     Bag,
     BagEvolution,
     BagMedicine,
@@ -155,6 +156,7 @@ class PokemonActivity final : public Activity {
   void renderPartyRowMachineCapability(int rowY, const pokemon::PokemonRecord& record);
   bool isListScreen() const;
   uint32_t selectedRecordId() const;
+  pokemon::PokemonRecord selectedRecord() const;
   static void screenBuilder(UiApp::ScreenType& screen, void* user);
   static void onRow(const freeink::ui::ActionEvent& event, void* user);
 
@@ -172,6 +174,13 @@ class PokemonActivity final : public Activity {
   uint16_t pokedexSpecies_ = 1;
   pokemon::Gender starterGender_ = pokemon::Gender::Male;
   uint32_t focusedRecordId_ = 0;
+  // Cached alongside focusedRecordId_ at every one of its 3 assignment
+  // sites (all already have the full record in RAM already - from
+  // snapshot_.party or pcPage_, not a fresh read) so the Moveset/
+  // MovesetPick/TmReplaceSlot/PpUpSlot screens don't call readRecord() once
+  // per row/frame/keypress for data that never changes while focused on the
+  // same Pokemon.
+  pokemon::PokemonRecord focusedRecord_{};
   pokemon::PokemonPromptContext nicknamePrompt_{};
   pokemon::EvolutionItem selectedItem_ = pokemon::EvolutionItem::None;
   BagCategory bagCategory_ = BagCategory::Evolution;

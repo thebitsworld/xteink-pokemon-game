@@ -38,12 +38,17 @@ bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& output
     return false;
   }
   const uint64_t fileSize = file.fileSize64();
-  if (fileSize > POKEMON_IVEV_FILE_MAX_BYTES) {
+  // Gated against the LEGACY (larger) bound, not the current
+  // POKEMON_IVEV_MAX_ENTRIES-sized one - a file written under a higher cap
+  // by a previous build must still be readable here so decodeIvEvStoreFile()
+  // gets the chance to clamp it (keep the lowest-recordId entries, drop the
+  // rest) instead of the whole slot being discarded outright as "too big."
+  if (fileSize > POKEMON_IVEV_LEGACY_FILE_MAX_BYTES) {
     LOG_ERR("PokemonIvEvStore", "IV/EV store slot larger than any valid layout, discarding %s", path);
     file.close();
     return false;
   }
-  // Heap-allocated, not a stack local - at POKEMON_IVEV_FILE_MAX_BYTES
+  // Heap-allocated, not a stack local - at POKEMON_IVEV_LEGACY_FILE_MAX_BYTES
   // (~14KB) this, combined with the same-sized buffers this function's own
   // caller/callee both need at the same time (PokemonIvEvStore::load()'s
   // stateA/stateB, decodeIvEvStoreFile()'s own candidate), was large enough
@@ -188,6 +193,19 @@ bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
     return false;
   }
   if (!pokemon::upsertIvEvEntry(*candidate, entry)) return false;
+  return writeState(*candidate);
+}
+
+bool PokemonIvEvStore::removeEntry(const uint32_t recordId) {
+  if (!loaded_) load();
+  // Heap-allocated, not a stack local copy of state_ - see upsertEntry()'s
+  // matching comment (and load()'s, for the original field-crash context).
+  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(state_));
+  if (!candidate) {
+    LOG_ERR("PokemonIvEvStore", "Out of memory removing IV/EV entry");
+    return false;
+  }
+  if (!pokemon::removeIvEvEntry(*candidate, recordId)) return false;
   return writeState(*candidate);
 }
 

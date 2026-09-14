@@ -12,6 +12,14 @@
 
 namespace pokemon {
 
+// The PC Box's own capacity - distinct from (and much smaller than)
+// PokemonStore's total-record hard ceiling of 1024 (see
+// PokemonService::resolveEncounter()'s own comment) and matched to
+// POKEMON_IVEV_MAX_ENTRIES (PokemonIvEvStoreCodec.h) so every record that
+// can exist once this cap is enforced - up to PARTY_SIZE in the party, up
+// to this many in the Box - always has room for a persisted IV/EV entry.
+constexpr uint32_t PC_BOX_MAX_RECORDS = 512;
+
 enum class TeachMoveOutcome : uint8_t {
   Learned,
   AlreadyKnown,
@@ -36,6 +44,11 @@ enum class ServiceStatus : uint8_t {
   LastPokemon,
   NotApplicable,
   StorageError,
+  // The party is full AND the PC Box is at its own PC_BOX_MAX_RECORDS cap -
+  // there's nowhere left to put a new catch. Distinct from PartyFull (an
+  // unrelated party-management error) so the UI can show a dedicated
+  // "release some Pokemon first" message instead of a generic one.
+  BoxFull,
 };
 
 struct PokemonSnapshot {
@@ -76,6 +89,12 @@ class PokemonService {
   ServiceStatus movePartyMember(uint8_t fromSlot, uint8_t toSlot);
   ServiceStatus depositPokemon(uint32_t recordId);
   ServiceStatus withdrawPokemon(uint32_t recordId);
+  // Permanently deletes a PC Box Pokemon (see pokemon::releaseRecord() for
+  // the full rejection rules - party members and, indirectly, the leader
+  // are never eligible). Also best-effort frees its battle-store and IV/EV
+  // slots. NotApplicable if it's in the party or the pure-logic layer
+  // otherwise rejects it; NotFound if recordId doesn't exist at all.
+  ServiceStatus releasePokemon(uint32_t recordId);
   // Marks a species "seen" in the Pokedex directly - wild encounters
   // already do this the moment the encounter is generated
   // (finalizeEncounter(), before battle even starts), but a gym/Elite
