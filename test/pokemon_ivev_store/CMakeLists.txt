@@ -1,6 +1,7 @@
 add_executable(PokemonIvEvStoreCodecTest
   PokemonIvEvStoreCodecTest.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonIvEvStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
 )
 
 target_include_directories(PokemonIvEvStoreCodecTest PRIVATE
@@ -16,6 +17,7 @@ add_test(NAME PokemonIvEvStoreCodecTest COMMAND PokemonIvEvStoreCodecTest)
 add_executable(PokemonIvEvStoreTest
   PokemonIvEvStoreTest.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonIvEvStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
   ${REPO_ROOT}/src/pokemon/PokemonIvEvStore.cpp
 )
 

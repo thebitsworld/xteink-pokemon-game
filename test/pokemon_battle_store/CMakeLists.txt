@@ -1,6 +1,7 @@
 add_executable(PokemonBattleStoreCodecTest
   PokemonBattleStoreCodecTest.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonBattleStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
 )
 
 target_include_directories(PokemonBattleStoreCodecTest PRIVATE
@@ -16,6 +17,7 @@ add_test(NAME PokemonBattleStoreCodecTest COMMAND PokemonBattleStoreCodecTest)
 add_executable(PokemonBattleStoreTest
   PokemonBattleStoreTest.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonBattleStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
   ${REPO_ROOT}/src/pokemon/PokemonBattleStore.cpp
 )
 

@@ -110,6 +110,7 @@ add_executable(PokemonServiceTest
   ${REPO_ROOT}/lib/Pokemon/PokemonBattle.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonBattleStoreCodec.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonIvEvStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
   ${REPO_ROOT}/src/pokemon/PokemonStore.cpp
   ${REPO_ROOT}/src/pokemon/PokemonBattleStore.cpp
   ${REPO_ROOT}/src/pokemon/PokemonIvEvStore.cpp

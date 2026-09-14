@@ -845,6 +845,42 @@ TEST(PokemonService, ReadingCreditHealsAnExistingBattleEntryAndClearsStatusOnceF
   EXPECT_EQ(healed->status, pokemon::Ailment::None);
 }
 
+TEST(PokemonService, ReadingCreditHealsEveryDamagedPartyMemberInOneBatchedWrite) {
+  // Regression test for healPartyOnRead()'s batched write (PokemonBattleStore
+  // ::upsertEntries()) - with 2+ damaged party members in the same credit
+  // call, every one of them must come out healed, not just the first (a bug
+  // that a naive "build one candidate state, upsert per member" refactor
+  // could introduce if a later member's upsert started from a stale copy of
+  // the state instead of one that already reflects an earlier member's
+  // heal).
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 1), true);  // Bulbasaur, party slot 1
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry first{};
+  ASSERT_EQ(service.loadBattleEntry(1, first), pokemon::ServiceStatus::Ok);
+  first.currentHp = 1;
+  ASSERT_EQ(service.saveBattleEntry(first), pokemon::ServiceStatus::Ok);
+
+  pokemon::BattleRecordEntry second{};
+  ASSERT_EQ(service.loadBattleEntry(2, second), pokemon::ServiceStatus::Ok);
+  second.currentHp = 1;
+  ASSERT_EQ(service.saveBattleEntry(second), pokemon::ServiceStatus::Ok);
+
+  ASSERT_TRUE(service.creditMinutes(20, 10));  // +1 HP/minute for 20 minutes - plenty to heal both fully
+
+  const pokemon::BattleRecordEntry* healedFirst = battleStore.findEntry(1);
+  const pokemon::BattleRecordEntry* healedSecond = battleStore.findEntry(2);
+  ASSERT_NE(healedFirst, nullptr);
+  ASSERT_NE(healedSecond, nullptr);
+  EXPECT_GT(healedFirst->currentHp, 1U);
+  EXPECT_GT(healedSecond->currentHp, 1U);
+}
+
 TEST(PokemonService, ReadingCreditLeavesAPartyMemberWithNoBattleEntryAlone) {
   // A Pokemon that has never fought has no battle-store entry yet; crediting
   // reading minutes must not create or touch one on its behalf - it will be

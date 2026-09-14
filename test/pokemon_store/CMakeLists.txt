@@ -23,6 +23,7 @@ add_executable(PokemonStoreCodecTest
   ${REPO_ROOT}/lib/Pokemon/PokemonTypes.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonSpecies.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
 )
 
 target_include_directories(PokemonStoreCodecTest PRIVATE
@@ -41,6 +42,7 @@ add_executable(PokemonStoreTest
   ${REPO_ROOT}/lib/Pokemon/PokemonTypes.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonSpecies.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
   ${REPO_ROOT}/src/pokemon/PokemonStore.cpp
 )
 
