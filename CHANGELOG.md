@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.19.3] - 2026-09-14
+
+### Changed
+
+- The main save now reads and writes in larger chunks instead of one Pokémon record at a time - a save with many Pokémon commits noticeably faster (every catch, every Poké Ball thrown, every 5-minute reading checkpoint writes the save).
+
 ## [0.19.2] - 2026-09-14
 
 ### Fixed

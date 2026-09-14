@@ -300,6 +300,46 @@ void pcPagesExcludeThePartyAndSupportAllThreeOrders() {
   CHECK(second[0] == bulbasaur);
 }
 
+void largeSaveSurvivesBatchedIoAcrossMultipleBufferChunks() {
+  // Regression test for batched record I/O (BatchedRecordReader/
+  // BatchedRecordWriter in PokemonStore.cpp): reads/writes now happen
+  // BUFFER_RECORD_CAPACITY (42) records at a time instead of one at a time,
+  // so a save with more than 42 records is the one case that could silently
+  // misalign or drop a record at a chunk boundary. 60 records spans one
+  // full 42-record chunk plus an 18-record partial second chunk.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
+  pokemon::PokemonState state{};
+  constexpr uint32_t recordTotal = 60;
+  std::array<pokemon::PokemonRecord, recordTotal> records{};
+  for (uint32_t i = 0; i < recordTotal; ++i) {
+    records[i] = caughtAbra(i + 1);
+    CHECK(pokemon::markSpecies(state.seenSpecies, records[i].speciesId));
+    CHECK(pokemon::markSpecies(state.caughtSpecies, records[i].speciesId));
+    const pokemon::RecordMutation mutation{records[i].recordId, records[i], pokemon::RecordMutationKind::Append};
+    CHECK(store.commit(state, mutation));
+  }
+
+  // Every record, including ones straddling the 42-record chunk boundary,
+  // must still be individually readable and byte-identical.
+  for (uint32_t i = 0; i < recordTotal; ++i) {
+    pokemon::PokemonRecord readBack{};
+    CHECK(store.readRecord(records[i].recordId, readBack));
+    CHECK(readBack == records[i]);
+  }
+
+  // A full PC page (CatchDate order) must return every record in the same
+  // order they were appended, with none dropped or duplicated.
+  std::array<pokemon::PokemonRecord, recordTotal> page{};
+  size_t count = 0;
+  CHECK(store.readPcPage(pokemon::PcOrder::CatchDate, 0, page, count));
+  CHECK(count == recordTotal);
+  for (uint32_t i = 0; i < recordTotal; ++i) {
+    CHECK(page[i] == records[i]);
+  }
+}
+
 void pcReadFailureIsDistinctFromAValidEmptyPage() {
   Storage.clear();
   pokemon::PokemonStore store;
@@ -689,6 +729,7 @@ int main() {
   laterAppendStreamsExistingRecordsIntoTheInactiveSlot();
   replacementChangesOnlyTheRequestedRecord();
   pcPagesExcludeThePartyAndSupportAllThreeOrders();
+  largeSaveSurvivesBatchedIoAcrossMultipleBufferChunks();
   pcReadFailureIsDistinctFromAValidEmptyPage();
   resetCommitsANewerEmptySnapshot();
   everyInterruptedResetByteLeavesThePreviousSnapshotBootable();
