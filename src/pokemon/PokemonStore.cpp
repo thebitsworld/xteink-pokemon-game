@@ -151,7 +151,15 @@ size_t recordsOffset(const SnapshotHeader& header) {
   return POKEMON_SNAPSHOT_HEADER_BYTES + snapshotStateBytes(header.version);
 }
 
-InspectionResult inspectSnapshot(const char* path, SnapshotHeader& outputHeader) {
+// outputHighestRecordId is only meaningful when this returns Ready (matching
+// outputHeader's own contract) - the highest recordId seen while scanning the
+// file, i.e. previousRecordId's final value once the ascending-order scan
+// below completes. Needed because ids are no longer dense once a record can
+// be removed (RecordMutationKind::Remove) - recordCount() + 1 stopped being a
+// safe "definitely unused, definitely greater than every existing id" choice
+// for a new record id the moment Release shipped; the caller uses this value
+// instead (see PokemonStore::nextRecordId()).
+InspectionResult inspectSnapshot(const char* path, SnapshotHeader& outputHeader, uint32_t& outputHighestRecordId) {
   if (!Storage.exists(path)) return InspectionResult::Missing;
   FsFile file = Storage.open(path, O_RDONLY);
   if (!file) {
@@ -241,6 +249,7 @@ InspectionResult inspectSnapshot(const char* path, SnapshotHeader& outputHeader)
     return InspectionResult::Corrupt;
   }
   outputHeader = header;
+  outputHighestRecordId = previousRecordId;
   return InspectionResult::Ready;
 }
 
@@ -260,6 +269,7 @@ StoreBeginResult PokemonStore::begin() {
   writable_ = false;
   activeHeader_ = {};
   activeIsA_ = false;
+  highestRecordId_ = 0;
   if (!Storage.ensureDirectoryExists(STORE_DIRECTORY)) {
     LOG_ERR("PokemonStore", "Failed to prepare data directory");
     return StoreBeginResult::Corrupt;
@@ -267,13 +277,17 @@ StoreBeginResult PokemonStore::begin() {
 
   SnapshotHeader headerA{};
   SnapshotHeader headerB{};
-  InspectionResult resultA = inspectSnapshot(STORE_PATH_A, headerA);
-  InspectionResult resultB = inspectSnapshot(STORE_PATH_B, headerB);
+  uint32_t highestA = 0;
+  uint32_t highestB = 0;
+  InspectionResult resultA = inspectSnapshot(STORE_PATH_A, headerA, highestA);
+  InspectionResult resultB = inspectSnapshot(STORE_PATH_B, headerB, highestB);
   if (resultA == InspectionResult::Missing && resultB == InspectionResult::Missing) {
     SnapshotHeader legacyHeaderA{};
     SnapshotHeader legacyHeaderB{};
-    const InspectionResult legacyResultA = inspectSnapshot(LEGACY_STORE_PATH_A, legacyHeaderA);
-    const InspectionResult legacyResultB = inspectSnapshot(LEGACY_STORE_PATH_B, legacyHeaderB);
+    uint32_t legacyHighestA = 0;
+    uint32_t legacyHighestB = 0;
+    const InspectionResult legacyResultA = inspectSnapshot(LEGACY_STORE_PATH_A, legacyHeaderA, legacyHighestA);
+    const InspectionResult legacyResultB = inspectSnapshot(LEGACY_STORE_PATH_B, legacyHeaderB, legacyHighestB);
     if (legacyResultA == InspectionResult::Unsupported || legacyResultB == InspectionResult::Unsupported) {
       if (legacyResultA == InspectionResult::Corrupt || legacyResultB == InspectionResult::Corrupt) {
         return StoreBeginResult::Corrupt;
@@ -290,7 +304,7 @@ StoreBeginResult PokemonStore::begin() {
         LOG_ERR("PokemonStore", "Failed to migrate legacy save filename");
         return StoreBeginResult::Corrupt;
       }
-      resultA = inspectSnapshot(STORE_PATH_A, headerA);
+      resultA = inspectSnapshot(STORE_PATH_A, headerA, highestA);
       if (resultA != InspectionResult::Ready || headerA != legacyHeader) {
         LOG_ERR("PokemonStore", "Migrated legacy save failed verification");
         return StoreBeginResult::Corrupt;
@@ -311,6 +325,7 @@ StoreBeginResult PokemonStore::begin() {
     activeIsA_ = resultA == InspectionResult::Ready &&
                  (resultB != InspectionResult::Ready || !sequenceIsNewer(headerB.sequence, headerA.sequence));
     activeHeader_ = activeIsA_ ? headerA : headerB;
+    highestRecordId_ = activeIsA_ ? highestA : highestB;
     ready_ = true;
     writable_ = true;
     return StoreBeginResult::Ready;
@@ -447,12 +462,15 @@ bool PokemonStore::writeSnapshot(const PokemonState& state, const RecordMutation
   }
 
   SnapshotHeader verified{};
-  if (inspectSnapshot(destinationPath, verified) != InspectionResult::Ready || verified != header) {
+  uint32_t verifiedHighestRecordId = 0;
+  if (inspectSnapshot(destinationPath, verified, verifiedHighestRecordId) != InspectionResult::Ready ||
+      verified != header) {
     LOG_ERR("PokemonStore", "Inactive snapshot verification failed");
     return false;
   }
   activeHeader_ = verified;
   activeIsA_ = destinationIsA;
+  highestRecordId_ = verifiedHighestRecordId;
   ready_ = true;
   return true;
 }
