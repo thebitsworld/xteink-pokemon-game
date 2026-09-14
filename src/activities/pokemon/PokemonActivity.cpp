@@ -1724,12 +1724,26 @@ void PokemonActivity::activate() {
         const uint8_t forcedContinuationMoveId =
             battlePlayer_.bideTurnsRemaining > 0 ? pokemon::BIDE_MOVE_ID : battlePlayer_.forcedMoveId;
         if (forcedContinuationMoveId != 0) {
+          bool resolvedContinuation = false;
           for (int slot = 0; slot < static_cast<int>(pokemon::BATTLE_MOVE_SLOTS); ++slot) {
             if (battlePlayer_.moves[slot].moveId == forcedContinuationMoveId) {
               resolveBattlePlayerMoveTurn(static_cast<uint8_t>(slot));
-              return;
+              resolvedContinuation = true;
+              break;
             }
           }
+          if (resolvedContinuation) return;
+          // Defense in depth: forcedContinuationMoveId doesn't match any
+          // current move slot (should not happen - a mid-battle moveset
+          // change while a continuation is pending is not a normal path -
+          // but this is the exact family of state that once hard-locked the
+          // battle for good, see PokemonBattle.cpp's resolveAction() PP-gate
+          // fix). Clear the forced state instead of leaving the player stuck
+          // in a menu-less battle with no way to ever act again.
+          battlePlayer_.forcedMoveId = 0;
+          battlePlayer_.forcedTurnsRemaining = 0;
+          battlePlayer_.invulnerable = false;
+          battlePlayer_.bideTurnsRemaining = 0;
         }
         // Real Gen 1 behavior: once every learned move is out of PP, FIGHT
         // doesn't even offer a menu - it's forced straight into Struggle.

@@ -672,13 +672,39 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
   const bool forcedStruggle = moveSlot >= BATTLE_MOVE_SLOTS;
   BattleMoveSlot* slot = nullptr;
   uint8_t moveId = STRUGGLE_MOVE_ID;
+  const TwoTurnTableEntry* twoTurn = nullptr;
+  bool isContinuingBide = false;
+  bool isReleasingTwoTurn = false;
+  bool isContinuingTrap = false;
+  bool isContinuingThrash = false;
   if (!forcedStruggle) {
     slot = &attacker.moves[moveSlot];
-    if (slot->moveId == 0 || slot->currentPp == 0) {
+    if (slot->moveId == 0) {
       result.event = BattleLogEvent::MoveHadNoPp;
       return result;
     }
     moveId = slot->moveId;
+    // Multi-turn moves (Bide, two-turn charge moves, trapping moves) spend
+    // PP only on the turn they're first chosen - the automatic follow-up/
+    // release turn re-executes the same move for free (see the decrement
+    // further down) and must NOT be rejected here just because that earlier
+    // spend already brought this slot to 0 PP. Computed up front (rather
+    // than after the PP check, as originally) specifically so the PP check
+    // below can tell a genuinely-exhausted fresh choice apart from a forced
+    // continuation - conflating the two used to hard-lock the battle: the
+    // release turn of Fly/Dig with exactly 1 PP remaining would hit this
+    // check, leave forcedMoveId/invulnerable set forever, and nothing could
+    // ever end the fight again short of a reboot.
+    isContinuingBide = moveId == BIDE_MOVE_ID && attacker.bideTurnsRemaining > 0;
+    twoTurn = twoTurnEntryForMove(moveId);
+    isReleasingTwoTurn = twoTurn != nullptr && attacker.forcedMoveId == moveId;
+    isContinuingTrap = isTrapMove(moveId) && attacker.forcedMoveId == moveId;
+    isContinuingThrash = isThrashMove(moveId) && attacker.forcedMoveId == moveId;
+    const bool isContinuation = isContinuingBide || isReleasingTwoTurn || isContinuingTrap || isContinuingThrash;
+    if (slot->currentPp == 0 && !isContinuation) {
+      result.event = BattleLogEvent::MoveHadNoPp;
+      return result;
+    }
   }
 
   // Flinch (Stomp, Bite, ...) takes priority over even a status check below -
@@ -697,17 +723,11 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     result.event = BattleLogEvent::MoveHadNoPp;
     return result;
   }
-  // Multi-turn moves (Bide, two-turn charge moves, trapping moves) only
-  // spend PP on the turn the player/AI actually chooses them - every
-  // automatic follow-up turn re-executes the same move for free, matching
-  // the real games. isReleasingTwoTurn/isContinuingTrap detect "this is a
-  // follow-up turn, not a fresh use" by checking forcedMoveId; isContinuingBide
-  // is simpler since Bide never lets go of the move id across its 2 turns.
-  const bool isContinuingBide = moveId == BIDE_MOVE_ID && attacker.bideTurnsRemaining > 0;
-  const TwoTurnTableEntry* twoTurn = twoTurnEntryForMove(moveId);
-  const bool isReleasingTwoTurn = twoTurn != nullptr && attacker.forcedMoveId == moveId;
-  const bool isContinuingTrap = isTrapMove(moveId) && attacker.forcedMoveId == moveId;
-  const bool isContinuingThrash = isThrashMove(moveId) && attacker.forcedMoveId == moveId;
+  // isContinuingBide/isReleasingTwoTurn/isContinuingTrap/isContinuingThrash
+  // were already computed above (alongside the PP-exhaustion check they need
+  // to stay correct) - reused here for the actual PP spend, which happens
+  // only on the turn a multi-turn move is first chosen, never on an
+  // automatic follow-up.
   if (!isContinuingBide && !isReleasingTwoTurn && !isContinuingTrap && !isContinuingThrash && slot != nullptr) {
     --slot->currentPp;
   }

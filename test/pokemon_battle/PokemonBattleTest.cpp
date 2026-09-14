@@ -1063,6 +1063,38 @@ void flyGrantsInvulnerabilityDuringTheChargeTurnButSolarBeamDoesNot() {
   CHECK(charmanderSolar.currentHp < hpBeforeSolarCharge);
 }
 
+void twoTurnMoveReleasesEvenWhenItsLastPpWasSpentOnTheChargeTurn() {
+  // Regression test for a real softlock: Fly/Dig only spend PP on the charge
+  // turn (see twoTurnMoveChargesThenReleasesOnTheFollowingTurn()), so a slot
+  // with exactly 1 PP remaining hits 0 PP right after the charge turn. The
+  // release turn used to run the "is this slot out of PP?" check before it
+  // could recognise "this 0 PP is a legitimate in-progress continuation, not
+  // a fresh exhausted choice" - which rejected the release with MoveHadNoPp,
+  // left forcedMoveId/invulnerable set forever, and hard-locked the battle
+  // (nothing could ever hit the permanently-invulnerable attacker again, and
+  // the UI's own forced-continuation guard blocks every other menu option
+  // and the Back button while forcedMoveId is set). This must resolve like
+  // any other release turn instead.
+  BattleCombatant charmander = makeCombatant(4, 30, {19});  // Fly
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});    // Tackle
+  charmander.moves[0].currentPp = 1;
+  const uint16_t hpBeforeCharge = bulbasaur.currentHp;
+
+  const pokemon::BattleTurnResult chargeResult = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(chargeResult.player.event == BattleLogEvent::ChargingMove);
+  CHECK(charmander.moves[0].currentPp == 0);
+  CHECK(charmander.forcedMoveId == 19);
+  CHECK(charmander.invulnerable);
+
+  const pokemon::BattleTurnResult releaseResult = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(releaseResult.player.event != BattleLogEvent::MoveHadNoPp);
+  CHECK(releaseResult.player.event != BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.currentHp < hpBeforeCharge);
+  CHECK(charmander.forcedMoveId == 0);
+  CHECK(!charmander.invulnerable);
+  CHECK(charmander.moves[0].currentPp == 0);  // still no second PP charge on release
+}
+
 void trapMoveLocksTheAttackerIntoRepeatingItAndBypassesAccuracyOnFollowUpTurns() {
   // Charmander (faster - higher base Speed even at an equal level) uses
   // Wrap on Bulbasaur - a successful first hit locks Charmander into
@@ -1716,6 +1748,7 @@ int main() {
   selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget();
   twoTurnMoveChargesThenReleasesOnTheFollowingTurn();
   flyGrantsInvulnerabilityDuringTheChargeTurnButSolarBeamDoesNot();
+  twoTurnMoveReleasesEvenWhenItsLastPpWasSpentOnTheChargeTurn();
   trapMoveLocksTheAttackerIntoRepeatingItAndBypassesAccuracyOnFollowUpTurns();
   bideStoresDamageOverTwoTurnsThenReleasesDoubleItBack();
   leechSeedDrainsTheSeededSideAndHealsTheSeederAtEndOfTurn();
