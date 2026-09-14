@@ -148,9 +148,11 @@ class PokemonActivity final : public Activity {
   int listTop() const;
   int rowHeightForScreen() const;
   bool showsPartyHealthRows() const;
+  bool showsMachineCapabilityRows() const;
   int rowsPerPage() const;
   int pageStart() const;
   void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record, bool drawNameLine);
+  void renderPartyRowMachineCapability(int rowY, const pokemon::PokemonRecord& record);
   bool isListScreen() const;
   uint32_t selectedRecordId() const;
   static void screenBuilder(UiApp::ScreenType& screen, void* user);
