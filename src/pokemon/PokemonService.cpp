@@ -395,10 +395,29 @@ ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const u
 
   BattleRecordEntry entry{};
   if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
-  entry.moves[slot] = moveId;
+  // The battle-store format packs known moves at the front with no gaps
+  // (validateBattleRecordEntry() rejects an empty slot followed by a real
+  // one) - if the caller picked an empty slot that isn't the FIRST empty
+  // slot (e.g. Screen::Moveset always lists all 4 rows, so picking the
+  // fourth "-" row while the third is also still empty is easy to do),
+  // redirect to the first empty slot instead of writing a gap that would
+  // make upsertEntry() reject the whole entry with a misleading "save
+  // error." A slot that already holds a move is left exactly where it is -
+  // that's Moveset's deliberate "swap this move for another" flow, not an
+  // empty-slot pick.
+  uint8_t targetSlot = slot;
+  if (entry.moves[targetSlot] == 0) {
+    for (uint8_t candidate = 0; candidate < targetSlot; ++candidate) {
+      if (entry.moves[candidate] == 0) {
+        targetSlot = candidate;
+        break;
+      }
+    }
+  }
+  entry.moves[targetSlot] = moveId;
   // maxPpFor(), not the move's raw base PP - see teachMove()'s same comment:
   // PP Up is tied to the slot, not the move identity.
-  entry.pp[slot] = maxPpFor(move->pp, entry.ppUp[slot]);
+  entry.pp[targetSlot] = maxPpFor(move->pp, entry.ppUp[targetSlot]);
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to update moveset");
     return ServiceStatus::StorageError;

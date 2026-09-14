@@ -649,6 +649,23 @@ void multiHitMoveStopsEarlyIfTheDefenderFaintsPartway() {
   CHECK(result.player.hitCount == 1);  // fainted on the first hit - the rest never got attempted
 }
 
+void multiHitMoveStopsAfterBreakingASubstituteInsteadOfHittingRealHp() {
+  // Regression test: a multi-hit move that breaks a Substitute partway
+  // through used to keep landing its remaining hits on the defender's real
+  // HP instead of stopping there, like the real games do. Twineedle (move
+  // 41) always hits exactly twice - give the defender a 1-HP Substitute so
+  // the first hit alone breaks it, then assert the second hit never touched
+  // real HP.
+  BattleCombatant attacker = makeCombatant(1, 30, {41});  // Bulbasaur, Twineedle
+  BattleCombatant defender = makeCombatant(4, 30, {33});  // Charmander
+  defender.substituteHp = 1;
+  const uint16_t hpBefore = defender.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(defender.substituteHp == 0);
+  CHECK(defender.currentHp == hpBefore);
+  CHECK(result.player.hitCount == 1);  // stopped after breaking the substitute, not 2
+}
+
 void forcedStruggleSentinelDealsDamageAndRecoilsWithNoLearnedMove() {
   // pokemon::BATTLE_MOVE_SLOTS itself (or any value >= it) as the move slot
   // forces a real Struggle turn - no learned move needed, no PP touched.
@@ -1019,6 +1036,43 @@ void selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget() {
   CHECK(charmander.currentHp == 0);
   CHECK(bulbasaur.currentHp == 0);
   CHECK(result.outcome == pokemon::BattleOutcome::OpponentWon);
+}
+
+void damagingMoveWithAilmentDoesNotInflictItAgainstAnImmuneType() {
+  // Body Slam (id 34, Normal, 30% paralysis) against a Ghost-type target
+  // (Gastly, id 92, Ghost/Poison) deals 0 damage - Normal is 0% effective
+  // against Ghost - and must not paralyze it either. Type immunity used to
+  // only block the damage roll; the secondary ailment applied anyway with
+  // no log line explaining why, since the ailment block never looked at
+  // type effectiveness at all.
+  BattleCombatant charmander = makeCombatant(4, 30, {34});  // Body Slam
+  BattleCombatant gastly = makeCombatant(92, 5, {45});      // Growl - harmless filler
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, gastly, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(gastly.currentHp == gastly.maxHp);
+  CHECK(gastly.status == Ailment::None);
+}
+
+void statusMoveWithAilmentRespectsTypeImmunity() {
+  // Thunder Wave (id 86, Electric, status, "always" paralysis per the
+  // ailment_chance==0-means-guaranteed convention) against a Ground-type
+  // target (Sandshrew, id 27) - Electric is 0% effective against Ground.
+  // Status-category moves used to skip the type chart entirely, so this
+  // paralyzed a type that should be flatly immune.
+  BattleCombatant charmander = makeCombatant(4, 30, {86});  // Thunder Wave
+  BattleCombatant sandshrew = makeCombatant(27, 5, {45});   // Growl - harmless filler
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(charmander, sandshrew, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(sandshrew.status == Ailment::None);
+
+  // Sanity check the other direction, so the fix isn't overly broad: the
+  // same move against a non-immune type still paralyzes normally.
+  BattleCombatant charmanderVsBulbasaur = makeCombatant(4, 30, {86});
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {45});
+  const pokemon::BattleTurnResult resultVsBulbasaur =
+      pokemon::stepBattle(charmanderVsBulbasaur, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(resultVsBulbasaur.player.event == BattleLogEvent::InflictedStatus);
+  CHECK(bulbasaur.status == Ailment::Paralysis);
 }
 
 void twoTurnMoveChargesThenReleasesOnTheFollowingTurn() {
@@ -1721,6 +1775,7 @@ int main() {
   twineedleAlwaysHitsExactlyTwice();
   nonMultiHitMoveReportsZeroHitCount();
   multiHitMoveStopsEarlyIfTheDefenderFaintsPartway();
+  multiHitMoveStopsAfterBreakingASubstituteInsteadOfHittingRealHp();
   forcedStruggleSentinelDealsDamageAndRecoilsWithNoLearnedMove();
   opponentStrugglesWhenAllOfItsLearnedMovesAreOutOfPp();
   ivZeroEvZeroReproducesTheOriginalFormulaExactly();
@@ -1746,6 +1801,8 @@ int main() {
   selfDestructMoveFaintsTheUserRegardlessOfHitOrMiss();
   selfDestructHalvesDefendersDefenseForThisHit();
   selfDestructCausesASimultaneousKoWhenItAlsoFaintsTheTarget();
+  damagingMoveWithAilmentDoesNotInflictItAgainstAnImmuneType();
+  statusMoveWithAilmentRespectsTypeImmunity();
   twoTurnMoveChargesThenReleasesOnTheFollowingTurn();
   flyGrantsInvulnerabilityDuringTheChargeTurnButSolarBeamDoesNot();
   twoTurnMoveReleasesEvenWhenItsLastPpWasSpentOnTheChargeTurn();

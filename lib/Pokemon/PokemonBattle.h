@@ -289,7 +289,13 @@ enum class BattleLogEvent : uint8_t {
   StatRaised,       // a stat-changing move successfully raised a stage
   StatLowered,      // a stat-changing move successfully lowered a stage
   StatChangeFailed,  // the target stat was already at +6/-6 - no further change possible
-  StatsReset,       // Haze - both sides' stages (and this engine's status slot) reset
+  StatsReset,       // Haze - both sides' stat stages reset. NOT yet status/
+                    // Reflect/Light Screen/Mist/Focus Energy too, despite
+                    // real Gen 1 Haze clearing those as well - tracked as
+                    // Missing Feature 1.4 in pokemon-gen1-audit-round2.md,
+                    // not implemented here yet. Update this comment (or
+                    // implement the rest) together, don't let them drift
+                    // apart again.
   OneHitKo,          // Fissure/Horn Drill/Guillotine connected - instant faint
   MoveFailed,        // Counter with nothing to reflect this turn ("But it failed!")
   Flinched,          // hit by a flinch-inducing move last turn (Stomp, Bite, ...) - this turn's action is skipped
