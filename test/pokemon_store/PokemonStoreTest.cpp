@@ -278,6 +278,10 @@ void removeMutationShrinksRecordCountAndLeavesOtherRecordsIntact() {
   const pokemon::RecordMutation removeMutation{abra.recordId, {}, pokemon::RecordMutationKind::Remove};
   CHECK(store.commit(state, removeMutation));
   CHECK(store.recordCount() == 2);
+  // Regression check for the critical id-collision bug: recordCount() + 1
+  // (2 + 1 = 3) would collide with bulbasaur's still-live id 3.
+  // nextRecordId() must track the highest surviving id instead.
+  CHECK(store.nextRecordId() == 4);
 
   pokemon::PokemonRecord loaded{};
   CHECK(!store.readRecord(abra.recordId, loaded));
@@ -298,6 +302,7 @@ void removeMutationShrinksRecordCountAndLeavesOtherRecordsIntact() {
   pokemon::PokemonStore reopened;
   CHECK(reopened.begin() == pokemon::StoreBeginResult::Ready);
   CHECK(reopened.recordCount() == 2);
+  CHECK(reopened.nextRecordId() == 4);
   CHECK(!reopened.readRecord(abra.recordId, loaded));
 
   // Removing a record that doesn't exist fails outright, rather than

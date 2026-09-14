@@ -350,6 +350,74 @@ TEST(PokemonService, ReleasePokemonRejectsAnUnknownRecordId) {
   EXPECT_EQ(service.releasePokemon(999), pokemon::ServiceStatus::NotFound);
 }
 
+TEST(PokemonService, ReleasingAMiddleRecordDoesNotBreakSubsequentCatches) {
+  // Regression test for a critical bug: releasing anything but the most-
+  // recently-caught record used to make every later catch fail forever,
+  // because the next record id was computed as recordCount() + 1 - only
+  // safe while ids stayed dense, which Release broke (it removes a record
+  // from the middle of the file without renumbering anything, so
+  // recordCount() drops while the surviving ids do not shift down).
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);                                     // record 1
+  appendOwnedPokemon(store, caughtPokemon(2, 4), false);   // Box record
+  appendOwnedPokemon(store, caughtPokemon(3, 7), false);   // Box record
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.releasePokemon(2), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(store.recordCount(), 2U);  // records {1, 3} remain
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Encounter;
+  state.pendingEvents[0].speciesId = 133;
+  state.pendingEvents[0].level = 12;
+  state.pendingEvents[0].gender = pokemon::Gender::Female;
+  ASSERT_TRUE(store.commit(state));
+
+  uint32_t caughtRecordId = 0;
+  ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId), pokemon::ServiceStatus::Ok);
+  EXPECT_GT(caughtRecordId, 3U);  // must not collide with the surviving record 3
+}
+
+TEST(PokemonService, ReleasingTheHighestIdRecordAllowsTheNextCatchToReuseThatIdSafely) {
+  // Releasing the record that happened to hold the highest id lowers the
+  // ceiling (nextRecordId() tracks the highest currently-LIVE id, not a
+  // monotonic "highest ever assigned" counter) - so the next catch CAN get
+  // an id that was previously used and released. That is safe (not a
+  // collision with anything - the old record and its battle-store/IV-EV
+  // entries are all genuinely gone, see
+  // ReleasePokemonRemovesTheRecordAndFreesItsSideStoreSlots), so this test
+  // only asserts the one real invariant: the new id must not collide with
+  // any record that is still actually alive.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);                                     // record 1
+  appendOwnedPokemon(store, caughtPokemon(2, 4), false);
+  appendOwnedPokemon(store, caughtPokemon(3, 7), false);   // highest id
+
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  ASSERT_EQ(service.releasePokemon(3), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(store.recordCount(), 2U);  // records {1, 2} remain
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Encounter;
+  state.pendingEvents[0].speciesId = 133;
+  state.pendingEvents[0].level = 12;
+  state.pendingEvents[0].gender = pokemon::Gender::Female;
+  ASSERT_TRUE(store.commit(state));
+
+  uint32_t caughtRecordId = 0;
+  ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId), pokemon::ServiceStatus::Ok);
+  EXPECT_NE(caughtRecordId, 1U);  // must not collide with the surviving starter
+  EXPECT_NE(caughtRecordId, 2U);  // must not collide with the other surviving record
+}
+
 TEST(PokemonService, RejectsWithdrawalWhenThePartyIsFull) {
   Storage.clear();
   pokemon::PokemonStore store;

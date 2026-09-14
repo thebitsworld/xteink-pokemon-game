@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.20.2] - 2026-09-14
+
+### Fixed
+
+- Fixed a critical bug: releasing any Pokémon from the Box other than the very last one you caught made every catch after that fail forever, with no way out except releasing your most recent catch too. New Pokémon now always get a truly unused ID again.
+
 ## [0.20.1] - 2026-09-14
 
 ### Changed

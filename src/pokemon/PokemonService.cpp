@@ -293,7 +293,12 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
     const bool partyFull = partyCount == PARTY_SIZE;
     const uint32_t boxCount = store_.recordCount() - partyCount;
     if (partyFull && boxCount >= PC_BOX_MAX_RECORDS) return ServiceStatus::BoxFull;
-    mutation.requestedRecordId = store_.recordCount() + 1U;
+    // NOT recordCount() + 1 - once Release can remove a record from the
+    // middle of the file, recordCount() drops but surviving ids don't shift
+    // down, so ids are sparse and recordCount() + 1 can collide with an id
+    // that's still in use (PokemonStore::nextRecordId()'s own doc comment
+    // has the full reasoning).
+    mutation.requestedRecordId = store_.nextRecordId();
   }
   if (!pokemon::resolveEncounter(state, leader, choice, "", mutation)) return ServiceStatus::NotApplicable;
   if (!store_.commit(state, mutation)) {
