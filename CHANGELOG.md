@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-14
+
+### Changed
+
+- The party screen for teaching a TM/HM now shows each Pokémon's full name instead of cutting it off, and notes right under the name whether it can learn the move or already knows it - no more picking blind and finding out after the fact.
+
 ## [0.18.7] - 2026-09-13
 
 ### Fixed

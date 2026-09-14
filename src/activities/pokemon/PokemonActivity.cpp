@@ -668,7 +668,17 @@ bool PokemonActivity::showsPartyHealthRows() const {
          (bagCategory_ == BagCategory::Medicine || bagCategory_ == BagCategory::BattleMedicine);
 }
 
-int PokemonActivity::rowHeightForScreen() const { return showsPartyHealthRows() ? 96 : 64; }
+// Screen::ItemTarget while picking who to teach a TM/HM to - a taller row so
+// the party member's full name (not squeezed onto a shared label/value line)
+// and whether it can learn this move both fit, matching the two-line shape
+// showsPartyHealthRows() already uses for Medicine/BattleMedicine targets.
+bool PokemonActivity::showsMachineCapabilityRows() const {
+  return screen_ == Screen::ItemTarget && bagCategory_ == BagCategory::Machine;
+}
+
+int PokemonActivity::rowHeightForScreen() const {
+  return (showsPartyHealthRows() || showsMachineCapabilityRows()) ? 96 : 64;
+}
 
 int PokemonActivity::rowsPerPage() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -2343,13 +2353,14 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_EMPTY));
           break;
         }
-        if (showsPartyHealthRows() && (screen_ == Screen::Party || screen_ == Screen::ItemTarget)) {
-          // Name/level/gender is drawn entirely by renderPartyRowHealth()
-          // alongside the HP bar instead - that keeps both lines sharing one
-          // left edge instead of this generic label/value text (anchored to
-          // the list's sidePadding) and the HP bar (anchored to the icon)
-          // starting at two different x's. Still register the row (empty
-          // label) so touch/selection keep working.
+        if ((showsPartyHealthRows() || showsMachineCapabilityRows()) &&
+            (screen_ == Screen::Party || screen_ == Screen::ItemTarget)) {
+          // Name/level/gender is drawn entirely by renderPartyRowHealth()/
+          // renderPartyRowMachineCapability() instead - that keeps every line
+          // sharing one left edge instead of this generic label/value text
+          // (anchored to the list's sidePadding) and the custom-drawn content
+          // (anchored to the icon) starting at two different x's. Still
+          // register the row (empty label) so touch/selection keep working.
           row(local, "");
           break;
         }
@@ -3734,6 +3745,8 @@ void PokemonActivity::renderRowArt() {
       } else if (screen_ == Screen::ItemTarget && start + local < snapshot_.partyCount) {
         renderPartyRowHealth(rowY, snapshot_.party[start + local], true);
       }
+    } else if (showsMachineCapabilityRows() && start + local < snapshot_.partyCount) {
+      renderPartyRowMachineCapability(rowY, snapshot_.party[start + local]);
     }
   }
 }
@@ -3841,6 +3854,54 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
     renderer.drawText(UI_10_FONT_ID, statusRight - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
                       statusY, status, true, EpdFontFamily::BOLD);
   }
+}
+
+// Screen::ItemTarget while picking who to teach a TM/HM to
+// (BagCategory::Machine) - same two-line shape as renderPartyRowHealth()
+// (full name/level/gender on top, sharing the icon's left edge), but the
+// second line says whether this Pokemon can learn the move instead of
+// showing an HP bar: "already knows it" (teaching again would be a no-op -
+// matches teachMove()'s own AlreadyKnown outcome) takes priority over
+// "can learn it" (canLearnViaMachine()); neither line is drawn for a
+// species that can't learn this move at all, same as everywhere else in
+// this file that just silently omits inapplicable info.
+void PokemonActivity::renderPartyRowMachineCapability(const int rowY, const pokemon::PokemonRecord& record) {
+  const int textX = listBounds_.x + 112;
+  const int textRight = listBounds_.x + listBounds_.width - 8;
+
+  const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
+  const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
+  constexpr int lineGap = 8;
+  const int blockTop = rowY + pokemon::pokemonCenteredOffset(rowHeight_, lineHeight1 + lineGap + lineHeight2);
+  const int line2Top = blockTop + lineHeight1 + lineGap;
+
+  char meta[16];
+  snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
+  const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
+  const char* gender = genderAbbrev(record.gender);
+  const int genderWidth = gender[0] == '\0' ? 0 : renderer.getTextWidth(UI_12_FONT_ID, gender) + 4;
+  const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - genderWidth - 10);
+  const std::string name = renderer.truncatedText(
+      UI_12_FONT_ID, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
+      nameMaxWidth, EpdFontFamily::BOLD);
+  const int nameWidth = renderer.getTextWidth(UI_12_FONT_ID, name.c_str(), EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, textX, blockTop, name.c_str(), true, EpdFontFamily::BOLD);
+  if (gender[0] != '\0') renderer.drawText(UI_12_FONT_ID, textX + nameWidth + 4, blockTop, gender);
+  renderer.drawText(UI_12_FONT_ID, textRight - metaWidth, blockTop, meta);
+
+  const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+  bool alreadyKnown = false;
+  for (size_t slot = 0; slot < pokemon::BATTLE_MOVE_SLOTS; ++slot) {
+    if (entry.moves[slot] == selectedMachineMoveId_) {
+      alreadyKnown = true;
+      break;
+    }
+  }
+  const char* capability =
+      alreadyKnown                                                          ? tr(STR_POKEMON_MACHINE_ALREADY_KNOWS)
+      : pokemon::canLearnViaMachine(record.speciesId, selectedMachineMoveId_) ? tr(STR_POKEMON_MACHINE_CAN_LEARN)
+                                                                              : "";
+  if (capability[0] != '\0') renderer.drawText(UI_10_FONT_ID, textX, line2Top, capability);
 }
 
 void PokemonActivity::renderHeaderAndHints() {
