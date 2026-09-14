@@ -878,14 +878,21 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   // a MoveHit to promote to InflictedStatus instead of silently staying None.
   result.event = BattleLogEvent::MoveHit;
 
+  // Computed unconditionally (not just for a damaging move) so a Status-
+  // category move with a real ailment (Thunder Wave, Poison Powder, ...) can
+  // also be blocked by type immunity below - PokemonType::None (an untyped
+  // move, or one of the handful of special-cased moves that pass it) safely
+  // returns 100 from typeEffectivenessPercent()'s own bounds check, so this
+  // is a no-op for anything that doesn't carry a real attacking type.
+  const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
+  uint16_t effectivenessPercent = 100;
+  if (defenderSpecies != nullptr) {
+    const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+    effectivenessPercent = typeEffectivenessPercent(move->type, defenderTypes.primary, defenderTypes.secondary);
+  }
+
   if (move->category != MoveCategory::Status) {
     const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
-    const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
-    uint16_t effectivenessPercent = 100;
-    if (defenderSpecies != nullptr) {
-      const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
-      effectivenessPercent = typeEffectivenessPercent(move->type, defenderTypes.primary, defenderTypes.secondary);
-    }
 
     if (fixedDamage != nullptr) {
       // These moves skip the normal level/power/Attack/Defense formula
@@ -960,7 +967,18 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       bool anyCritical = false;
       uint8_t hitsLanded = 0;
       uint32_t totalDamage = 0;
-      for (uint8_t hit = 0; hit < hitsToAttempt && defender.currentHp > 0; ++hit) {
+      // A multi-hit move (Double Slap, Fury Attack, ...) that breaks a
+      // Substitute partway through must stop there - once the decoy is
+      // gone, the remaining hits of the SAME action have nothing left to
+      // absorb them and would otherwise land on the real Pokemon's HP
+      // instead, which the real games don't do (the rest of the hits are
+      // simply not thrown). Only gates on a Substitute that was actually up
+      // when this action started (defenderHadSubstitute) - a move used
+      // against a target with no Substitute at all must never be affected
+      // by this check.
+      for (uint8_t hit = 0; hit < hitsToAttempt && defender.currentHp > 0 &&
+                             !(defenderHadSubstitute && defender.substituteHp == 0);
+           ++hit) {
         // Dire Hit (a battle-boost item) raises the user's own crit ratio to
         // the same high-crit tier a move like Slash gets, for the rest of
         // the battle - stacks with (rather than doubling past) an
@@ -1318,8 +1336,19 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   // Thunder Shock's 10% paralysis). Treat 0 as "always" for Status moves.
   const uint8_t effectiveAilmentChance =
       (move->category == MoveCategory::Status && move->ailmentChance == 0) ? 100 : move->ailmentChance;
-  if (defender.status == Ailment::None && defender.currentHp > 0 && defender.substituteHp == 0 &&
-      move->ailment != Ailment::None && rollPercentChance(random, effectiveAilmentChance)) {
+  if (move->ailment != Ailment::None && effectivenessPercent == 0) {
+    // A type-immune target is unaffected by the move's ailment too, the same
+    // way it's already unaffected by a damaging move's own damage - a
+    // Ground-type is immune to Thunder Wave's paralysis, not just to a
+    // hypothetical Electric-type damage roll. Only reported here (rather
+    // than always, at the top of the function) because a damaging move that
+    // also carries an ailment already reports MoveNoEffect for the same
+    // reason from its own effectiveness handling above - this only ever
+    // changes the event for a pure Status-category ailment move, which had
+    // no other branch above to report immunity at all.
+    result.event = BattleLogEvent::MoveNoEffect;
+  } else if (defender.status == Ailment::None && defender.currentHp > 0 && defender.substituteHp == 0 &&
+             move->ailment != Ailment::None && rollPercentChance(random, effectiveAilmentChance)) {
     defender.status = move->ailment;
     if (move->ailment == Ailment::Sleep) {
       defender.statusTurns = rollStatusDuration(random, 1, 3);

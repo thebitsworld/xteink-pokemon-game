@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.19.2] - 2026-09-14
+
+### Fixed
+
+- A damaging move with a secondary effect (paralysis, poison, burn, ...) no longer inflicts that effect against a type that's immune to it - a Ghost-type Pokémon hit by a Normal-type move is no longer paralyzed by a move that deals it zero damage.
+- Pure status moves (Thunder Wave, Poison Powder, Stun Spore, ...) now respect type immunity too - Thunder Wave no longer paralyzes a Ground-type Pokémon.
+- A multi-hit move (Double Slap, Fury Attack, Twineedle, ...) that breaks a Substitute partway through its hits now stops there instead of having its remaining hits land on the real Pokémon.
+- Learning a move into an empty Moveset slot no longer fails with a misleading "Save error" when an earlier slot is also empty - it correctly fills the first empty slot instead.
+
 ## [0.19.1] - 2026-09-14
 
 ### Fixed

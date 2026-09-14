@@ -1346,6 +1346,30 @@ TEST(PokemonService, LearnMoveIntoSlotOverwritesUnconditionallyAtFullPp) {
   EXPECT_EQ(service.learnMoveIntoSlot(1, 2, 0), pokemon::ServiceStatus::Invalid);
 }
 
+TEST(PokemonService, LearnMoveIntoSlotRedirectsToTheFirstEmptySlotInsteadOfLeavingAGap) {
+  // Regression test: Screen::Moveset always lists all BATTLE_MOVE_SLOTS rows
+  // (empty ones shown as "-"), so picking the LAST empty row while an
+  // earlier one is also still empty used to write a gap
+  // (validateBattleRecordEntry() rejects moves[2]==0 with moves[3]!=0) -
+  // upsertEntry() then failed the whole write, surfacing as a misleading
+  // "save error" with nothing actually learned.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.learnMoveIntoSlot(1, 3, 98), pokemon::ServiceStatus::Ok);  // Quick Attack into slot 3
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->moves[0], 84U);
+  EXPECT_EQ(updated->moves[1], 45U);
+  EXPECT_EQ(updated->moves[2], 98U);  // redirected to the first empty slot, not slot 3
+  EXPECT_EQ(updated->moves[3], 0U);
+  EXPECT_GT(updated->pp[2], 0U);
+}
+
 TEST(PokemonService, ForgetMoveRepacksTheRemainingMovesInsteadOfLeavingAGap) {
   // Regression test: forgetting anything but the LAST known slot used to
   // leave moves[slot] == 0 with a non-zero move still sitting after it,
