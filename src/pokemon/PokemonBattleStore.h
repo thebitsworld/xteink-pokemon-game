@@ -4,6 +4,8 @@
 
 #include <PokemonBattleStoreCodec.h>
 
+#include <span>
+
 namespace pokemon {
 
 // Reads/writes /.crosspoint/pokemon-battle-{a,b}.bin: the live HP/PP/status
@@ -33,6 +35,13 @@ class PokemonBattleStore {
   // write failure; the in-memory state and both on-disk files are left as
   // they were before the call in either case.
   bool upsertEntry(const BattleRecordEntry& entry);
+  // Applies every entry to a single candidate state, then writes it once -
+  // one file rewrite+verify total instead of one per entry. Used by
+  // PokemonService::healPartyOnRead() so healing a full 6-member party
+  // costs one write instead of up to 6. Same all-or-nothing semantics as
+  // upsertEntry(): if any entry fails validation, nothing is written and
+  // the in-memory state/on-disk files are untouched.
+  bool upsertEntries(std::span<const BattleRecordEntry> entries);
   bool removeEntry(uint32_t recordId);
   // Writes an empty state (same double-buffer commit as upsertEntry/
   // removeEntry - lands on the currently-inactive slot, verified, then flips

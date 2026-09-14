@@ -783,6 +783,14 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
   constexpr uint16_t HP_HEAL_PER_MINUTE = 1;
   constexpr uint16_t MINUTES_PER_PP_TICK = 10;
 
+  // Collected here and written once at the end (upsertEntries()) instead of
+  // once per party member - PARTY_SIZE separate upsertEntry() calls each
+  // rewrite+verify the whole (small) battle-store file, so healing a full
+  // party used to cost up to 6 file writes for what's really one logical
+  // update.
+  std::array<BattleRecordEntry, PARTY_SIZE> healedEntries{};
+  size_t healedCount = 0;
+
   for (const uint32_t recordId : state.partyRecordIds) {
     if (recordId == 0) continue;
     const BattleRecordEntry* existing = battleStore_.findEntry(recordId);
@@ -819,10 +827,14 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
       healed.statusTurns = 0;
     }
 
-    if (healed == *existing) continue;  // avoid a pointless SD write when there was nothing to heal
+    if (healed == *existing) continue;  // nothing to heal for this member
+    healedEntries[healedCount++] = healed;
+  }
+
+  if (healedCount > 0) {
     // Best-effort: a battle-store write failure here should not fail the
     // reading-credit commit that already succeeded.
-    battleStore_.upsertEntry(healed);
+    battleStore_.upsertEntries(std::span<const BattleRecordEntry>(healedEntries.data(), healedCount));
   }
 }
 

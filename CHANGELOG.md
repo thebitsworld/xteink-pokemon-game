@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.20.1] - 2026-09-14
+
+### Changed
+
+- Healing your party while reading now saves in one step instead of up to six - noticeably fewer SD-card writes on every reading checkpoint.
+- The three separate copies of the save-file integrity check (main save, battle data, individual stats) are now one shared, faster implementation.
+
 ## [0.20.0] - 2026-09-14
 
 ### Added

@@ -5,6 +5,8 @@
 #include <cstring>
 #include <limits>
 
+#include "PokemonCrc32.h"
+
 namespace pokemon {
 namespace {
 
@@ -111,14 +113,8 @@ HeaderDecodeResult decodeSnapshotHeader(const HeaderBytes& bytes, SnapshotHeader
   return HeaderDecodeResult::Ready;
 }
 
-uint32_t updateSnapshotCrc32(uint32_t crc, const uint8_t* data, const size_t size) {
-  for (size_t index = 0; index < size; ++index) {
-    crc ^= data[index];
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      crc = (crc >> 1U) ^ (0xEDB88320U & static_cast<uint32_t>(0U - (crc & 1U)));
-    }
-  }
-  return crc;
+uint32_t updateSnapshotCrc32(const uint32_t crc, const uint8_t* data, const size_t size) {
+  return updatePokemonCrc32(crc, data, size);
 }
 
 bool encodeState(const PokemonState& state, StateBytes& output) {
