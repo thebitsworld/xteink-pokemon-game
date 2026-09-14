@@ -14,10 +14,12 @@ namespace pokemon {
 
 // The PC Box's own capacity - distinct from (and much smaller than)
 // PokemonStore's total-record hard ceiling of 1024 (see
-// PokemonService::resolveEncounter()'s own comment) and matched to
-// POKEMON_IVEV_MAX_ENTRIES (PokemonIvEvStoreCodec.h) so every record that
-// can exist once this cap is enforced - up to PARTY_SIZE in the party, up
-// to this many in the Box - always has room for a persisted IV/EV entry.
+// PokemonService::resolveEncounter()'s own comment). POKEMON_IVEV_MAX_ENTRIES
+// (PokemonIvEvStoreCodec.h) is deliberately this value PLUS PARTY_SIZE (518,
+// not 512) - the true maximum number of simultaneously-live records is
+// PARTY_SIZE in the party plus this many in the Box, since the catch gate
+// only blocks once BOTH are full - so every live record always has room for
+// a persisted IV/EV entry.
 constexpr uint32_t PC_BOX_MAX_RECORDS = 512;
 
 enum class TeachMoveOutcome : uint8_t {

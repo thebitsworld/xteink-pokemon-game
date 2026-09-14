@@ -1,5 +1,6 @@
 #include <HalStorage.h>
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 
@@ -213,6 +214,37 @@ void preExistingLegacySingleFileIsMigratedOnFirstLoad() {
   if (rereadEntry != nullptr) CHECK(rereadEntry->currentHp == 30);
 }
 
+// Round 3 audit bug 2.7: one invalid entry in a batch must not discard the
+// other, otherwise-good entries.
+void upsertEntriesAppliesValidEntriesAndSkipsAnInvalidOne() {
+  Storage.clear();
+  pokemon::PokemonBattleStore store;
+
+  pokemon::BattleRecordEntry invalid = makeEntry(0, 5);  // recordId 0 is never valid
+  std::array<pokemon::BattleRecordEntry, 3> batch = {makeEntry(7, 20), invalid, makeEntry(3, 15)};
+  CHECK(store.upsertEntries(batch));
+
+  const pokemon::BattleRecordEntry* seven = store.findEntry(7);
+  CHECK(seven != nullptr);
+  if (seven != nullptr) CHECK(seven->currentHp == 20);
+  const pokemon::BattleRecordEntry* three = store.findEntry(3);
+  CHECK(three != nullptr);
+  if (three != nullptr) CHECK(three->currentHp == 15);
+  CHECK(store.findEntry(0) == nullptr);
+
+  pokemon::PokemonBattleStore reader;
+  CHECK(reader.findEntry(7) != nullptr);
+  CHECK(reader.findEntry(3) != nullptr);
+}
+
+void upsertEntriesFailsWhenEveryEntryIsInvalid() {
+  Storage.clear();
+  pokemon::PokemonBattleStore store;
+  std::array<pokemon::BattleRecordEntry, 2> batch = {makeEntry(0, 5), makeEntry(0, 6)};
+  CHECK(!store.upsertEntries(batch));
+  CHECK(!Storage.exists(STORE_PATH_A));
+}
+
 }  // namespace
 
 int main() {
@@ -226,5 +258,7 @@ int main() {
   invalidUpsertLeavesThePreviouslyWrittenFilesUntouched();
   aWriteFailureLeavesTheActiveFileAndInMemoryStateUnchanged();
   preExistingLegacySingleFileIsMigratedOnFirstLoad();
+  upsertEntriesAppliesValidEntriesAndSkipsAnInvalidOne();
+  upsertEntriesFailsWhenEveryEntryIsInvalid();
   return failures == 0 ? 0 : 1;
 }

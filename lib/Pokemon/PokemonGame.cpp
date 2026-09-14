@@ -798,7 +798,16 @@ bool useEvolutionItem(PokemonState& state, PokemonRecord& record, const Evolutio
 
 CollectionActionSet collectionActions(const bool party, const uint8_t partyCount) {
   CollectionActionSet actions{};
-  const auto append = [&actions](const CollectionAction action) { actions.items[actions.count++] = action; };
+  // Defense in depth (round 3 audit bug 2.8): CollectionActionSet::items is
+  // a fixed-size array, currently exactly large enough for every action
+  // this function can emit at once - the Box branch with a non-full party
+  // already emits all 6. Nothing overflows it today, but nothing enforced
+  // that either, so the next action added here without also growing
+  // items's size would silently write out of bounds.
+  const auto append = [&actions](const CollectionAction action) {
+    if (actions.count >= actions.items.size()) return;
+    actions.items[actions.count++] = action;
+  };
 
   append(CollectionAction::Summary);
   append(CollectionAction::Moveset);

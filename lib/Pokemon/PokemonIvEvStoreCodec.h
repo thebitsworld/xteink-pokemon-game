@@ -14,13 +14,17 @@ constexpr size_t POKEMON_IVEV_ENTRY_BYTES = 14;  // recordId(4) + iv(5) + ev(5),
 // scratch), and the write-side cap upsertIvEvEntry() enforces. Deliberately
 // smaller than PokemonService::resolveEncounter()'s own 1024-record hard
 // cap on the *main* save - a realistic PC Box now has its own explicit
-// 512-entry cap (see PC_BOX_MAX_RECORDS / the Release feature in
-// PokemonService), and 512 + the party's 6 covers every record that can
-// exist once that cap is enforced. A record that somehow still can't get a
-// slot (e.g. a save written before this cap existed) doesn't crash or
-// corrupt anything - PokemonService::ensureIvEv() already tolerates a
-// "not found" entry by rolling a fresh, unpersisted one.
-constexpr size_t POKEMON_IVEV_MAX_ENTRIES = 512;
+// 512-entry cap (PC_BOX_MAX_RECORDS, see PokemonService.h), and the capacity
+// gate only blocks a catch once the party is ALSO full - so the true
+// maximum number of simultaneously-live records is PC_BOX_MAX_RECORDS (512)
+// + PARTY_SIZE (6) = 518, not 512. This is exactly that ceiling (not just
+// 512) so every live record always has room for a persisted IV/EV entry -
+// getting this arithmetic wrong once already shipped as round 3's bug 2.3.
+// A record that somehow still can't get a slot regardless (e.g. a save
+// written before this cap existed) doesn't crash or corrupt anything -
+// PokemonService::ensureIvEv() already tolerates a "not found" entry by
+// rolling a fresh, unpersisted one.
+constexpr size_t POKEMON_IVEV_MAX_ENTRIES = 518;
 // The largest entry count any previously-shipped build could have written
 // (when this cap was 1024) - decodeIvEvStoreFile() accepts an input file up
 // to THIS size (so an old, larger file isn't discarded as corrupt/oversized
