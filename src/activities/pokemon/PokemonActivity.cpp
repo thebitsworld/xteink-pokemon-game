@@ -564,6 +564,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::Move:
     case Screen::ResetFirst:
     case Screen::ResetFinal:
+    case Screen::PcReleaseConfirm:
       return screen_ == Screen::Move ? snapshot_.partyCount : 2;
     case Screen::Menu:
       return 8;
@@ -578,12 +579,13 @@ int PokemonActivity::logicalCount() const {
     case Screen::Moveset:
       return pokemon::BATTLE_MOVE_SLOTS;
     case Screen::MovesetPick: {
-      pokemon::PokemonRecord record{};
-      if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return 0;
-      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
+      if (focusedRecord_.recordId == 0) return 0;
+      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(focusedRecord_);
       // +1 for the trailing "Forget" row - always offered regardless of
       // whether there's anything new to learn (Stage 12).
-      return static_cast<int>(learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry)) + 1;
+      return static_cast<int>(
+                 learnableMoveCount(focusedRecord_.speciesId, pokemon::levelForXp(focusedRecord_.totalXp), entry)) +
+             1;
     }
     case Screen::TmReplaceSlot:
     case Screen::PpUpSlot:
@@ -649,7 +651,9 @@ int PokemonActivity::logicalCount() const {
 int PokemonActivity::listTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   int top = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + metrics.verticalSpacing;
-  if (screen_ == Screen::Starter || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal) top += 72;
+  if (screen_ == Screen::Starter || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal ||
+      screen_ == Screen::PcReleaseConfirm)
+    top += 72;
   if (screen_ == Screen::Gender) top += 180;
   if (screen_ == Screen::NicknameQuestion) top += 210;
   return top;
@@ -698,6 +702,22 @@ uint32_t PokemonActivity::selectedRecordId() const {
     return local >= 0 && local < static_cast<int>(pcCount_) ? pcPage_[local].recordId : 0;
   }
   return focusedRecordId_;
+}
+
+// The full-record counterpart to selectedRecordId() - every case already
+// has the complete PokemonRecord sitting in RAM (snapshot_.party/pcPage_),
+// so this is free to call anywhere selectedRecordId() already is, no extra
+// SD read. Used to populate focusedRecord_ at the moment a Pokemon becomes
+// "focused" for the Moveset/TM/PP-Up screens.
+pokemon::PokemonRecord PokemonActivity::selectedRecord() const {
+  if (screen_ == Screen::Party || screen_ == Screen::Move || screen_ == Screen::ItemTarget) {
+    return selected_ < snapshot_.partyCount ? snapshot_.party[selected_] : pokemon::PokemonRecord{};
+  }
+  if (screen_ == Screen::Pc) {
+    const int local = selected_ - pageStart();
+    return local >= 0 && local < static_cast<int>(pcCount_) ? pcPage_[local] : pokemon::PokemonRecord{};
+  }
+  return focusedRecord_;
 }
 
 void PokemonActivity::showMessage(const char* message, const Screen returnScreen) {
@@ -1328,6 +1348,7 @@ void PokemonActivity::activate() {
       const uint32_t recordId = selectedRecordId();
       if (recordId == 0) return;
       focusedRecordId_ = recordId;
+      focusedRecord_ = selectedRecord();
       actionSource_ = screen_;
       setScreen(Screen::Actions);
       return;
@@ -1368,13 +1389,20 @@ void PokemonActivity::activate() {
           }
           return;
         }
+        case pokemon::CollectionAction::Release:
+          if (focusedRecord_.recordId == 0) return;
+          snprintf(message_, sizeof(message_), tr(STR_POKEMON_RELEASE_QUESTION),
+                   focusedRecord_.nickname[0] == '\0' ? speciesName(focusedRecord_.speciesId)
+                                                       : focusedRecord_.nickname.data());
+          setScreen(Screen::PcReleaseConfirm);
+          return;
         case pokemon::CollectionAction::Rename:
           openNickname(focusedRecordId_, false, Screen::Actions);
           return;
         case pokemon::CollectionAction::EvolutionPrompts: {
-          pokemon::PokemonRecord record{};
-          if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return;
-          const bool enabled = (record.flags & pokemon::recordFlag(pokemon::RecordFlag::EvolutionPromptsDisabled)) == 0;
+          if (focusedRecord_.recordId == 0) return;
+          const bool enabled =
+              (focusedRecord_.flags & pokemon::recordFlag(pokemon::RecordFlag::EvolutionPromptsDisabled)) == 0;
           if (service_.setEvolutionPrompts(focusedRecordId_, !enabled) != pokemon::ServiceStatus::Ok) {
             showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Actions);
           } else {
@@ -1403,10 +1431,10 @@ void PokemonActivity::activate() {
       setScreen(Screen::MovesetPick);
       return;
     case Screen::MovesetPick: {
-      pokemon::PokemonRecord record{};
-      if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) return;
-      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
-      const size_t learnable = learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry);
+      if (focusedRecord_.recordId == 0) return;
+      const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(focusedRecord_);
+      const size_t learnable =
+          learnableMoveCount(focusedRecord_.speciesId, pokemon::levelForXp(focusedRecord_.totalXp), entry);
       if (static_cast<size_t>(selected_) >= learnable) {
         // Trailing "Forget" row - clears the slot instead of learning
         // anything (Stage 12; refuses to clear a Pokemon's last move).
@@ -1417,8 +1445,8 @@ void PokemonActivity::activate() {
         setScreen(Screen::Moveset);
         return;
       }
-      const uint8_t moveId = learnableMoveIdAt(record.speciesId, pokemon::levelForXp(record.totalXp), entry,
-                                               static_cast<size_t>(selected_));
+      const uint8_t moveId = learnableMoveIdAt(focusedRecord_.speciesId, pokemon::levelForXp(focusedRecord_.totalXp),
+                                               entry, static_cast<size_t>(selected_));
       if (moveId == 0) return;
       if (service_.learnMoveIntoSlot(focusedRecordId_, movesetSlot_, moveId) != pokemon::ServiceStatus::Ok) {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Moveset);
@@ -1509,6 +1537,7 @@ void PokemonActivity::activate() {
         // No MovesetFull-style branching - every occupied slot is always a
         // valid PP Up target, so this always goes straight to the picker.
         focusedRecordId_ = recordId;
+        focusedRecord_ = selectedRecord();
         setScreen(Screen::PpUpSlot);
         return;
       }
@@ -1556,6 +1585,7 @@ void PokemonActivity::activate() {
           // Full moveset no longer just blocks the TM - let the player
           // choose which of the 4 current moves to overwrite (Stage 12).
           focusedRecordId_ = recordId;
+          focusedRecord_ = selectedRecord();
           setScreen(Screen::TmReplaceSlot);
         } else if (outcome != pokemon::TeachMoveOutcome::Learned) {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
@@ -1931,8 +1961,12 @@ void PokemonActivity::activate() {
       }
       const uint16_t caughtSpecies = battleOpponent_.speciesId;
       uint32_t caughtRecordId = 0;
-      if (service_.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId) != pokemon::ServiceStatus::Ok ||
-          caughtRecordId == 0) {
+      const pokemon::ServiceStatus caughtStatus = service_.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId);
+      if (caughtStatus == pokemon::ServiceStatus::BoxFull) {
+        showMessage(tr(STR_POKEMON_BOX_FULL), Screen::Menu);
+        return;
+      }
+      if (caughtStatus != pokemon::ServiceStatus::Ok || caughtRecordId == 0) {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
         return;
       }
@@ -1971,6 +2005,18 @@ void PokemonActivity::activate() {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Settings);
       else
         setScreen(Screen::Settings);
+      return;
+    case Screen::PcReleaseConfirm:
+      if (selected_ != 0) {
+        setScreen(Screen::Actions);
+        return;
+      }
+      if (service_.releasePokemon(focusedRecordId_) != pokemon::ServiceStatus::Ok) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Pc);
+        return;
+      }
+      if (!refreshSnapshot()) return;
+      setScreen(Screen::Pc);
       return;
     case Screen::Message:
       setScreen(returnScreen_);
@@ -2064,6 +2110,9 @@ void PokemonActivity::goBack() {
     case Screen::ResetFirst:
     case Screen::ResetFinal:
       setScreen(Screen::Settings);
+      return;
+    case Screen::PcReleaseConfirm:
+      setScreen(Screen::Actions);
       return;
     default:
       setScreen(Screen::Menu);
@@ -2337,6 +2386,7 @@ void PokemonActivity::buildRows() {
       case Screen::NicknameQuestion:
       case Screen::ResetFirst:
       case Screen::ResetFinal:
+      case Screen::PcReleaseConfirm:
         row(local, index == 0 ? tr(STR_YES) : tr(STR_NO));
         break;
       // Unreachable in practice: isListScreen() excludes Screen::Menu (it
@@ -2405,6 +2455,9 @@ void PokemonActivity::buildRows() {
           case pokemon::CollectionAction::Withdraw:
             label = tr(STR_POKEMON_WITHDRAW);
             break;
+          case pokemon::CollectionAction::Release:
+            label = tr(STR_POKEMON_RELEASE);
+            break;
           case pokemon::CollectionAction::Rename:
             label = tr(STR_POKEMON_RENAME);
             break;
@@ -2416,11 +2469,8 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::Moveset: {
-        pokemon::PokemonRecord record{};
         const pokemon::BattleRecordEntry entry =
-            service_.readRecord(focusedRecordId_, record) == pokemon::ServiceStatus::Ok
-                ? service_.peekBattleMoves(record)
-                : pokemon::BattleRecordEntry{};
+            focusedRecord_.recordId != 0 ? service_.peekBattleMoves(focusedRecord_) : pokemon::BattleRecordEntry{};
         const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
         char value[16];
         snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index],
@@ -2429,16 +2479,16 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::MovesetPick: {
-        pokemon::PokemonRecord record{};
-        if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) break;
-        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
-        const size_t learnable = learnableMoveCount(record.speciesId, pokemon::levelForXp(record.totalXp), entry);
+        if (focusedRecord_.recordId == 0) break;
+        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(focusedRecord_);
+        const size_t learnable =
+            learnableMoveCount(focusedRecord_.speciesId, pokemon::levelForXp(focusedRecord_.totalXp), entry);
         if (static_cast<size_t>(index) >= learnable) {
           row(local, tr(STR_POKEMON_FORGET));
           break;
         }
-        const uint8_t moveId =
-            learnableMoveIdAt(record.speciesId, pokemon::levelForXp(record.totalXp), entry, static_cast<size_t>(index));
+        const uint8_t moveId = learnableMoveIdAt(focusedRecord_.speciesId, pokemon::levelForXp(focusedRecord_.totalXp),
+                                                 entry, static_cast<size_t>(index));
         const pokemon::MoveData* move = pokemon::moveData(moveId);
         row(local, move == nullptr ? "?" : move->name);
         break;
@@ -2448,11 +2498,8 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_CANCEL));
           break;
         }
-        pokemon::PokemonRecord record{};
         const pokemon::BattleRecordEntry entry =
-            service_.readRecord(focusedRecordId_, record) == pokemon::ServiceStatus::Ok
-                ? service_.peekBattleMoves(record)
-                : pokemon::BattleRecordEntry{};
+            focusedRecord_.recordId != 0 ? service_.peekBattleMoves(focusedRecord_) : pokemon::BattleRecordEntry{};
         const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
         char value[16];
         snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index],
@@ -2465,11 +2512,8 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_CANCEL));
           break;
         }
-        pokemon::PokemonRecord record{};
         const pokemon::BattleRecordEntry entry =
-            service_.readRecord(focusedRecordId_, record) == pokemon::ServiceStatus::Ok
-                ? service_.peekBattleMoves(record)
-                : pokemon::BattleRecordEntry{};
+            focusedRecord_.recordId != 0 ? service_.peekBattleMoves(focusedRecord_) : pokemon::BattleRecordEntry{};
         const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
         char value[24];
         if (move == nullptr) {
@@ -2938,9 +2982,10 @@ void PokemonActivity::renderFocused() {
     centered(renderer, UI_12_FONT_ID, contentTop + 100, tr(STR_POKEMON_BAG_EMPTY), EpdFontFamily::BOLD);
     return;
   }
-  if (screen_ == Screen::NicknameQuestion || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal) {
-    const char* prompt = screen_ == Screen::NicknameQuestion ? message_
-                         : screen_ == Screen::ResetFirst     ? tr(STR_POKEMON_RESET_QUESTION)
+  if (screen_ == Screen::NicknameQuestion || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal ||
+      screen_ == Screen::PcReleaseConfirm) {
+    const char* prompt = screen_ == Screen::NicknameQuestion || screen_ == Screen::PcReleaseConfirm ? message_
+                         : screen_ == Screen::ResetFirst                                            ? tr(STR_POKEMON_RESET_QUESTION)
                                                              : tr(STR_POKEMON_RESET_CONFIRM);
     centered(renderer, UI_12_FONT_ID, contentTop + 18, prompt, EpdFontFamily::BOLD);
     if (screen_ == Screen::NicknameQuestion) {
@@ -3925,11 +3970,19 @@ void PokemonActivity::renderHeaderAndHints() {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     return;
   }
+  char pcTitleBuffer[32];
   const char* title = tr(STR_POKEMON);
   if (screen_ == Screen::Party || screen_ == Screen::Move || screen_ == Screen::ItemTarget)
     title = tr(STR_POKEMON_PARTY);
-  else if (screen_ == Screen::Pc || screen_ == Screen::PcOrder)
-    title = tr(STR_POKEMON_PC_BOX);
+  else if (screen_ == Screen::Pc || screen_ == Screen::PcOrder) {
+    // ownedCount is every record (party + Box); partyCount of those are in
+    // the party, so the remainder is exactly what's actually sitting in the
+    // Box - the same count the resolveEncounter() capacity gate checks.
+    const uint32_t boxCount = snapshot_.ownedCount - snapshot_.partyCount;
+    snprintf(pcTitleBuffer, sizeof(pcTitleBuffer), tr(STR_POKEMON_PC_BOX_WITH_COUNT), boxCount,
+             pokemon::PC_BOX_MAX_RECORDS);
+    title = pcTitleBuffer;
+  }
   else if (screen_ == Screen::Bag)
     title = tr(STR_POKEMON_BAG);
   else if (screen_ == Screen::BagEvolution)
@@ -3957,6 +4010,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_BADGES);
   else if (screen_ == Screen::Settings || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal)
     title = tr(STR_POKEMON_SETTINGS);
+  else if (screen_ == Screen::PcReleaseConfirm)
+    title = tr(STR_POKEMON_PC_BOX);
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware())
     TouchHeaderBackButton::draw(renderer, uiTarget_, header, title, false);

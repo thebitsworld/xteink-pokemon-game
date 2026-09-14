@@ -95,19 +95,21 @@ void collectionActionsExcludeOperationsThatCannotSucceed() {
   CHECK(reorderableParty.items[5] == pokemon::CollectionAction::EvolutionPrompts);
 
   const pokemon::CollectionActionSet fullPartyPc = pokemon::collectionActions(false, pokemon::PARTY_SIZE);
-  CHECK(fullPartyPc.count == 4);
+  CHECK(fullPartyPc.count == 5);
   CHECK(fullPartyPc.items[0] == pokemon::CollectionAction::Summary);
   CHECK(fullPartyPc.items[1] == pokemon::CollectionAction::Moveset);
-  CHECK(fullPartyPc.items[2] == pokemon::CollectionAction::Rename);
-  CHECK(fullPartyPc.items[3] == pokemon::CollectionAction::EvolutionPrompts);
+  CHECK(fullPartyPc.items[2] == pokemon::CollectionAction::Release);
+  CHECK(fullPartyPc.items[3] == pokemon::CollectionAction::Rename);
+  CHECK(fullPartyPc.items[4] == pokemon::CollectionAction::EvolutionPrompts);
 
   const pokemon::CollectionActionSet pcWithRoom = pokemon::collectionActions(false, pokemon::PARTY_SIZE - 1U);
-  CHECK(pcWithRoom.count == 5);
+  CHECK(pcWithRoom.count == 6);
   CHECK(pcWithRoom.items[0] == pokemon::CollectionAction::Summary);
   CHECK(pcWithRoom.items[1] == pokemon::CollectionAction::Moveset);
   CHECK(pcWithRoom.items[2] == pokemon::CollectionAction::Withdraw);
-  CHECK(pcWithRoom.items[3] == pokemon::CollectionAction::Rename);
-  CHECK(pcWithRoom.items[4] == pokemon::CollectionAction::EvolutionPrompts);
+  CHECK(pcWithRoom.items[3] == pokemon::CollectionAction::Release);
+  CHECK(pcWithRoom.items[4] == pokemon::CollectionAction::Rename);
+  CHECK(pcWithRoom.items[5] == pokemon::CollectionAction::EvolutionPrompts);
 }
 
 pokemon::Gender validGenderForSpecies(const uint16_t speciesId) {
@@ -1074,6 +1076,62 @@ void reenablingPromptsWaitsForTheNextLevel() {
   CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::None);
 }
 
+void releaseRecordRemovesAPcRecordButKeepsItInThePokedex() {
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  CHECK(pokemon::markSpecies(state.seenSpecies, leader.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, leader.speciesId));
+
+  pokemon::PokemonRecord boxed = leaderAtLevelFive();
+  boxed.recordId = 12;
+  boxed.speciesId = 1;
+  CHECK(pokemon::markSpecies(state.seenSpecies, boxed.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, boxed.speciesId));
+  // Not in state.partyRecordIds - this is what makes it a "Box" record.
+
+  pokemon::RecordMutation mutation{};
+  CHECK(pokemon::releaseRecord(state, boxed, mutation));
+  CHECK(mutation.kind == pokemon::RecordMutationKind::Remove);
+  CHECK(mutation.requestedRecordId == boxed.recordId);
+  // Stays in the Pokedex forever, matching every mainline game.
+  CHECK(pokemon::isSpeciesMarked(state.seenSpecies, boxed.speciesId));
+  CHECK(pokemon::isSpeciesMarked(state.caughtSpecies, boxed.speciesId));
+}
+
+void releaseRecordRejectsAPartyMember() {
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  CHECK(pokemon::markSpecies(state.seenSpecies, leader.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, leader.speciesId));
+
+  pokemon::RecordMutation mutation{};
+  CHECK(!pokemon::releaseRecord(state, leader, mutation));
+  CHECK(mutation.kind == pokemon::RecordMutationKind::None);  // untouched on rejection
+  CHECK(state.partyRecordIds[0] == leader.recordId);          // still in party
+}
+
+void releaseRecordDropsAnyPendingEvolutionForThatRecord() {
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  CHECK(pokemon::markSpecies(state.seenSpecies, leader.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, leader.speciesId));
+
+  pokemon::PokemonRecord boxed = leaderAtLevelFive();
+  boxed.recordId = 12;
+  boxed.speciesId = 1;
+  CHECK(pokemon::markSpecies(state.seenSpecies, boxed.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, boxed.speciesId));
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Evolution;
+  state.pendingEvents[0].recordId = boxed.recordId;
+  state.pendingEvents[0].speciesId = 2;
+  state.dashboardNotice = pokemon::DashboardNotice::WhatsThis;
+
+  pokemon::RecordMutation mutation{};
+  CHECK(pokemon::releaseRecord(state, boxed, mutation));
+  CHECK(mutation.kind == pokemon::RecordMutationKind::Remove);
+  CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::None);
+}
+
 void levelHundredDoesNotCatchUpOrChainLevelEvolutions() {
   pokemon::PokemonRecord bulbasaur = leaderAtLevelFive();
   bulbasaur.speciesId = 1;
@@ -1293,6 +1351,9 @@ int main() {
   acknowledgingABlockingItemWaitsForTheNextLevel();
   levelEvolutionPromptsOnceAndCanBeConfirmedOrBlocked();
   reenablingPromptsWaitsForTheNextLevel();
+  releaseRecordRemovesAPcRecordButKeepsItInThePokedex();
+  releaseRecordRejectsAPartyMember();
+  releaseRecordDropsAnyPendingEvolutionForThatRecord();
   levelHundredDoesNotCatchUpOrChainLevelEvolutions();
   promptTogglePreservesAnUnrelatedPendingEvent();
   disablingPromptsRemovesOnlyMatchingQueuedEvolutions();

@@ -349,22 +349,26 @@ bool PokemonStore::commit(const PokemonState& state, const RecordMutation& mutat
 bool PokemonStore::writeSnapshot(const PokemonState& state, const RecordMutation& mutation, const bool discardRecords) {
   const bool appending = mutation.kind == RecordMutationKind::Append;
   const bool replacing = mutation.kind == RecordMutationKind::Replace;
+  const bool removing = mutation.kind == RecordMutationKind::Remove;
   if (!writable_ || !validateState(state) || (discardRecords && mutation.kind != RecordMutationKind::None) ||
       ((appending || replacing) &&
        (mutation.requestedRecordId != mutation.record.recordId || !validateRecord(mutation.record))) ||
-      (replacing && (!ready_ || discardRecords)) ||
-      (!appending && !replacing && mutation.kind != RecordMutationKind::None)) {
+      (removing && mutation.requestedRecordId == 0) ||
+      ((replacing || removing) && (!ready_ || discardRecords)) ||
+      (!appending && !replacing && !removing && mutation.kind != RecordMutationKind::None)) {
     return false;
   }
 
   const bool preserveRecords = ready_ && !discardRecords;
   const uint32_t currentRecordCount = preserveRecords ? activeHeader_.recordCount : 0;
   if (appending && currentRecordCount == UINT32_MAX) return false;
+  if (removing && currentRecordCount == 0) return false;
 
   const uint32_t nextSequence =
       !ready_ ? 1U : (activeHeader_.sequence == UINT32_MAX ? 1U : activeHeader_.sequence + 1U);
   StateBytes stateBytes{};
-  const SnapshotHeader header{nextSequence, currentRecordCount + (appending ? 1U : 0U)};
+  const SnapshotHeader header{nextSequence,
+                              currentRecordCount + (appending ? 1U : 0U) - (removing ? 1U : 0U)};
   HeaderBytes headerBytes{};
   if (!encodeState(state, stateBytes) || !encodeSnapshotHeader(header, headerBytes)) return false;
   write32(stateBytes.data() + 108, nextSequence);
@@ -396,6 +400,7 @@ bool PokemonStore::writeSnapshot(const PokemonState& state, const RecordMutation
                  writeExact(destination, stateBytes.data(), stateBytes.size());
   uint32_t lastRecordId = 0;
   bool replacementFound = !replacing;
+  bool removalFound = !removing;
   BatchedRecordReader sourceReader(source, currentRecordCount);
   BatchedRecordWriter destWriter(destination);
   for (uint32_t index = 0; writeOk && index < currentRecordCount; ++index) {
@@ -406,6 +411,13 @@ bool PokemonStore::writeSnapshot(const PokemonState& state, const RecordMutation
       writeOk = recordId > lastRecordId;
       lastRecordId = recordId;
       const bool useReplacement = replacing && recordId == mutation.requestedRecordId;
+      // A Remove mutation skips writing this record entirely instead of
+      // substituting - it simply isn't copied to the destination file.
+      const bool skipForRemoval = removing && recordId == mutation.requestedRecordId;
+      if (skipForRemoval) {
+        removalFound = true;
+        continue;
+      }
       const RecordBytes& outputBytes = useReplacement ? mutationRecordBytes : recordBytes;
       writeOk = writeOk && destWriter.write(outputBytes);
       if (writeOk) crc = updateSnapshotCrc32(crc, outputBytes.data(), outputBytes.size());
@@ -423,7 +435,7 @@ bool PokemonStore::writeSnapshot(const PokemonState& state, const RecordMutation
               writeExact(destination, mutationRecordBytes.data(), mutationRecordBytes.size());
     if (writeOk) crc = updateSnapshotCrc32(crc, mutationRecordBytes.data(), mutationRecordBytes.size());
   }
-  writeOk = writeOk && replacementFound;
+  writeOk = writeOk && replacementFound && removalFound;
   const bool sourceCloseOk = !preserveRecords || source.close();
   uint8_t crcBytes[POKEMON_SNAPSHOT_CRC_BYTES]{};
   write32(crcBytes, finishSnapshotCrc32(crc));

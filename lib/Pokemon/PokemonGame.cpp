@@ -724,6 +724,27 @@ bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, const En
   return true;
 }
 
+bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutation& mutation) {
+  if (!validateState(state) || !validateRecord(record) || mutation.kind != RecordMutationKind::None) {
+    return false;
+  }
+  for (const uint32_t partyRecordId : state.partyRecordIds) {
+    if (partyRecordId == record.recordId) return false;  // withdraw to the Box first
+  }
+
+  PokemonState stateCandidate = state;
+  removePendingEvolutionsForRecord(stateCandidate, record.recordId);
+  refreshDashboardNotice(stateCandidate);
+  if (!validateState(stateCandidate)) return false;
+
+  RecordMutation mutationCandidate = mutation;
+  mutationCandidate.requestedRecordId = record.recordId;
+  mutationCandidate.kind = RecordMutationKind::Remove;
+  state = stateCandidate;
+  mutation = mutationCandidate;
+  return true;
+}
+
 bool resolveEvolution(PokemonState& state, PokemonRecord& record, const EvolutionChoice choice,
                       RecordMutation& mutation) {
   const PendingEvent* front = pendingEventFront(state);
@@ -789,6 +810,7 @@ CollectionActionSet collectionActions(const bool party, const uint8_t partyCount
   } else if (partyCount < PARTY_SIZE) {
     append(CollectionAction::Withdraw);
   }
+  if (!party) append(CollectionAction::Release);
   append(CollectionAction::Rename);
   append(CollectionAction::EvolutionPrompts);
   return actions;
