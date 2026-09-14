@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 
 namespace pokemon {
 namespace {
@@ -30,6 +31,109 @@ bool readExact(FsFile& file, void* output, const size_t size) {
 }
 
 bool writeExact(FsFile& file, const void* input, const size_t size) { return file.write(input, size) == size; }
+
+// Reads a known-length run of consecutive 48-byte records from an already-
+// open, correctly-seeked file, one FsFile::read() call per
+// BUFFER_RECORD_CAPACITY records instead of one syscall per record - every
+// loop below used to issue one 48-byte read (or write) per record, which on
+// a large save is thousands of individual SD-card transactions for a single
+// operation (see the "batched save I/O" performance note in
+// docs/development/pokemon-gen1-audit-round2.md, item 3.2). The caller must
+// pass the exact number of records it intends to read (recordCount from the
+// header, never "however many bytes happen to be left in the file") -
+// requesting more than that would read past the record region into the
+// trailing CRC bytes and misdecode them as a record.
+//
+// The buffer is heap-allocated (new (std::nothrow), lazily on first use) and
+// owned for the lifetime of one call - never a stack local or a reused
+// static. This module has a real history of stack-overflow crashes from
+// exactly this shape of fixed-size buffer (see the v0.18.1/v0.18.2 IV/EV
+// store fixes); a 2 KB buffer is unlikely to repeat that specific crash, but
+// there's no reason to reintroduce the pattern this project already moved
+// away from.
+class BatchedRecordReader {
+ public:
+  static constexpr size_t BUFFER_RECORD_CAPACITY = 42;  // 42 * 48 B = 2016 B, close to a clean 2 KB
+
+  BatchedRecordReader(FsFile& file, const uint32_t totalRecords) : file_(file), remaining_(totalRecords) {}
+
+  // Decodes the next record's raw bytes into `out`. Returns false on any
+  // short read/allocation failure - the caller should treat that exactly
+  // like the old per-record readExact() returning false.
+  bool next(RecordBytes& out) {
+    if (bufferPos_ >= bufferValidRecords_) {
+      if (remaining_ == 0 || !refill(out.size())) return false;
+    }
+    std::memcpy(out.data(), buffer_.get() + bufferPos_ * out.size(), out.size());
+    ++bufferPos_;
+    --remaining_;
+    return true;
+  }
+
+ private:
+  bool refill(const size_t recordBytes) {
+    if (buffer_ == nullptr) {
+      buffer_.reset(new (std::nothrow) uint8_t[BUFFER_RECORD_CAPACITY * recordBytes]);
+      if (buffer_ == nullptr) return false;
+    }
+    const size_t chunkRecords = std::min<size_t>(BUFFER_RECORD_CAPACITY, remaining_);
+    const size_t wantBytes = chunkRecords * recordBytes;
+    const int got = file_.read(buffer_.get(), wantBytes);
+    if (got != static_cast<int>(wantBytes)) return false;
+    bufferValidRecords_ = chunkRecords;
+    bufferPos_ = 0;
+    return true;
+  }
+
+  FsFile& file_;
+  uint32_t remaining_;
+  std::unique_ptr<uint8_t[]> buffer_;
+  size_t bufferPos_ = 0;
+  size_t bufferValidRecords_ = 0;
+};
+
+// The write-side counterpart to BatchedRecordReader: accumulates records
+// into the same size heap buffer and flushes with one FsFile::write() call
+// per full buffer, instead of one write() per record. The caller must call
+// finish() after the last write() (and before writing anything that must
+// come after the batched records, like the trailing CRC bytes) to flush any
+// partial buffer still pending - a destructor-based flush was deliberately
+// not used here so a flush failure can be reported through the same
+// writeOk-style bool chain every other step in writeSnapshot() already uses,
+// rather than being silently swallowed.
+class BatchedRecordWriter {
+ public:
+  static constexpr size_t BUFFER_RECORD_CAPACITY = BatchedRecordReader::BUFFER_RECORD_CAPACITY;
+
+  explicit BatchedRecordWriter(FsFile& file) : file_(file) {}
+
+  bool write(const RecordBytes& record) {
+    if (buffer_ == nullptr) {
+      buffer_.reset(new (std::nothrow) uint8_t[BUFFER_RECORD_CAPACITY * record.size()]);
+      if (buffer_ == nullptr) return false;
+    }
+    std::memcpy(buffer_.get() + bufferedRecords_ * record.size(), record.data(), record.size());
+    ++bufferedRecords_;
+    return bufferedRecords_ < BUFFER_RECORD_CAPACITY || flush(record.size());
+  }
+
+  // Safe to call with recordBytes == 0 (nothing was ever buffered) or on an
+  // already-flushed writer - both are no-ops that return true.
+  bool finish(const size_t recordBytes) { return flush(recordBytes); }
+
+ private:
+  bool flush(const size_t recordBytes) {
+    if (bufferedRecords_ == 0) return true;
+    const size_t wantBytes = bufferedRecords_ * recordBytes;
+    const bool ok = file_.write(buffer_.get(), wantBytes) == wantBytes;
+    bufferedRecords_ = 0;
+    return ok;
+  }
+
+  FsFile& file_;
+  std::unique_ptr<uint8_t[]> buffer_;
+  size_t bufferedRecords_ = 0;
+};
 
 uint32_t read32(const uint8_t* bytes) {
   return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8U) |
@@ -97,10 +201,11 @@ InspectionResult inspectSnapshot(const char* path, SnapshotHeader& outputHeader)
       requiredPendingRecords |= static_cast<uint8_t>(1U << eventIndex);
     }
   }
+  BatchedRecordReader reader(file, header.recordCount);
   for (uint32_t index = 0; index < header.recordCount; ++index) {
     RecordBytes recordBytes{};
     PokemonRecord record{};
-    if (!readExact(file, recordBytes.data(), recordBytes.size()) || !decodeRecord(recordBytes, record) ||
+    if (!reader.next(recordBytes) || !decodeRecord(recordBytes, record) ||
         record.recordId <= previousRecordId || !isSpeciesMarked(state.caughtSpecies, record.speciesId)) {
       LOG_ERR("PokemonStore", "Invalid record in %s", path);
       file.close();
@@ -291,20 +396,28 @@ bool PokemonStore::writeSnapshot(const PokemonState& state, const RecordMutation
                  writeExact(destination, stateBytes.data(), stateBytes.size());
   uint32_t lastRecordId = 0;
   bool replacementFound = !replacing;
+  BatchedRecordReader sourceReader(source, currentRecordCount);
+  BatchedRecordWriter destWriter(destination);
   for (uint32_t index = 0; writeOk && index < currentRecordCount; ++index) {
     RecordBytes recordBytes{};
-    writeOk = readExact(source, recordBytes.data(), recordBytes.size());
+    writeOk = sourceReader.next(recordBytes);
     if (writeOk) {
       const uint32_t recordId = read32(recordBytes.data());
       writeOk = recordId > lastRecordId;
       lastRecordId = recordId;
       const bool useReplacement = replacing && recordId == mutation.requestedRecordId;
       const RecordBytes& outputBytes = useReplacement ? mutationRecordBytes : recordBytes;
-      writeOk = writeOk && writeExact(destination, outputBytes.data(), outputBytes.size());
+      writeOk = writeOk && destWriter.write(outputBytes);
       if (writeOk) crc = updateSnapshotCrc32(crc, outputBytes.data(), outputBytes.size());
       if (writeOk && useReplacement) replacementFound = true;
     }
   }
+  // Flush any records still sitting in the batched writer's buffer before
+  // writing anything that must land after them in the file (the appended
+  // record, then the trailing CRC bytes) - those two writes still go
+  // straight to `destination` unbatched, since there's at most one of each
+  // per call, nothing to batch.
+  writeOk = writeOk && destWriter.finish(mutationRecordBytes.size());
   if (appending) {
     writeOk = writeOk && mutation.record.recordId > lastRecordId &&
               writeExact(destination, mutationRecordBytes.data(), mutationRecordBytes.size());
@@ -341,10 +454,11 @@ bool PokemonStore::readRecord(const uint32_t recordId, PokemonRecord& output) co
     file.close();
     return false;
   }
+  BatchedRecordReader reader(file, activeHeader_.recordCount);
   for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
     RecordBytes bytes{};
     PokemonRecord candidate{};
-    if (!readExact(file, bytes.data(), bytes.size()) || !decodeRecord(bytes, candidate)) {
+    if (!reader.next(bytes) || !decodeRecord(bytes, candidate)) {
       LOG_ERR("PokemonStore", "Failed to decode active record");
       file.close();
       return false;
@@ -372,10 +486,11 @@ bool PokemonStore::loadOwnedEvolutionNeeds(OwnedEvolutionNeeds& output) const {
     return false;
   }
 
+  BatchedRecordReader reader(file, activeHeader_.recordCount);
   for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
     RecordBytes bytes{};
     PokemonRecord record{};
-    if (!readExact(file, bytes.data(), bytes.size()) || !decodeRecord(bytes, record)) {
+    if (!reader.next(bytes) || !decodeRecord(bytes, record)) {
       LOG_ERR("PokemonStore", "Failed to scan owned evolution needs");
       file.close();
       return false;
@@ -407,10 +522,11 @@ bool PokemonStore::readPcPage(const PcOrder order, size_t offset, const std::spa
 
   size_t written = 0;
   if (order == PcOrder::CatchDate) {
+    BatchedRecordReader reader(file, activeHeader_.recordCount);
     for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
       RecordBytes bytes{};
       PokemonRecord record{};
-      if (!readExact(file, bytes.data(), bytes.size()) || !decodeRecord(bytes, record)) {
+      if (!reader.next(bytes) || !decodeRecord(bytes, record)) {
         LOG_ERR("PokemonStore", "Failed to read PC capture order");
         file.close();
         return false;
@@ -432,23 +548,27 @@ bool PokemonStore::readPcPage(const PcOrder order, size_t offset, const std::spa
   }
 
   PokedexBits pcSpecies{};
-  for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
-    RecordBytes bytes{};
-    PokemonRecord record{};
-    if (!readExact(file, bytes.data(), bytes.size()) || !decodeRecord(bytes, record) ||
-        (!recordIsInParty(state, record.recordId) && !markSpecies(pcSpecies, record.speciesId))) {
-      LOG_ERR("PokemonStore", "Failed to scan PC species");
-      file.close();
-      return false;
+  {
+    BatchedRecordReader speciesScanReader(file, activeHeader_.recordCount);
+    for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
+      RecordBytes bytes{};
+      PokemonRecord record{};
+      if (!speciesScanReader.next(bytes) || !decodeRecord(bytes, record) ||
+          (!recordIsInParty(state, record.recordId) && !markSpecies(pcSpecies, record.speciesId))) {
+        LOG_ERR("PokemonStore", "Failed to scan PC species");
+        file.close();
+        return false;
+      }
     }
   }
 
   const auto appendSpecies = [&](const uint16_t speciesId) {
     if (!file.seek(activeRecordsOffset)) return false;
+    BatchedRecordReader reader(file, activeHeader_.recordCount);
     for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
       RecordBytes bytes{};
       PokemonRecord record{};
-      if (!readExact(file, bytes.data(), bytes.size()) || !decodeRecord(bytes, record)) return false;
+      if (!reader.next(bytes) || !decodeRecord(bytes, record)) return false;
       if (record.speciesId != speciesId || recordIsInParty(state, record.recordId)) continue;
       if (offset != 0) {
         --offset;
