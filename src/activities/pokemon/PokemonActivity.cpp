@@ -463,12 +463,22 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
   if (action.hitCount > 0) {
     snprintf(hitCountClause, sizeof(hitCountClause), tr(STR_POKEMON_HIT_TIMES), action.hitCount);
   }
-  const char* clauses[6] = {redirectedClause[0] != '\0' ? redirectedClause : nullptr,
+  // Acid/Bubble Beam/Aurora Beam/Psychic/Constrict/Bubble's secondary stat
+  // drop (round 3-4 audit item 1.3) - independent of the effectiveness
+  // suffix above (both can fire on the same hit), so it's its own clause
+  // rather than replacing `suffix`.
+  char statDropClause[64] = "";
+  if (action.statDropApplied) {
+    snprintf(statDropClause, sizeof(statDropClause), tr(STR_POKEMON_STAT_FELL), speciesName(other.speciesId),
+              statKindName(action.statDropStat));
+  }
+  const char* clauses[7] = {redirectedClause[0] != '\0' ? redirectedClause : nullptr,
                             hitCountClause[0] != '\0' ? hitCountClause : nullptr,
                             action.critical ? tr(STR_POKEMON_CRITICAL_HIT) : nullptr,
                             suffix[0] != '\0' ? suffix : nullptr,
                             action.recoilApplied ? tr(STR_POKEMON_RECOIL) : nullptr,
-                            action.drainApplied ? tr(STR_POKEMON_DRAINED) : nullptr};
+                            action.drainApplied ? tr(STR_POKEMON_DRAINED) : nullptr,
+                            statDropClause[0] != '\0' ? statDropClause : nullptr};
   snprintf(buffer, size, "%s", used);
   for (const char* clause : clauses) {
     if (clause == nullptr) continue;
@@ -894,6 +904,13 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
   pokemon::BattleTurnResult result{};
   if (trainerAiShouldActInsteadOfMoveThisTurn(trainerActionLine, sizeof(trainerActionLine))) {
     result = service_.resolvePlayerOnlyTurn(battlePlayer_, battleOpponent_, moveSlot);
+    // Teleport (round 3-4 audit item 1.7): the engine can't tell a wild
+    // battle from a trainer one, so a gym/Elite Four/Champion battle
+    // rewrites the event to a plain failure here, before it's ever
+    // formatted/displayed - see BattleLogEvent::Teleported's doc comment.
+    if (gymChallengeIndex_ != 0 && result.player.event == pokemon::BattleLogEvent::Teleported) {
+      result.player.event = pokemon::BattleLogEvent::MoveFailed;
+    }
     savePlayerBattleEntry();
     char playerLine[80] = "";
     if (result.player.acted) formatBattleActionLine(playerLine, sizeof(playerLine), battlePlayer_, battleOpponent_, result.player);
@@ -904,6 +921,9 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
     }
   } else {
     result = service_.resolveBattleTurn(battlePlayer_, battleOpponent_, moveSlot);
+    if (gymChallengeIndex_ != 0 && result.player.event == pokemon::BattleLogEvent::Teleported) {
+      result.player.event = pokemon::BattleLogEvent::MoveFailed;
+    }
     savePlayerBattleEntry();
     buildBattleLog(result);
   }
@@ -940,6 +960,11 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
       // the same outcome (and screen) as running away.
       resolveBattleAsPass();
     }
+  } else if (result.player.event == pokemon::BattleLogEvent::Teleported) {
+    // Real Gen 1: Teleport in a wild battle is a guaranteed escape, the same
+    // outcome as a successful Run - reaching here (rather than being
+    // rewritten to MoveFailed above) means this is a wild encounter.
+    resolveBattleAsPass();
   } else {
     setScreen(Screen::Battle);
   }
@@ -1070,6 +1095,7 @@ bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
   setupBattleOpponent(pending.speciesId, pending.level, {}, pending.gender);
   gymChallengeIndex_ = 0;
   forcedBattleSwitch_ = false;
+  battleRunAttempts_ = 0;
   snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
   setScreen(Screen::Battle);
   return true;
@@ -1831,7 +1857,20 @@ void PokemonActivity::activate() {
         setScreen(Screen::BattleSwitch);
         return;
       }
-      resolveBattleAsPass();  // RUN - always the last option either way
+      // RUN - always the last option either way. A gym/Elite Four/Champion
+      // challenge stays an unconditional forfeit (it's a menu-level "abandon
+      // the challenge," not an in-world escape - round 2-4 audit item 0.3/
+      // 1.3); only a wild battle rolls real Gen 1 escape odds.
+      if (isGym) {
+        resolveBattleAsPass();
+        return;
+      }
+      if (service_.attemptRunFromBattle(battlePlayer_, battleOpponent_, battleRunAttempts_)) {
+        resolveBattleAsPass();
+        return;
+      }
+      ++battleRunAttempts_;
+      finishItemUseMidBattle(tr(STR_POKEMON_COULDNT_ESCAPE));
       return;
     }
     case Screen::BattleMoves: {
@@ -2114,7 +2153,18 @@ void PokemonActivity::goBack() {
           battlePlayer_.trappedTurnsRemaining > 0) {
         return;
       }
-      resolveBattleAsPass();
+      // Same real Gen 1 run-away odds as the on-screen RUN option - see its
+      // handling in the activate() case above.
+      if (gymChallengeIndex_ != 0) {
+        resolveBattleAsPass();
+        return;
+      }
+      if (service_.attemptRunFromBattle(battlePlayer_, battleOpponent_, battleRunAttempts_)) {
+        resolveBattleAsPass();
+        return;
+      }
+      ++battleRunAttempts_;
+      finishItemUseMidBattle(tr(STR_POKEMON_COULDNT_ESCAPE));
       return;
     case Screen::BattleMoves:
     case Screen::BattleBalls:

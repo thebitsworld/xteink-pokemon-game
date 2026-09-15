@@ -208,6 +208,10 @@ class PokemonService {
   // voluntary switch, so only the player's own chosen move resolves.
   BattleTurnResult resolvePlayerOnlyTurn(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot);
   bool attemptBattleCatch(const BattleCombatant& wild, BallKind ball);
+  // Wild-battle-only run-away odds (see attemptRun()'s doc comment in
+  // PokemonBattle.h) - a gym/Elite Four/Champion RUN is always an
+  // unconditional forfeit at the UI layer and never calls this.
+  bool attemptRunFromBattle(const BattleCombatant& player, const BattleCombatant& opponent, uint8_t attemptCount);
   // A gym/Elite Four/Champion trainer's fixed roster carries no gender of
   // its own (unlike a wild encounter's PendingEvent, already rolled at
   // encounter time) - rolls one by the species' real gender ratio so the

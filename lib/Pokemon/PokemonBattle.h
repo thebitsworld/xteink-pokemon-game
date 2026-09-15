@@ -72,6 +72,21 @@ struct BattleCombatant {
   uint16_t maxHp = 0;
   Ailment status = Ailment::None;
   uint8_t statusTurns = 0;  // sleep/confusion countdown, engine-managed
+  // Toxic's real Gen 1 escalating-damage counter: 0 means "not badly
+  // poisoned" (either not poisoned at all, or poisoned by an ordinary
+  // poison-inflicting move - Poison Powder, Smog, ... - which always uses
+  // the flat STATUS_DAMAGE_FRACTION tick, see docs/development's audit
+  // round 2/4 item 0.2). Set to 1 the instant Toxic itself successfully
+  // poisons a target, then incremented by applyEndOfTurnStatusDamage() every
+  // turn it ticks, driving Toxic's own n*maxHP/16 formula (n=1,2,3,...,
+  // uncapped) instead of the shared flat fraction. Deliberately kept
+  // transient like the other per-battle counters below (bideDamageStored,
+  // disableTurnsRemaining, ...) rather than added to the persisted
+  // BattleRecordEntry - a documented simplification: closing and reopening
+  // the app mid-battle while badly poisoned restarts the count at 1 rather
+  // than resuming where it left off. Reset to 0 whenever status is cleared
+  // (faintCombatant(), Haze) or a fresh BattleCombatant is built.
+  uint8_t toxicCounter = 0;
   std::array<BattleMoveSlot, BATTLE_MOVE_SLOTS> moves{};
   // How many times each move slot has had a PP Up used on it (0-3) - copied
   // from BattleRecordEntry::ppUp at battle setup so the in-battle move menu
@@ -289,13 +304,15 @@ enum class BattleLogEvent : uint8_t {
   StatRaised,       // a stat-changing move successfully raised a stage
   StatLowered,      // a stat-changing move successfully lowered a stage
   StatChangeFailed,  // the target stat was already at +6/-6 - no further change possible
-  StatsReset,       // Haze - both sides' stat stages reset. NOT yet status/
-                    // Reflect/Light Screen/Mist/Focus Energy too, despite
-                    // real Gen 1 Haze clearing those as well - tracked as
-                    // Missing Feature 1.4 in pokemon-gen1-audit-round2.md,
-                    // not implemented here yet. Update this comment (or
-                    // implement the rest) together, don't let them drift
-                    // apart again.
+  StatsReset,       // Haze - both sides' stat stages, non-volatile status
+                    // (and Toxic's counter)/confusion, and Reflect/Light
+                    // Screen/Mist/Focus Energy (Guard Spec./Dire Hit's same
+                    // shared fields) all reset on both sides - implemented
+                    // in full per pokemon-gen1-audit-round2.md/round4.md
+                    // item 0.4/1.4. Deliberately clears the OPPONENT's
+                    // status too (the intended reading, not the real Gen 1
+                    // "lingering status" glitch some cartridges have - this
+                    // project consistently implements intended behavior).
   OneHitKo,          // Fissure/Horn Drill/Guillotine connected - instant faint
   MoveFailed,        // Counter with nothing to reflect this turn ("But it failed!")
   Flinched,          // hit by a flinch-inducing move last turn (Stomp, Bite, ...) - this turn's action is skipped
@@ -311,6 +328,9 @@ enum class BattleLogEvent : uint8_t {
   MustRecharge,      // Hyper Beam's recharge turn - no action taken
   Trapped,           // immobilized by an opponent's Wrap/Bind/Fire Spin/Clamp - no action taken
   NothingHappened,   // a pure-flavor status move with no ailment/effect (Splash, ...) - "But nothing happened!"
+  Teleported,        // Teleport connected - engine can't tell wild from trainer, see PokemonActivity.cpp:
+                     // a wild battle treats this as a guaranteed escape (same as a successful Run); a
+                     // trainer/gym battle rewrites this to MoveFailed before it's ever displayed.
 };
 
 // Which stat/accuracy-or-evasion axis a status move affects. Combined with
@@ -409,6 +429,13 @@ struct BattleActionResult {
   // minimum 1) - independent of `event` for the same reason `critical`/
   // `recoilApplied` are.
   bool drainApplied = false;
+  // True if a damaging move's secondary stat-drop effect fired this action
+  // (Acid/Bubble Beam/Aurora Beam/Psychic/Constrict/Bubble - see
+  // SECONDARY_STAT_DROP_TABLE) - independent of `event` for the same reason
+  // `critical`/`recoilApplied`/`drainApplied` are. `statDropStat` names which
+  // stat fell on the defender; only meaningful when this is true.
+  bool statDropApplied = false;
+  StatKind statDropStat = StatKind::Attack;
   // The real move id actually executed this action, if it differs from the
   // slot's own move - i.e. Metronome/Mirror Move redirecting to whatever
   // move they picked/mirrored. 0 when no redirection happened (the normal
@@ -515,6 +542,19 @@ enum class BallKind : uint8_t {
 // shakes before breaking free" cosmetic animation, since this project has
 // no such animation to drive.
 bool attemptCatch(const BattleCombatant& wild, BallKind ball, const RandomSource& random);
+
+// Real Gen 1 run-away odds for a WILD battle only (a trainer/gym RUN is
+// always an unconditional forfeit at the UI layer, never routed through
+// here - see PokemonActivity.cpp). Bulbapedia's documented Gen 1 formula:
+// F = (playerSpeed * 32) / max(1, opponentSpeed/4), plus 30 per prior failed
+// attempt THIS battle (`attemptCount`, 0 on the first try) - escape is
+// guaranteed once F exceeds 255, otherwise a roll in [0,256) must land
+// below F. `player`/`opponent`'s effective (staged, paralysis-halved,
+// badge-boosted) Speed is computed internally, the same way stepBattle()
+// already computes turn order. Pure and testable with an injected
+// RandomSource, mirroring attemptCatch() above.
+bool attemptRun(const BattleCombatant& player, const BattleCombatant& opponent, uint8_t attemptCount,
+                const RandomSource& random);
 
 // XP awarded to the Pokemon active when a battle is won (defeating or
 // catching a wild Pokemon, or defeating one gym/Elite Four/Champion team
