@@ -1280,19 +1280,49 @@ void reflectExactlyHalvesNonCriticalPhysicalDamage() {
   CHECK(reflectedDamage == plainDamage / 2U);
 }
 
-void mistAndFocusEnergyReuseGuardSpecAndDireHit() {
-  // Mist and Focus Energy are moves that reuse the exact same
-  // guardSpecActive/direHitActive fields the Guard Spec./Dire Hit battle-
-  // boost items already use for the identical effects.
+void mistAndFocusEnergySetTheirOwnFields() {
+  // Focus Energy reuses the exact same direHitActive field the Dire Hit
+  // battle-boost item already uses for the identical effect (both really are
+  // per-Pokemon, correctly ending on a switch). Mist gets its OWN field
+  // (mistActive), deliberately separate from guardSpecActive, since Mist -
+  // unlike Guard Spec. itself - protects the whole SIDE and must survive a
+  // switch (docs/development/pokemon-gen1-audit-round6.md item 2.5).
   BattleCombatant bulbasaurMist = makeCombatant(1, 20, {54});  // Mist
   BattleCombatant dummy1 = makeCombatant(4, 20, {45});
   pokemon::stepBattle(bulbasaurMist, dummy1, 0, ZERO_RANDOM);
-  CHECK(bulbasaurMist.guardSpecActive);
+  CHECK(bulbasaurMist.mistActive);
+  CHECK(!bulbasaurMist.guardSpecActive);
 
   BattleCombatant bulbasaurFocus = makeCombatant(1, 20, {116});  // Focus Energy
   BattleCombatant dummy2 = makeCombatant(4, 20, {45});
   pokemon::stepBattle(bulbasaurFocus, dummy2, 0, ZERO_RANDOM);
   CHECK(bulbasaurFocus.direHitActive);
+}
+
+// --- Round-6 audit bug 2.5: Mist must keep blocking an opponent's
+// stat-lowering move/secondary stat-drop via its OWN mistActive field, now
+// that it's no longer aliased onto guardSpecActive (the Guard Spec. item's
+// field, which correctly stays per-Pokemon and must NOT also be set by
+// Mist) - the actual "survives a switch" behavior itself lives in
+// PokemonActivity.cpp (setupBattlePlayer()/setupBattleOpponent()'s
+// preserveSideEffects), outside this pure-engine test's reach, but the
+// engine-level blocking behavior the split must not regress is covered
+// here. ---
+
+void mistBlocksOpponentStatLoweringMovesAndSecondaryStatDropsViaItsOwnField() {
+  BattleCombatant mistUser = makeCombatant(1, 50, {45});  // Bulbasaur, target of Growl
+  mistUser.mistActive = true;
+  CHECK(!mistUser.guardSpecActive);  // deliberately not aliased onto Guard Spec.'s own field
+  BattleCombatant grower = makeCombatant(4, 50, {45});    // Charmander, Growl
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(mistUser, grower, ZERO_RANDOM);
+  CHECK(result.opponent.event == BattleLogEvent::StatChangeFailed);
+  CHECK(mistUser.attackStage == 0);
+
+  BattleCombatant mistDefender = makeCombatant(7, 50, {45});  // Squirtle
+  mistDefender.mistActive = true;
+  BattleCombatant psychicUser = makeCombatant(1, 50, {94});   // Bulbasaur, Psychic
+  pokemon::stepOpponentOnlyTurn(mistDefender, psychicUser, ZERO_RANDOM);
+  CHECK(mistDefender.specialStage == 0);
 }
 
 void recoverHealsHalfMaxHpAndFailsAtFullHealth() {
@@ -1689,6 +1719,72 @@ void substituteBlocksTheTargetImmobilizationFromATrapMove() {
   CHECK(target.trappedTurnsRemaining == 0);   // but the real Pokemon was never touched
 }
 
+// --- Round-6 audit bug 2.3: Substitute must block a secondary consequence
+// (primary status infliction, flinch, secondary stat-drop) on the exact hit
+// that breaks it, not just on hits after it's already gone - previously
+// these 3 checks looked at the POST-hit substituteHp (already 0 once
+// broken) instead of a pre-hit snapshot, matching the pattern the trap-
+// immobilization check above already got right. ---
+
+void substituteBlocksAilmentInflictionOnTheHitThatBreaksIt() {
+  // Ember (10% burn chance, always rolls true under ZERO_RANDOM) breaking a
+  // 1-HP Substitute must not still burn the real Pokemon behind it.
+  BattleCombatant attacker = makeCombatant(4, 50, {52});  // Charmander, Ember
+  BattleCombatant defender = makeCombatant(7, 50, {45});  // Squirtle, Growl (unused)
+  defender.substituteHp = 1;
+  pokemon::stepOpponentOnlyTurn(defender, attacker, ZERO_RANDOM);
+  CHECK(defender.substituteHp == 0);        // the hit broke it
+  CHECK(defender.status == Ailment::None);  // but the real Pokemon was never touched
+}
+
+void substituteBlocksFlinchOnTheHitThatBreaksIt() {
+  // Stomp (30% flinch chance, always rolls true under ZERO_RANDOM) breaking
+  // a 1-HP Substitute must not still flinch the real Pokemon.
+  BattleCombatant attacker = makeCombatant(4, 50, {23});  // Charmander, Stomp
+  BattleCombatant defender = makeCombatant(7, 50, {45});
+  defender.substituteHp = 1;
+  pokemon::stepOpponentOnlyTurn(defender, attacker, ZERO_RANDOM);
+  CHECK(defender.substituteHp == 0);
+  CHECK(!defender.flinched);
+}
+
+void substituteBlocksSecondaryStatDropOnTheHitThatBreaksIt() {
+  // Psychic (33% Special-drop chance, always rolls true under ZERO_RANDOM)
+  // breaking a 1-HP Substitute must not still lower the real Pokemon's
+  // Special stage.
+  BattleCombatant attacker = makeCombatant(1, 50, {94});  // Bulbasaur, Psychic
+  BattleCombatant defender = makeCombatant(7, 50, {45});  // Squirtle
+  defender.substituteHp = 1;
+  pokemon::stepOpponentOnlyTurn(defender, attacker, ZERO_RANDOM);
+  CHECK(defender.substituteHp == 0);
+  CHECK(defender.specialStage == 0);
+}
+
+// --- Round-6 audit bug 2.4: a trapped target is released immediately if
+// the Pokemon holding it in a partial trap (Wrap/Bind/Fire Spin/Clamp)
+// faints mid-trap, instead of staying immobilized against whatever comes in
+// next. ---
+
+void faintingTrapperReleasesTheTrappedTargetImmediately() {
+  // Wrapper is mid-continuing-Wrap (forcedMoveId already set, as if this
+  // were its second or later turn locked into the move) and separately
+  // poisoned at 1 HP, so the end-of-turn poison tick faints it this same
+  // turn. Target is trapped and stays that way through the turn (it can't
+  // act at all while trapped), so only the faint-driven release matters here.
+  BattleCombatant wrapper = makeCombatant(4, 50, {35});  // Wrap
+  wrapper.forcedMoveId = 35;
+  wrapper.forcedTurnsRemaining = 2;
+  wrapper.status = Ailment::Poison;
+  wrapper.currentHp = 1;
+  BattleCombatant target = makeCombatant(7, 50, {45});  // Growl - irrelevant, target is trapped
+  target.trappedTurnsRemaining = 3;
+
+  pokemon::stepBattle(target, wrapper, 0, ZERO_RANDOM);
+
+  CHECK(wrapper.currentHp == 0);
+  CHECK(target.trappedTurnsRemaining == 0);
+}
+
 // --- Round-4 Gen 1 authenticity fixes: real badge stat boosts and the
 // real two-roll catch algorithm. ---
 
@@ -2018,6 +2114,7 @@ void hazeClearsStatusConfusionScreensAndToxicCounterOnBothSides() {
   opponent.statusTurns = 2;
   opponent.toxicCounter = 3;
   opponent.lightScreenActive = true;
+  opponent.mistActive = true;
   opponent.guardSpecActive = true;
   opponent.direHitActive = true;
 
@@ -2030,6 +2127,7 @@ void hazeClearsStatusConfusionScreensAndToxicCounterOnBothSides() {
   CHECK(opponent.status == Ailment::None);
   CHECK(opponent.toxicCounter == 0);
   CHECK(!opponent.lightScreenActive);
+  CHECK(!opponent.mistActive);
   CHECK(!opponent.guardSpecActive);
   CHECK(!opponent.direHitActive);
 }
@@ -2133,7 +2231,7 @@ int main() {
   leechSeedDrainsTheSeededSideAndHealsTheSeederAtEndOfTurn();
   leechSeedFailsAgainstAGrassTypeTarget();
   reflectExactlyHalvesNonCriticalPhysicalDamage();
-  mistAndFocusEnergyReuseGuardSpecAndDireHit();
+  mistAndFocusEnergySetTheirOwnFields();
   recoverHealsHalfMaxHpAndFailsAtFullHealth();
   restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns();
   whirlwindAndRoarAlwaysReportForcedSwitchOnUse();
@@ -2167,6 +2265,11 @@ int main() {
   confusionSelfHitUsesTheRealDamageFormulaNotAFlatMaxHpFraction();
   splashReportsNothingHappenedInsteadOfMoveHit();
   substituteBlocksTheTargetImmobilizationFromATrapMove();
+  substituteBlocksAilmentInflictionOnTheHitThatBreaksIt();
+  substituteBlocksFlinchOnTheHitThatBreaksIt();
+  substituteBlocksSecondaryStatDropOnTheHitThatBreaksIt();
+  faintingTrapperReleasesTheTrappedTargetImmediately();
+  mistBlocksOpponentStatLoweringMovesAndSecondaryStatDropsViaItsOwnField();
   badgeBoostRaisesTheCorrespondingStatByTwelvePointFivePercent();
   speedBadgeBoostCanFlipWhichSideActsFirst();
   wildOrTrainerOpponentsNeverGetABadgeBoost();

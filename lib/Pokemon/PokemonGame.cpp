@@ -775,7 +775,16 @@ bool resolveEvolution(PokemonState& state, PokemonRecord& record, const Evolutio
 }
 
 bool useEvolutionItem(PokemonState& state, PokemonRecord& record, const EvolutionItem item, RecordMutation& mutation) {
-  if (!validateState(state) || !validateRecord(record) || pendingEventFront(state) != nullptr ||
+  // Scoped to THIS record, mirroring resolveEvolution()'s own
+  // `front->recordId == record.recordId` check just below - an unrelated
+  // pending event (a MoveLearn/Evolution queued for some OTHER party
+  // member) must not block using an evolution stone/Link Cable on this one.
+  // Previously this rejected on ANY pending event at all, which meant a
+  // single queued event anywhere in the party could block evolving a
+  // completely unrelated Pokemon (docs/development/pokemon-gen1-audit-
+  // round7.md bug 1.1).
+  const PendingEvent* front = pendingEventFront(state);
+  if (!validateState(state) || !validateRecord(record) || (front != nullptr && front->recordId == record.recordId) ||
       item < EvolutionItem::MoonStone || item > EvolutionItem::LinkCable || mutation.kind != RecordMutationKind::None) {
     return false;
   }
