@@ -13,12 +13,12 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ## 1. Bug (round 4)
 
-- [ ] **2.9** — Khi player thắng do mutual-KO (Pokémon của mình cũng ngất theo,
-  vd Explosion/Self-Destruct), game không báo "Pokémon fainted!" và không ép
-  đổi Pokémon trước trận kế tiếp. UX gap nhỏ, không mất dữ liệu/exploit.
-  → `PokemonActivity::resolveBattlePlayerMoveTurn()`, cần check
-  `battlePlayer_.currentHp == 0` cùng với `PlayerWon` trước khi vào flow thắng
-  thường.
+- [x] **2.9** — ĐÃ FIX (`v0.20.4`, commit `009f2345`/merge `214bd9ca`). Khi
+  player thắng do mutual-KO (Pokémon của mình cũng ngất theo, vd
+  Explosion/Self-Destruct), game giờ báo "Pokémon của bạn cũng ngất" và ép đổi
+  Pokémon trước khi tiếp tục Gym/Elite Four/Champion (hoặc kết thúc run như
+  thua nếu hết Pokémon khoẻ mạnh), thay vì âm thầm gửi Pokémon đã ngất ra đấu
+  tiếp.
 - [ ] *(ghi chú rủi ro, không phải bug đang xảy ra)* fix bug 2.6 (Box-full gate
   trước khi ném Ball) dùng 1 gate trùng lặp riêng thay vì sửa tận gốc thứ tự
   gọi hàm gốc — nếu sau này 2 công thức lệch nhau, lỗi cũ có thể quay lại. Cân
