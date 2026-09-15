@@ -217,6 +217,12 @@ class PokemonActivity final : public Activity {
   uint8_t opponentHealChargesRemaining_ = 0;
   int battlePartySlot_ = 0;               // which snapshot_.party[] slot is currently battlePlayer_
   bool forcedBattleSwitch_ = false;       // true while the active Pokemon just fainted - Back can't cancel out
+  // How many times RUN has already failed THIS wild battle - Gen 1's real
+  // escape odds improve with each failed attempt (see
+  // PokemonService::attemptRunFromBattle()'s doc comment). Reset to 0 at the
+  // start of every new battle (enterBattle()/enterGymBattle(), though a gym
+  // RUN never consults this at all - see Screen::Battle's RUN handling).
+  uint8_t battleRunAttempts_ = 0;
   std::array<freeink::ui::ListItem, ROW_CAPACITY> rows_{};
   std::array<std::array<char, 56>, ROW_CAPACITY> labels_{};
   std::array<std::array<char, 32>, ROW_CAPACITY> values_{};

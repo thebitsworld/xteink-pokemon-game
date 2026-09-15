@@ -131,11 +131,14 @@ struct MultiHitTableEntry {
 constexpr MultiHitTableEntry MULTI_HIT_TABLE[] = {
     {3, 0},    // Double Slap
     {4, 0},    // Comet Punch
+    {24, 2},   // Double Kick - always exactly 2 hits
     {31, 0},   // Fury Attack
     {41, 2},   // Twineedle - always exactly 2 hits
     {42, 0},   // Pin Missile
+    {131, 0},  // Spike Cannon
     {140, 0},  // Barrage
     {154, 0},  // Fury Swipes
+    {155, 2},  // Bonemerang - always exactly 2 hits
 };
 
 const MultiHitTableEntry* multiHitEntryForMove(const uint8_t moveId) {
@@ -242,6 +245,32 @@ const FlinchTableEntry* flinchEntryForMove(const uint8_t moveId) {
   return nullptr;
 }
 
+// 6 real Gen 1 damaging moves that also carry a secondary chance to lower
+// one of the target's stats by 1 stage - a new category alongside
+// STAT_CHANGE_TABLE above (which only covers pure Status-category moves).
+// Hand-authored, same rationale as every other table in this file: PokeAPI's
+// own move data carries no stat-change column at all.
+struct SecondaryStatDropEntry {
+  uint8_t moveId;
+  StatKind stat;
+  uint8_t chancePercent;
+};
+constexpr SecondaryStatDropEntry SECONDARY_STAT_DROP_TABLE[] = {
+    {51, StatKind::Defense, 10},  // Acid
+    {61, StatKind::Speed, 10},    // Bubble Beam
+    {62, StatKind::Attack, 10},   // Aurora Beam
+    {94, StatKind::Special, 33},  // Psychic - a real Gen 1 quirk gives this one ~33%, not 10% like the other 5
+    {132, StatKind::Speed, 10},   // Constrict
+    {145, StatKind::Speed, 10},   // Bubble
+};
+
+const SecondaryStatDropEntry* secondaryStatDropEntryForMove(const uint8_t moveId) {
+  for (const SecondaryStatDropEntry& entry : SECONDARY_STAT_DROP_TABLE) {
+    if (entry.moveId == moveId) return &entry;
+  }
+  return nullptr;
+}
+
 // The 4 real Gen 1 HP-drain moves - the attacker heals half the damage dealt
 // (minimum 1), on top of the normal damage formula (unlike FIXED_DAMAGE_TABLE's
 // entries, these don't change how damage itself is computed).
@@ -262,6 +291,73 @@ constexpr uint8_t DREAM_EATER_MOVE_ID = 138;
 // to skip its entire next turn ("must recharge!") before it can act again -
 // see BattleCombatant::mustRecharge's doc comment.
 constexpr uint8_t HYPER_BEAM_MOVE_ID = 63;
+
+// Jump Kick / Hi Jump Kick: a real Gen 1 quirk distinct from later
+// generations - missing costs the user a flat 1 HP of "crash" damage
+// (not a fraction of anything), applied wherever this action reports a
+// miss (see applyCrashDamageIfMissed()'s call sites in
+// resolveGenericMoveEffect()).
+constexpr uint8_t JUMP_KICK_MOVE_ID = 26;
+constexpr uint8_t HI_JUMP_KICK_MOVE_ID = 136;
+bool isCrashDamageMove(const uint8_t moveId) { return moveId == JUMP_KICK_MOVE_ID || moveId == HI_JUMP_KICK_MOVE_ID; }
+
+// Applies Jump Kick/Hi Jump Kick's 1 HP crash-on-miss (see the doc comment
+// above) - reuses BattleActionResult::recoilApplied for its log clause
+// rather than adding a new one, the same way `critical`/`drainApplied` are
+// already independent boolean flags layered onto whatever `event` reports.
+// Correctly clamps at 0 and lets the caller's usual post-action faint check
+// (stepBattle()'s own currentHp==0 handling) pick up the extremely rare case
+// where this 1 HP is the user's last.
+void applyCrashDamageIfMissed(BattleCombatant& attacker, const uint8_t moveId, BattleActionResult& result) {
+  if (!isCrashDamageMove(moveId)) return;
+  constexpr uint16_t CRASH_DAMAGE = 1;
+  attacker.currentHp = attacker.currentHp > CRASH_DAMAGE ? static_cast<uint16_t>(attacker.currentHp - CRASH_DAMAGE) : 0;
+  result.recoilApplied = true;
+}
+
+// Toxic's real Gen 1 move id - see BattleCombatant::toxicCounter's doc
+// comment and applyEndOfTurnStatusDamage() below.
+constexpr uint8_t TOXIC_MOVE_ID = 92;
+
+// Teleport's real Gen 1 move id - see BattleLogEvent::Teleported's doc
+// comment and PokemonActivity.cpp for how a wild vs. trainer battle each
+// interpret it (the engine itself can't tell those apart).
+constexpr uint8_t TELEPORT_MOVE_ID = 100;
+
+// Move priority - Gen 1 has exactly two non-zero-priority moves. Hand-
+// authored, same rationale as every other move-id table in this file:
+// PokeAPI's own move data carries no priority column for Gen 1.
+int8_t movePriority(const uint8_t moveId) {
+  if (moveId == 98) return 1;   // Quick Attack
+  if (moveId == 68) return -1;  // Counter
+  return 0;
+}
+
+// Priority of whatever `slot` would resolve to, from stepBattle()'s point of
+// view before either side has actually acted - `slot >= BATTLE_MOVE_SLOTS`
+// covers both the Struggle sentinel and "no real slot," and always reads as
+// priority 0 (Struggle itself has no special priority in Gen 1).
+int8_t movePriorityForSlot(const BattleCombatant& combatant, const uint8_t slot) {
+  if (slot >= BATTLE_MOVE_SLOTS) return 0;
+  return movePriority(combatant.moves[slot].moveId);
+}
+
+// A combatant's effective (staged, paralysis-halved, badge-boosted) Speed -
+// shared by stepBattle()'s own turn-order calculation and attemptRun()'s
+// escape-odds formula, so the two never compute it two different ways.
+uint16_t effectiveSpeed(const BattleCombatant& combatant) {
+  const BaseStats* stats = baseStatsFor(combatant.speciesId);
+  if (stats == nullptr) return 0;
+  constexpr size_t speedIndex = static_cast<size_t>(StatIndex::Speed);
+  uint16_t speed = applyStatStage(
+      battleWorkingStat(stats->speed, combatant.level, combatant.iv[speedIndex], combatant.ev[speedIndex]),
+      combatant.speedStage);
+  if ((combatant.badgeBoostMask & BADGE_BOOST_SPEED) != 0) {
+    speed = static_cast<uint16_t>(speed + speed / 8U);
+  }
+  if (combatant.status == Ailment::Paralysis) speed /= 2U;
+  return speed;
+}
 
 // Rage's real Gen 1 quirk: while enraged (see BattleCombatant::enraged),
 // every hit taken raises the user's own Attack by one stage - checked
@@ -300,6 +396,7 @@ struct TwoTurnTableEntry {
   bool grantsInvulnerability;
 };
 constexpr TwoTurnTableEntry TWO_TURN_TABLE[] = {
+    {13, false},   // Razor Wind
     {19, true},    // Fly
     {91, true},    // Dig
     {76, false},   // Solar Beam
@@ -399,11 +496,34 @@ EffectiveTypes effectiveTypesFor(const BattleCombatant& combatant, const Species
   return {species.primaryType, species.secondaryType};
 }
 
+// Real Gen 1 type-based status-ailment immunities - independent of the
+// move's own type effectiveness (already handled separately: Fire/Fire,
+// Poison/Poison and Ice/Ice are all 50%, not 0%, so none of these matchups
+// would otherwise be caught by the existing effectivenessPercent==0 check).
+// A Fire-type can never be Burned, a Poison-type (or Poison/X dual type)
+// never Poisoned (regular or Toxic - see TOXIC_MOVE_ID), an Ice-type never
+// Frozen. Deliberately does NOT include the Gen 6+ additions (Electric/
+// paralysis, Grass/powder moves) - those are not Gen 1 rules. Only ever
+// blocks the STATUS side effect of a move, never its damage - see the two
+// different call sites in resolveGenericMoveEffect().
+bool typeIsImmuneToAilment(const EffectiveTypes& types, const Ailment ailment) {
+  const auto has = [&](const PokemonType t) { return types.primary == t || types.secondary == t; };
+  if (ailment == Ailment::Burn) return has(PokemonType::Fire);
+  if (ailment == Ailment::Poison) return has(PokemonType::Poison);
+  if (ailment == Ailment::Freeze) return has(PokemonType::Ice);
+  return false;
+}
+
 // Applies damage to whichever of `defender`'s two HP pools is currently
 // active - a Substitute (if one is up) absorbs it instead of the real
 // Pokemon, and a hit that would deal more than the Substitute's remaining
 // HP just breaks it outright rather than overflowing onto currentHp,
 // matching the real games.
+// Confirmed intentional, not a bug (re-checked in the round 3/4 audits):
+// damage absorbed by a Substitute still updates lastPhysicalDamageTaken/
+// bideDamageStored (Counter/Bide read from those at their own call sites
+// below) exactly as if it had landed on the real Pokemon - this matches a
+// real, documented Gen 1 quirk, not a shortcut this project introduced.
 void applyDamageRespectingSubstitute(BattleCombatant& defender, const uint16_t damage) {
   if (defender.substituteHp > 0) {
     defender.substituteHp = defender.substituteHp > damage ? static_cast<uint16_t>(defender.substituteHp - damage) : 0;
@@ -466,6 +586,11 @@ uint16_t computeDamage(const BattleCombatant& attacker, const BattleCombatant& d
 bool statusPreventsAction(BattleCombatant& combatant, const RandomSource& random, BattleLogEvent& event) {
   switch (combatant.status) {
     case Ailment::Sleep:
+      // Confirmed intentional, not a bug (re-checked in the round 3/4
+      // audits): the turn the sleep counter reaches 0 costs nothing - the
+      // Pokemon wakes up and can still act this same turn. This matches
+      // real Gen 1 (the counter is checked at the start of the turn, before
+      // the move is chosen), not a simplification.
       if (combatant.statusTurns > 0) {
         --combatant.statusTurns;
         event = BattleLogEvent::StatusPreventedMove;
@@ -522,7 +647,19 @@ bool statusPreventsAction(BattleCombatant& combatant, const RandomSource& random
 void applyEndOfTurnStatusDamage(BattleCombatant& combatant, BattleLogEvent& event) {
   if (combatant.currentHp == 0) return;
   if (combatant.status != Ailment::Poison && combatant.status != Ailment::Burn) return;
-  const uint16_t damage = clampToUint16(std::max<uint32_t>(1U, combatant.maxHp / STATUS_DAMAGE_FRACTION));
+  uint16_t damage;
+  if (combatant.status == Ailment::Poison && combatant.toxicCounter > 0) {
+    // Toxic's real Gen 1 escalating damage: n * maxHP/16, n starting at 1
+    // and incrementing every turn it ticks (uncapped) - deliberately its own
+    // formula/fraction, kept separate from STATUS_DAMAGE_FRACTION's shared
+    // flat 1/8 that ordinary Poison/Burn/Leech Seed still use (see
+    // toxicCounter's doc comment in PokemonBattle.h).
+    damage = clampToUint16(
+        std::max<uint32_t>(1U, static_cast<uint32_t>(combatant.maxHp) * combatant.toxicCounter / 16U));
+    if (combatant.toxicCounter < UINT8_MAX) ++combatant.toxicCounter;
+  } else {
+    damage = clampToUint16(std::max<uint32_t>(1U, combatant.maxHp / STATUS_DAMAGE_FRACTION));
+  }
   combatant.currentHp = combatant.currentHp > damage ? static_cast<uint16_t>(combatant.currentHp - damage) : 0;
   event = BattleLogEvent::StatusDamage;
 }
@@ -827,6 +964,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   // specific real-game exceptions (Swift, Earthquake-vs-Dig, ...).
   if (defender.invulnerable) {
     result.event = BattleLogEvent::MoveMissed;
+    applyCrashDamageIfMissed(attacker, moveId, result);
     return;
   }
 
@@ -868,6 +1006,10 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     uint32_t accuracyRoll = 0;
     if (rollBelow(random, 100U, accuracyRoll) && accuracyRoll >= effectiveAccuracy) {
       result.event = BattleLogEvent::MoveMissed;
+      // Jump Kick/Hi Jump Kick: a real Gen 1 quirk - missing costs the user
+      // 1 flat HP of crash damage (see applyCrashDamageIfMissed()'s doc
+      // comment). A no-op for every other move.
+      applyCrashDamageIfMissed(attacker, moveId, result);
       return;
     }
   }
@@ -885,9 +1027,13 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   // returns 100 from typeEffectivenessPercent()'s own bounds check, so this
   // is a no-op for anything that doesn't carry a real attacking type.
   const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
+  // Hoisted out of the `if` below (rather than scoped to it) so the ailment
+  // block further down can also see it, for the type-based status-ailment
+  // immunity check (typeIsImmuneToAilment()) - see round 3/4 audit item 1.1.
+  EffectiveTypes defenderTypes{PokemonType::None, PokemonType::None};
   uint16_t effectivenessPercent = 100;
   if (defenderSpecies != nullptr) {
-    const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+    defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
     effectivenessPercent = typeEffectivenessPercent(move->type, defenderTypes.primary, defenderTypes.secondary);
   }
 
@@ -1041,6 +1187,23 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
         defender.flinched = true;
       }
 
+      // Acid/Bubble Beam/Aurora Beam/Psychic/Constrict/Bubble: a chance to
+      // lower one of the target's stats by 1 stage - same guards as the
+      // flinch roll just above, plus Guard Spec./Mist (guardSpecActive),
+      // which blocks an opponent's stat-lowering effect everywhere else in
+      // this engine and must not become the one exception here.
+      if (const SecondaryStatDropEntry* statDrop = secondaryStatDropEntryForMove(moveId);
+          statDrop != nullptr && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0 &&
+          defender.substituteHp == 0 && !defender.guardSpecActive &&
+          rollPercentChance(random, statDrop->chancePercent)) {
+        int8_t& stage = statStageRef(defender, statDrop->stat);
+        if (stage > -6) {
+          --stage;
+          result.statDropApplied = true;
+          result.statDropStat = statDrop->stat;
+        }
+      }
+
       // Wrap/Bind/Fire Spin/Clamp: a successful first hit locks the
       // ATTACKER into repeating this same move automatically for 1-4 more
       // turns (2-5 total - the same real Gen 1 duration distribution
@@ -1100,14 +1263,41 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
 
   // Hyper Beam: reaching this point means the move already didn't miss (a
   // miss returns early above), so a real hit - including one that's immune
-  // for 0 damage - always forces a recharge next turn, matching the real
-  // games.
-  if (moveId == HYPER_BEAM_MOVE_ID) attacker.mustRecharge = true;
+  // for 0 damage - forces a recharge next turn, matching the real games -
+  // UNLESS the hit fainted the target, in which case Gen 1 skips the
+  // recharge entirely (see round 3/4 audit item 1.5). `defender.currentHp`
+  // is already up to date here (damage resolution above already ran).
+  if (moveId == HYPER_BEAM_MOVE_ID && defender.currentHp > 0) attacker.mustRecharge = true;
 
   if (moveId == HAZE_MOVE_ID) {
     resetBattleStages(attacker);
     resetBattleStages(defender);
+    // Real Gen 1 Haze also clears both sides' non-volatile status (and
+    // Toxic's escalating counter) and confusion, plus Reflect/Light
+    // Screen/Mist/Focus Energy (the same guardSpecActive/direHitActive
+    // fields Guard Spec./Dire Hit set - Mist IS the move version of Guard
+    // Spec., Focus Energy IS the move version of Dire Hit, so clearing them
+    // here is correct for both) - see round 2/4 audit item 0.4/1.4 and
+    // BattleLogEvent::StatsReset's doc comment.
+    const auto clearHazeState = [](BattleCombatant& combatant) {
+      combatant.status = Ailment::None;
+      combatant.statusTurns = 0;
+      combatant.toxicCounter = 0;
+      combatant.reflectActive = false;
+      combatant.lightScreenActive = false;
+      combatant.guardSpecActive = false;
+      combatant.direHitActive = false;
+    };
+    clearHazeState(attacker);
+    clearHazeState(defender);
     result.event = BattleLogEvent::StatsReset;
+  } else if (moveId == TELEPORT_MOVE_ID) {
+    // The engine can't tell a wild battle from a trainer battle - see
+    // BattleLogEvent::Teleported's doc comment. PokemonActivity.cpp rewrites
+    // this to MoveFailed before display/handling for a gym/Elite Four/
+    // Champion battle; for a wild battle it's treated as a guaranteed
+    // escape, same outcome as a successful Run.
+    result.event = BattleLogEvent::Teleported;
   } else if (const StatChangeEffect* statEffect = statChangeForMove(moveId); statEffect != nullptr) {
     BattleCombatant& target = statEffect->targetsSelf ? attacker : defender;
     // Guard Spec. (a battle-boost item) blocks an opponent's stat-lowering
@@ -1347,9 +1537,23 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     // changes the event for a pure Status-category ailment move, which had
     // no other branch above to report immunity at all.
     result.event = BattleLogEvent::MoveNoEffect;
+  } else if (move->ailment != Ailment::None && typeIsImmuneToAilment(defenderTypes, move->ailment)) {
+    // Real Gen 1 type-based status immunity (Fire can't be Burned,
+    // Poison can't be Poisoned, Ice can't be Frozen) - see
+    // typeIsImmuneToAilment()'s doc comment. For a pure Status-category
+    // move this is the only place that reports the immunity at all, so it
+    // gets MoveNoEffect the same way the type-effectiveness-based immunity
+    // above does; for a damaging move with a blocked secondary ailment, the
+    // damage itself already produced its own event above, so this stays
+    // silent rather than overwriting it.
+    if (move->category == MoveCategory::Status) result.event = BattleLogEvent::MoveNoEffect;
   } else if (defender.status == Ailment::None && defender.currentHp > 0 && defender.substituteHp == 0 &&
              move->ailment != Ailment::None && rollPercentChance(random, effectiveAilmentChance)) {
     defender.status = move->ailment;
+    // Toxic (see TOXIC_MOVE_ID) starts its own escalating-damage counter at
+    // 1 rather than using the shared flat STATUS_DAMAGE_FRACTION tick every
+    // other poison-inflicting move uses - see toxicCounter's doc comment.
+    defender.toxicCounter = (moveId == TOXIC_MOVE_ID && move->ailment == Ailment::Poison) ? 1 : 0;
     if (move->ailment == Ailment::Sleep) {
       defender.statusTurns = rollStatusDuration(random, 1, 3);
     } else if (move->ailment == Ailment::Confusion) {
@@ -1442,6 +1646,7 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
 void faintCombatant(BattleCombatant& combatant, BattleLogEvent& event) {
   combatant.status = Ailment::None;
   combatant.statusTurns = 0;
+  combatant.toxicCounter = 0;
   event = BattleLogEvent::Fainted;
 }
 
@@ -1604,32 +1809,32 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
     return result;
   }
 
-  const BaseStats* playerStats = baseStatsFor(player.speciesId);
-  const BaseStats* opponentStats = baseStatsFor(opponent.speciesId);
-  constexpr size_t speedIndex = static_cast<size_t>(StatIndex::Speed);
-  uint16_t playerSpeed = playerStats == nullptr
-                             ? 0
-                             : applyStatStage(battleWorkingStat(playerStats->speed, player.level,
-                                                                player.iv[speedIndex], player.ev[speedIndex]),
-                                              player.speedStage);
-  uint16_t opponentSpeed =
-      opponentStats == nullptr
-          ? 0
-          : applyStatStage(battleWorkingStat(opponentStats->speed, opponent.level, opponent.iv[speedIndex],
-                                             opponent.ev[speedIndex]),
-                           opponent.speedStage);
-  // Soul Badge boost (see BADGE_BOOST_SPEED's doc comment) - only ever set
-  // on the player's own side, applied before paralysis's halving (same
-  // ordering as Burn/badge-boost-Attack in computeDamage()).
-  if ((player.badgeBoostMask & BADGE_BOOST_SPEED) != 0) {
-    playerSpeed = static_cast<uint16_t>(playerSpeed + playerSpeed / 8U);
+  const uint16_t playerSpeed = effectiveSpeed(player);
+  const uint16_t opponentSpeed = effectiveSpeed(opponent);
+
+  // The AI's move-slot pick is hoisted up here (rather than inline at each
+  // resolveAction() call site below, as it used to be) so move priority -
+  // not just Speed - can decide turn order (Quick Attack always goes first,
+  // Counter always goes last - see movePriority()/round 2-4 audit item 0.1/
+  // 1.1). Computed once and reused at both call sites below so the AI's
+  // choice is never re-rolled mid-turn.
+  const uint8_t opponentMoveSlot = chooseOpponentMoveSlot(player, opponent, random);
+  const int8_t playerPriority = movePriorityForSlot(player, playerMoveSlot);
+  const int8_t opponentPriority = movePriorityForSlot(opponent, opponentMoveSlot);
+  bool playerFirst;
+  if (playerPriority != opponentPriority) {
+    playerFirst = playerPriority > opponentPriority;
+  } else if (playerSpeed != opponentSpeed) {
+    playerFirst = playerSpeed > opponentSpeed;
+  } else {
+    // Real Gen 1 breaks an exact Speed tie with a coin flip rather than
+    // always favoring the player (round 2-4 audit item 0.6/1.6) - a roll of
+    // 0 means the player goes first, matching this engine's previous
+    // unconditional tie-goes-to-the-player behavior under ZERO_RANDOM, so
+    // existing deterministic tests are minimally disturbed.
+    uint32_t coin = 0;
+    playerFirst = !rollBelow(random, 2U, coin) || coin == 0;
   }
-  if ((opponent.badgeBoostMask & BADGE_BOOST_SPEED) != 0) {
-    opponentSpeed = static_cast<uint16_t>(opponentSpeed + opponentSpeed / 8U);
-  }
-  if (player.status == Ailment::Paralysis) playerSpeed /= 2U;
-  if (opponent.status == Ailment::Paralysis) opponentSpeed /= 2U;
-  const bool playerFirst = playerSpeed >= opponentSpeed;
 
   // Counter only reflects a physical hit taken *this same turn* - clear last
   // turn's record before either side acts (see BattleCombatant::
@@ -1668,14 +1873,14 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
-    result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
+    result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
     if (player.currentHp == 0) {
       faintCombatant(player, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
   } else {
-    result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
+    result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
     if (player.currentHp == 0 && opponent.currentHp == 0) {
       faintCombatant(player, result.player.event);
       faintCombatant(opponent, result.opponent.event);
@@ -1804,6 +2009,25 @@ bool attemptCatch(const BattleCombatant& wild, const BallKind ball, const Random
   uint32_t r2 = 0;
   if (!rollBelow(random, 256U, r2)) return false;
   return r2 <= hpFactor;
+}
+
+bool attemptRun(const BattleCombatant& player, const BattleCombatant& opponent, const uint8_t attemptCount,
+                const RandomSource& random) {
+  // Real Gen 1 escape odds (Bulbapedia's documented formula, see
+  // attemptRun()'s doc comment in PokemonBattle.h): F = (playerSpeed * 32) /
+  // max(1, opponentSpeed/4), plus 30 per prior failed attempt this battle.
+  // F > 255 is a guaranteed escape; otherwise a roll in [0,256) must land
+  // below F. opponentSpeed/4 is floored to 0 for a very slow opponent -
+  // guarded to at least 1 to avoid a divide-by-zero, same spirit as the
+  // ball-catch HP-factor divide just above.
+  const uint16_t playerSpeed = effectiveSpeed(player);
+  const uint16_t opponentSpeed = effectiveSpeed(opponent);
+  const uint32_t divisor = std::max<uint32_t>(1U, static_cast<uint32_t>(opponentSpeed) / 4U);
+  const uint32_t f = (static_cast<uint32_t>(playerSpeed) * 32U) / divisor + static_cast<uint32_t>(attemptCount) * 30U;
+  if (f > 255U) return true;
+  uint32_t roll = 0;
+  if (!rollBelow(random, 256U, roll)) return false;
+  return roll < f;
 }
 
 uint32_t battleVictoryXp(const uint8_t opponentLevel, const bool isTrainerBattle) {

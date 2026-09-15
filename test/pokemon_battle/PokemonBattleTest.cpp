@@ -940,11 +940,13 @@ void counterReflectsDoubleTheLastPhysicalDamageTakenThisTurn() {
 }
 
 void counterFailsWhenUserHasNotTakenPhysicalDamageThisTurn() {
-  // Squirtle (much higher level, so faster) uses Counter before Charmander's
-  // Tackle has landed - nothing to reflect yet this turn, so it fails
+  // Squirtle uses Counter while Charmander uses Growl (a Status move, no
+  // physical damage) - nothing to reflect this turn regardless of turn
+  // order (Counter's own real -1 priority, added alongside move priority,
+  // now always resolves it last anyway - see movePriority()), so it fails
   // ("But it failed!") instead of dealing damage.
   BattleCombatant squirtle = makeCombatant(7, 30, {68});   // Counter
-  BattleCombatant charmander = makeCombatant(4, 5, {33});  // Tackle
+  BattleCombatant charmander = makeCombatant(4, 5, {45});  // Growl
   const uint16_t charmanderHpBefore = charmander.currentHp;
 
   const pokemon::BattleTurnResult result = pokemon::stepBattle(squirtle, charmander, 0, ZERO_RANDOM);
@@ -1761,6 +1763,293 @@ void faintingFromAnEndOfTurnPoisonTickAlsoClearsStatus() {
   CHECK(player.status == Ailment::None);
 }
 
+// --- Round 3/4 Gen 1 authenticity audit fixes: type-based status immunity,
+// 3 new multi-hit moves, secondary stat-drop moves, Razor Wind, Hyper Beam's
+// recharge-skip-on-faint, Jump Kick/Hi Jump Kick crash damage, Teleport,
+// move priority, Toxic's escalating damage, wild run-away odds, Haze's full
+// reset, and the Speed-tie coin flip. ---
+
+void fireTypeCannotBeBurned() {
+  // Ember (10% burn chance in this dataset) on Charmander (Fire) - ZERO_RANDOM
+  // would otherwise guarantee the burn roll succeeding, so a still-unburned
+  // target proves the type immunity, not just bad luck.
+  BattleCombatant attacker = makeCombatant(1, 30, {52});   // Bulbasaur, Ember
+  BattleCombatant charmander = makeCombatant(4, 5, {33});  // Fire
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, charmander, 0, ZERO_RANDOM);
+  CHECK(charmander.status == Ailment::None);
+  CHECK(charmander.currentHp < charmander.maxHp);  // the damage itself still lands
+}
+
+void poisonTypeCannotBePoisoned() {
+  // Poison Powder's ailment_chance is 0 (== "always" for a Status move in
+  // this dataset), so an unpoisoned Ekans (pure Poison-type) proves the
+  // immunity rather than a missed chance roll.
+  BattleCombatant attacker = makeCombatant(1, 30, {77});  // Poison Powder
+  BattleCombatant ekans = makeCombatant(23, 5, {45});     // pure Poison
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, ekans, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(ekans.status == Ailment::None);
+}
+
+void iceTypeCannotBeFrozen() {
+  BattleCombatant attacker = makeCombatant(7, 30, {58});  // Ice Beam
+  BattleCombatant jynx = makeCombatant(124, 5, {45});     // Ice/Psychic
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, jynx, 0, ZERO_RANDOM);
+  CHECK(jynx.status == Ailment::None);
+  CHECK(jynx.currentHp < jynx.maxHp);  // the damage itself still lands
+}
+
+void doubleKickAlwaysHitsExactlyTwice() {
+  BattleCombatant attacker = makeCombatant(1, 30, {24});  // Bulbasaur, Double Kick
+  BattleCombatant defender = makeCombatant(4, 60, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(result.player.hitCount == 2);
+}
+
+void bonemerangAlwaysHitsExactlyTwice() {
+  // Bonemerang's accuracy is 90 (not 100 like Double Kick/Twineedle), so
+  // MAX_RANDOM's worst-case accuracy roll would make it whiff outright -
+  // ZERO_RANDOM instead (which also guarantees a critical hit, hence the
+  // attacker being the much-higher-level/faster side here, and the padded
+  // defender HP, so both intended hits always land rather than the attacker
+  // getting critically KO'd first or the defender fainting after only one).
+  BattleCombatant attacker = makeCombatant(1, 60, {155});  // Bulbasaur, Bonemerang
+  BattleCombatant defender = makeCombatant(4, 30, {33});
+  defender.maxHp = 300;
+  defender.currentHp = 300;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.hitCount == 2);
+}
+
+void spikeCannonRollsTheRandomMultiHitDistribution() {
+  // Same fixedRoll(7) trick as the existing Comet Punch test - lands in the
+  // top 1/8 bucket, always exactly 5 hits, proving Spike Cannon uses the
+  // real rolled distribution rather than a fixed count.
+  uint32_t context = 7;
+  const RandomSource fixedRandom{&context, fixedRoll};
+  BattleCombatant attacker = makeCombatant(4, 30, {131});  // Charmander, Spike Cannon
+  BattleCombatant defender = makeCombatant(1, 30, {33});
+  defender.maxHp = 300;
+  defender.currentHp = 300;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, fixedRandom);
+  CHECK(result.player.hitCount == 5);
+}
+
+void secondaryStatDropMovesCanLowerATargetsStat() {
+  // Acid: a 10% chance to lower the target's Defense - ZERO_RANDOM guarantees
+  // the roll succeeding (and, incidentally, a critical hit) - defender HP is
+  // padded so the hit never faints it first (the stat-drop guard requires it
+  // still be standing after the hit, same as the flinch roll's own guard).
+  BattleCombatant attacker = makeCombatant(4, 50, {51});  // Acid
+  BattleCombatant defender = makeCombatant(7, 50, {33});
+  defender.maxHp = 300;
+  defender.currentHp = 300;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.statDropApplied);
+  CHECK(result.player.statDropStat == StatKind::Defense);
+  CHECK(defender.defenseStage == -1);
+}
+
+void psychicCanLowerTheTargetsSpecialStage() {
+  BattleCombatant attacker = makeCombatant(4, 50, {94});  // Psychic
+  BattleCombatant defender = makeCombatant(1, 50, {33});
+  defender.maxHp = 300;
+  defender.currentHp = 300;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.statDropApplied);
+  CHECK(result.player.statDropStat == StatKind::Special);
+  CHECK(defender.specialStage == -1);
+}
+
+void secondaryStatDropIsAGenuineChanceNotAGuarantee() {
+  // MAX_RANDOM rolls the worst-case (highest) percentage-chance roll, which
+  // must fail Acid's 10% chance.
+  BattleCombatant attacker = makeCombatant(4, 50, {51});  // Acid
+  BattleCombatant defender = makeCombatant(7, 50, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(!result.player.statDropApplied);
+  CHECK(defender.defenseStage == 0);
+}
+
+void razorWindIsATwoTurnMoveWithNoInvulnerability() {
+  BattleCombatant charmander = makeCombatant(4, 30, {13});  // Razor Wind
+  BattleCombatant bulbasaur = makeCombatant(1, 5, {33});
+  const uint16_t hpBeforeCharge = bulbasaur.currentHp;
+
+  const pokemon::BattleTurnResult chargeResult = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(chargeResult.player.event == BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.currentHp == hpBeforeCharge);
+  CHECK(charmander.forcedMoveId == 13);
+  // Razor Wind does NOT grant invulnerability (unlike Fly/Dig) - Bulbasaur's
+  // Tackle should still land normally during Charmander's charge turn.
+  CHECK(charmander.currentHp < charmander.maxHp);
+
+  const pokemon::BattleTurnResult releaseResult = pokemon::stepBattle(charmander, bulbasaur, 0, ZERO_RANDOM);
+  CHECK(releaseResult.player.event != BattleLogEvent::ChargingMove);
+  CHECK(bulbasaur.currentHp < hpBeforeCharge);
+  CHECK(charmander.forcedMoveId == 0);
+}
+
+void hyperBeamSkipsRechargeWhenTheHitFaintsTheTarget() {
+  BattleCombatant hyperBeamer = makeCombatant(4, 100, {63});  // Hyper Beam, way overleveled
+  BattleCombatant target = makeCombatant(7, 2, {45});         // guaranteed to faint from one hit
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(target, hyperBeamer, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::OpponentWon);  // `target` (the player param) fainted
+  CHECK(!hyperBeamer.mustRecharge);
+}
+
+void jumpKickDealsOneHpCrashDamageOnAMiss() {
+  BattleCombatant attacker = makeCombatant(4, 30, {26});  // Jump Kick, 95 accuracy
+  BattleCombatant defender = makeCombatant(7, 30, {45});
+  const uint16_t hpBefore = attacker.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveMissed);
+  CHECK(result.player.recoilApplied);
+  CHECK(attacker.currentHp == hpBefore - 1U);
+}
+
+void hiJumpKickAlsoDealsOneHpCrashDamageOnAMiss() {
+  BattleCombatant attacker = makeCombatant(4, 30, {136});  // Hi Jump Kick, 90 accuracy
+  BattleCombatant defender = makeCombatant(7, 30, {45});
+  const uint16_t hpBefore = attacker.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveMissed);
+  CHECK(result.player.recoilApplied);
+  CHECK(attacker.currentHp == hpBefore - 1U);
+}
+
+void ordinaryMoveMissNeverAppliesCrashDamage() {
+  BattleCombatant attacker = makeCombatant(4, 30, {77});  // Poison Powder, 75 accuracy
+  BattleCombatant defender = makeCombatant(7, 30, {45});
+  const uint16_t hpBefore = attacker.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::MoveMissed);
+  CHECK(!result.player.recoilApplied);
+  CHECK(attacker.currentHp == hpBefore);
+}
+
+void teleportReportsTeleportedEvent() {
+  // The engine can't tell a wild battle from a trainer one (see
+  // BattleLogEvent::Teleported's doc comment) - PokemonActivity.cpp is
+  // responsible for interpreting this as an escape (wild) or rewriting it to
+  // MoveFailed (trainer/gym), so the engine's own contract is just: Teleport
+  // always reports this event once it doesn't miss.
+  BattleCombatant attacker = makeCombatant(4, 30, {100});  // Teleport
+  BattleCombatant defender = makeCombatant(7, 30, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, ZERO_RANDOM);
+  CHECK(result.player.event == BattleLogEvent::Teleported);
+}
+
+void quickAttackAlwaysGoesFirstRegardlessOfSpeed() {
+  // Squirtle (level 5, Quick Attack) is far slower than Charmander (level
+  // 50, Tackle), but Quick Attack's real +1 priority must let it act first
+  // anyway - proven by fainting Charmander (1 HP) before it ever gets to act.
+  BattleCombatant slowAttacker = makeCombatant(7, 5, {98});
+  BattleCombatant fastOpponent = makeCombatant(4, 50, {33});
+  fastOpponent.currentHp = 1;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(slowAttacker, fastOpponent, 0, ZERO_RANDOM);
+  CHECK(result.outcome == BattleOutcome::PlayerWon);
+  CHECK(!result.opponent.acted);
+}
+
+void counterAlwaysResolvesLastRegardlessOfSpeedAdvantage() {
+  // Squirtle (Counter) is much faster than Charmander (Tackle), but
+  // Counter's real -1 priority means Charmander's Tackle must still resolve
+  // FIRST, giving Counter something to reflect instead of failing.
+  BattleCombatant fastCounterUser = makeCombatant(7, 50, {68});
+  BattleCombatant slowAttacker = makeCombatant(4, 5, {33});
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(fastCounterUser, slowAttacker, 0, ZERO_RANDOM);
+  CHECK(result.player.event != BattleLogEvent::MoveFailed);
+}
+
+void toxicDamageEscalatesEachTurnItTicks() {
+  BattleCombatant player = makeCombatant(4, 50, {45});   // Growl filler, deals no damage
+  BattleCombatant opponent = makeCombatant(7, 50, {92});  // Toxic
+  const pokemon::BattleTurnResult turn1 = pokemon::stepBattle(player, opponent, 0, ZERO_RANDOM);
+  CHECK(player.status == Ailment::Poison);
+  CHECK(player.toxicCounter == 2);  // set to 1 on infliction, then incremented by this same turn's tick
+  const uint16_t hpAfterTurn1 = player.currentHp;
+  const uint16_t expectedFirstTick = std::max<uint16_t>(1, static_cast<uint16_t>(player.maxHp / 16U));
+  CHECK(player.maxHp - hpAfterTurn1 == expectedFirstTick);
+
+  const pokemon::BattleTurnResult turn2 = pokemon::stepBattle(player, opponent, 0, ZERO_RANDOM);
+  CHECK(player.toxicCounter == 3);
+  const uint16_t expectedSecondTick = std::max<uint16_t>(1, static_cast<uint16_t>(player.maxHp * 2U / 16U));
+  CHECK(hpAfterTurn1 - player.currentHp == expectedSecondTick);
+  CHECK(expectedSecondTick > expectedFirstTick);  // the whole point: it escalates
+}
+
+void runAwayGuaranteedWhenFormulaExceedsTwoFiftyFive() {
+  BattleCombatant fastPlayer = makeCombatant(4, 50, {33});
+  const BattleCombatant zeroSpeedOpponent{};  // speciesId 0 -> effective Speed 0
+  CHECK(pokemon::attemptRun(fastPlayer, zeroSpeedOpponent, 0, MAX_RANDOM));
+}
+
+void runAwayGuaranteedFailureWhenPlayerHasNoSpeed() {
+  const BattleCombatant zeroSpeedPlayer{};  // speciesId 0 -> effective Speed 0, F == 0
+  BattleCombatant fastOpponent = makeCombatant(4, 50, {33});
+  CHECK(!pokemon::attemptRun(zeroSpeedPlayer, fastOpponent, 0, ZERO_RANDOM));
+}
+
+void runAwayCanFailAgainstAMuchFasterOpponent() {
+  BattleCombatant slowPlayer = makeCombatant(1, 5, {33});    // low level -> low Speed
+  BattleCombatant fastOpponent = makeCombatant(4, 60, {33});  // much higher level/Speed
+  CHECK(!pokemon::attemptRun(slowPlayer, fastOpponent, 0, MAX_RANDOM));  // worst-case roll against low odds
+}
+
+void runAwayAttemptCountEventuallyGuaranteesEscape() {
+  // The same matchup as the failing case above, but with enough prior failed
+  // attempts (+30 per attempt) that F must exceed 255 regardless of RNG.
+  BattleCombatant slowPlayer = makeCombatant(1, 5, {33});
+  BattleCombatant fastOpponent = makeCombatant(4, 60, {33});
+  CHECK(pokemon::attemptRun(slowPlayer, fastOpponent, 200, MAX_RANDOM));
+}
+
+void hazeClearsStatusConfusionScreensAndToxicCounterOnBothSides() {
+  // Opponent uses Tackle (not a stat-changing move) rather than Growl -
+  // Charmander (faster) resolves Haze first, and a Growl afterward would
+  // re-lower hazer's just-reset Attack stage, muddying the assertion below.
+  BattleCombatant hazer = makeCombatant(4, 50, {114});  // Charmander (faster), Haze
+  hazer.attackStage = 3;
+  hazer.reflectActive = true;
+  BattleCombatant opponent = makeCombatant(7, 50, {33});  // Squirtle, Tackle
+  opponent.defenseStage = -2;
+  opponent.status = Ailment::Confusion;
+  opponent.statusTurns = 2;
+  opponent.toxicCounter = 3;
+  opponent.lightScreenActive = true;
+  opponent.guardSpecActive = true;
+  opponent.direHitActive = true;
+
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(hazer, opponent, 0, ZERO_RANDOM);
+
+  CHECK(result.player.event == BattleLogEvent::StatsReset);
+  CHECK(hazer.attackStage == 0);
+  CHECK(!hazer.reflectActive);
+  CHECK(opponent.defenseStage == 0);
+  CHECK(opponent.status == Ailment::None);
+  CHECK(opponent.toxicCounter == 0);
+  CHECK(!opponent.lightScreenActive);
+  CHECK(!opponent.guardSpecActive);
+  CHECK(!opponent.direHitActive);
+}
+
+void speedTieIsBrokenByACoinFlipInsteadOfAlwaysFavoringThePlayer() {
+  // Identical species/level on both sides gives an exact Speed tie (and
+  // equal move priority, both Explosion) - Explosion unconditionally faints
+  // its own user, so whichever side's action actually ran ends the turn
+  // immediately, a clean signal for which side the tie-break picked.
+  BattleCombatant playerZero = makeCombatant(4, 50, {153});  // Explosion
+  BattleCombatant opponentZero = makeCombatant(4, 50, {153});
+  const pokemon::BattleTurnResult zeroResult = pokemon::stepBattle(playerZero, opponentZero, 0, ZERO_RANDOM);
+  CHECK(!zeroResult.opponent.acted);  // coin roll 0 keeps this engine's old default: ties go to the player
+
+  BattleCombatant playerMax = makeCombatant(4, 50, {153});
+  BattleCombatant opponentMax = makeCombatant(4, 50, {153});
+  const pokemon::BattleTurnResult maxResult = pokemon::stepBattle(playerMax, opponentMax, 0, MAX_RANDOM);
+  CHECK(maxResult.opponent.acted);  // coin roll 1 now correctly lets the opponent win a tie instead
+}
+
 }  // namespace
 
 int main() {
@@ -1883,5 +2172,29 @@ int main() {
   wildOrTrainerOpponentsNeverGetABadgeBoost();
   faintingFromADirectHitClearsStatus();
   faintingFromAnEndOfTurnPoisonTickAlsoClearsStatus();
+  fireTypeCannotBeBurned();
+  poisonTypeCannotBePoisoned();
+  iceTypeCannotBeFrozen();
+  doubleKickAlwaysHitsExactlyTwice();
+  bonemerangAlwaysHitsExactlyTwice();
+  spikeCannonRollsTheRandomMultiHitDistribution();
+  secondaryStatDropMovesCanLowerATargetsStat();
+  psychicCanLowerTheTargetsSpecialStage();
+  secondaryStatDropIsAGenuineChanceNotAGuarantee();
+  razorWindIsATwoTurnMoveWithNoInvulnerability();
+  hyperBeamSkipsRechargeWhenTheHitFaintsTheTarget();
+  jumpKickDealsOneHpCrashDamageOnAMiss();
+  hiJumpKickAlsoDealsOneHpCrashDamageOnAMiss();
+  ordinaryMoveMissNeverAppliesCrashDamage();
+  teleportReportsTeleportedEvent();
+  quickAttackAlwaysGoesFirstRegardlessOfSpeed();
+  counterAlwaysResolvesLastRegardlessOfSpeedAdvantage();
+  toxicDamageEscalatesEachTurnItTicks();
+  runAwayGuaranteedWhenFormulaExceedsTwoFiftyFive();
+  runAwayGuaranteedFailureWhenPlayerHasNoSpeed();
+  runAwayCanFailAgainstAMuchFasterOpponent();
+  runAwayAttemptCountEventuallyGuaranteesEscape();
+  hazeClearsStatusConfusionScreensAndToxicCounterOnBothSides();
+  speedTieIsBrokenByACoinFlipInsteadOfAlwaysFavoringThePlayer();
   return failures == 0 ? 0 : 1;
 }

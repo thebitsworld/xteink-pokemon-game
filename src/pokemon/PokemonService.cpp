@@ -929,6 +929,11 @@ bool PokemonService::attemptBattleCatch(const BattleCombatant& wild, const BallK
   return attemptCatch(wild, ball, random_);
 }
 
+bool PokemonService::attemptRunFromBattle(const BattleCombatant& player, const BattleCombatant& opponent,
+                                          const uint8_t attemptCount) {
+  return attemptRun(player, opponent, attemptCount, random_);
+}
+
 Gender PokemonService::rollGenderFor(const uint16_t speciesId) {
   Gender gender = Gender::Unknown;
   chooseGenderForSpecies(speciesId, random_, gender);
