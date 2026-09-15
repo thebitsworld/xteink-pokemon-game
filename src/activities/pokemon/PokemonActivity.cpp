@@ -1041,6 +1041,11 @@ bool PokemonActivity::setupBattlePlayer(const int slot) {
   battlePlayer_.currentHp = std::min<uint16_t>(entry.currentHp, battlePlayer_.maxHp);
   battlePlayer_.status = entry.status;
   battlePlayer_.statusTurns = entry.statusTurns;
+  // Restore the in-progress Toxic escalation too (round 5 audit bug 3.1) -
+  // without this, every switch (this function runs at battle start AND on
+  // every voluntary/forced Switch) silently reset it to 0, downgrading an
+  // escalating Toxic to flat 1/8 Poison the instant the player switched.
+  battlePlayer_.toxicCounter = entry.toxicCounter;
   for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
     battlePlayer_.moves[i] = pokemon::BattleMoveSlot{entry.moves[i], entry.pp[i]};
   }
@@ -1179,6 +1184,10 @@ void PokemonActivity::savePlayerBattleEntry() {
   entry.currentHp = battlePlayer_.currentHp;
   entry.status = battlePlayer_.status;
   entry.statusTurns = battlePlayer_.statusTurns;
+  // Persist the in-progress Toxic escalation counter too, or it silently
+  // resets to flat-1/8 Poison the next time this entry is loaded (round 5
+  // audit bug 3.1) - see BattleRecordEntry::toxicCounter's doc comment.
+  entry.toxicCounter = battlePlayer_.status == pokemon::Ailment::Poison ? battlePlayer_.toxicCounter : 0;
   // Best-effort: the in-memory battle state already reflects reality either
   // way, and a rare SD write failure here shouldn't block the player from
   // continuing the fight or leaving it.
@@ -1664,6 +1673,11 @@ void PokemonActivity::activate() {
           battlePlayer_.currentHp = entry.currentHp;
           battlePlayer_.status = entry.status;
           battlePlayer_.statusTurns = entry.statusTurns;
+          // Same reasoning as setupBattlePlayer() - keep toxicCounter in
+          // lockstep with the persisted entry (round 5 audit bug 3.1),
+          // including going back to 0 here if the item just cured the
+          // Poison outright.
+          battlePlayer_.toxicCounter = entry.toxicCounter;
           for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battlePlayer_.moves[i].currentPp = entry.pp[i];
         }
         if (!refreshSnapshot()) return;

@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.21.1] - 2026-09-15
+
+### Fixed
+
+- Toxic's escalating damage now survives switching your Pokémon out and back in mid-battle - previously it silently reset back to regular Poison's flat damage rate the moment you switched.
+
 ## [0.21.0] - 2026-09-15
 
 ### Added
