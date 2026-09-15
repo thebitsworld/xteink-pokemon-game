@@ -585,6 +585,10 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
         (item->curesAilment == Ailment::All || item->curesAilment == entry.status)) {
       entry.status = Ailment::None;
       entry.statusTurns = 0;
+      // toxicCounter is only ever valid while status == Poison
+      // (validateBattleRecordEntry) - clear it alongside the cure, or this
+      // entry fails to save (round 5 audit bug 3.1's persistence fix).
+      entry.toxicCounter = 0;
       changed = true;
     }
     if (item->category == ItemCategory::PPRestore) {
@@ -856,6 +860,9 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
     if (healed.currentHp >= maxHp && healed.status != Ailment::None) {
       healed.status = Ailment::None;
       healed.statusTurns = 0;
+      // Same reasoning as useConsumable()'s cure branch (round 5 audit bug
+      // 3.1) - toxicCounter must go back to 0 whenever status does.
+      healed.toxicCounter = 0;
     }
 
     if (healed == *existing) continue;  // nothing to heal for this member

@@ -64,6 +64,7 @@ bool validateBattleRecordEntry(const BattleRecordEntry& entry) {
       return false;  // All is an item-targeting sentinel (Full Heal/Restore), never a live combatant status
   }
   if (entry.status != Ailment::Sleep && entry.status != Ailment::Confusion && entry.statusTurns != 0) return false;
+  if (entry.status != Ailment::Poison && entry.toxicCounter != 0) return false;
   return true;
 }
 
@@ -77,6 +78,7 @@ bool encodeBattleRecordEntry(const BattleRecordEntry& entry, BattleEntryBytes& o
   candidate[14] = static_cast<uint8_t>(entry.status);
   candidate[15] = entry.statusTurns;
   for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate[16 + index] = entry.ppUp[index];
+  candidate[20] = entry.toxicCounter;
   output = candidate;
   return true;
 }
@@ -91,6 +93,7 @@ bool decodeBattleRecordEntry(const BattleEntryBytes& bytes, BattleRecordEntry& o
   candidate.status = static_cast<Ailment>(bytes[14]);
   candidate.statusTurns = bytes[15];
   for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.ppUp[index] = bytes[16 + index];
+  candidate.toxicCounter = bytes[20];
   if (!validateBattleRecordEntry(candidate)) return false;
   output = candidate;
   return true;
@@ -105,7 +108,26 @@ bool decodeBattleRecordEntryV1(const BattleEntryBytesV1& bytes, BattleRecordEntr
   if (bytes[14] > static_cast<uint8_t>(Ailment::All)) return false;
   candidate.status = static_cast<Ailment>(bytes[14]);
   candidate.statusTurns = bytes[15];
-  // ppUp stays all-zero - v1 predates PP Up entirely.
+  // ppUp/toxicCounter stay all-zero - v1 predates both PP Up and Toxic
+  // escalation entirely.
+  if (!validateBattleRecordEntry(candidate)) return false;
+  output = candidate;
+  return true;
+}
+
+bool decodeBattleRecordEntryV2(const BattleEntryBytesV2& bytes, BattleRecordEntry& output) {
+  BattleRecordEntry candidate{};
+  candidate.recordId = read32(bytes.data(), 0);
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.moves[index] = bytes[4 + index];
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.pp[index] = bytes[8 + index];
+  candidate.currentHp = read16(bytes.data(), 12);
+  if (bytes[14] > static_cast<uint8_t>(Ailment::All)) return false;
+  candidate.status = static_cast<Ailment>(bytes[14]);
+  candidate.statusTurns = bytes[15];
+  for (size_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) candidate.ppUp[index] = bytes[16 + index];
+  // toxicCounter stays 0 - v2 predates Toxic escalation (round 5 audit bug
+  // 3.1). A Toxic'd Pokemon saved under v2 simply resumes at the flat 1/8
+  // rate on next load, same as it always did before this round.
   if (!validateBattleRecordEntry(candidate)) return false;
   output = candidate;
   return true;
@@ -204,9 +226,13 @@ bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreSt
   if (data == nullptr || size < POKEMON_BATTLE_HEADER_BYTES + POKEMON_BATTLE_FILE_CRC_BYTES) return false;
   if (data[0] != 'P' || data[1] != 'K' || data[2] != 'B' || data[3] != 'T') return false;
   const uint8_t version = data[4];
-  if (version != POKEMON_BATTLE_STORE_VERSION && version != POKEMON_BATTLE_STORE_VERSION_V1) return false;
-  const size_t entryBytes = version == POKEMON_BATTLE_STORE_VERSION_V1 ? POKEMON_BATTLE_ENTRY_BYTES_V1
-                                                                       : POKEMON_BATTLE_ENTRY_BYTES;
+  if (version != POKEMON_BATTLE_STORE_VERSION && version != POKEMON_BATTLE_STORE_VERSION_V2 &&
+      version != POKEMON_BATTLE_STORE_VERSION_V1) {
+    return false;
+  }
+  const size_t entryBytes = version == POKEMON_BATTLE_STORE_VERSION_V1   ? POKEMON_BATTLE_ENTRY_BYTES_V1
+                            : version == POKEMON_BATTLE_STORE_VERSION_V2 ? POKEMON_BATTLE_ENTRY_BYTES_V2
+                                                                         : POKEMON_BATTLE_ENTRY_BYTES;
   const uint8_t count = data[5];
   if (count > POKEMON_BATTLE_MAX_ENTRIES) return false;
   const uint32_t candidateSequence = read32(data, 6);
@@ -228,10 +254,14 @@ bool decodeBattleStoreFile(const uint8_t* data, const size_t size, BattleStoreSt
       BattleEntryBytesV1 v1Bytes{};
       std::memcpy(v1Bytes.data(), entryData, v1Bytes.size());
       entryOk = decodeBattleRecordEntryV1(v1Bytes, candidate.entries[index]);
-    } else {
-      BattleEntryBytes v2Bytes{};
+    } else if (version == POKEMON_BATTLE_STORE_VERSION_V2) {
+      BattleEntryBytesV2 v2Bytes{};
       std::memcpy(v2Bytes.data(), entryData, v2Bytes.size());
-      entryOk = decodeBattleRecordEntry(v2Bytes, candidate.entries[index]);
+      entryOk = decodeBattleRecordEntryV2(v2Bytes, candidate.entries[index]);
+    } else {
+      BattleEntryBytes v3Bytes{};
+      std::memcpy(v3Bytes.data(), entryData, v3Bytes.size());
+      entryOk = decodeBattleRecordEntry(v3Bytes, candidate.entries[index]);
     }
     if (!entryOk) return false;
   }

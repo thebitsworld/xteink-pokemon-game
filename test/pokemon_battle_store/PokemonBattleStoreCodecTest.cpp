@@ -207,6 +207,22 @@ pokemon::BattleEntryBytesV1 makeV1EntryBytes(const BattleRecordEntry& entry) {
   return bytes;
 }
 
+pokemon::BattleEntryBytesV2 makeV2EntryBytes(const BattleRecordEntry& entry) {
+  pokemon::BattleEntryBytesV2 bytes{};
+  bytes[0] = static_cast<uint8_t>(entry.recordId);
+  bytes[1] = static_cast<uint8_t>(entry.recordId >> 8);
+  bytes[2] = static_cast<uint8_t>(entry.recordId >> 16);
+  bytes[3] = static_cast<uint8_t>(entry.recordId >> 24);
+  for (size_t i = 0; i < 4; ++i) bytes[4 + i] = entry.moves[i];
+  for (size_t i = 0; i < 4; ++i) bytes[8 + i] = entry.pp[i];
+  bytes[12] = static_cast<uint8_t>(entry.currentHp);
+  bytes[13] = static_cast<uint8_t>(entry.currentHp >> 8);
+  bytes[14] = static_cast<uint8_t>(entry.status);
+  bytes[15] = entry.statusTurns;
+  for (size_t i = 0; i < 4; ++i) bytes[16 + i] = entry.ppUp[i];
+  return bytes;
+}
+
 void legacyHeaderlessFileStillDecodesForMigration() {
   BattleStoreState state{};
   CHECK(pokemon::upsertBattleEntry(state, makeEntry(9)));
@@ -255,12 +271,62 @@ void v1DoubleBufferedFileStillDecodesWithZeroPpUp() {
   CHECK(decodedSequence == sequence);
   CHECK(decoded == state);  // ppUp defaults to 0 on both sides, so equality still holds
 
-  // An unrecognized version (neither v1 nor the current v2) is rejected.
+  // An unrecognized version (none of v1/v2/current) is rejected.
   std::vector<uint8_t> badVersion = bytes;
   badVersion[4] = 99;
   BattleStoreState badOutput{};
   uint32_t badSequence = 0;
   CHECK(!pokemon::decodeBattleStoreFile(badVersion.data(), badVersion.size(), badOutput, badSequence));
+}
+
+void v2DoubleBufferedFileStillDecodesWithZeroToxicCounter() {
+  BattleStoreState state{};
+  BattleRecordEntry entry = makeEntry(5);
+  entry.ppUp = {2, 1, 0, 0};
+  CHECK(pokemon::upsertBattleEntry(state, entry));
+
+  // Hand-build a genuine v2 (20-byte entries, pre-Toxic-escalation)
+  // double-buffered file - what a real existing user's pokemon-battle-
+  // {a,b}.bin looked like between PP Up shipping and round 5's Toxic
+  // escalation fix (audit bug 3.1).
+  const pokemon::BattleEntryBytesV2 entryBytes = makeV2EntryBytes(state.entries[0]);
+  std::vector<uint8_t> bytes = {'P', 'K', 'B', 'T', pokemon::POKEMON_BATTLE_STORE_VERSION_V2, 1};
+  constexpr uint32_t sequence = 7;
+  for (size_t i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(sequence >> (8 * i)));
+  bytes.insert(bytes.end(), entryBytes.begin(), entryBytes.end());
+  const uint32_t crc = pokemon::finishBattleStoreCrc32(
+      pokemon::updateBattleStoreCrc32(pokemon::BATTLE_STORE_CRC32_INITIAL, bytes.data(), bytes.size()));
+  for (size_t i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(crc >> (8 * i)));
+
+  BattleStoreState decoded{};
+  uint32_t decodedSequence = 0;
+  CHECK(pokemon::decodeBattleStoreFile(bytes.data(), bytes.size(), decoded, decodedSequence));
+  CHECK(decodedSequence == sequence);
+  CHECK(decoded == state);  // toxicCounter defaults to 0 on both sides, so equality still holds
+  CHECK(decoded.entries[0].toxicCounter == 0);
+}
+
+void toxicCounterRoundTripsThroughEncodeDecodeAndIsValidatedAgainstStatus() {
+  BattleRecordEntry entry = makeEntry(1);
+  entry.status = Ailment::Poison;
+  entry.toxicCounter = 4;
+  CHECK(pokemon::validateBattleRecordEntry(entry));
+
+  pokemon::BattleEntryBytes bytes{};
+  CHECK(pokemon::encodeBattleRecordEntry(entry, bytes));
+  CHECK(bytes[20] == 4);
+
+  BattleRecordEntry decoded{};
+  CHECK(pokemon::decodeBattleRecordEntry(bytes, decoded));
+  CHECK(decoded == entry);
+  CHECK(decoded.toxicCounter == 4);
+
+  // A nonzero toxicCounter only makes sense while status == Poison - the
+  // same invariant statusTurns already enforces for Sleep/Confusion (round
+  // 5 audit bug 3.1's persistence fix).
+  BattleRecordEntry toxicWithoutPoison = entry;
+  toxicWithoutPoison.status = Ailment::None;
+  CHECK(!pokemon::validateBattleRecordEntry(toxicWithoutPoison));
 }
 
 }  // namespace
@@ -275,5 +341,7 @@ int main() {
   emptyStateEncodesToJustTheHeaderAndCrc();
   legacyHeaderlessFileStillDecodesForMigration();
   v1DoubleBufferedFileStillDecodesWithZeroPpUp();
+  v2DoubleBufferedFileStillDecodesWithZeroToxicCounter();
+  toxicCounterRoundTripsThroughEncodeDecodeAndIsValidatedAgainstStatus();
   return failures == 0 ? 0 : 1;
 }

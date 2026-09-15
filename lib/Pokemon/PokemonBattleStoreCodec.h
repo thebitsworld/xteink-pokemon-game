@@ -9,16 +9,18 @@
 
 namespace pokemon {
 
-// v1 (original format) entries were 16 bytes with no PP-Up counters; v2 adds
-// a per-slot ppUp[BATTLE_MOVE_SLOTS] (see BattleRecordEntry below), 20 bytes.
-// Both the header's version byte and each entry's actual on-disk size follow
-// the format version - decodeBattleStoreFile() branches on the header's
-// version to pick the right entry size and decode function, exactly the way
-// PokemonStoreCodec's own decodeState() branches on its own version to
-// handle old vs. new PokemonState layouts. Encoding always writes the
-// current (latest) version.
+// v1 (original format) entries were 16 bytes with no PP-Up counters; v2
+// added a per-slot ppUp[BATTLE_MOVE_SLOTS] (20 bytes); v3 adds a single
+// toxicCounter byte (see BattleRecordEntry below, and its doc comment for
+// why), 21 bytes. Both the header's version byte and each entry's actual
+// on-disk size follow the format version - decodeBattleStoreFile() branches
+// on the header's version to pick the right entry size and decode function,
+// exactly the way PokemonStoreCodec's own decodeState() branches on its own
+// version to handle old vs. new PokemonState layouts. Encoding always
+// writes the current (latest) version.
 constexpr size_t POKEMON_BATTLE_ENTRY_BYTES_V1 = 16;
-constexpr size_t POKEMON_BATTLE_ENTRY_BYTES = 20;
+constexpr size_t POKEMON_BATTLE_ENTRY_BYTES_V2 = 20;
+constexpr size_t POKEMON_BATTLE_ENTRY_BYTES = 21;
 constexpr size_t POKEMON_BATTLE_MAX_ENTRIES = 6;  // one per Party slot; PC-boxed Pokemon carry no live battle state
 constexpr size_t POKEMON_BATTLE_FILE_CRC_BYTES = 4;
 // Header: magic "PKBT" (4) + version (1) + entryCount (1) + sequence (4). A
@@ -29,7 +31,8 @@ constexpr size_t POKEMON_BATTLE_FILE_CRC_BYTES = 4;
 // number, never overwriting the currently-active slot in place.
 constexpr size_t POKEMON_BATTLE_HEADER_BYTES = 10;
 constexpr uint8_t POKEMON_BATTLE_STORE_VERSION_V1 = 1;  // legacy: no ppUp counters
-constexpr uint8_t POKEMON_BATTLE_STORE_VERSION = 2;     // current: adds ppUp[BATTLE_MOVE_SLOTS]
+constexpr uint8_t POKEMON_BATTLE_STORE_VERSION_V2 = 2;  // legacy: adds ppUp[BATTLE_MOVE_SLOTS], no toxicCounter
+constexpr uint8_t POKEMON_BATTLE_STORE_VERSION = 3;     // current: adds toxicCounter
 constexpr size_t POKEMON_BATTLE_FILE_MAX_BYTES = POKEMON_BATTLE_HEADER_BYTES +
                                                  POKEMON_BATTLE_MAX_ENTRIES * POKEMON_BATTLE_ENTRY_BYTES +
                                                  POKEMON_BATTLE_FILE_CRC_BYTES;
@@ -42,6 +45,7 @@ constexpr size_t POKEMON_BATTLE_LEGACY_FILE_MAX_BYTES =
 
 using BattleEntryBytes = std::array<uint8_t, POKEMON_BATTLE_ENTRY_BYTES>;
 using BattleEntryBytesV1 = std::array<uint8_t, POKEMON_BATTLE_ENTRY_BYTES_V1>;
+using BattleEntryBytesV2 = std::array<uint8_t, POKEMON_BATTLE_ENTRY_BYTES_V2>;
 using BattleStoreFileBytes = std::array<uint8_t, POKEMON_BATTLE_FILE_MAX_BYTES>;
 using BattleStoreLegacyFileBytes = std::array<uint8_t, POKEMON_BATTLE_LEGACY_FILE_MAX_BYTES>;
 
@@ -72,6 +76,16 @@ struct BattleRecordEntry {
   // maxPpFor() in PokemonBattle.h. Absent (defaults to all 0) when decoded
   // from a v1 (pre-PP-Up) file.
   std::array<uint8_t, BATTLE_MOVE_SLOTS> ppUp{};
+  // Mirrors BattleCombatant::toxicCounter (PokemonBattle.h) across a switch/
+  // save-reload boundary - without this, switching a Toxic'd Pokemon out and
+  // back in (or simply exiting/reopening the app mid-battle) silently reset
+  // the escalating Toxic damage back to flat 1/8 the moment the entry was
+  // reloaded, since there was nowhere to persist the in-progress counter
+  // (round 5 audit bug 3.1). Meaningful only while status == Ailment::Poison
+  // - kept at 0 otherwise (validateBattleRecordEntry enforces this, the same
+  // way statusTurns is only allowed nonzero for Sleep/Confusion). Absent
+  // (defaults to 0) when decoded from a v1/v2 (pre-Toxic-escalation) file.
+  uint8_t toxicCounter = 0;
 
   bool operator==(const BattleRecordEntry&) const = default;
 };
@@ -105,6 +119,9 @@ bool decodeBattleRecordEntry(const BattleEntryBytes& bytes, BattleRecordEntry& o
 // decodeBattleStoreFile() when the file header says version 1, and by
 // decodeLegacyBattleStoreFile() (which predates PP Up entirely).
 bool decodeBattleRecordEntryV1(const BattleEntryBytesV1& bytes, BattleRecordEntry& output);
+// Decodes a v2 (pre-Toxic-escalation) 20-byte entry - toxicCounter comes back
+// 0. Used by decodeBattleStoreFile() when the file header says version 2.
+bool decodeBattleRecordEntryV2(const BattleEntryBytesV2& bytes, BattleRecordEntry& output);
 
 uint32_t updateBattleStoreCrc32(uint32_t crc, const uint8_t* data, size_t size);
 constexpr uint32_t finishBattleStoreCrc32(const uint32_t crc) { return crc ^ 0xFFFFFFFFU; }

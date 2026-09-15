@@ -4,12 +4,29 @@ Ghi lại để khỏi phải hỏi lại. Nguồn đầy đủ, chi tiết (fil
 xuất) nằm trong các file audit:
 - [docs/development/pokemon-gen1-audit-round2.md](docs/development/pokemon-gen1-audit-round2.md)
 - [docs/development/pokemon-gen1-audit-round3.md](docs/development/pokemon-gen1-audit-round3.md)
-- [docs/development/pokemon-gen1-audit-round4.md](docs/development/pokemon-gen1-audit-round4.md) (nội dung của nó đã được xử lý xong trong đợt này)
+- [docs/development/pokemon-gen1-audit-round4.md](docs/development/pokemon-gen1-audit-round4.md) (nội dung của nó đã được xử lý xong)
+- [docs/development/pokemon-gen1-audit-round5.md](docs/development/pokemon-gen1-audit-round5.md) (re-verify round 4, tìm bug mới 3.1 — đã fix `v0.21.1`)
 
 File này chỉ là **danh sách rút gọn** để chọn việc tiếp theo. Xoá/cập nhật dòng
 nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
+
+## Round 5 (2026-09-15, `v0.21.1`)
+
+Audit vòng 5 re-verify toàn bộ 18 mục "đã xong" của round 4 (tất cả đúng, không
+regression) và trả lời 2 câu hỏi mở còn treo (công thức run-away `+30×số lần
+thử` — đúng theo Gen 1 thật; `movePriority()` hand-authored — đúng lựa chọn,
+khớp convention có sẵn). Phát hiện 1 bug mới:
+
+- [x] **3.1 (round 5) — ĐÃ FIX**: `toxicCounter` (field mới của Toxic tăng
+  dần, round 4) không được lưu vào `BattleRecordEntry` — mỗi lần đổi Pokémon
+  giữa trận, damage Toxic âm thầm tụt về 1/8 cố định. Fix: bump format
+  `pokemon-battle-{a,b}.bin` lên v3 (21 byte/entry, theo đúng tiền lệ PP Up
+  v1→v2), thêm `toxicCounter` vào 3 điểm đọc/ghi
+  (`savePlayerBattleEntry()`, `setupBattlePlayer()`, item-sync mid-battle) +
+  2 điểm cure-status trong `PokemonService.cpp` (đảm bảo invariant
+  `toxicCounter` chỉ khác 0 khi `status == Poison`).
 
 ## Trạng thái hiện tại (cập nhật 2026-09-15, `v0.21.0`)
 

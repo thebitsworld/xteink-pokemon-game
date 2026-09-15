@@ -1346,6 +1346,30 @@ TEST(PokemonService, UseConsumableFullRestoreHealsAndCuresAnyStatus) {
   EXPECT_EQ(restored->status, pokemon::Ailment::None);
 }
 
+// Round 5 audit bug 3.1: toxicCounter is only ever valid while status ==
+// Poison (validateBattleRecordEntry) - curing Poison via an item must clear
+// it too, or the persisted entry becomes invalid and silently fails to save.
+TEST(PokemonService, UseConsumableCuringPoisonAlsoClearsTheToxicCounter) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.status = pokemon::Ailment::Poison;
+  entry.toxicCounter = 5;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  EXPECT_EQ(service.useConsumable(1, 18), pokemon::UseConsumableOutcome::Applied);  // Antidote
+  const pokemon::BattleRecordEntry* cured = battleStore.findEntry(1);
+  ASSERT_NE(cured, nullptr);
+  EXPECT_EQ(cured->status, pokemon::Ailment::None);
+  EXPECT_EQ(cured->toxicCounter, 0U);
+}
+
 TEST(PokemonService, UseConsumablePPRestoreTopsUpEveryKnownMoveSlot) {
   Storage.clear();
   pokemon::PokemonStore store;
