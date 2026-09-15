@@ -1200,8 +1200,15 @@ void PokemonActivity::finishBattleAfterWildFainted() {
     service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level,
                            gymChallengeIndex_ != 0, battleOpponent_.speciesId);
   }
+  // The winning move can also have fainted the player's own active Pokemon
+  // at the same time (Self-Destruct/Explosion, or a KO+recoil hit - see
+  // stepBattle()'s mutual-KO handling). Capture this now, before a gym
+  // switch or refreshSnapshot() below can change what's in scope, so both
+  // tails can tell the player their own Pokemon is down too instead of
+  // silently moving on (round 4 audit bug 2.9).
+  const bool playerAlsoFainted = battlePlayer_.currentHp == 0;
   if (gymChallengeIndex_ != 0) {
-    advanceGymOpponentOrFinish();
+    advanceGymOpponentOrFinish(playerAlsoFainted);
     return;
   }
   const uint16_t opponentSpecies = battleOpponent_.speciesId;
@@ -1211,7 +1218,16 @@ void PokemonActivity::finishBattleAfterWildFainted() {
   service_.resolveEncounter(pokemon::EncounterChoice::Pass, caught);
   if (!refreshSnapshot()) return;
   char line[96];
-  snprintf(line, sizeof(line), tr(STR_POKEMON_FAINTED), speciesName(opponentSpecies));
+  if (playerAlsoFainted) {
+    char opponentLine[64];
+    snprintf(opponentLine, sizeof(opponentLine), tr(STR_POKEMON_FAINTED), speciesName(opponentSpecies));
+    char playerLine[64];
+    snprintf(playerLine, sizeof(playerLine), tr(STR_POKEMON_YOUR_POKEMON_FAINTED),
+             speciesName(battlePlayer_.speciesId));
+    snprintf(line, sizeof(line), "%s\n%s", opponentLine, playerLine);
+  } else {
+    snprintf(line, sizeof(line), tr(STR_POKEMON_FAINTED), speciesName(opponentSpecies));
+  }
   showMessage(line, pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
 }
 
@@ -1229,7 +1245,7 @@ void PokemonActivity::finishBattleAfterPlayerFainted() {
   showMessage(line, pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
 }
 
-void PokemonActivity::advanceGymOpponentOrFinish() {
+void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
   const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
   ++gymChallengeTeamProgress_;
   if (gymChallengeTeamProgress_ < team.size()) {
@@ -1252,13 +1268,26 @@ void PokemonActivity::advanceGymOpponentOrFinish() {
     const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
     snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
              speciesName(battleOpponent_.speciesId));
+    if (playerAlsoFainted) {
+      // The player's own Pokemon can't face the next opponent as-is - force
+      // a switch first, exactly like an ordinary mid-battle faint, or end
+      // the challenge as a loss if nothing else is left to send out (round
+      // 4 audit bug 2.9).
+      if (usablePartySlotCount() > 0) {
+        forcedBattleSwitch_ = true;
+        setScreen(Screen::BattleSwitch);
+      } else {
+        finishBattleAfterPlayerFainted();
+      }
+      return;
+    }
     setScreen(Screen::Battle);
     return;
   }
-  finishGymChallenge(true);
+  finishGymChallenge(true, playerAlsoFainted);
 }
 
-void PokemonActivity::finishGymChallenge(const bool won) {
+void PokemonActivity::finishGymChallenge(const bool won, const bool playerAlsoFainted) {
   const uint8_t gymIndex = gymChallengeIndex_;
   gymChallengeIndex_ = 0;
   gymChallengeTeamProgress_ = 0;
@@ -1273,11 +1302,24 @@ void PokemonActivity::finishGymChallenge(const bool won) {
   }
   const pokemon::GymData* gym = pokemon::gymData(gymIndex);
   const char* leaderName = gym == nullptr ? "?" : gym->leaderName;
-  char line[96];
+  char winLine[80];
   if (gym != nullptr && gym->badgeName[0] != '\0') {
-    snprintf(line, sizeof(line), tr(STR_POKEMON_BADGE_EARNED), leaderName, gym->badgeName);
+    snprintf(winLine, sizeof(winLine), tr(STR_POKEMON_BADGE_EARNED), leaderName, gym->badgeName);
   } else {
-    snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_DEFEATED), leaderName);
+    snprintf(winLine, sizeof(winLine), tr(STR_POKEMON_TRAINER_DEFEATED), leaderName);
+  }
+  char line[96];
+  if (playerAlsoFainted) {
+    // The exchange that won the whole challenge also fainted the player's
+    // own Pokemon - no continuation is needed (the challenge is already
+    // over), but the player should still hear about it (round 4 audit bug
+    // 2.9) instead of only seeing the badge/victory line.
+    char playerLine[64];
+    snprintf(playerLine, sizeof(playerLine), tr(STR_POKEMON_YOUR_POKEMON_FAINTED),
+             speciesName(battlePlayer_.speciesId));
+    snprintf(line, sizeof(line), "%s\n%s", winLine, playerLine);
+  } else {
+    snprintf(line, sizeof(line), "%s", winLine);
   }
   if (!refreshSnapshot()) return;
   showMessage(line, Screen::GymList);

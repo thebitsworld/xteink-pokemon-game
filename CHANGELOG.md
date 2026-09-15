@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.20.4] - 2026-09-15
+
+### Fixed
+
+- Winning a battle by knocking out the opponent with the same move that also fainted your own Pokémon (like Self-Destruct/Explosion) now tells you your Pokémon fainted too, and asks you to send out another one before continuing a Gym/Elite Four/Champion run instead of silently moving on with a fainted Pokémon still active.
+
 ## [0.20.3] - 2026-09-14
 
 ### Fixed
