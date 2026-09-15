@@ -55,7 +55,24 @@ constexpr size_t POKEMON_IVEV_LEGACY_FILE_MAX_BYTES = POKEMON_IVEV_HEADER_BYTES 
                                                       POKEMON_IVEV_FILE_CRC_BYTES;
 
 using IvEvEntryBytes = std::array<uint8_t, POKEMON_IVEV_ENTRY_BYTES>;
+// Sized for the LEGACY (larger, retired) entry cap - used only by the READ
+// path (PokemonIvEvStore.cpp's inspectSlot()), which must still be able to
+// read in a file written by a previous build under the old, higher
+// POKEMON_IVEV_LEGACY_MAX_ENTRIES cap before decodeIvEvStoreFile() clamps it
+// down. See IvEvStoreWriteFileBytes below for the much smaller type actually
+// used on the write path - round 4 audit item 3.4: this type used to be
+// (mis)used there too, sizing every write-side allocation for a format this
+// build never actually writes.
 using IvEvStoreFileBytes = std::array<uint8_t, POKEMON_IVEV_LEGACY_FILE_MAX_BYTES>;
+// Sized for the CURRENT write-side cap only (POKEMON_IVEV_MAX_ENTRIES, 518
+// entries - about half of IvEvStoreFileBytes above). Nothing is ever encoded
+// with more than POKEMON_IVEV_MAX_ENTRIES entries (IvEvStoreState::entries
+// itself is capped there), so this is the only buffer size the write path
+// (PokemonIvEvStore::writeState()) ever actually needs; sizing that
+// allocation for the legacy, larger cap (as it did before this fix) was pure
+// waste with no compatibility purpose - unlike the read path, which must
+// stay legacy-sized to accept an old, larger file before clamping it down.
+using IvEvStoreWriteFileBytes = std::array<uint8_t, POKEMON_IVEV_FILE_MAX_BYTES>;
 
 // A Pokemon's permanent individual variance: IVs (0-15 per stat, rolled once
 // at creation - catch, starter pick, gift/event - and never changed again)
@@ -113,9 +130,22 @@ constexpr uint32_t IVEV_STORE_CRC32_INITIAL = 0xFFFFFFFFU;
 // Encodes `state` into `output`/`outputSize`: a header (magic, version,
 // entryCount, `sequence`), then entries back to back (only the non-zero-
 // recordId ones), then a trailing CRC32. Fails if `sequence` is 0 (reserved
-// for "no valid slot yet") or the state does not pass validateIvEvStoreState.
-bool encodeIvEvStoreFile(const IvEvStoreState& state, uint32_t sequence, IvEvStoreFileBytes& output,
+// for "no valid slot yet"), the state does not pass validateIvEvStoreState,
+// or `outputCapacity` is too small for the state's actual entry count (this
+// can only happen if a caller passes a buffer smaller than
+// POKEMON_IVEV_FILE_MAX_BYTES - both IvEvStoreFileBytes and
+// IvEvStoreWriteFileBytes are always large enough for any valid state).
+bool encodeIvEvStoreFile(const IvEvStoreState& state, uint32_t sequence, uint8_t* output, size_t outputCapacity,
                          size_t& outputSize);
+
+// Convenience overload for callers holding a fixed-size byte array (either
+// IvEvStoreFileBytes or the smaller IvEvStoreWriteFileBytes) rather than a
+// raw pointer + capacity.
+template <size_t N>
+bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, std::array<uint8_t, N>& output,
+                         size_t& outputSize) {
+  return encodeIvEvStoreFile(state, sequence, output.data(), output.size(), outputSize);
+}
 
 // Decodes and fully verifies an IV/EV store file of exactly `size` bytes:
 // magic/version must match, entryCount must be <= POKEMON_IVEV_LEGACY_MAX_ENTRIES

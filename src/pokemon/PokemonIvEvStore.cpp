@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -121,14 +122,16 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
     return false;
   }
   const uint32_t nextSequence = !ready_ ? 1U : (sequence_ == UINT32_MAX ? 1U : sequence_ + 1U);
-  // Heap-allocated, not stack locals - see load()'s matching comment; this
-  // function reaches similarly deep nested call depths (encode, then
-  // write, then inspectSlot -> decode again to verify) that overflowed a
-  // real device's task stack.
-  // Non-throwing new, not std::make_unique - see inspectSlot()'s matching
-  // comment; a failed allocation here must fail this write attempt, not
-  // crash the device.
-  std::unique_ptr<IvEvStoreFileBytes> bytes(new (std::nothrow) IvEvStoreFileBytes());
+  // Sized for the write-side cap only (POKEMON_IVEV_MAX_ENTRIES, 518 - see
+  // IvEvStoreWriteFileBytes's own doc comment, round 4 audit item 3.4) -
+  // about half of the legacy-sized IvEvStoreFileBytes this used to
+  // (mis)allocate here for a format this build never actually writes.
+  // Heap-allocated, not a stack local - see load()'s matching comment; this
+  // function reaches similarly deep nested call depths that overflowed a
+  // real device's task stack. Non-throwing new, not std::make_unique - see
+  // inspectSlot()'s matching comment; a failed allocation here must fail
+  // this write attempt, not crash the device.
+  std::unique_ptr<IvEvStoreWriteFileBytes> bytes(new (std::nothrow) IvEvStoreWriteFileBytes());
   if (!bytes) {
     LOG_ERR("PokemonIvEvStore", "Out of memory encoding IV/EV store");
     return false;
@@ -150,18 +153,29 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
     return false;
   }
 
-  // Free bytes (~14KB) before allocating verified (~16KB) rather than
-  // holding both at once - lowers the peak concurrent heap this function
-  // needs, on top of failing gracefully (below) if the heap is tight.
-  bytes.reset();
-  std::unique_ptr<IvEvStoreState> verified(new (std::nothrow) IvEvStoreState());
-  if (!verified) {
-    LOG_ERR("PokemonIvEvStore", "Out of memory verifying IV/EV store write");
-    return false;
+  // Verify by reading the just-written bytes straight back and comparing
+  // them byte-for-byte against `bytes` (still in memory, exactly what was
+  // intended), instead of decoding a whole second ~8 KB IvEvStoreState
+  // purely to == it against `state` (round 4 audit item 3.5). NOTE: the
+  // audit doc that requested this described PokemonBattleStore::writeState()
+  // as already doing a byte-for-byte verify to mirror - as of this branch
+  // that sibling still decodes-and-compares via operator== (a small, stack-
+  // local BattleStoreState, not heap-allocated, so it never had this file's
+  // motivating stack/heap-pressure history); this function's own byte
+  // comparison is written fresh rather than copied from there. A plain byte
+  // comparison still proves the file matches exactly, header/sequence bytes
+  // included, without any decode step at all.
+  FsFile verifyFile = Storage.open(destinationPath, O_RDONLY);
+  bool verifiedOk = false;
+  if (verifyFile && verifyFile.fileSize64() == size) {
+    // Non-throwing new, not std::make_unique - see inspectSlot()'s matching
+    // comment.
+    std::unique_ptr<IvEvStoreWriteFileBytes> readBack(new (std::nothrow) IvEvStoreWriteFileBytes());
+    verifiedOk = readBack != nullptr && readExact(verifyFile, readBack->data(), size) &&
+                 std::memcmp(readBack->data(), bytes->data(), size) == 0;
   }
-  uint32_t verifiedSequence = 0;
-  if (!inspectSlot(destinationPath, *verified, verifiedSequence) || verifiedSequence != nextSequence ||
-      !(*verified == state)) {
+  const bool verifyCloseOk = !verifyFile || verifyFile.close();
+  if (!verifiedOk || !verifyCloseOk) {
     LOG_ERR("PokemonIvEvStore", "Inactive IV/EV store slot verification failed");
     return false;
   }

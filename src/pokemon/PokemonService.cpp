@@ -45,14 +45,26 @@ ServiceStatus PokemonService::loadSnapshot(PokemonSnapshot& output) {
     LOG_ERR("PokemonService", "Failed to load Pokemon snapshot state");
     return ServiceStatus::StorageError;
   }
-  for (size_t slot = 0; slot < PARTY_SIZE && output.state.partyRecordIds[slot] != 0; ++slot) {
-    if (!store_.readRecord(output.state.partyRecordIds[slot], output.party[slot])) {
+  uint8_t partySlotCount = 0;
+  while (partySlotCount < PARTY_SIZE && output.state.partyRecordIds[partySlotCount] != 0) ++partySlotCount;
+  // A single batched readRecords() scan instead of one independent
+  // readRecord() scan per party member (round 4 audit item 3.1 - this used
+  // to be the single hottest save-path call in the module, re-opening and
+  // re-scanning the file up to PARTY_SIZE times for one loadSnapshot()).
+  if (partySlotCount > 0) {
+    const std::span<const uint32_t> requestedIds(output.state.partyRecordIds.data(), partySlotCount);
+    const std::span<PokemonRecord> partyOutput(output.party.data(), partySlotCount);
+    bool allFound = store_.readRecords(requestedIds, partyOutput);
+    for (uint8_t slot = 0; allFound && slot < partySlotCount; ++slot) {
+      allFound = output.party[slot].recordId == requestedIds[slot];
+    }
+    if (!allFound) {
       LOG_ERR("PokemonService", "Failed to load Pokemon snapshot party");
       output = {};
       return ServiceStatus::StorageError;
     }
-    ++output.partyCount;
   }
+  output.partyCount = partySlotCount;
   output.ownedCount = store_.recordCount();
   return ServiceStatus::Ok;
 }
@@ -796,15 +808,29 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
   std::array<BattleRecordEntry, PARTY_SIZE> healedEntries{};
   size_t healedCount = 0;
 
-  for (const uint32_t recordId : state.partyRecordIds) {
+  // Batched single-pass lookup (PokemonStore::readRecords(), round 4 audit
+  // item 3.2) instead of one independent readRecord() scan per party member
+  // - this function runs every 5 minutes via the reading-credit checkpoint,
+  // so it's one of the hottest save-path callers alongside loadSnapshot()
+  // (item 3.1). This runs independently of loadSnapshot() (it's given its
+  // own `state`, not necessarily the same instance as any cached
+  // snapshot_.party[] the UI layer might be holding), so there is no
+  // already-in-RAM shortcut safely available here - the party's records do
+  // need a real (batched) read.
+  std::array<PokemonRecord, PARTY_SIZE> partyRecords{};
+  store_.readRecords(std::span<const uint32_t>(state.partyRecordIds.data(), PARTY_SIZE),
+                     std::span<PokemonRecord>(partyRecords.data(), PARTY_SIZE));
+
+  for (size_t slot = 0; slot < PARTY_SIZE; ++slot) {
+    const uint32_t recordId = state.partyRecordIds[slot];
     if (recordId == 0) continue;
     const BattleRecordEntry* existing = battleStore_.findEntry(recordId);
     // Nothing to heal if it was never fought - it will synthesize at full
     // HP/PP the first time it is needed anyway.
     if (existing == nullptr) continue;
 
-    PokemonRecord record{};
-    if (!store_.readRecord(recordId, record)) continue;
+    const PokemonRecord& record = partyRecords[slot];
+    if (record.recordId != recordId) continue;  // readRecords() couldn't find/decode this slot
     const BaseStats* stats = baseStatsFor(record.speciesId);
     if (stats == nullptr) continue;
     const IvEvEntry ivEv = ensureIvEv(recordId);
@@ -818,12 +844,12 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
 
     const uint16_t ppTicks = static_cast<uint16_t>(minutes / MINUTES_PER_PP_TICK);
     if (ppTicks > 0) {
-      for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
-        if (healed.moves[slot] == 0) continue;
-        const MoveData* move = moveData(healed.moves[slot]);
-        const uint8_t maxPp = move == nullptr ? 0 : maxPpFor(move->pp, healed.ppUp[slot]);
-        const uint32_t healedPp = static_cast<uint32_t>(healed.pp[slot]) + ppTicks;
-        healed.pp[slot] = static_cast<uint8_t>(std::min<uint32_t>(maxPp, healedPp));
+      for (size_t moveSlot = 0; moveSlot < BATTLE_MOVE_SLOTS; ++moveSlot) {
+        if (healed.moves[moveSlot] == 0) continue;
+        const MoveData* move = moveData(healed.moves[moveSlot]);
+        const uint8_t maxPp = move == nullptr ? 0 : maxPpFor(move->pp, healed.ppUp[moveSlot]);
+        const uint32_t healedPp = static_cast<uint32_t>(healed.pp[moveSlot]) + ppTicks;
+        healed.pp[moveSlot] = static_cast<uint8_t>(std::min<uint32_t>(maxPp, healedPp));
       }
     }
 

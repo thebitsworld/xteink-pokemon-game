@@ -129,6 +129,17 @@ pokemon::PokemonRecord caughtAbra(const uint32_t recordId) {
   return record;
 }
 
+pokemon::PokemonRecord caughtOfSpecies(const uint32_t recordId, const uint16_t speciesId) {
+  pokemon::PokemonRecord record{};
+  record.recordId = recordId;
+  record.totalXp = 52;
+  record.speciesId = speciesId;
+  record.caughtLevel = 5;
+  record.gender = pokemon::Gender::Female;
+  record.origin = pokemon::Origin::Caught;
+  return record;
+}
+
 void emptyStoreCommitsAndReloadsSequenceOne() {
   Storage.clear();
   pokemon::PokemonStore store;
@@ -415,6 +426,135 @@ void pcReadFailureIsDistinctFromAValidEmptyPage() {
   CHECK(!store.readPcPage(pokemon::PcOrder::CatchDate, 0, page, count));
   CHECK(count == 0);
   Storage.setFailRead(false);
+}
+
+// Round 4 audit item 3.1: readRecords() must do a single forward scan of the
+// file and return the exact same results calling readRecord() once per id
+// would - including per-id "not found" for a missing id and for id 0.
+void readRecordsMatchesPerIdReadRecordLookups() {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
+  const pokemon::PokemonRecord pikachu = starterPikachu();
+  const pokemon::PokemonRecord abra = caughtAbra(2);
+  const pokemon::PokemonRecord bulbasaur = caughtBulbasaur(3);
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = pikachu.recordId;
+  for (const pokemon::PokemonRecord& record : {pikachu, abra, bulbasaur}) {
+    CHECK(pokemon::markSpecies(state.seenSpecies, record.speciesId));
+    CHECK(pokemon::markSpecies(state.caughtSpecies, record.speciesId));
+    CHECK(store.commit(state, {record.recordId, record, pokemon::RecordMutationKind::Append}));
+  }
+
+  const std::array<uint32_t, 4> ids{pikachu.recordId, 999U /* missing */, bulbasaur.recordId, 0U};
+  std::array<pokemon::PokemonRecord, 4> results{};
+  CHECK(store.readRecords(ids, results));
+  CHECK(results[0] == pikachu);
+  CHECK(results[1].recordId == 0);  // not found, same contract as readRecord()
+  CHECK(results[2] == bulbasaur);
+  CHECK(results[3].recordId == 0);  // id 0 never matches
+
+  pokemon::PokemonRecord viaSingle{};
+  CHECK(store.readRecord(pikachu.recordId, viaSingle));
+  CHECK(viaSingle == results[0]);
+  CHECK(!store.readRecord(999U, viaSingle));
+  CHECK(store.readRecord(bulbasaur.recordId, viaSingle));
+  CHECK(viaSingle == results[2]);
+
+  // Mismatched recordIds/output sizes are rejected outright, no partial work.
+  std::array<pokemon::PokemonRecord, 3> tooSmall{};
+  CHECK(!store.readRecords(ids, std::span<pokemon::PokemonRecord>(tooSmall)));
+
+  // An empty request is trivially fine, even against a not-ready store.
+  pokemon::PokemonStore notReady;
+  CHECK(notReady.readRecords(std::span<const uint32_t>(), std::span<pokemon::PokemonRecord>()));
+}
+
+// Round 4 audit item 3.6: readRecord() now hands BatchedRecordReader a
+// chunk size of exactly 1 record instead of the ~2KB/42-record default -
+// this must still correctly find a record at the start, middle, and end of
+// a multi-record file (and correctly report a genuinely missing one),
+// exactly as it did with the old, larger buffer.
+void readRecordFindsEveryPositionWithTheSmallerSingleRecordChunk() {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
+  pokemon::PokemonState state{};
+  std::array<pokemon::PokemonRecord, 5> records{};
+  for (uint32_t i = 0; i < records.size(); ++i) {
+    records[i] = caughtAbra(i + 1);
+    CHECK(pokemon::markSpecies(state.seenSpecies, records[i].speciesId));
+    CHECK(pokemon::markSpecies(state.caughtSpecies, records[i].speciesId));
+    CHECK(store.commit(state, {records[i].recordId, records[i], pokemon::RecordMutationKind::Append}));
+  }
+
+  pokemon::PokemonRecord loaded{};
+  CHECK(store.readRecord(records.front().recordId, loaded));
+  CHECK(loaded == records.front());
+  CHECK(store.readRecord(records[2].recordId, loaded));
+  CHECK(loaded == records[2]);
+  CHECK(store.readRecord(records.back().recordId, loaded));
+  CHECK(loaded == records.back());
+  CHECK(!store.readRecord(999U, loaded));
+}
+
+// Round 4 audit item 3.3: PC Box ordering used to re-scan the whole file
+// once PER DISTINCT SPECIES to place records - this locks in that the
+// single-pass replacement produces byte-identical ordering (species order,
+// then catch order within a species, including a repeated species) across
+// PokedexNumber and Alphabetical, with correct pagination.
+void pcOrderingIsUnchangedAcrossManyDistinctSpeciesIncludingARepeat() {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
+  // record id -> species: 1 Pikachu(25, party), 2 Gengar(94), 3 Bulbasaur(1),
+  // 4 Charmander(4), 5 Squirtle(7), 6 Abra(63), 7 Charmander(4) again.
+  const pokemon::PokemonRecord pikachu = caughtOfSpecies(1, 25);
+  const pokemon::PokemonRecord gengar = caughtOfSpecies(2, 94);
+  const pokemon::PokemonRecord bulbasaur = caughtOfSpecies(3, 1);
+  const pokemon::PokemonRecord charmander1 = caughtOfSpecies(4, 4);
+  const pokemon::PokemonRecord squirtle = caughtOfSpecies(5, 7);
+  const pokemon::PokemonRecord abra = caughtOfSpecies(6, 63);
+  const pokemon::PokemonRecord charmander2 = caughtOfSpecies(7, 4);
+  const std::array<pokemon::PokemonRecord, 7> all{pikachu, gengar, bulbasaur, charmander1, squirtle, abra, charmander2};
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = pikachu.recordId;
+  for (const pokemon::PokemonRecord& record : all) {
+    CHECK(pokemon::markSpecies(state.seenSpecies, record.speciesId));
+    CHECK(pokemon::markSpecies(state.caughtSpecies, record.speciesId));
+    CHECK(store.commit(state, {record.recordId, record, pokemon::RecordMutationKind::Append}));
+  }
+
+  // PokedexNumber: species ascending by id (Bulbasaur 1, Charmander 4,
+  // Squirtle 7, Abra 63, Gengar 94, catch order within Charmander.
+  std::array<pokemon::PokemonRecord, 6> full{};
+  size_t count = 0;
+  CHECK(store.readPcPage(pokemon::PcOrder::PokedexNumber, 0, full, count));
+  CHECK(count == 6);
+  const std::array<pokemon::PokemonRecord, 6> expectedPokedex{bulbasaur, charmander1, charmander2, squirtle, abra, gengar};
+  CHECK(full == expectedPokedex);
+  std::array<pokemon::PokemonRecord, 2> page{};
+  CHECK(store.readPcPage(pokemon::PcOrder::PokedexNumber, 2, page, count));
+  CHECK(count == 2);
+  CHECK(page[0] == charmander2);
+  CHECK(page[1] == squirtle);
+
+  // Alphabetical: Abra, Bulbasaur, Charmander(x2, catch order), Gengar,
+  // Squirtle.
+  CHECK(store.readPcPage(pokemon::PcOrder::Alphabetical, 0, full, count));
+  CHECK(count == 6);
+  const std::array<pokemon::PokemonRecord, 6> expectedAlpha{abra, bulbasaur, charmander1, charmander2, gengar, squirtle};
+  CHECK(full == expectedAlpha);
+  CHECK(store.readPcPage(pokemon::PcOrder::Alphabetical, 2, page, count));
+  CHECK(count == 2);
+  CHECK(page[0] == charmander1);
+  CHECK(page[1] == charmander2);
+
+  // CatchDate stays plain catch order, unaffected by this fix.
+  CHECK(store.readPcPage(pokemon::PcOrder::CatchDate, 0, full, count));
+  CHECK(count == 6);
+  const std::array<pokemon::PokemonRecord, 6> expectedCatchDate{gengar, bulbasaur, charmander1, squirtle, abra, charmander2};
+  CHECK(full == expectedCatchDate);
 }
 
 void resetCommitsANewerEmptySnapshot() {
@@ -786,6 +926,9 @@ int main() {
   pcPagesExcludeThePartyAndSupportAllThreeOrders();
   largeSaveSurvivesBatchedIoAcrossMultipleBufferChunks();
   pcReadFailureIsDistinctFromAValidEmptyPage();
+  readRecordsMatchesPerIdReadRecordLookups();
+  readRecordFindsEveryPositionWithTheSmallerSingleRecordChunk();
+  pcOrderingIsUnchangedAcrossManyDistinctSpeciesIncludingARepeat();
   resetCommitsANewerEmptySnapshot();
   everyInterruptedResetByteLeavesThePreviousSnapshotBootable();
   everyInterruptedWriteByteLeavesThePreviousSnapshotBootable();

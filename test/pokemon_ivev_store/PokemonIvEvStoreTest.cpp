@@ -144,6 +144,29 @@ void aWriteFailureLeavesTheActiveFileAndInMemoryStateUnchanged() {
   CHECK(!Storage.exists(STORE_PATH_B));
 }
 
+// Round 4 audit items 3.4/3.5: the write path now uses a smaller,
+// write-cap-sized buffer and verifies by comparing raw bytes read back from
+// disk instead of decoding a second IvEvStoreState - this locks in that
+// write-verify still genuinely catches a bad write rather than silently
+// accepting it, exactly the fault-detection this class exists to provide.
+void aCorruptedWriteIsDetectedAndDoesNotBecomeActive() {
+  Storage.clear();
+  pokemon::PokemonIvEvStore store;
+  // Flip one byte inside the very first write's entry data (offset 11, just
+  // past the fixed 11-byte header) as it lands on "disk" - simulating a
+  // storage medium that silently didn't take the write correctly. The
+  // write-verify read-back must still catch this.
+  Storage.setCorruptNextWrite(STORE_PATH_A, 11);
+  CHECK(!store.upsertEntry(makeEntry(7, 20)));
+  CHECK(store.findEntry(7) == nullptr);  // in-memory state never adopted the bad write
+
+  // A fresh reader must not see a persisted-but-corrupted entry either - the
+  // corruption breaks the CRC covering the payload, so the slot decodes as
+  // invalid on its own too.
+  pokemon::PokemonIvEvStore reader;
+  CHECK(reader.findEntry(7) == nullptr);
+}
+
 void resetClearsBothTheStoreAndAFreshReader() {
   Storage.clear();
   pokemon::PokemonIvEvStore store;
@@ -166,6 +189,7 @@ int main() {
   bothFilesCorruptStillLeavesAnEmptyStoreNeverAnError();
   invalidUpsertLeavesThePreviouslyWrittenFilesUntouched();
   aWriteFailureLeavesTheActiveFileAndInMemoryStateUnchanged();
+  aCorruptedWriteIsDetectedAndDoesNotBecomeActive();
   resetClearsBothTheStoreAndAFreshReader();
   return failures == 0 ? 0 : 1;
 }
