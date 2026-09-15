@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-15
+
+### Added
+
+- The Pokémon menu now shows a "Coming Up" section under the button grid, with a progress bar for each of the 5 reading-reward tracks (Wild Encounter, Balls, Medicine, TM/HM, Evolution items) showing how close you are to a guaranteed drop.
+
 ## [0.21.2] - 2026-09-15
 
 ### Fixed
