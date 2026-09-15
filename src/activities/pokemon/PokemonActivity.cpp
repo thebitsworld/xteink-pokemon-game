@@ -532,11 +532,32 @@ bool PokemonActivity::refreshSnapshot() {
   // comment in the header) from ever going stale across a mutation. Without
   // this, e.g. toggling Evolution prompts off then back on while staying on
   // Screen::Actions read the pre-toggle cached flags both times, so the
-  // second toggle silently no-opped instead of turning prompts back on -
-  // ignoring the read failure here on purpose: if it fails, the cache just
-  // keeps its previous (already slightly stale, no worse than before this
-  // fix existed) contents rather than failing the whole refresh over it.
-  if (focusedRecordId_ != 0) service_.readRecord(focusedRecordId_, focusedRecord_);
+  // second toggle silently no-opped instead of turning prompts back on.
+  //
+  // service_.loadSnapshot(snapshot_) just above already read every party
+  // member's full record into snapshot_.party[] - the focused Pokemon is a
+  // party member in the dominant case (Moveset/TM-teach/PP-Up/Evolution-
+  // toggle/Rename are all reached via Party -> select -> Actions), so check
+  // there first (a handful of in-memory struct comparisons, no I/O) before
+  // falling back to a real SD read for a Box-focused Pokemon. This is round
+  // 4 audit item 3.8 - without it, this fix for bug 2.2 added one redundant
+  // full linear SD scan to ~30 mutation call sites across this file, each of
+  // which already just paid for loadSnapshot()'s own scan a few lines above.
+  // Ignoring the SD-fallback failure here is on purpose (unchanged from
+  // before this comment): if it fails, the cache just keeps its previous
+  // (already slightly stale, no worse than before this fix existed)
+  // contents rather than failing the whole refresh over it.
+  if (focusedRecordId_ != 0) {
+    bool foundInParty = false;
+    for (uint8_t slot = 0; slot < snapshot_.partyCount; ++slot) {
+      if (snapshot_.party[slot].recordId == focusedRecordId_) {
+        focusedRecord_ = snapshot_.party[slot];
+        foundInParty = true;
+        break;
+      }
+    }
+    if (!foundInParty) service_.readRecord(focusedRecordId_, focusedRecord_);
+  }
   return true;
 }
 
@@ -3062,8 +3083,12 @@ void PokemonActivity::renderFocused() {
     return;
   }
   if (screen_ == Screen::Summary) {
-    pokemon::PokemonRecord record{};
-    if (service_.readRecord(focusedRecordId_, record) != pokemon::ServiceStatus::Ok) {
+    // focusedRecord_ is kept fresh by refreshSnapshot() after every mutation
+    // (see its own doc comment, round 3 audit bug 2.2) - re-reading it from
+    // SD again here on every single frame redraw was pure waste once that
+    // fix landed (round 4 audit item 3.7).
+    const pokemon::PokemonRecord& record = focusedRecord_;
+    if (record.recordId == 0) {
       LOG_ERR("PokemonActivity", "Failed to load summary record %lu", static_cast<unsigned long>(focusedRecordId_));
       centered(renderer, UI_12_FONT_ID, contentTop + 100, tr(STR_POKEMON_LOAD_ERROR), EpdFontFamily::BOLD);
       return;

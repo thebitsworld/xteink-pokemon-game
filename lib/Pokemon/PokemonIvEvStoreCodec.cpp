@@ -126,10 +126,12 @@ bool validateIvEvStoreState(const IvEvStoreState& state) {
   return true;
 }
 
-bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, IvEvStoreFileBytes& output,
-                         size_t& outputSize) {
-  if (sequence == 0 || !validateIvEvStoreState(state)) return false;
+bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, uint8_t* output,
+                         const size_t outputCapacity, size_t& outputSize) {
+  if (sequence == 0 || output == nullptr || !validateIvEvStoreState(state)) return false;
   const size_t count = ivEvEntryCount(state);
+  const size_t required = POKEMON_IVEV_HEADER_BYTES + count * POKEMON_IVEV_ENTRY_BYTES + POKEMON_IVEV_FILE_CRC_BYTES;
+  if (outputCapacity < required) return false;
   // Writes directly into the caller-provided `output` rather than building
   // a second, same-sized local first: an earlier fix already had this
   // function heap-allocate its own candidate buffer to get it off the
@@ -152,19 +154,19 @@ bool encodeIvEvStoreFile(const IvEvStoreState& state, const uint32_t sequence, I
   output[2] = 'I';
   output[3] = 'V';
   output[4] = POKEMON_IVEV_STORE_VERSION;
-  write16(output.data(), 5, static_cast<uint16_t>(count));
-  write32(output.data(), 7, sequence);
+  write16(output, 5, static_cast<uint16_t>(count));
+  write32(output, 7, sequence);
 
-  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, output.data(), POKEMON_IVEV_HEADER_BYTES);
+  uint32_t crc = updateIvEvStoreCrc32(IVEV_STORE_CRC32_INITIAL, output, POKEMON_IVEV_HEADER_BYTES);
   size_t offset = POKEMON_IVEV_HEADER_BYTES;
   for (size_t index = 0; index < count; ++index) {
     IvEvEntryBytes entryBytes{};
     if (!encodeIvEvEntry(state.entries[index], entryBytes)) return false;
-    std::memcpy(output.data() + offset, entryBytes.data(), entryBytes.size());
+    std::memcpy(output + offset, entryBytes.data(), entryBytes.size());
     crc = updateIvEvStoreCrc32(crc, entryBytes.data(), entryBytes.size());
     offset += POKEMON_IVEV_ENTRY_BYTES;
   }
-  write32(output.data(), offset, finishIvEvStoreCrc32(crc));
+  write32(output, offset, finishIvEvStoreCrc32(crc));
   outputSize = offset + POKEMON_IVEV_FILE_CRC_BYTES;
   return true;
 }

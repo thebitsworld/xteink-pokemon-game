@@ -7,6 +7,7 @@
 #include <PokemonSpecies.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <memory>
 
@@ -55,7 +56,17 @@ class BatchedRecordReader {
  public:
   static constexpr size_t BUFFER_RECORD_CAPACITY = 42;  // 42 * 48 B = 2016 B, close to a clean 2 KB
 
-  BatchedRecordReader(FsFile& file, const uint32_t totalRecords) : file_(file), remaining_(totalRecords) {}
+  // chunkRecordCapacity defaults to BUFFER_RECORD_CAPACITY for every multi-
+  // record scan (readRecords(), readPcPage(), inspectSnapshot(),
+  // writeSnapshot()'s copy-forward loop) - those genuinely benefit from a
+  // large buffered read. readRecord()'s own single-id lookup passes 1
+  // instead (round 4 audit item 3.6): it only ever needs the one record
+  // it's about to decode next, so heap-allocating a ~2 KB chunk for it on
+  // every call was pure waste with no benefit - a single-record lookup
+  // reads (and re-reads, on average half the file) one record at a time
+  // either way.
+  BatchedRecordReader(FsFile& file, const uint32_t totalRecords, const size_t chunkRecordCapacity = BUFFER_RECORD_CAPACITY)
+      : file_(file), remaining_(totalRecords), chunkRecordCapacity_(std::max<size_t>(1, chunkRecordCapacity)) {}
 
   // Decodes the next record's raw bytes into `out`. Returns false on any
   // short read/allocation failure - the caller should treat that exactly
@@ -73,10 +84,10 @@ class BatchedRecordReader {
  private:
   bool refill(const size_t recordBytes) {
     if (buffer_ == nullptr) {
-      buffer_.reset(new (std::nothrow) uint8_t[BUFFER_RECORD_CAPACITY * recordBytes]);
+      buffer_.reset(new (std::nothrow) uint8_t[chunkRecordCapacity_ * recordBytes]);
       if (buffer_ == nullptr) return false;
     }
-    const size_t chunkRecords = std::min<size_t>(BUFFER_RECORD_CAPACITY, remaining_);
+    const size_t chunkRecords = std::min<size_t>(chunkRecordCapacity_, remaining_);
     const size_t wantBytes = chunkRecords * recordBytes;
     const int got = file_.read(buffer_.get(), wantBytes);
     if (got != static_cast<int>(wantBytes)) return false;
@@ -87,6 +98,7 @@ class BatchedRecordReader {
 
   FsFile& file_;
   uint32_t remaining_;
+  size_t chunkRecordCapacity_;
   std::unique_ptr<uint8_t[]> buffer_;
   size_t bufferPos_ = 0;
   size_t bufferValidRecords_ = 0;
@@ -484,7 +496,10 @@ bool PokemonStore::readRecord(const uint32_t recordId, PokemonRecord& output) co
     file.close();
     return false;
   }
-  BatchedRecordReader reader(file, activeHeader_.recordCount);
+  // Single-record chunk (see BatchedRecordReader's own doc comment, round 4
+  // audit item 3.6) - this lookup only ever needs the one record it's about
+  // to decode next, never a whole multi-KB chunk ahead of it.
+  BatchedRecordReader reader(file, activeHeader_.recordCount, 1);
   for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
     RecordBytes bytes{};
     PokemonRecord candidate{};
@@ -502,6 +517,35 @@ bool PokemonStore::readRecord(const uint32_t recordId, PokemonRecord& output) co
   }
   file.close();
   return false;
+}
+
+bool PokemonStore::readRecords(const std::span<const uint32_t> recordIds, const std::span<PokemonRecord> output) const {
+  if (recordIds.size() != output.size()) return false;
+  for (PokemonRecord& record : output) record = PokemonRecord{};
+  if (recordIds.empty()) return true;
+  if (!ready_) return false;
+  const char* path = activeIsA_ ? STORE_PATH_A : STORE_PATH_B;
+  FsFile file = Storage.open(path, O_RDONLY);
+  if (!file || !file.seek(recordsOffset(activeHeader_))) {
+    LOG_ERR("PokemonStore", "Failed to open active records");
+    file.close();
+    return false;
+  }
+  BatchedRecordReader reader(file, activeHeader_.recordCount);
+  for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
+    RecordBytes bytes{};
+    PokemonRecord candidate{};
+    if (!reader.next(bytes) || !decodeRecord(bytes, candidate)) {
+      LOG_ERR("PokemonStore", "Failed to decode active record");
+      file.close();
+      return false;
+    }
+    for (size_t i = 0; i < recordIds.size(); ++i) {
+      if (recordIds[i] != 0 && recordIds[i] == candidate.recordId) output[i] = candidate;
+    }
+  }
+  file.close();
+  return true;
 }
 
 bool PokemonStore::loadOwnedEvolutionNeeds(OwnedEvolutionNeeds& output) const {
@@ -577,7 +621,15 @@ bool PokemonStore::readPcPage(const PcOrder order, size_t offset, const std::spa
     return true;
   }
 
+  // One pass builds the species-presence bitset (as before) AND a per-
+  // species record count. Round 4 audit item 3.3: this used to be followed
+  // by one full extra re-scan of the file PER DISTINCT SPECIES present
+  // (appendSpecies(), below) to actually place records in order -
+  // O(species_count x N). The per-species counts gathered here let a single
+  // second pass (further down) place every record directly at its final
+  // position instead, O(N) regardless of how many species are present.
   PokedexBits pcSpecies{};
+  std::array<uint32_t, KANTO_SPECIES_COUNT + 1> perSpeciesCount{};
   {
     BatchedRecordReader speciesScanReader(file, activeHeader_.recordCount);
     for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
@@ -589,38 +641,24 @@ bool PokemonStore::readPcPage(const PcOrder order, size_t offset, const std::spa
         file.close();
         return false;
       }
+      if (!recordIsInParty(state, record.recordId)) ++perSpeciesCount[record.speciesId];
     }
   }
 
-  const auto appendSpecies = [&](const uint16_t speciesId) {
-    if (!file.seek(activeRecordsOffset)) return false;
-    BatchedRecordReader reader(file, activeHeader_.recordCount);
-    for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
-      RecordBytes bytes{};
-      PokemonRecord record{};
-      if (!reader.next(bytes) || !decodeRecord(bytes, record)) return false;
-      if (record.speciesId != speciesId || recordIsInParty(state, record.recordId)) continue;
-      if (offset != 0) {
-        --offset;
-        continue;
-      }
-      output[written++] = record;
-      if (written == output.size()) return true;
-    }
-    return true;
-  };
-
+  // Build the ordered species list for the requested sort - O(S) for
+  // PokedexNumber, an O(S^2) selection for Alphabetical (S <=
+  // KANTO_SPECIES_COUNT == 151, independent of N - the exact same cost this
+  // already had before this fix, just no longer paired with a per-species
+  // file re-scan).
+  std::array<uint16_t, KANTO_SPECIES_COUNT> orderedSpecies{};
+  size_t orderedCount = 0;
   if (order == PcOrder::PokedexNumber) {
-    for (uint16_t speciesId = 1; speciesId <= KANTO_SPECIES_COUNT && written < output.size(); ++speciesId) {
-      if (isSpeciesMarked(pcSpecies, speciesId) && !appendSpecies(speciesId)) {
-        LOG_ERR("PokemonStore", "Failed to order PC by Pokedex number");
-        file.close();
-        return false;
-      }
+    for (uint16_t speciesId = 1; speciesId <= KANTO_SPECIES_COUNT; ++speciesId) {
+      if (isSpeciesMarked(pcSpecies, speciesId)) orderedSpecies[orderedCount++] = speciesId;
     }
   } else {
     uint16_t previousSpeciesId = 0;
-    while (written < output.size()) {
+    while (orderedCount < KANTO_SPECIES_COUNT) {
       uint16_t nextSpeciesId = 0;
       for (uint16_t speciesId = 1; speciesId <= KANTO_SPECIES_COUNT; ++speciesId) {
         if (!isSpeciesMarked(pcSpecies, speciesId)) continue;
@@ -629,18 +667,51 @@ bool PokemonStore::readPcPage(const PcOrder order, size_t offset, const std::spa
         if (nextSpeciesId == 0 || std::strcmp(name, speciesData(nextSpeciesId)->name) < 0) nextSpeciesId = speciesId;
       }
       if (nextSpeciesId == 0) break;
-      if (!appendSpecies(nextSpeciesId)) {
-        LOG_ERR("PokemonStore", "Failed to order PC alphabetically");
-        file.close();
-        return false;
-      }
+      orderedSpecies[orderedCount++] = nextSpeciesId;
       previousSpeciesId = nextSpeciesId;
     }
+  }
+
+  // Cumulative starting index for each species in the final ordered
+  // sequence (species order, then within a species by original file/catch
+  // order) - lets the placement pass below compute each qualifying record's
+  // final position directly.
+  std::array<uint32_t, KANTO_SPECIES_COUNT + 1> speciesStartIndex{};
+  uint32_t totalQualifying = 0;
+  for (size_t rank = 0; rank < orderedCount; ++rank) {
+    const uint16_t speciesId = orderedSpecies[rank];
+    speciesStartIndex[speciesId] = totalQualifying;
+    totalQualifying += perSpeciesCount[speciesId];
+  }
+
+  if (!file.seek(activeRecordsOffset)) {
+    LOG_ERR("PokemonStore", "Failed to rewind PC records");
+    file.close();
+    return false;
+  }
+  std::array<uint32_t, KANTO_SPECIES_COUNT + 1> perSpeciesSeen{};
+  BatchedRecordReader placementReader(file, activeHeader_.recordCount);
+  for (uint32_t index = 0; index < activeHeader_.recordCount; ++index) {
+    RecordBytes bytes{};
+    PokemonRecord record{};
+    if (!placementReader.next(bytes) || !decodeRecord(bytes, record)) {
+      LOG_ERR("PokemonStore", "%s", order == PcOrder::PokedexNumber ? "Failed to order PC by Pokedex number"
+                                                                    : "Failed to order PC alphabetically");
+      file.close();
+      return false;
+    }
+    if (recordIsInParty(state, record.recordId)) continue;
+    const uint32_t globalIndex = speciesStartIndex[record.speciesId] + perSpeciesSeen[record.speciesId]++;
+    if (globalIndex < offset) continue;
+    const size_t localIndex = static_cast<size_t>(globalIndex - offset);
+    if (localIndex >= output.size()) continue;
+    output[localIndex] = record;
   }
   if (!file.close()) {
     LOG_ERR("PokemonStore", "Failed to close ordered PC page");
     return false;
   }
+  written = totalQualifying > offset ? std::min<size_t>(output.size(), totalQualifying - offset) : 0;
   count = written;
   return true;
 }

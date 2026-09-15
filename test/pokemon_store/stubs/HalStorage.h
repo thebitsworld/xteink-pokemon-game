@@ -86,6 +86,8 @@ class HalStorage {
     failRemove_ = false;
     failRename_ = false;
     failRead_ = false;
+    corruptNextWritePath_.clear();
+    corruptNextWriteOffset_ = 0;
   }
 
   void setWriteLimit(const size_t limit) {
@@ -104,6 +106,16 @@ class HalStorage {
   void setByte(const char* path, const size_t offset, const uint8_t value) {
     auto found = files_.find(path);
     if (found != files_.end() && offset < found->second.size()) found->second[offset] = value;
+  }
+  // Arms a one-shot corruption: the NEXT write() to `path` that actually
+  // covers `offset` flips that byte in the underlying buffer right as it's
+  // written (simulating real storage-medium bit rot during/just after a
+  // write), then disarms itself. Lets a test exercise a store's write-verify
+  // step (a read-back that must still catch a bad write) without needing a
+  // hook into the middle of that write function itself.
+  void setCorruptNextWrite(const char* path, const size_t offset) {
+    corruptNextWritePath_ = path;
+    corruptNextWriteOffset_ = offset;
   }
 
   bool ensureDirectoryExists(const char*) { return true; }
@@ -157,6 +169,19 @@ class HalStorage {
   bool failRemove_ = false;
   bool failRename_ = false;
   bool failRead_ = false;
+  std::string corruptNextWritePath_{};
+  size_t corruptNextWriteOffset_ = 0;
+
+ public:
+  // Called by HalFile::write() below - not part of the test-facing API.
+  void maybeCorruptWrite(const std::string& path, std::vector<uint8_t>& bytes, const size_t writeStart,
+                         const size_t writeLen) {
+    if (corruptNextWritePath_.empty() || corruptNextWritePath_ != path) return;
+    if (corruptNextWriteOffset_ < writeStart || corruptNextWriteOffset_ >= writeStart + writeLen) return;
+    if (corruptNextWriteOffset_ >= bytes.size()) return;
+    bytes[corruptNextWriteOffset_] ^= 0xFFU;
+    corruptNextWritePath_.clear();
+  }
 };
 
 #define Storage HalStorage::getInstance()
@@ -183,6 +208,7 @@ inline size_t HalFile::write(const void* input, const size_t count) {
   const size_t allowed = owner_->writableBytes(count);
   if (position_ + allowed > bytes_->size()) bytes_->resize(position_ + allowed);
   if (allowed != 0) std::memcpy(bytes_->data() + position_, input, allowed);
+  if (allowed != 0) owner_->maybeCorruptWrite(path_, *bytes_, position_, allowed);
   position_ += allowed;
   return allowed;
 }
