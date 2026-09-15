@@ -7,25 +7,27 @@ xuất) nằm trong các file audit:
 - [docs/development/pokemon-gen1-audit-round4.md](docs/development/pokemon-gen1-audit-round4.md) (nội dung của nó đã được xử lý xong)
 - [docs/development/pokemon-gen1-audit-round5.md](docs/development/pokemon-gen1-audit-round5.md) (re-verify round 4, tìm bug mới 3.1 — đã fix `v0.21.1`)
 - [docs/development/pokemon-gen1-audit-round6.md](docs/development/pokemon-gen1-audit-round6.md) (7 bug mới — 5 đã fix `v0.21.2`, xem mục "Round 6" bên dưới)
-- [docs/development/pokemon-gen1-audit-round7.md](docs/development/pokemon-gen1-audit-round7.md) (bug lớn 1.1 đã fix `v0.21.2`; 2 đề xuất tính năng pity-counter/lifetime-summary — CHƯA làm theo yêu cầu user, không tự đề xuất lại)
+- [docs/development/pokemon-gen1-audit-round7.md](docs/development/pokemon-gen1-audit-round7.md) (bug lớn 1.1 đã fix `v0.21.2`; tính năng pity-counter đã làm `v0.22.0`; lifetime-summary vẫn chưa làm)
 
 File này chỉ là **danh sách rút gọn** để chọn việc tiếp theo. Xoá/cập nhật dòng
 nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
-## Round 7 (2026-09-15, tại `v0.21.1`) — bug 1.1 ĐÃ FIX, tính năng pity-counter CHƯA làm (theo yêu cầu user)
+## Round 7 (2026-09-15) — bug 1.1 ĐÃ FIX (`v0.21.2`), tính năng pity-counter ĐÃ LÀM (`v0.22.0`)
 
 - [x] **1.1 — ĐÃ FIX (`v0.21.2`)**: `useEvolutionItem()` (`lib/Pokemon/PokemonGame.cpp`)
   bị chặn bởi BẤT KỲ pending event nào, không chỉ event liên quan đến chính
   Pokémon đang evolve. Fix: scope lại đúng theo `record.recordId`, giống
   `resolveEvolution()`.
-- [ ] *(KHÔNG làm theo yêu cầu user — chỉ note lại)* 2.1 — Hiển thị 5 bộ đếm
-  pity (encounterMisses/itemMisses/ballMisses/medicineMisses/machineMisses) +
-  lifetimeMinutes + tier tiến độ sách, hiện có sẵn trong engine nhưng chưa
-  hiện ở UI đâu cả.
-- [ ] *(KHÔNG làm theo yêu cầu user)* 2.2 — Màn hình tổng kết thành tích
-  (lifetime minutes, % Pokédex, số huy hiệu...).
+- [x] **2.1 — ĐÃ LÀM (`v0.22.0`)**: Thêm khối "Coming Up" dưới grid ở
+  `Screen::Menu`, hiển thị 5 thanh progress bar pity-counter (Encounter/
+  Balls/Medicine/TM-HM/Evolution) — căn giữa màn hình, cách nhau 1 dòng
+  trắng, tự bỏ qua nếu không đủ chỗ. Không làm phần lifetimeMinutes/tier
+  tiến độ sách (thấy dòng đó gây khó hiểu khi thảo luận, đã bỏ khỏi thiết
+  kế cuối).
+- [ ] *(chưa làm)* 2.2 — Màn hình tổng kết thành tích (lifetime minutes, %
+  Pokédex, số huy hiệu...).
 
 ## Round 6 (2026-09-15, tại `v0.21.1`) — 5/7 bug ĐÃ FIX (`v0.21.2`), 2 mục giữ nguyên theo quyết định user
 
