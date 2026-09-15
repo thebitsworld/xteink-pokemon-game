@@ -51,6 +51,17 @@ constexpr uint8_t BIDE_MOVE_ID = 117;
 // BattleCombatant::mimicActive's doc comment).
 constexpr uint8_t MIMIC_MOVE_ID = 102;
 
+// True if moveId is one of the 4 real Gen 1 partial-trapping moves (Wrap/
+// Bind/Fire Spin/Clamp) - exposed publicly (unlike most hand-authored move-id
+// checks in PokemonBattle.cpp) so PokemonActivity.cpp can tell, whenever a
+// combatant leaves the field mid-battle (faints, or is voluntarily switched
+// out), whether it was the one holding the OTHER side in a trap and so must
+// release BattleCombatant::trappedTurnsRemaining on that other side - see
+// docs/development/pokemon-gen1-audit-round6.md item 2.4. The engine's own
+// faintCombatant() already does this internally for the faint case; this is
+// for the voluntary-switch case, which PokemonActivity.cpp handles itself.
+bool isPartialTrapMove(uint8_t moveId);
+
 struct BattleMoveSlot {
   uint8_t moveId = 0;  // 0 = empty slot
   uint8_t currentPp = 0;
@@ -145,6 +156,20 @@ struct BattleCombatant {
   // battle - see rollCriticalHit()'s call site in resolveAction().
   bool guardSpecActive = false;
   bool direHitActive = false;
+  // Mist (the move version of Guard Spec.) - deliberately a SEPARATE field
+  // from guardSpecActive even though both do the identical thing (block the
+  // user's own stats from being lowered), because Mist and Guard Spec. now
+  // differ in one important way: Guard Spec./Dire Hit really are per-Pokemon
+  // effects in Gen 1 and correctly end on a switch (kept on guardSpecActive/
+  // direHitActive above), while Reflect/Light Screen/Mist protect the whole
+  // SIDE and must persist through a switch, only ending on their own timer or
+  // when the side is defeated - see reflectActive/lightScreenActive below and
+  // docs/development/pokemon-gen1-audit-round6.md item 2.5. PokemonActivity's
+  // setupBattlePlayer()/setupBattleOpponent() carry this field (along with
+  // reflectActive/lightScreenActive) across a switch that continues the same
+  // battle, instead of letting BattleCombatant's usual full switch-reset
+  // clear it.
+  bool mistActive = false;
   // True if this combatant was just hit by a move with a flinch effect
   // (Stomp, Bite, ...) and hasn't acted since - reset to false at the start
   // of every stepBattle()/stepOpponentOnlyTurn() call, same as
@@ -179,7 +204,14 @@ struct BattleCombatant {
   // Reflect/Light Screen (moves) - halve incoming Physical/Special damage
   // respectively for the rest of the battle (simplified from the real 5-turn
   // timer, same rationale as guardSpecActive). A critical hit still bypasses
-  // both, matching the real games.
+  // both, matching the real games. Real Gen 1 protects the whole SIDE with
+  // these, persisting through a switch - unlike every other field on this
+  // struct, which resets whenever a fresh BattleCombatant is built, these two
+  // (and mistActive above) are deliberately carried forward by
+  // PokemonActivity's setupBattlePlayer()/setupBattleOpponent() when the
+  // switch continues the same ongoing battle (see their preserveSideEffects
+  // parameter and docs/development/pokemon-gen1-audit-round6.md item 2.5).
+  // Still reset to false by a genuinely fresh battle, and by Haze.
   bool reflectActive = false;
   bool lightScreenActive = false;
   // Disable: prevents choosing the move at this slot for a few turns.

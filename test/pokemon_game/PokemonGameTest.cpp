@@ -1290,6 +1290,49 @@ void everyItemEvolutionConsumesExactlyOneItem() {
   }
 }
 
+void useEvolutionItemIgnoresAnUnrelatedPendingEventForADifferentRecord() {
+  // Round 7 audit bug 1.1: useEvolutionItem() previously rejected whenever
+  // ANY pending event existed at all, even one that has nothing to do with
+  // the record being evolved - unlike resolveEvolution() (see
+  // rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate() below), which
+  // correctly scopes its own analogous check to
+  // front->recordId == record.recordId. A pending event queued for some
+  // OTHER party member must not block using an evolution stone on this one.
+  pokemon::PokemonRecord record = leaderAtLevelFive();  // recordId 7, species 25
+  record.gender = validGenderForSpecies(record.speciesId);
+  pokemon::PokemonState state{};
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Evolution;
+  state.pendingEvents[0].recordId = 999;  // unrelated to record.recordId (7)
+  state.pendingEvents[0].speciesId = 2;
+  const size_t itemIndex = static_cast<size_t>(pokemon::EvolutionItem::ThunderStone) - 1U;
+  state.itemCounts[itemIndex] = 1;
+  pokemon::RecordMutation mutation{};
+
+  CHECK(pokemon::useEvolutionItem(state, record, pokemon::EvolutionItem::ThunderStone, mutation));
+  CHECK(record.speciesId == 26);
+  CHECK(state.itemCounts[itemIndex] == 0);
+}
+
+void useEvolutionItemIsStillBlockedByAPendingEventForTheSameRecord() {
+  // The scoped guard must still reject when the queued event DOES concern
+  // this exact record - an outstanding Evolution event for record 7 itself
+  // should still be resolved (via resolveEvolution()) before an item
+  // evolution can proceed on that same Pokemon.
+  pokemon::PokemonRecord record = leaderAtLevelFive();  // recordId 7, species 25
+  record.gender = validGenderForSpecies(record.speciesId);
+  pokemon::PokemonState state{};
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::Evolution;
+  state.pendingEvents[0].recordId = record.recordId;  // same record
+  state.pendingEvents[0].speciesId = 2;
+  const size_t itemIndex = static_cast<size_t>(pokemon::EvolutionItem::ThunderStone) - 1U;
+  state.itemCounts[itemIndex] = 1;
+  pokemon::RecordMutation mutation{};
+
+  CHECK(!pokemon::useEvolutionItem(state, record, pokemon::EvolutionItem::ThunderStone, mutation));
+  CHECK(record.speciesId == 25);
+  CHECK(state.itemCounts[itemIndex] == 1);
+}
+
 void rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate() {
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
@@ -1360,6 +1403,8 @@ int main() {
   rejectedPromptToggleDoesNotPartiallyMutate();
   everyLevelEvolutionQueuesAtItsThreshold();
   everyItemEvolutionConsumesExactlyOneItem();
+  useEvolutionItemIgnoresAnUnrelatedPendingEventForADifferentRecord();
+  useEvolutionItemIsStillBlockedByAPendingEventForTheSameRecord();
   rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate();
   return failures == 0 ? 0 : 1;
 }

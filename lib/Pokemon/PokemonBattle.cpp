@@ -10,6 +10,13 @@ namespace pokemon {
 namespace {
 
 constexpr uint8_t PARALYSIS_FAIL_CHANCE_PERCENT = 25;
+// Real Gen 1 confusion self-hit chance is 50% (lowered to 33% starting in
+// Generation III). Audit round 6 (docs/development/pokemon-gen1-audit-
+// round6.md, item 2.1) flagged this as a likely accidental cross-
+// contamination with SECONDARY_STAT_DROP_TABLE's own real Gen 1 ~33% value.
+// The user was told the real Gen 1 number is 50% and explicitly chose to
+// keep this milder, Gen 3+ value rather than fix it - this is a deliberate
+// divergence, not an oversight; do not "fix" it again in a future audit.
 constexpr uint8_t CONFUSION_SELF_HIT_CHANCE_PERCENT = 33;
 constexpr uint8_t FREEZE_THAW_CHANCE_PERCENT = 20;
 constexpr uint8_t STATUS_DAMAGE_FRACTION = 8;  // poison/burn: 1/8 max HP per turn, floor 1
@@ -355,6 +362,13 @@ uint16_t effectiveSpeed(const BattleCombatant& combatant) {
   if ((combatant.badgeBoostMask & BADGE_BOOST_SPEED) != 0) {
     speed = static_cast<uint16_t>(speed + speed / 8U);
   }
+  // Real Gen 1 (through Gen VI) reduces a paralyzed Pokemon's Speed to 1/4,
+  // not 1/2 - the milder 1/2 reduction is a Generation VII change. Audit
+  // round 6 (docs/development/pokemon-gen1-audit-round6.md, item 2.2)
+  // flagged this. The user was told the real Gen 1 fraction is 1/4 and
+  // explicitly chose to keep this milder 1/2 reduction rather than fix it -
+  // this is a deliberate divergence, not an oversight; do not "fix" it again
+  // in a future audit.
   if (combatant.status == Ailment::Paralysis) speed /= 2U;
   return speed;
 }
@@ -1037,6 +1051,20 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     effectivenessPercent = typeEffectivenessPercent(move->type, defenderTypes.primary, defenderTypes.secondary);
   }
 
+  // Snapshotted before any hit in this action can land - real Gen 1
+  // Substitute absorbs a hit AND blocks every secondary consequence of the
+  // hit that broke it (flinch, secondary stat-drop, and a damaging move's
+  // own status-infliction chance), since the decoy - not the real Pokemon -
+  // was the thing that got hit. Checking the POST-hit substituteHp instead
+  // would incorrectly let all three "leak through" on the exact hit that
+  // breaks the Substitute (docs/development/pokemon-gen1-audit-round6.md,
+  // item 2.3). Used below for the flinch/secondary-stat-drop checks (which
+  // used to take their own narrower-scoped copy of this) and for the
+  // primary-ailment-infliction check near the end of this function, which
+  // is out of scope of the trap-immobilization snapshot this engine already
+  // had right (see the multi-hit loop below).
+  const bool defenderHadSubstituteAtStart = defender.substituteHp > 0;
+
   if (move->category != MoveCategory::Status) {
     const BaseStats* attackerStats = baseStatsFor(attacker.speciesId);
 
@@ -1104,12 +1132,13 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       const uint8_t hitsToAttempt =
           multiHit == nullptr ? 1 : multiHit->fixedHits != 0 ? multiHit->fixedHits : rollMultiHitCount(random);
 
-      // Snapshotted before any hit lands - a trapping move's own damage can
-      // break the defender's Substitute in this same action, but the trap
-      // should still be judged against whatever was true when the hit
+      // Reuses defenderHadSubstituteAtStart (snapshotted at the top of this
+      // function) rather than its own copy - a trapping move's own damage
+      // can break the defender's Substitute in this same action, but the
+      // trap should still be judged against whatever was true when the hit
       // landed (see isTrapMove(moveId)'s dispatch below), not the
       // just-broken aftermath.
-      const bool defenderHadSubstitute = defender.substituteHp > 0;
+      const bool defenderHadSubstitute = defenderHadSubstituteAtStart;
       bool anyCritical = false;
       uint8_t hitsLanded = 0;
       uint32_t totalDamage = 0;
@@ -1183,18 +1212,19 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       // is still standing (a fainted target has nothing left to flinch).
       if (const FlinchTableEntry* flinch = flinchEntryForMove(moveId);
           flinch != nullptr && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0 &&
-          defender.substituteHp == 0 && rollPercentChance(random, flinch->chancePercent)) {
+          !defenderHadSubstitute && rollPercentChance(random, flinch->chancePercent)) {
         defender.flinched = true;
       }
 
       // Acid/Bubble Beam/Aurora Beam/Psychic/Constrict/Bubble: a chance to
       // lower one of the target's stats by 1 stage - same guards as the
-      // flinch roll just above, plus Guard Spec./Mist (guardSpecActive),
-      // which blocks an opponent's stat-lowering effect everywhere else in
-      // this engine and must not become the one exception here.
+      // flinch roll just above, plus Guard Spec./Mist (guardSpecActive/
+      // mistActive), which blocks an opponent's stat-lowering effect
+      // everywhere else in this engine and must not become the one
+      // exception here.
       if (const SecondaryStatDropEntry* statDrop = secondaryStatDropEntryForMove(moveId);
           statDrop != nullptr && effectivenessPercent != 0 && totalDamage > 0 && defender.currentHp > 0 &&
-          defender.substituteHp == 0 && !defender.guardSpecActive &&
+          !defenderHadSubstitute && !defender.guardSpecActive && !defender.mistActive &&
           rollPercentChance(random, statDrop->chancePercent)) {
         int8_t& stage = statStageRef(defender, statDrop->stat);
         if (stage > -6) {
@@ -1274,17 +1304,21 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     resetBattleStages(defender);
     // Real Gen 1 Haze also clears both sides' non-volatile status (and
     // Toxic's escalating counter) and confusion, plus Reflect/Light
-    // Screen/Mist/Focus Energy (the same guardSpecActive/direHitActive
-    // fields Guard Spec./Dire Hit set - Mist IS the move version of Guard
-    // Spec., Focus Energy IS the move version of Dire Hit, so clearing them
-    // here is correct for both) - see round 2/4 audit item 0.4/1.4 and
-    // BattleLogEvent::StatsReset's doc comment.
+    // Screen/Mist/Focus Energy (guardSpecActive/direHitActive are the same
+    // fields Guard Spec./Dire Hit set - Focus Energy IS the move version of
+    // Dire Hit, so clearing direHitActive here is correct for both; Mist has
+    // its own mistActive field, kept separate from guardSpecActive so a
+    // switch can carry Mist's side-wide effect forward without also
+    // reviving a stale Guard Spec. - see mistActive's doc comment) - see
+    // round 2/4 audit item 0.4/1.4 and BattleLogEvent::StatsReset's doc
+    // comment.
     const auto clearHazeState = [](BattleCombatant& combatant) {
       combatant.status = Ailment::None;
       combatant.statusTurns = 0;
       combatant.toxicCounter = 0;
       combatant.reflectActive = false;
       combatant.lightScreenActive = false;
+      combatant.mistActive = false;
       combatant.guardSpecActive = false;
       combatant.direHitActive = false;
     };
@@ -1300,14 +1334,16 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     result.event = BattleLogEvent::Teleported;
   } else if (const StatChangeEffect* statEffect = statChangeForMove(moveId); statEffect != nullptr) {
     BattleCombatant& target = statEffect->targetsSelf ? attacker : defender;
-    // Guard Spec. (a battle-boost item) blocks an opponent's stat-lowering
-    // move from affecting whoever activated it - the same "no change, no
-    // further effect" outcome as already being at the -6 floor, so this
-    // reuses StatChangeFailed rather than adding a dedicated message.
-    if (!statEffect->targetsSelf && statEffect->stages < 0 && (target.guardSpecActive || target.substituteHp > 0)) {
+    // Guard Spec. (a battle-boost item) or Mist (the move version, its own
+    // side-wide mistActive field) blocks an opponent's stat-lowering move
+    // from affecting whoever activated it - the same "no change, no further
+    // effect" outcome as already being at the -6 floor, so this reuses
+    // StatChangeFailed rather than adding a dedicated message.
+    if (!statEffect->targetsSelf && statEffect->stages < 0 &&
+        (target.guardSpecActive || target.mistActive || target.substituteHp > 0)) {
       // A Substitute blocks an opponent's stat-lowering move the same way
-      // Guard Spec. does - it's the decoy that would be affected, not the
-      // real Pokemon, so nothing happens.
+      // Guard Spec./Mist does - it's the decoy that would be affected, not
+      // the real Pokemon, so nothing happens.
       result.event = BattleLogEvent::StatChangeFailed;
     } else {
       int8_t& stage = statStageRef(target, statEffect->stat);
@@ -1326,12 +1362,14 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       result.event = BattleLogEvent::BuffApplied;
     }
   } else if (moveId == MIST_MOVE_ID || moveId == FOCUS_ENERGY_MOVE_ID) {
-    // Mist and Focus Energy reuse the exact same battle-boost-item fields as
-    // Guard Spec./Dire Hit (guardSpecActive/direHitActive) - both pairs do
-    // the identical thing (block the user's own stats from being lowered;
-    // raise the user's own crit ratio to the high-crit tier), just reached
-    // via a move instead of an item.
-    bool& active = moveId == MIST_MOVE_ID ? attacker.guardSpecActive : attacker.direHitActive;
+    // Focus Energy reuses the exact same battle-boost-item field as Dire Hit
+    // (direHitActive) - both raise the user's own crit ratio to the high-crit
+    // tier, just reached via a move instead of an item, and both really are
+    // per-Pokemon effects that correctly end on a switch. Mist gets its OWN
+    // field (mistActive) rather than reusing guardSpecActive the way it used
+    // to: Mist protects the whole SIDE and must survive a switch, unlike
+    // Guard Spec. itself - see mistActive's doc comment in PokemonBattle.h.
+    bool& active = moveId == MIST_MOVE_ID ? attacker.mistActive : attacker.direHitActive;
     if (active) {
       result.event = BattleLogEvent::MoveNoEffect;
     } else {
@@ -1547,7 +1585,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     // damage itself already produced its own event above, so this stays
     // silent rather than overwriting it.
     if (move->category == MoveCategory::Status) result.event = BattleLogEvent::MoveNoEffect;
-  } else if (defender.status == Ailment::None && defender.currentHp > 0 && defender.substituteHp == 0 &&
+  } else if (defender.status == Ailment::None && defender.currentHp > 0 && !defenderHadSubstituteAtStart &&
              move->ailment != Ailment::None && rollPercentChance(random, effectiveAilmentChance)) {
     defender.status = move->ailment;
     // Toxic (see TOXIC_MOVE_ID) starts its own escalating-damage counter at
@@ -1643,11 +1681,21 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
 // dedicated cure item to fix (previously a genuine divergence here - this
 // project's own `useConsumable()` comment had incorrectly claimed the real
 // games require a separate status cure after reviving).
-void faintCombatant(BattleCombatant& combatant, BattleLogEvent& event) {
+void faintCombatant(BattleCombatant& combatant, BattleCombatant& other, BattleLogEvent& event) {
   combatant.status = Ailment::None;
   combatant.statusTurns = 0;
   combatant.toxicCounter = 0;
   event = BattleLogEvent::Fainted;
+  // Real Gen 1: if the Pokemon that applied a partial-trapping move
+  // (Wrap/Bind/Fire Spin/Clamp - see BattleCombatant::trappedTurnsRemaining's
+  // doc comment) faints, the trapped target is released immediately rather
+  // than staying immobilized for however many turns were left against
+  // whatever comes in next (docs/development/pokemon-gen1-audit-round6.md,
+  // item 2.4). `combatant.forcedMoveId` being a trap move id means this
+  // fainting Pokemon was the one holding `other` in a trap.
+  if (combatant.forcedMoveId != 0 && isTrapMove(combatant.forcedMoveId)) {
+    other.trappedTurnsRemaining = 0;
+  }
 }
 
 void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnResult& result) {
@@ -1668,10 +1716,10 @@ void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnRe
   if (player.currentHp == 0 && opponent.currentHp == 0) {
     result.outcome = BattleOutcome::OpponentWon;  // simultaneous KO: wild Pokemon is still standing in spirit
   } else if (player.currentHp == 0) {
-    faintCombatant(player, result.player.event);
+    faintCombatant(player, opponent, result.player.event);
     result.outcome = BattleOutcome::OpponentWon;
   } else if (opponent.currentHp == 0) {
-    faintCombatant(opponent, result.opponent.event);
+    faintCombatant(opponent, player, result.opponent.event);
     result.outcome = BattleOutcome::PlayerWon;
   }
 }
@@ -1722,6 +1770,8 @@ const StatChangeEffect* statChangeForMove(const uint8_t moveId) {
   }
   return nullptr;
 }
+
+bool isPartialTrapMove(const uint8_t moveId) { return isTrapMove(moveId); }
 
 void resetBattleStages(BattleCombatant& combatant) {
   combatant.attackStage = 0;
@@ -1858,48 +1908,48 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
     // already at 0 HP (see docs/development/pokemon-gen1-audit-round3.md
     // bug 2.4 for the UI-side consequences of getting this wrong).
     if (player.currentHp == 0 && opponent.currentHp == 0) {
-      faintCombatant(player, result.player.event);
-      faintCombatant(opponent, result.opponent.event);
+      faintCombatant(player, opponent, result.player.event);
+      faintCombatant(opponent, player, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     if (opponent.currentHp == 0) {
-      faintCombatant(opponent, result.opponent.event);
+      faintCombatant(opponent, player, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     if (player.currentHp == 0) {
-      faintCombatant(player, result.player.event);
+      faintCombatant(player, opponent, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
     if (player.currentHp == 0) {
-      faintCombatant(player, result.player.event);
+      faintCombatant(player, opponent, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
   } else {
     result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
     if (player.currentHp == 0 && opponent.currentHp == 0) {
-      faintCombatant(player, result.player.event);
-      faintCombatant(opponent, result.opponent.event);
+      faintCombatant(player, opponent, result.player.event);
+      faintCombatant(opponent, player, result.opponent.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     if (player.currentHp == 0) {
-      faintCombatant(player, result.player.event);
+      faintCombatant(player, opponent, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
     }
     if (opponent.currentHp == 0) {
-      faintCombatant(opponent, result.opponent.event);
+      faintCombatant(opponent, player, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
     if (opponent.currentHp == 0) {
-      faintCombatant(opponent, result.opponent.event);
+      faintCombatant(opponent, player, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;
       return result;
     }
@@ -1929,7 +1979,7 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
 
   result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
   if (player.currentHp == 0) {
-    faintCombatant(player, result.player.event);
+    faintCombatant(player, opponent, result.player.event);
     result.outcome = BattleOutcome::OpponentWon;
     return result;
   }
@@ -1958,7 +2008,7 @@ BattleTurnResult stepPlayerOnlyTurn(BattleCombatant& player, BattleCombatant& op
 
   result.player = resolveAction(player, opponent, playerMoveSlot, random);
   if (opponent.currentHp == 0) {
-    faintCombatant(opponent, result.opponent.event);
+    faintCombatant(opponent, player, result.opponent.event);
     result.outcome = BattleOutcome::PlayerWon;
     return result;
   }

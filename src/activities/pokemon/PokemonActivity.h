@@ -93,7 +93,18 @@ class PokemonActivity final : public Activity {
   bool refreshSnapshot();
   void activate();
   void goBack();
-  void openNickname(uint32_t recordId, bool starter, Screen cancelScreen);
+  // `routeSuccessThroughPendingEvent`: true (the default) means a successful
+  // rename/starter-naming lands on Screen::Menu, or Screen::Event if a
+  // reading-time event happens to be queued right now - the behavior the
+  // post-catch/starter naming flow wants. false means it lands on
+  // `cancelScreen` instead, exactly like every sibling CollectionAction
+  // (Deposit/Withdraw/EvolutionPrompts) already returns the player to where
+  // they came from - what the Rename-an-already-owned-Pokemon flow
+  // (Screen::Actions) wants instead. Both the success AND the SD-write-
+  // failure branch use the same rule - see docs/development/pokemon-gen1-
+  // audit-round6.md item 2.6.
+  void openNickname(uint32_t recordId, bool starter, Screen cancelScreen,
+                    bool routeSuccessThroughPendingEvent = true);
   void finishStarter(const char* nickname);
   void showMessage(const char* message, Screen returnScreen);
   void buildUi(freeink::ui::FreeInkApp<24, 8>::ScreenType& screen);
@@ -102,9 +113,18 @@ class PokemonActivity final : public Activity {
   void renderFocused();
   void renderRowArt();
   void renderHeaderAndHints();
-  bool setupBattlePlayer(int slot);
+  // `preserveSideEffects`: true when this (re)builds a BattleCombatant for a
+  // Pokemon continuing the SAME already-in-progress battle (a voluntary/
+  // forced mid-battle switch, or the opponent's team advancing to its next
+  // member) - Reflect/Light Screen/Mist protect the whole SIDE in real Gen 1
+  // and must survive that kind of switch. Left false (the default) at every
+  // fresh-battle-start call site (enterBattle()/enterGymBattle()), where
+  // whatever is sitting in battlePlayer_/battleOpponent_ is stale leftover
+  // state from a previous, already-concluded battle and must NOT carry
+  // forward - see docs/development/pokemon-gen1-audit-round6.md item 2.5.
+  bool setupBattlePlayer(int slot, bool preserveSideEffects = false);
   void setupBattleOpponent(uint16_t speciesId, uint8_t level, std::span<const uint8_t> fixedMoves = {},
-                           pokemon::Gender gender = pokemon::Gender::Unknown);
+                           pokemon::Gender gender = pokemon::Gender::Unknown, bool preserveSideEffects = false);
   bool enterBattle(const pokemon::PendingEvent& pending);
   bool enterGymBattle(uint8_t gymIndex);
   void savePlayerBattleEntry();

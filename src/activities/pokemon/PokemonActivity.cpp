@@ -777,7 +777,8 @@ void PokemonActivity::finishStarter(const char* nickname) {
   setScreen(Screen::Menu);
 }
 
-void PokemonActivity::openNickname(const uint32_t recordId, const bool starter, const Screen cancelScreen) {
+void PokemonActivity::openNickname(const uint32_t recordId, const bool starter, const Screen cancelScreen,
+                                    const bool routeSuccessThroughPendingEvent) {
   auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_POKEMON_NICKNAME), "", 32,
                                                            InputType::Text);
   if (!keyboard) {
@@ -785,23 +786,27 @@ void PokemonActivity::openNickname(const uint32_t recordId, const bool starter, 
     showMessage(tr(STR_POKEMON_SAVE_ERROR), cancelScreen);
     return;
   }
-  startActivityForResult(std::move(keyboard), [this, recordId, starter, cancelScreen](const ActivityResult& result) {
-    if (result.isCancelled) {
-      setScreen(cancelScreen);
-      return;
-    }
-    const auto* keyboardResult = std::get_if<KeyboardResult>(&result.data);
-    if (keyboardResult == nullptr) return;
-    if (starter) {
-      finishStarter(keyboardResult->text.c_str());
-    } else if (service_.renamePokemon(recordId, keyboardResult->text) == pokemon::ServiceStatus::Ok) {
-      if (!refreshSnapshot()) return;
-      nicknamePrompt_ = {};
-      setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
-    } else {
-      showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
-    }
-  });
+  startActivityForResult(
+      std::move(keyboard),
+      [this, recordId, starter, cancelScreen, routeSuccessThroughPendingEvent](const ActivityResult& result) {
+        if (result.isCancelled) {
+          setScreen(cancelScreen);
+          return;
+        }
+        const auto* keyboardResult = std::get_if<KeyboardResult>(&result.data);
+        if (keyboardResult == nullptr) return;
+        if (starter) {
+          finishStarter(keyboardResult->text.c_str());
+        } else if (service_.renamePokemon(recordId, keyboardResult->text) == pokemon::ServiceStatus::Ok) {
+          if (!refreshSnapshot()) return;
+          nicknamePrompt_ = {};
+          setScreen(routeSuccessThroughPendingEvent
+                        ? (pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event)
+                        : cancelScreen);
+        } else {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), routeSuccessThroughPendingEvent ? Screen::Menu : cancelScreen);
+        }
+      });
 }
 
 int PokemonActivity::battlePlayerMoveCount() const {
@@ -912,7 +917,11 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
     if (worstCasePlayerEffectivenessAgainst(*playerSpecies, *candidateSpecies) <= 100U) {
       std::swap(gymTeamOrder_[gymChallengeTeamProgress_], gymTeamOrder_[candidate]);
       const pokemon::GymTeamMember& next = team[gymTeamOrder_[gymChallengeTeamProgress_]];
-      setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId));
+      // Same ongoing gym battle, opponent voluntarily switching - the
+      // trainer's own side-wide Reflect/Light Screen/Mist must survive this
+      // (see setupBattleOpponent()'s preserveSideEffects doc comment).
+      setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId),
+                          /*preserveSideEffects=*/true);
       snprintf(buffer, size, tr(STR_POKEMON_SENT_OUT), leaderName, speciesName(battleOpponent_.speciesId));
       return true;
     }
@@ -1018,14 +1027,41 @@ int PokemonActivity::usablePartySlotAt(const size_t index) const {
   return -1;
 }
 
-bool PokemonActivity::setupBattlePlayer(const int slot) {
+bool PokemonActivity::setupBattlePlayer(const int slot, const bool preserveSideEffects) {
   if (slot < 0 || slot >= snapshot_.partyCount) return false;
   const pokemon::PokemonRecord& fighter = snapshot_.party[slot];
   pokemon::BattleRecordEntry entry{};
   if (service_.loadBattleEntry(fighter.recordId, entry) != pokemon::ServiceStatus::Ok) return false;
 
+  // Real Gen 1: if the outgoing player Pokemon was holding the opponent in a
+  // partial trap (Wrap/Bind/Fire Spin/Clamp), switching it out releases that
+  // trap immediately rather than leaving the opponent immobilized against
+  // whatever comes in next - see docs/development/pokemon-gen1-audit-
+  // round6.md item 2.4. This function runs at both battle start (no trap
+  // possible yet) and every voluntary/forced Switch, so this is a no-op at
+  // battle start.
+  if (battlePlayer_.forcedMoveId != 0 && pokemon::isPartialTrapMove(battlePlayer_.forcedMoveId)) {
+    battleOpponent_.trappedTurnsRemaining = 0;
+  }
+
+  // Reflect/Light Screen/Mist protect the whole player SIDE in real Gen 1
+  // and persist through a switch, ending only on their own timer or when the
+  // side is defeated - unlike Guard Spec./Dire Hit/Focus Energy, which really
+  // are per-Pokemon and correctly do end here (docs/development/pokemon-
+  // gen1-audit-round6.md item 2.5). Snapshotted before the reset below and
+  // restored after it, but only when `preserveSideEffects` says this is the
+  // SAME ongoing battle continuing (a switch), not a fresh battle starting -
+  // otherwise this would leak stale state from a previous, already-concluded
+  // battle into a brand new one.
+  const bool carryReflect = preserveSideEffects && battlePlayer_.reflectActive;
+  const bool carryLightScreen = preserveSideEffects && battlePlayer_.lightScreenActive;
+  const bool carryMist = preserveSideEffects && battlePlayer_.mistActive;
+
   battlePartySlot_ = slot;
   battlePlayer_ = pokemon::BattleCombatant{};
+  battlePlayer_.reflectActive = carryReflect;
+  battlePlayer_.lightScreenActive = carryLightScreen;
+  battlePlayer_.mistActive = carryMist;
   battlePlayer_.speciesId = fighter.speciesId;
   battlePlayer_.gender = fighter.gender;
   battlePlayer_.level = pokemon::levelForXp(fighter.totalXp);
@@ -1068,8 +1104,31 @@ bool PokemonActivity::setupBattlePlayer(const int slot) {
 }
 
 void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_t level,
-                                          const std::span<const uint8_t> fixedMoves, const pokemon::Gender gender) {
+                                          const std::span<const uint8_t> fixedMoves, const pokemon::Gender gender,
+                                          const bool preserveSideEffects) {
+  // Mirrors setupBattlePlayer()'s own trap-release check, roles reversed: if
+  // the outgoing opponent Pokemon (fainted, or an AI voluntarily switching
+  // mid-battle - a real mechanic since v0.17.0) was holding the player in a
+  // partial trap, switching it out releases that trap immediately - see
+  // docs/development/pokemon-gen1-audit-round6.md item 2.4. A no-op the
+  // first time this runs for a fresh battle (nothing has trapped anyone yet).
+  if (battleOpponent_.forcedMoveId != 0 && pokemon::isPartialTrapMove(battleOpponent_.forcedMoveId)) {
+    battlePlayer_.trappedTurnsRemaining = 0;
+  }
+
+  // Mirrors setupBattlePlayer()'s own Reflect/Light Screen/Mist carry-over -
+  // these protect the opponent's whole SIDE and must survive the opponent
+  // trainer sending out its next team member mid-battle, but must not leak
+  // in from a previous, already-concluded battle when a fresh one starts -
+  // see docs/development/pokemon-gen1-audit-round6.md item 2.5.
+  const bool carryReflect = preserveSideEffects && battleOpponent_.reflectActive;
+  const bool carryLightScreen = preserveSideEffects && battleOpponent_.lightScreenActive;
+  const bool carryMist = preserveSideEffects && battleOpponent_.mistActive;
+
   battleOpponent_ = pokemon::BattleCombatant{};
+  battleOpponent_.reflectActive = carryReflect;
+  battleOpponent_.lightScreenActive = carryLightScreen;
+  battleOpponent_.mistActive = carryMist;
   battleOpponent_.speciesId = speciesId;
   battleOpponent_.level = level;
   battleOpponent_.gender = gender;
@@ -1320,7 +1379,12 @@ void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
         next = pokemon::championFinalSlotFor(starterRecord.speciesId);
       }
     }
-    setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId));
+    // Same ongoing gym battle, the trainer's next team member sent out after
+    // the previous one fainted - the trainer's own side-wide Reflect/Light
+    // Screen/Mist must survive this (see setupBattleOpponent()'s
+    // preserveSideEffects doc comment).
+    setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId),
+                        /*preserveSideEffects=*/true);
     const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
     snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
              speciesName(battleOpponent_.speciesId));
@@ -1505,7 +1569,12 @@ void PokemonActivity::activate() {
           setScreen(Screen::PcReleaseConfirm);
           return;
         case pokemon::CollectionAction::Rename:
-          openNickname(focusedRecordId_, false, Screen::Actions);
+          // Renaming an already-owned Pokemon from Party/PC Box: return to
+          // Actions on both success AND a Cancel/SD-write-failure, matching
+          // every sibling CollectionAction, instead of always kicking the
+          // player out to the top-level Menu (docs/development/pokemon-
+          // gen1-audit-round6.md item 2.6).
+          openNickname(focusedRecordId_, false, Screen::Actions, /*routeSuccessThroughPendingEvent=*/false);
           return;
         case pokemon::CollectionAction::EvolutionPrompts: {
           if (focusedRecord_.recordId == 0) return;
@@ -1972,7 +2041,10 @@ void PokemonActivity::activate() {
       // resets the flag below.
       const bool wasForced = forcedBattleSwitch_;
       savePlayerBattleEntry();
-      if (!setupBattlePlayer(slot)) {
+      // A mid-battle switch (forced or voluntary) continues the SAME
+      // ongoing battle - Reflect/Light Screen/Mist must survive it (see
+      // setupBattlePlayer()'s preserveSideEffects doc comment).
+      if (!setupBattlePlayer(slot, /*preserveSideEffects=*/true)) {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Battle);
         return;
       }
@@ -2089,8 +2161,15 @@ void PokemonActivity::activate() {
       if (!caught) {
         char line[96];
         snprintf(line, sizeof(line), tr(STR_POKEMON_BROKE_FREE), speciesName(battleOpponent_.speciesId));
-        snprintf(battleLog_, sizeof(battleLog_), "%s", line);
-        setScreen(Screen::Battle);
+        // Throwing a Ball is a non-attacking action, exactly like using an
+        // item or switching - a failed catch still costs the whole turn, so
+        // the opponent gets to act right away (docs/development/pokemon-
+        // gen1-audit-round6.md item 2.7). finishItemUseMidBattle() already
+        // implements this (resolveOpponentOnlyTurn(), the same forced-
+        // switch/battle-loss handling, and the shared battleLog_ formatting)
+        // - reused here rather than duplicated. A successful catch (below)
+        // ends the encounter outright, so it needs no opponent turn.
+        finishItemUseMidBattle(line);
         return;
       }
       // A successful catch counts as a win too - award the same battle XP a
