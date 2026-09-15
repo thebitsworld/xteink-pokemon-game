@@ -112,8 +112,13 @@ class PokemonActivity final : public Activity {
   void finishItemUseMidBattle(const char* usedLine);
   void finishBattleAfterWildFainted();
   void finishBattleAfterPlayerFainted();
-  void advanceGymOpponentOrFinish();
-  void finishGymChallenge(bool won);
+  // playerAlsoFainted: the exchange that produced this win also left the
+  // player's own active Pokemon at 0 HP (a mutual KO the player caused - see
+  // docs/development/pokemon-gen1-audit-round4.md bug 2.9). Only ever true
+  // when called from finishBattleAfterWildFainted()'s gym path - the
+  // Whirlwind/Roar-forced-switch call site can't produce a fainted attacker.
+  void advanceGymOpponentOrFinish(bool playerAlsoFainted = false);
+  void finishGymChallenge(bool won, bool playerAlsoFainted = false);
   void buildBattleLog(const pokemon::BattleTurnResult& result);
   void renderBattleHud();
   void renderBattleMenu();
