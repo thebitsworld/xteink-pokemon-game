@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.21.2] - 2026-09-15
+
+### Fixed
+
+- A Substitute now correctly blocks flinching, a secondary stat-drop, or a new status condition from the exact hit that breaks it, instead of letting that effect land on the real Pokémon behind it.
+- Wrap/Bind/Fire Spin/Clamp now release their target immediately if the Pokémon that trapped them faints or is switched out, instead of leaving the target immobilized against whatever comes in next.
+- Reflect, Light Screen, and Mist now protect your whole team for the rest of the battle instead of wearing off the instant you switch Pokémon.
+- Renaming a Pokémon you already own now returns you to where you were (Party/PC Box), instead of always kicking you out to the main Pokémon menu.
+- Throwing a Ball that fails to catch a wild Pokémon now correctly costs your turn - the wild Pokémon gets to act, exactly like using an item or switching already did.
+- Using an Evolution Stone or a Link Cable no longer fails with a misleading "no effect" message just because you had an unrelated item or encounter notification waiting - it's now only blocked if that notification is actually about the Pokémon you're trying to evolve.
+
 ## [0.21.1] - 2026-09-15
 
 ### Fixed
