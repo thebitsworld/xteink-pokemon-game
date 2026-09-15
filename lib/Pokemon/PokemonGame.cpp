@@ -16,7 +16,9 @@ constexpr uint8_t OWNED_NEEDS_MASK = 0x3FU;
 constexpr uint8_t ENCOUNTER_CHECK_MINUTES = 15;
 constexpr uint8_t ENCOUNTER_CHANCE_DENOMINATOR = 5;
 constexpr uint8_t ENCOUNTER_CHANCE_SUCCESSES = 2;
-constexpr uint8_t ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3;
+// ENCOUNTER_MISSES_BEFORE_GUARANTEE/BALL_MISSES_BEFORE_GUARANTEE/
+// ITEM_TRACK_MISSES_BEFORE_GUARANTEE/HOURLY_ITEM_MISSES_BEFORE_GUARANTEE now
+// live in PokemonGame.h (public) so the UI can reference the same numbers.
 // Ball, medicine and TM/HM (Stage 23) all check at the same 15-minute cadence as
 // the encounter roll itself, each with its own pity counter so a streak of
 // bad luck on one track never touches the others. Ball is a notch more
@@ -25,10 +27,8 @@ constexpr uint8_t ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3;
 // per catch against ~1.84 encounters/hour).
 constexpr uint32_t BALL_CHANCE_NUMERATOR = 3;
 constexpr uint32_t BALL_CHANCE_DENOMINATOR = 5;
-constexpr uint8_t BALL_MISSES_BEFORE_GUARANTEE = 3;
 constexpr uint32_t ITEM_TRACK_CHANCE_NUMERATOR = 2;
 constexpr uint32_t ITEM_TRACK_CHANCE_DENOMINATOR = 5;
-constexpr uint8_t ITEM_TRACK_MISSES_BEFORE_GUARANTEE = 3;
 
 bool randomBelow(const RandomSource& random, const uint32_t upperExclusive, uint32_t& output) {
   if (random.below == nullptr || upperExclusive == 0) return false;
@@ -548,11 +548,11 @@ bool processEncounterCheck(PokemonState& state, const uint8_t bookProgressPercen
 bool processHourlyItem(PokemonState& state, const RandomSource& random, const OwnedEvolutionNeeds ownedEvolutionNeeds,
                        PendingEventKind& generatedEvent) {
   if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) {
-    state.itemMisses = 19;
+    state.itemMisses = HOURLY_ITEM_MISSES_BEFORE_GUARANTEE;
     return true;
   }
   bool triggered = false;
-  if (!rollPityGate(random, state.itemMisses, 19, 1, 20, triggered)) return false;
+  if (!rollPityGate(random, state.itemMisses, HOURLY_ITEM_MISSES_BEFORE_GUARANTEE, 1, 20, triggered)) return false;
   if (!triggered) return true;
   bool itemCreated = false;
   if (!createItem(state, ownedEvolutionNeeds, random, itemCreated)) return false;

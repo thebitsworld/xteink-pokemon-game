@@ -3392,6 +3392,7 @@ void PokemonActivity::renderFocused() {
   }
   if (screen_ == Screen::Menu) {
     renderMenuGrid();
+    renderMenuPityBars();
     return;
   }
   if (screen_ == Screen::Bag) {
@@ -3540,6 +3541,80 @@ void PokemonActivity::renderMenuGrid() {
                         : index == 6 ? tr(STR_POKEMON_BADGES)
                                      : tr(STR_POKEMON_SETTINGS);
     drawGridButton(buttonGridCellRect(index), index == selected_, label);
+  }
+}
+
+// Compact "how close to a guaranteed drop" readout, drawn below the Menu
+// grid in whatever vertical space it leaves unused (never shrinks the grid
+// itself). Reuses PokemonState's own pity counters - encounterMisses/
+// ballMisses/medicineMisses/machineMisses/itemMisses - and their public
+// thresholds (PokemonGame.h), so a player can see how close they are to a
+// guaranteed wild encounter/Ball/Medicine/TM-HM/evolution-stone drop instead
+// of that progress being invisible engine-only state.
+void PokemonActivity::renderMenuPityBars() {
+  if (snapshot_.partyCount == 0) return;
+
+  struct PityRow {
+    const char* label;
+    uint8_t misses;
+    uint8_t threshold;
+  };
+  const std::array<PityRow, 5> rows{{
+      {tr(STR_POKEMON_ENCOUNTER), snapshot_.state.encounterMisses, pokemon::ENCOUNTER_MISSES_BEFORE_GUARANTEE},
+      {tr(STR_POKEMON_BAG_BALLS), snapshot_.state.ballMisses, pokemon::BALL_MISSES_BEFORE_GUARANTEE},
+      {tr(STR_POKEMON_BAG_MEDICINE), snapshot_.state.medicineMisses, pokemon::ITEM_TRACK_MISSES_BEFORE_GUARANTEE},
+      {tr(STR_POKEMON_BAG_MACHINES), snapshot_.state.machineMisses, pokemon::ITEM_TRACK_MISSES_BEFORE_GUARANTEE},
+      {tr(STR_POKEMON_BAG_EVOLUTION), snapshot_.state.itemMisses, pokemon::HOURLY_ITEM_MISSES_BEFORE_GUARANTEE},
+  }};
+
+  const int gridRows = (logicalCount() + MENU_GRID_COLUMNS - 1) / MENU_GRID_COLUMNS;
+  const int gridBottom = buttonGridTop() + gridRows * MENU_GRID_ROW_HEIGHT;
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  int viewableTop = 0;
+  int viewableRight = 0;
+  int viewableBottom = 0;
+  int viewableLeft = 0;
+  renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
+  const int screenBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - viewableBottom - 8;
+
+  constexpr int margin = 8;
+  constexpr int titleHeight = 16;
+  constexpr int rowGap = 3;
+  const int rowCount = static_cast<int>(rows.size());
+  const int available = screenBottom - gridBottom - titleHeight - 4;
+  const int rowHeight = (available - rowGap * (rowCount - 1)) / rowCount;
+  // Not enough room (a very short/rotated viewport) - skip entirely rather
+  // than overlapping the grid or drawing illegibly squashed bars.
+  if (rowHeight < 12) return;
+
+  constexpr int labelWidth = 70;
+  constexpr int fracWidth = 40;
+  const int trackX = margin + labelWidth + 6;
+  const int trackRight = renderer.getScreenWidth() - margin - fracWidth - 6;
+  const int trackWidth = trackRight - trackX;
+  if (trackWidth < 20) return;
+
+  renderer.drawText(UI_10_FONT_ID, margin, gridBottom + 4, tr(STR_POKEMON_COMING_UP));
+  const int barsTop = gridBottom + 4 + titleHeight;
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+
+  for (int index = 0; index < rowCount; ++index) {
+    const PityRow& row = rows[static_cast<size_t>(index)];
+    const int y = barsTop + index * (rowHeight + rowGap);
+    const int textY = y + std::max(0, (rowHeight - lineHeight) / 2);
+    renderer.drawText(UI_10_FONT_ID, margin, textY, row.label);
+
+    constexpr int barHeight = 10;
+    const int barY = y + std::max(0, (rowHeight - barHeight) / 2);
+    renderer.drawRect(trackX, barY, trackWidth, barHeight, true);
+    const uint8_t misses = std::min(row.misses, row.threshold);
+    const int filled = row.threshold == 0 ? 0 : (trackWidth - 2) * misses / row.threshold;
+    if (filled > 0) renderer.fillRect(trackX + 1, barY + 1, filled, barHeight - 2, true);
+
+    char frac[16];
+    snprintf(frac, sizeof(frac), "%u/%u", misses, row.threshold);
+    renderer.drawText(UI_10_FONT_ID, trackRight + 6, textY, frac);
   }
 }
 

@@ -146,6 +146,11 @@ class PokemonActivity final : public Activity {
   int battleMenuTop() const;
   Rect battleGridCellRect(int index) const;
   void renderMenuGrid();
+  // Compact "how close to a guaranteed drop" readout, drawn below the Menu
+  // grid in whatever screen space it leaves unused. Purely a display of
+  // PokemonState fields the engine already persists (encounterMisses/
+  // ballMisses/medicineMisses/machineMisses/itemMisses) - no new save data.
+  void renderMenuPityBars();
   void renderBagGrid();
   void renderPcOrderButtons();
   int buttonGridTop() const;

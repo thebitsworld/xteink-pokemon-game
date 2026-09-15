@@ -7,6 +7,22 @@
 
 namespace pokemon {
 
+// Pity-counter thresholds: how many consecutive misses on a given 15/60-
+// minute drop track guarantee a hit on the next check (see rollPityGate()'s
+// callers in PokemonGame.cpp for how each track actually applies these).
+// Public (not file-local to PokemonGame.cpp) so the UI can show a player
+// their own progress toward each guarantee without duplicating these
+// numbers - see PokemonActivity::renderMenuPityBars().
+constexpr uint8_t ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3;
+constexpr uint8_t BALL_MISSES_BEFORE_GUARANTEE = 3;
+// Medicine and TM/HM each run their own independent pity counter (see
+// processTrackDrop() in PokemonGame.cpp) but share this same threshold.
+constexpr uint8_t ITEM_TRACK_MISSES_BEFORE_GUARANTEE = 3;
+// The hourly evolution-stone/Link Cable roll (processHourlyItem()) checks
+// far less often than the other 4 tracks, so it tolerates a much longer
+// losing streak before guaranteeing a hit.
+constexpr uint8_t HOURLY_ITEM_MISSES_BEFORE_GUARANTEE = 19;
+
 enum class CreditStatus : uint8_t {
   Rejected = 0,
   NoChange = 1,
