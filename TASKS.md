@@ -6,11 +6,48 @@ xuất) nằm trong các file audit:
 - [docs/development/pokemon-gen1-audit-round3.md](docs/development/pokemon-gen1-audit-round3.md)
 - [docs/development/pokemon-gen1-audit-round4.md](docs/development/pokemon-gen1-audit-round4.md) (nội dung của nó đã được xử lý xong)
 - [docs/development/pokemon-gen1-audit-round5.md](docs/development/pokemon-gen1-audit-round5.md) (re-verify round 4, tìm bug mới 3.1 — đã fix `v0.21.1`)
+- [docs/development/pokemon-gen1-audit-round6.md](docs/development/pokemon-gen1-audit-round6.md) (7 bug mới, chưa fix — xem mục "Round 6" bên dưới)
 
 File này chỉ là **danh sách rút gọn** để chọn việc tiếp theo. Xoá/cập nhật dòng
 nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
+
+## Round 6 (2026-09-15, tại `v0.21.1`) — 7 bug mới phát hiện, CHƯA FIX (không nghiêm trọng, note lại)
+
+Re-verify round 5's `toxicCounter` fix: hoàn toàn đúng, không sót gì. 7 bug mới
+dưới đây đều không nghiêm trọng/không gây mất dữ liệu, để dành fix sau:
+
+- [ ] **2.1** — Tỷ lệ tự đánh trúng mình khi Confusion đang dùng **33%**
+  (`CONFUSION_SELF_HIT_CHANCE_PERCENT`, `PokemonBattle.cpp:13`), Gen 1 thật là
+  **50%** — có thể bị nhầm với số 33% của bảng secondary stat-drop (Psychic).
+- [ ] **2.2** — Paralysis giảm Speed còn 1/2 (`PokemonBattle.cpp:358`), Gen 1
+  thật giảm còn 1/4. Ảnh hưởng cả turn order lẫn công thức run-away
+  (`attemptRun()` dùng chung `effectiveSpeed()`).
+- [ ] **2.3 (quan trọng nhất về cơ chế)** — Substitute không chặn được
+  flinch/secondary stat-drop/status chính khi đúng đòn đó phá vỡ Substitute
+  (3 chỗ ở `PokemonBattle.cpp:1184-1188`, `:1195-1199`, `:1550-1552` check
+  `substituteHp == 0` sau đòn thay vì dùng snapshot trước đòn như
+  trap-immobilization đã làm đúng ở `:1231`).
+- [ ] **2.4** — Trap (Wrap/Bind/Fire Spin/Clamp) không giải phóng nạn nhân
+  nếu bên gài trap ngất/bị đổi ra giữa chừng (`trappedTurnsRemaining` chỉ
+  giảm dần ở `finishTurn()`, không ai reset khi bên gài trap rời trận).
+- [ ] **2.5** — Reflect/Light Screen/Mist kết thúc khi đổi Pokémon, đúng ra
+  phải theo cả team đến hết trận (field nằm trên `BattleCombatant`, bị reset
+  toàn bộ khi switch).
+- [ ] **2.6** — Đổi tên Pokémon đã sở hữu (từ Party/PC Box qua
+  `Screen::Actions` → Rename) luôn thoát về `Screen::Menu` thay vì quay lại
+  đúng màn hình gốc — `openNickname()`'s `cancelScreen` param bị bỏ qua ở
+  nhánh thành công (`PokemonActivity.cpp:780-804`).
+- [ ] **2.7 (dễ bị lợi dụng nhất)** — Ném Ball thất bại không cho đối thủ ra
+  đòn (`Screen::BattleBalls`, `PokemonActivity.cpp:2060-2093` thiếu gọi
+  `resolveOpponentOnlyTurn()`) — vi phạm luật "hành động không tấn công vẫn
+  tốn lượt" áp dụng ở mọi nơi khác (dùng item, đổi Pokémon).
+- [ ] *(độ tin cậy thấp hơn)* 2.8 — Rage không tính damage từ Bide release
+  hoặc tự đánh do Confusion.
+- [ ] *(độ tin cậy thấp hơn)* 2.9 — PP Up áp dụng + lưu trước khi xác nhận
+  tiêu item thành công — cùng dạng bug round 3 đã fix cho battle-boost item
+  nhưng chưa áp dụng cho đường PP Up.
 
 ## Round 5 (2026-09-15, `v0.21.1`)
 
