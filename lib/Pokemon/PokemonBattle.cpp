@@ -256,12 +256,12 @@ struct SecondaryStatDropEntry {
   uint8_t chancePercent;
 };
 constexpr SecondaryStatDropEntry SECONDARY_STAT_DROP_TABLE[] = {
-    {51, StatKind::Defense, 33},  // Acid
-    {61, StatKind::Speed, 33},    // Bubble Beam
-    {62, StatKind::Attack, 33},   // Aurora Beam
-    {94, StatKind::Special, 33},  // Psychic
-    {132, StatKind::Speed, 33},   // Constrict
-    {145, StatKind::Speed, 33},   // Bubble
+    {51, StatKind::Defense, 10},  // Acid
+    {61, StatKind::Speed, 10},    // Bubble Beam
+    {62, StatKind::Attack, 10},   // Aurora Beam
+    {94, StatKind::Special, 33},  // Psychic - a real Gen 1 quirk gives this one ~33%, not 10% like the other 5
+    {132, StatKind::Speed, 10},   // Constrict
+    {145, StatKind::Speed, 10},   // Bubble
 };
 
 const SecondaryStatDropEntry* secondaryStatDropEntryForMove(const uint8_t moveId) {

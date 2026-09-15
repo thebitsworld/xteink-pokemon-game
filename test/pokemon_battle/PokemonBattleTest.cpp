@@ -1836,7 +1836,7 @@ void spikeCannonRollsTheRandomMultiHitDistribution() {
 }
 
 void secondaryStatDropMovesCanLowerATargetsStat() {
-  // Acid: a 33% chance to lower the target's Defense - ZERO_RANDOM guarantees
+  // Acid: a 10% chance to lower the target's Defense - ZERO_RANDOM guarantees
   // the roll succeeding (and, incidentally, a critical hit) - defender HP is
   // padded so the hit never faints it first (the stat-drop guard requires it
   // still be standing after the hit, same as the flinch roll's own guard).
@@ -1863,7 +1863,7 @@ void psychicCanLowerTheTargetsSpecialStage() {
 
 void secondaryStatDropIsAGenuineChanceNotAGuarantee() {
   // MAX_RANDOM rolls the worst-case (highest) percentage-chance roll, which
-  // must fail Acid's 33% chance.
+  // must fail Acid's 10% chance.
   BattleCombatant attacker = makeCombatant(4, 50, {51});  // Acid
   BattleCombatant defender = makeCombatant(7, 50, {33});
   const pokemon::BattleTurnResult result = pokemon::stepBattle(attacker, defender, 0, MAX_RANDOM);
