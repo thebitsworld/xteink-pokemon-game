@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-15
+
+### Added
+
+- 7 previously-missing Gen 1 battle mechanics: type-based status immunity (Fire can't be Burned, Poison can't be Poisoned, Ice can't be Frozen), 3 new multi-hit moves (Double Kick, Spike Cannon, Bonemerang), a secondary stat-drop chance on 6 damaging moves (Acid, Bubble Beam, Aurora Beam, Psychic, Constrict, Bubble), Razor Wind as a real two-turn charge move, Jump Kick/Hi Jump Kick crash damage on a miss, and Teleport now works (guaranteed escape in a wild battle, no effect against a trainer).
+- Real Gen 1 move priority: Quick Attack always goes first, Counter always goes last, regardless of Speed.
+- Toxic's damage now escalates each turn it's active, instead of matching regular Poison's flat rate.
+- Running from a wild battle can now fail (based on your Pokémon's Speed vs. the wild Pokémon's, with better odds after each failed attempt) instead of always succeeding - this never applies to Gym/Elite Four/Champion battles, which still can't be run from at all.
+- Haze now fully resets both Pokémon - status conditions, confusion, and Reflect/Light Screen/Mist/Focus Energy - not just stat stage changes.
+- A true Speed tie between your Pokémon and the opponent's is now a coin flip instead of always favoring you.
+
+### Changed
+
+- Hyper Beam no longer forces a recharge turn if the hit also knocks out the target.
+
+### Performance
+
+- Loading your party from the save file, healing it while reading, and refreshing the currently-focused Pokémon after any action all do noticeably fewer SD-card reads than before - especially loading the game itself and every save after catching, releasing, depositing/withdrawing, teaching a move, and similar actions.
+- Sorting the PC Box by Pokédex number or name no longer re-scans the whole save file once per distinct species present - now a single pass regardless of how many different species you've caught.
+- Reduced RAM use for verifying an individual-stats (IV/EV) save after writing it.
+
 ## [0.20.4] - 2026-09-15
 
 ### Fixed
