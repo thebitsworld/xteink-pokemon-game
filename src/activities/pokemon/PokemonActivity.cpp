@@ -3544,9 +3544,10 @@ void PokemonActivity::renderMenuGrid() {
   }
 }
 
-// Compact "how close to a guaranteed drop" readout, drawn below the Menu
-// grid in whatever vertical space it leaves unused (never shrinks the grid
-// itself). Reuses PokemonState's own pity counters - encounterMisses/
+// Compact "how close to a guaranteed drop" readout, drawn directly below the
+// Menu grid as a small block CENTERED horizontally on the screen (not
+// stretched edge to edge - a full-width bar read as sprawling/cluttered in
+// practice). Reuses PokemonState's own pity counters - encounterMisses/
 // ballMisses/medicineMisses/machineMisses/itemMisses - and their public
 // thresholds (PokemonGame.h), so a player can see how close they are to a
 // guaranteed wild encounter/Ball/Medicine/TM-HM/evolution-stone drop instead
@@ -3566,9 +3567,38 @@ void PokemonActivity::renderMenuPityBars() {
       {tr(STR_POKEMON_BAG_MACHINES), snapshot_.state.machineMisses, pokemon::ITEM_TRACK_MISSES_BEFORE_GUARANTEE},
       {tr(STR_POKEMON_BAG_EVOLUTION), snapshot_.state.itemMisses, pokemon::HOURLY_ITEM_MISSES_BEFORE_GUARANTEE},
   }};
+  const int rowCount = static_cast<int>(rows.size());
 
   const int gridRows = (logicalCount() + MENU_GRID_COLUMNS - 1) / MENU_GRID_COLUMNS;
-  const int gridBottom = buttonGridTop() + gridRows * MENU_GRID_ROW_HEIGHT;
+  // buttonGridCellRect() only ever fills MENU_GRID_ROW_HEIGHT - 8 of each
+  // row's height (see drawGridButton()) - the true bottom of the last drawn
+  // button is 8px higher than a naive rows*MENU_GRID_ROW_HEIGHT would say.
+  const int gridBottom = buttonGridTop() + gridRows * MENU_GRID_ROW_HEIGHT - 8;
+
+  constexpr int rowHeight = 18;
+  constexpr int barHeight = 8;
+  constexpr int colGap = 8;  // label-to-bar and bar-to-fraction gap
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int titleGap = lineHeight;  // one blank line between the title and the first row
+  const int rowGap = lineHeight;    // one blank line between every pair of rows
+
+  // Every column is sized to its own content (not a guessed width), and the
+  // whole block - label column + bar + fraction column - is then centered
+  // on the screen as one unit, so labels/bars/fractions all line up with
+  // each other AND the block itself sits centered, not pinned to the left
+  // margin or stretched to the right edge.
+  int labelWidth = 0;
+  for (const PityRow& row : rows) {
+    labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, row.label));
+  }
+  const int fracWidth = renderer.getTextWidth(UI_10_FONT_ID, "00/00");
+  constexpr int barWidth = 180;  // fixed, not screen-width-dependent - see round7 feedback
+
+  const int blockWidth = labelWidth + colGap + barWidth + colGap + fracWidth;
+  const int blockLeft = std::max(8, (renderer.getScreenWidth() - blockWidth) / 2);
+  const int labelX = blockLeft;
+  const int trackX = labelX + labelWidth + colGap;
+  const int fracX = trackX + barWidth + colGap;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   int viewableTop = 0;
@@ -3578,43 +3608,35 @@ void PokemonActivity::renderMenuPityBars() {
   renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
   const int screenBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - viewableBottom - 8;
 
-  constexpr int margin = 8;
-  constexpr int titleHeight = 16;
-  constexpr int rowGap = 3;
-  const int rowCount = static_cast<int>(rows.size());
-  const int available = screenBottom - gridBottom - titleHeight - 4;
-  const int rowHeight = (available - rowGap * (rowCount - 1)) / rowCount;
+  // Center the whole block (title + rows) vertically within whatever space
+  // is actually left below the grid, instead of pinning it to the grid's
+  // bottom edge - leaves an even gap above and below on a typical screen,
+  // rather than everything huddled right under the last button row.
+  const int blockHeight = lineHeight + titleGap + rowCount * rowHeight + (rowCount - 1) * rowGap;
+  const int leftoverSpace = screenBottom - gridBottom;
   // Not enough room (a very short/rotated viewport) - skip entirely rather
-  // than overlapping the grid or drawing illegibly squashed bars.
-  if (rowHeight < 12) return;
+  // than overlapping the grid or drawing off the bottom edge.
+  if (blockHeight > leftoverSpace) return;
+  const int titleY = gridBottom + (leftoverSpace - blockHeight) / 2;
 
-  constexpr int labelWidth = 70;
-  constexpr int fracWidth = 40;
-  const int trackX = margin + labelWidth + 6;
-  const int trackRight = renderer.getScreenWidth() - margin - fracWidth - 6;
-  const int trackWidth = trackRight - trackX;
-  if (trackWidth < 20) return;
-
-  renderer.drawText(UI_10_FONT_ID, margin, gridBottom + 4, tr(STR_POKEMON_COMING_UP));
-  const int barsTop = gridBottom + 4 + titleHeight;
-  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  centered(renderer, UI_10_FONT_ID, titleY, tr(STR_POKEMON_COMING_UP), EpdFontFamily::BOLD);
+  const int barsTop = titleY + lineHeight + titleGap;
 
   for (int index = 0; index < rowCount; ++index) {
     const PityRow& row = rows[static_cast<size_t>(index)];
     const int y = barsTop + index * (rowHeight + rowGap);
     const int textY = y + std::max(0, (rowHeight - lineHeight) / 2);
-    renderer.drawText(UI_10_FONT_ID, margin, textY, row.label);
+    renderer.drawText(UI_10_FONT_ID, labelX, textY, row.label);
 
-    constexpr int barHeight = 10;
     const int barY = y + std::max(0, (rowHeight - barHeight) / 2);
-    renderer.drawRect(trackX, barY, trackWidth, barHeight, true);
+    renderer.drawRect(trackX, barY, barWidth, barHeight, true);
     const uint8_t misses = std::min(row.misses, row.threshold);
-    const int filled = row.threshold == 0 ? 0 : (trackWidth - 2) * misses / row.threshold;
+    const int filled = row.threshold == 0 ? 0 : (barWidth - 2) * misses / row.threshold;
     if (filled > 0) renderer.fillRect(trackX + 1, barY + 1, filled, barHeight - 2, true);
 
     char frac[16];
     snprintf(frac, sizeof(frac), "%u/%u", misses, row.threshold);
-    renderer.drawText(UI_10_FONT_ID, trackRight + 6, textY, frac);
+    renderer.drawText(UI_10_FONT_ID, fracX, textY, frac);
   }
 }
 
