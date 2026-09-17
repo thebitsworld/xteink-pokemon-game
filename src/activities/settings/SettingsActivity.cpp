@@ -968,6 +968,10 @@ void SettingsActivity::toggleCurrentSetting() {
     openSleepTimeoutPicker();
     return;
   }
+  if (setting.valuePtr == &CrossPointSettings::slideshowIntervalMinutes) {
+    openSlideshowIntervalPicker();
+    return;
+  }
   if (setting.value16Ptr == &CrossPointSettings::frontlightScheduleStart ||
       setting.value16Ptr == &CrossPointSettings::frontlightScheduleEnd) {
     openFrontlightScheduleTimePicker(setting.value16Ptr, setting.nameId);
@@ -1194,6 +1198,25 @@ void SettingsActivity::openSleepTimeoutPicker() {
       [this](const ActivityResult& result) {
         if (!result.isCancelled) {
           SETTINGS.sleepTimeoutMinutes = static_cast<uint8_t>(std::get<IntervalResult>(result.data).value);
+          SETTINGS.saveToFile();
+        }
+        requestUpdate();
+      });
+}
+
+void SettingsActivity::openSlideshowIntervalPicker() {
+  startActivityForResult(
+      std::make_unique<IntervalSelectionActivity>(
+          renderer, mappedInput, "SlideshowIntervalInterval", StrId::STR_SLIDESHOW_INTERVAL,
+          SETTINGS.slideshowIntervalMinutes, CrossPointSettings::MIN_SLIDESHOW_INTERVAL_MINUTES,
+          CrossPointSettings::MAX_SLIDESHOW_INTERVAL_MINUTES, 1, 5, StrId::STR_SLEEP_TIMER_VALUE_FORMAT,
+          /*readerActivity=*/false, /*allowPowerAsConfirm=*/false, /*ignoreInitialConfirmRelease=*/true,
+          /*showPercentValue=*/false, StrId::STR_NONE_OPT, /*overrideDisabledReaderTouchscreen=*/false,
+          /*showTouchHeaderBackButton=*/true, /*valueFormatter=*/nullptr, /*tapStep=*/0,
+          /*useReaderSlider=*/true),
+      [this](const ActivityResult& result) {
+        if (!result.isCancelled) {
+          SETTINGS.slideshowIntervalMinutes = static_cast<uint8_t>(std::get<IntervalResult>(result.data).value);
           SETTINGS.saveToFile();
         }
         requestUpdate();

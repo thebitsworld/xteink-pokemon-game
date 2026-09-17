@@ -39,6 +39,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
+  enum SLIDESHOW_SCALE_MODE { SLIDESHOW_FIT = 0, SLIDESHOW_CROP = 1, SLIDESHOW_SCALE_MODE_COUNT };
   enum SLEEP_SCREEN_COVER_FILTER {
     NO_FILTER = 0,
     BLACK_AND_WHITE = 1,
@@ -521,6 +522,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
+  // Photo slideshow: minutes between images, and Fit/Crop display mode.
+  uint8_t slideshowIntervalMinutes = 5;
+  uint8_t slideshowScaleMode = SLIDESHOW_FIT;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;
@@ -637,6 +641,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static constexpr uint8_t MIN_SLEEP_TIMEOUT_MINUTES = 1;
   static constexpr uint8_t SLEEP_TIMEOUT_NEVER_MINUTES = 31;
   static constexpr uint8_t MAX_SLEEP_TIMEOUT_MINUTES = SLEEP_TIMEOUT_NEVER_MINUTES;
+  static constexpr uint8_t MIN_SLIDESHOW_INTERVAL_MINUTES = 1;
+  static constexpr uint8_t MAX_SLIDESHOW_INTERVAL_MINUTES = 60;
   static constexpr uint8_t SD_FONT_MAX_SIZE_STEPS = 8;
   static constexpr uint8_t MIN_READER_FONT_POINT_SIZE = 8;
   static constexpr uint8_t MIN_LINE_HEIGHT_PERCENT = 70;

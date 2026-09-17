@@ -72,6 +72,7 @@ enum class HomeMenuAction {
   ReadingStats,
   Bookmarks,
   FileTransfer,
+  Slideshow,
   Settings,
 #if defined(CROSSINK_ENABLE_POKEMON)
   Pokemon,
@@ -86,9 +87,9 @@ struct HomeMenuEntry {
 
 struct HomeMenuEntries {
 #if defined(CROSSINK_ENABLE_POKEMON)
-  static constexpr int kCapacity = 9;
+  static constexpr int kCapacity = 10;
 #else
-  static constexpr int kCapacity = 8;
+  static constexpr int kCapacity = 9;
 #endif
   std::array<HomeMenuEntry, kCapacity> entries{};
   int count = 0;
@@ -325,6 +326,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   }
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
+  items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
 #if defined(CROSSINK_ENABLE_POKEMON)
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
@@ -352,6 +354,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   }
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
+  items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
 #if defined(CROSSINK_ENABLE_POKEMON)
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
@@ -1627,6 +1630,9 @@ void HomeActivity::loop() {
           case HomeMenuAction::FileTransfer:
             onFileTransferOpen();
             break;
+          case HomeMenuAction::Slideshow:
+            onSlideshowOpen();
+            break;
 #if defined(CROSSINK_ENABLE_POKEMON)
           case HomeMenuAction::Pokemon:
             onPokemonOpen();
@@ -1880,6 +1886,9 @@ void HomeActivity::loop() {
         break;
       case HomeMenuAction::FileTransfer:
         onFileTransferOpen();
+        break;
+      case HomeMenuAction::Slideshow:
+        onSlideshowOpen();
         break;
       case HomeMenuAction::Settings:
         onSettingsOpen();
@@ -2529,6 +2538,8 @@ void HomeActivity::onPokemonOpen() {
 #endif
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
+
+void HomeActivity::onSlideshowOpen() { activityManager.goToSlideshow(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 

@@ -41,6 +41,19 @@ constexpr int ROOT_HINT_GAP = 20;
 constexpr size_t NAME_BUFFER_SIZE = 500;
 constexpr fui::ActionId ACTION_ROW = 1;
 constexpr fui::ActionId ACTION_SETTINGS = 2;
+constexpr fui::ActionId ACTION_PICK_SELECT = 3;
+
+// Mode::PickDirectory's "Select this folder" touch target, in the header.
+// Placing it low in the screen (a bottom bar, mirroring the non-touch
+// button-hint band) looked right on paper but rendered clipped by the
+// simulator's X4 Pro window - that band sits right at the physical panel
+// edge, which the device's own front-facing button-hint text can afford to
+// hug but a header action can't risk. The header is proven-safe: every other
+// screen's back arrow/title already renders fully visible there.
+int pickDirectorySelectButtonWidth(const GfxRenderer& renderer, const TouchHeaderBackButton::Layout& backLayout) {
+  const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_SELECT), EpdFontFamily::BOLD);
+  return std::max(backLayout.iconRect.width, textWidth + 24);
+}
 constexpr size_t INDEX_THRESHOLD = 200;
 constexpr size_t MAX_VIRTUAL_LIST_ENTRIES = static_cast<size_t>(std::numeric_limits<int16_t>::max());
 constexpr uint32_t FILE_BROWSER_APPEND_MIN_FREE_AFTER_ALLOC = 48U * 1024U;
@@ -406,6 +419,7 @@ void FileBrowserActivity::onEnter() {
   applySharedUiTheme(app, uiTarget);
   app.on(ACTION_ROW, &FileBrowserActivity::onRowEvent, this);
   app.on(ACTION_SETTINGS, &FileBrowserActivity::onSettingsEvent, this);
+  app.on(ACTION_PICK_SELECT, &FileBrowserActivity::onPickDirectorySelectEvent, this);
   app.setScreen(&FileBrowserActivity::listScreen, this);
   requestUpdate();
 }
@@ -513,9 +527,12 @@ void FileBrowserActivity::promptDeleteDirectory(const std::string& fullPath, con
 void FileBrowserActivity::showDirectoryActionMenu(const std::string& entry, bool ignoreInitialConfirmRelease) {
   const std::string fullPath = normalizeDirectoryPath(buildFullPath(basepath, entry));
   const bool useDefaultFolders = isDefaultSleepFolderPath(fullPath) || isPreferredSleepFolder(fullPath);
+  const bool isSlideshowFolder = isPreferredSlideshowFolder(fullPath);
   std::vector<FileBrowserActionActivity::MenuItem> items;
   items.push_back({useDefaultFolders ? FileBrowserAction::ClearSleepFolder : FileBrowserAction::SetSleepFolder,
                    useDefaultFolders ? StrId::STR_USE_DEFAULT_SLEEP_FOLDERS : StrId::STR_SET_AS_SLEEP_FOLDER});
+  items.push_back({isSlideshowFolder ? FileBrowserAction::ClearSlideshowFolder : FileBrowserAction::SetSlideshowFolder,
+                   isSlideshowFolder ? StrId::STR_CLEAR_SLIDESHOW_FOLDER : StrId::STR_SET_AS_SLIDESHOW_FOLDER});
   items.push_back({FileBrowserAction::Delete, StrId::STR_DELETE});
 
   startActivityForResult(std::make_unique<FileBrowserActionActivity>(renderer, mappedInput, getFileName(entry),
@@ -537,6 +554,12 @@ void FileBrowserActivity::showDirectoryActionMenu(const std::string& entry, bool
                                return;
                              case FileBrowserAction::ClearSleepFolder:
                                clearPreferredSleepFolder();
+                               return;
+                             case FileBrowserAction::SetSlideshowFolder:
+                               setPreferredSlideshowFolder(fullPath);
+                               return;
+                             case FileBrowserAction::ClearSlideshowFolder:
+                               clearPreferredSlideshowFolder();
                                return;
                              case FileBrowserAction::DeleteCache:
                              case FileBrowserAction::DeleteStats:
@@ -633,6 +656,41 @@ void FileBrowserActivity::clearPreferredSleepFolder() {
 
 bool FileBrowserActivity::isPreferredSleepFolder(const std::string& fullPath) const {
   return APP_STATE.preferredSleepFolderPath == normalizeDirectoryPath(fullPath);
+}
+
+void FileBrowserActivity::setPreferredSlideshowFolder(const std::string& fullPath) {
+  const std::string normalizedPath = normalizeDirectoryPath(fullPath);
+  if (APP_STATE.slideshowFolderPath == normalizedPath) {
+    requestUpdate();
+    return;
+  }
+
+  APP_STATE.slideshowFolderPath = normalizedPath;
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("FileBrowser", "Failed to save slideshow folder path: %s", normalizedPath.c_str());
+    return;
+  }
+  LOG_INF("FileBrowser", "Slideshow folder set to: %s", normalizedPath.c_str());
+  requestUpdate();
+}
+
+void FileBrowserActivity::clearPreferredSlideshowFolder() {
+  if (APP_STATE.slideshowFolderPath.empty()) {
+    requestUpdate();
+    return;
+  }
+
+  APP_STATE.slideshowFolderPath.clear();
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("FileBrowser", "Failed to clear slideshow folder path");
+    return;
+  }
+  LOG_INF("FileBrowser", "Cleared slideshow folder");
+  requestUpdate();
+}
+
+bool FileBrowserActivity::isPreferredSlideshowFolder(const std::string& fullPath) const {
+  return !APP_STATE.slideshowFolderPath.empty() && APP_STATE.slideshowFolderPath == normalizeDirectoryPath(fullPath);
 }
 
 void FileBrowserActivity::pinBootFavorite(const std::string& fullPath) {
@@ -808,6 +866,8 @@ void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool igno
             return;
           case FileBrowserAction::SetSleepFolder:
           case FileBrowserAction::ClearSleepFolder:
+          case FileBrowserAction::SetSlideshowFolder:
+          case FileBrowserAction::ClearSlideshowFolder:
           case FileBrowserAction::RemoveFromRecents:
           case FileBrowserAction::ViewBookmarks:
           case FileBrowserAction::ViewClippings:
@@ -873,6 +933,20 @@ void FileBrowserActivity::onSettingsEvent(const fui::ActionEvent&, void* user) {
   if (self->mode != Mode::Books || !self->mappedInput.hasTouchHardware()) return;
   self->app.clearTapFlash();
   self->openSettings();
+}
+
+void FileBrowserActivity::onPickDirectorySelectEvent(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<FileBrowserActivity*>(user);
+  if (self->mode != Mode::PickDirectory || !self->mappedInput.hasTouchHardware()) return;
+  self->app.clearTapFlash();
+  self->selectCurrentDirectory();
+}
+
+void FileBrowserActivity::selectCurrentDirectory() {
+  ActivityResult result{FilePathResult{normalizeDirectoryPath(basepath)}};
+  result.isCancelled = false;
+  setResult(std::move(result));
+  finish();
 }
 
 void FileBrowserActivity::openSettings() {
@@ -965,12 +1039,15 @@ void FileBrowserActivity::loop() {
 
   // In directory-picker mode the fourth front button selects the folder shown
   // in the path band; Confirm continues to descend into the highlighted child.
-  if (mode == Mode::PickDirectory && mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-    ActivityResult result{FilePathResult{normalizeDirectoryPath(basepath)}};
-    result.isCancelled = false;
-    setResult(std::move(result));
-    finish();
-    return;
+  // Touch devices confirm via the header's "Select" button instead (see
+  // buildListScreen()/onPickDirectorySelectEvent()), since touch-only
+  // hardware has no physical Right button and BaseTheme::drawButtonHints()
+  // no-ops entirely when gpio.hasTouch().
+  if (mode == Mode::PickDirectory) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      selectCurrentDirectory();
+      return;
+    }
   }
 
   // Long press BACK (1s+) toggles hidden files (Books mode only).
@@ -1208,6 +1285,35 @@ void FileBrowserActivity::buildListScreen(UiApp::ScreenType& screen) {
     screen.target().bitmap(fui::Rect{iconX, iconY, icon.width, icon.height}, icon, fui::BitmapMode::Center,
                            fui::Paint::solid(fui::Color::Black));
   }
+
+  // Touch-only "Select this folder" header action. drawButtonHints() (in
+  // render()) is a no-op on touch hardware (BaseTheme skips the whole hint bar
+  // when gpio.hasTouch()), so PickDirectory mode - which otherwise only offers
+  // a physical Right-button press to confirm a folder - needs its own touch
+  // affordance. A bottom bar (mirroring the button-hint band, or using
+  // screen.takeBottom() right above the path band) looked correct on paper
+  // but rendered clipped on the X4 Pro simulator - that band sits right at
+  // the panel's physical edge. The header is a proven-safe place instead:
+  // it already renders fully visible on every screen.
+  if (mode == Mode::PickDirectory && mappedInput.hasTouchHardware()) {
+    const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
+    const auto backLayout = TouchHeaderBackButton::layout(header);
+    const int selectWidth = pickDirectorySelectButtonWidth(renderer, backLayout);
+    const fui::Rect selectRect{static_cast<int16_t>(header.x + header.width - selectWidth),
+                               static_cast<int16_t>(backLayout.touchRect.y), static_cast<int16_t>(selectWidth),
+                               static_cast<int16_t>(backLayout.touchRect.height)};
+    fui::ButtonProps selectProps;
+    selectProps.action = ACTION_PICK_SELECT;
+    selectProps.styles = fui::plainStyles(fui::Paint::solid(fui::Color::Black));
+    selectProps.minTouchSize = screen.theme().minTouchSize;
+    screen.button(selectProps, selectRect);
+    const char* selectLabel = tr(STR_SELECT);
+    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, selectLabel, EpdFontFamily::BOLD);
+    const int textX = selectRect.x + (selectRect.width - textWidth) / 2;
+    const int textY = backLayout.iconRect.y + TouchHeaderBackButton::TITLE_VERTICAL_OFFSET +
+                      (backLayout.iconRect.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+    renderer.drawText(UI_10_FONT_ID, textX, textY, selectLabel, true, EpdFontFamily::BOLD);
+  }
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   // Full path band at the bottom: separator on top, left-truncated so the
@@ -1344,13 +1450,18 @@ void FileBrowserActivity::render(RenderLock&&) {
       mode == Mode::PickFirmware
           ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
           : (mode == Mode::PickDirectory
-                 ? std::string(tr(STR_SELECT_RECEIVE_FOLDER))
+                 ? std::string(tr(STR_SELECT_FOLDER))
                  : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1)));
   // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
   // indicator; the rest of the screen renders through the app.
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware()) {
-    const int rightReserve = mode == Mode::Books ? TouchHeaderBackButton::layout(header).iconRect.width + 8 : 0;
+    const int rightReserve =
+        mode == Mode::Books
+            ? TouchHeaderBackButton::layout(header).iconRect.width + 8
+            : (mode == Mode::PickDirectory
+                   ? pickDirectorySelectButtonWidth(renderer, TouchHeaderBackButton::layout(header)) + 8
+                   : 0);
     TouchHeaderBackButton::draw(renderer, uiTarget, header, folderName.c_str(), false, rightReserve);
   } else {
     GUI.drawHeader(renderer, header, folderName.c_str());

@@ -39,6 +39,7 @@
 #include "settings/SettingsActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
+#include "util/SlideshowActivity.h"
 #include "util/TwoFingerSwipe.h"
 
 namespace {
@@ -697,6 +698,8 @@ void ActivityManager::goToSettings(const bool dismissOnUpSwipe) {
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
+
+void ActivityManager::goToSlideshow() { replaceActivity(std::make_unique<SlideshowActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToRecentBooks() {
   if (SETTINGS.recentBooksView == CrossPointSettings::RECENT_BOOKS_GRID) {

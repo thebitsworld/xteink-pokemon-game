@@ -27,6 +27,8 @@ enum class FileBrowserAction : int {
   SendNearby = 15,
   PinBootFavorite = 16,
   UnpinBootFavorite = 17,
+  SetSlideshowFolder = 18,
+  ClearSlideshowFolder = 19,
 };
 
 class FileBrowserActionActivity final : public Activity {

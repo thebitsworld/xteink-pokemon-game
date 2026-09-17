@@ -36,6 +36,9 @@ class FileBrowserActivity final : public Activity {
   void setPreferredSleepFolder(const std::string& fullPath);
   void clearPreferredSleepFolder();
   bool isPreferredSleepFolder(const std::string& fullPath) const;
+  void setPreferredSlideshowFolder(const std::string& fullPath);
+  void clearPreferredSlideshowFolder();
+  bool isPreferredSlideshowFolder(const std::string& fullPath) const;
   void pinBootFavorite(const std::string& fullPath);
   void unpinBootFavorite();
   bool isPinnedBootFavorite(const std::string& fullPath) const;
@@ -82,14 +85,18 @@ class FileBrowserActivity final : public Activity {
   // renderer supplies a local row number and this records its absolute base.
   size_t actionWindowFirst = 0;
   freeink::ui::ListNav listNav;
-
   static void listScreen(UiApp::ScreenType& screen, void* user);
   static void onRowEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onSettingsEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onPickDirectorySelectEvent(const freeink::ui::ActionEvent& event, void* user);
   void buildListScreen(UiApp::ScreenType& screen);
   void activateSelected();
   void navigateBack();
   void openSettings();
+  // Confirms `basepath` as the picked folder (Mode::PickDirectory only): the
+  // physical Right button (loop()) and the touch header "Select" action
+  // (onPickDirectorySelectEvent()) both funnel through this.
+  void selectCurrentDirectory();
 
   // Data loading
   void clearIndexNameCache();
