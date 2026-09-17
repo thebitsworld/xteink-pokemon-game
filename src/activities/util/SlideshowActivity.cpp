@@ -240,15 +240,48 @@ void SlideshowActivity::renderCurrentImage() {
     config.useExactDimensions = true;
 
     PngToFramebufferConverter converter;
-    renderer.clearScreen();
-    if (!converter.decodeToFramebuffer(filePath, renderer, config)) {
-      drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
-      return;
-    }
-    renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
     const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    // Each pass re-decodes the PNG under a different render mode (BW, then the
+    // LSB/MSB grayscale planes) rather than resuming a stream - the dither in
+    // DirectPixelWriter is purely positional, so re-decoding reproduces the
+    // same quantized values per plane, matching the pattern already used for
+    // BMP below and for the sleep cover (SleepActivity::renderBitmapSleepScreen).
+    const auto drawFrame = [&]() {
+      renderer.clearScreen();
+      if (!converter.decodeToFramebuffer(filePath, renderer, config)) return false;
+      renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      return true;
+    };
+
+    bool success = drawFrame();
+    if (success) {
+      const bool absolute = renderer.supportsAbsoluteGrayscale();
+      if (absolute) {
+        success = renderer.displayAbsoluteGrayscaleBase();
+      } else {
+        renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+      }
+      for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+        if (!success) break;
+        renderer.setRenderMode(mode);
+        success = drawFrame();
+        if (!success) break;
+        if (mode == GfxRenderer::GRAYSCALE_LSB)
+          renderer.copyGrayscaleLsbBuffers();
+        else
+          renderer.copyGrayscaleMsbBuffers();
+      }
+      renderer.setRenderMode(GfxRenderer::BW);
+      if (success) {
+        renderer.displayGrayBuffer();
+        success = drawFrame();
+        if (success) renderer.cleanupGrayscaleWithFrameBuffer();
+      }
+    }
+    if (!success) {
+      drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
+    }
     return;
   }
 
@@ -300,8 +333,13 @@ void SlideshowActivity::renderCurrentImage() {
 
   renderer.clearScreen();
   bool success = drawFrame();
-  if (success && bitmap.hasGreyscale() && renderer.supportsAbsoluteGrayscale()) {
-    success = renderer.displayAbsoluteGrayscaleBase();
+  if (success && bitmap.hasGreyscale()) {
+    const bool absolute = renderer.supportsAbsoluteGrayscale();
+    if (absolute) {
+      success = renderer.displayAbsoluteGrayscaleBase();
+    } else {
+      renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+    }
     for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
       if (!success) break;
       success = bitmap.rewindToData() == BmpReaderError::Ok;
