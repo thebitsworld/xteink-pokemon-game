@@ -200,16 +200,6 @@ void BmpViewerActivity::onEnter() {
       renderer.clearScreen();
       bool success = drawFrame();
       if (success && bitmap.hasGreyscale() && renderer.supportsAbsoluteGrayscale()) {
-        // Same fix as SlideshowActivity::renderCurrentImage() (see its own
-        // comment for the full root-cause writeup): on X3 the OEM grayscale
-        // pre-conditioning pass has to run - preceded by a real full-panel
-        // refresh to physically resettle the panel - or the image comes out
-        // washed out/less detailed than the identical image on X4 Pro. This
-        // viewer duplicates the whole grayscale-composite sequence instead
-        // of sharing SlideshowActivity's, so it needed the same fix applied
-        // separately.
-        renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-        renderer.preconditionGrayscale();
         success = renderer.displayAbsoluteGrayscaleBase();
         for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
           if (!success) break;
