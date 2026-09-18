@@ -75,22 +75,6 @@ const char* genderAbbrev(const pokemon::Gender gender) {
   return "";
 }
 
-// A small hand-drawn Poké Ball silhouette - GfxRenderer has no circle
-// primitive and no bundled font glyph looks like one, so this approximates
-// the classic black-top/white-bottom-with-center-button shape using only
-// fillRect/drawRect. Used on the wild-encounter screen to flag a species
-// that's already been caught before (see isSpeciesMarked(caughtSpecies)).
-void drawCaughtBallIcon(const GfxRenderer& renderer, const int x, const int y, const int size) {
-  const int half = size / 2;
-  renderer.fillRect(x, y, size, half, true);
-  renderer.drawRect(x, y, size, size, true);
-  const int buttonSize = std::max(3, size / 3);
-  const int buttonX = x + (size - buttonSize) / 2;
-  const int buttonY = y + half - buttonSize / 2;
-  renderer.fillRect(buttonX, buttonY, buttonSize, buttonSize, false);
-  renderer.drawRect(buttonX, buttonY, buttonSize, buttonSize, true);
-}
-
 // Compact "♂★"/"★"/"♂"/"" suffix combining genderAbbrev() with a shiny star
 // (U+2605, added to ui_symbols_10 alongside the gender glyphs), for the
 // list-row idiom that measures one suffix string's width and draws it right
@@ -3460,14 +3444,19 @@ void PokemonActivity::renderFocused() {
     centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
     snprintf(line, sizeof(line), "%s %u    %s%s", tr(STR_POKEMON_LEVEL), pending.level, genderText(pending.gender),
              pending.isShiny ? " ★" : "");
-    centered(renderer, UI_10_FONT_ID, contentTop + 140, line);
-    // "Caught before" indicator - a small Poké Ball icon below the name/
+    centered(renderer, UI_10_FONT_ID, contentTop + 148, line);
+    // "Caught before" indicator - the real Poké Ball item icon (item id 7,
+    // same sprite the Bag screen already shows for it) below the name/
     // level/gender text, shown only if this species is already in
     // caughtSpecies (Pokedex-owned), so the player can tell at a glance
     // whether this encounter would be a new catch or a duplicate.
     if (pokemon::isSpeciesMarked(snapshot_.state.caughtSpecies, pending.speciesId)) {
-      constexpr int ballSize = 16;
-      drawCaughtBallIcon(renderer, (renderer.getScreenWidth() - ballSize) / 2, contentTop + 164, ballSize);
+      constexpr int ballSize = 24;
+      constexpr uint8_t pokeBallItemId = 7;
+      pokemon::drawPokemonBagItemArt(renderer, pokeBallItemId,
+                                     Rect{(renderer.getScreenWidth() - ballSize) / 2, contentTop + 184, ballSize,
+                                          ballSize},
+                                     false);
     }
   } else if (pending.kind == pokemon::PendingEventKind::Item) {
     pokemon::drawPokemonItemArt(renderer, pending.item, true,

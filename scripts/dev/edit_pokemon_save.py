@@ -122,6 +122,15 @@ GENDER_FEMALE = 2
 GENDER_GENDERLESS = 3
 GENDER_NAMES = {GENDER_UNKNOWN: "-", GENDER_MALE: "Male", GENDER_FEMALE: "Female", GENDER_GENDERLESS: "Genderless"}
 
+# RecordFlag (PokemonTypes.h) - PokemonRecord.flags bits.
+RECORD_FLAG_EVOLUTION_PROMPTS_DISABLED = 1 << 0
+RECORD_FLAG_SHINY = 1 << 1
+
+# encodePendingEvent()/decodePendingEvent() (PokemonStoreCodec.cpp) pack
+# isShiny into bit 7 of the wire-format gender byte - Gender itself only ever
+# uses values 0-3, so this never collides with a real gender value.
+PENDING_EVENT_SHINY_BIT = 0x80
+
 SAVE_NAMES = ("pokemon-a.bin", "pokemon-b.bin")
 BATTLE_STORE_NAMES = ("pokemon-battle-a.bin", "pokemon-battle-b.bin", "pokemon-battle.bin")
 
@@ -502,22 +511,36 @@ def write_battle_store(save_dir: Path, entries: list[BattleEntry], sequence: int
 # --------------------------------------------------------------------------
 
 
-def read_pending_event(save: SaveFile, slot: int) -> tuple[int, int, int, int, int, int]:
+def read_pending_event(save: SaveFile, slot: int) -> tuple[int, int, int, int, int, int, bool]:
     offset = OFF_PENDING_EVENTS + slot * PENDING_EVENT_BYTES
-    return struct.unpack_from("<IHBBBB", state_bytes(save, offset, PENDING_EVENT_BYTES))
+    record_id, species_id, level, gender_byte, item, kind = struct.unpack_from(
+        "<IHBBBB", state_bytes(save, offset, PENDING_EVENT_BYTES)
+    )
+    is_shiny = (gender_byte & PENDING_EVENT_SHINY_BIT) != 0
+    gender = gender_byte & ~PENDING_EVENT_SHINY_BIT
+    return record_id, species_id, level, gender, item, kind, is_shiny
 
 
 def write_pending_event(
-    save: SaveFile, slot: int, record_id: int, species_id: int, level: int, gender: int, item: int, kind: int
+    save: SaveFile,
+    slot: int,
+    record_id: int,
+    species_id: int,
+    level: int,
+    gender: int,
+    item: int,
+    kind: int,
+    is_shiny: bool = False,
 ) -> None:
     offset = OFF_PENDING_EVENTS + slot * PENDING_EVENT_BYTES
-    packed = struct.pack("<IHBBBB", record_id, species_id, level, gender, item, kind)
+    gender_byte = gender | (PENDING_EVENT_SHINY_BIT if is_shiny else 0)
+    packed = struct.pack("<IHBBBB", record_id, species_id, level, gender_byte, item, kind)
     set_state_bytes(save, offset, packed)
 
 
 def first_empty_pending_slot(save: SaveFile) -> Optional[int]:
     for slot in range(PENDING_EVENT_COUNT):
-        _, _, _, _, _, kind = read_pending_event(save, slot)
+        _, _, _, _, _, kind, _ = read_pending_event(save, slot)
         if kind == PENDING_KIND_NONE:
             return slot
     return None
@@ -554,8 +577,9 @@ def cmd_dump(args: argparse.Namespace) -> None:
         species = species_map.get(species_id)
         species_name = species.name if species else f"?{species_id}"
         in_party = " [party]" if record_id in party_ids else ""
+        shiny_suffix = " [SHINY]" if flags & RECORD_FLAG_SHINY else ""
         print(
-            f"  #{record_id}: {species_name} (species {species_id}), totalXp={total_xp}, "
+            f"  #{record_id}: {species_name}{shiny_suffix} (species {species_id}), totalXp={total_xp}, "
             f"caughtLevel={caught_level}, gender={GENDER_NAMES.get(gender, gender)}, "
             f"nickname={nickname!r}{in_party}"
         )
@@ -597,14 +621,15 @@ def cmd_dump(args: argparse.Namespace) -> None:
 
     print("\npending events:")
     for slot in range(PENDING_EVENT_COUNT):
-        record_id, species_id, level, gender, item, kind = read_pending_event(active, slot)
+        record_id, species_id, level, gender, item, kind, is_shiny = read_pending_event(active, slot)
         if kind == PENDING_KIND_NONE:
             print(f"  slot {slot}: empty")
             continue
         species = species_map.get(species_id)
         species_name = species.name if species else f"?{species_id}"
+        shiny_suffix = " [SHINY]" if is_shiny else ""
         print(
-            f"  slot {slot}: {PENDING_KIND_NAMES.get(kind, kind)} - recordId={record_id}, species={species_name}, "
+            f"  slot {slot}: {PENDING_KIND_NAMES.get(kind, kind)} - recordId={record_id}, species={species_name}{shiny_suffix}, "
             f"level={level}, gender={GENDER_NAMES.get(gender, gender)}, item={item}"
         )
 
@@ -673,10 +698,11 @@ def cmd_queue_encounter(args: argparse.Namespace) -> None:
         raise ToolError(f"--slot must be 0-{PENDING_EVENT_COUNT - 1}")
 
     for save in saves:
-        write_pending_event(save, slot, 0, species.id, args.level, gender, 0, PENDING_KIND_ENCOUNTER)
+        write_pending_event(save, slot, 0, species.id, args.level, gender, 0, PENDING_KIND_ENCOUNTER, args.shiny)
         recompute_crc(save)
+    shiny_suffix = " [SHINY]" if args.shiny else ""
     print(
-        f"queued slot {slot}: wild {species.name} (species {species.id}), level {args.level}, "
+        f"queued slot {slot}: wild {species.name}{shiny_suffix} (species {species.id}), level {args.level}, "
         f"gender {GENDER_NAMES[gender]}"
     )
     if not args.dry_run:
@@ -814,8 +840,9 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
     new_id = max(existing_ids, default=0) + 1
 
     total_xp = xp_required(args.level)
+    flags = RECORD_FLAG_SHINY if args.shiny else 0
     record_bytes = (
-        struct.pack("<IIHBBBB", new_id, total_xp, species.id, args.level, gender, ORIGIN_CAUGHT, 0)
+        struct.pack("<IIHBBBB", new_id, total_xp, species.id, args.level, gender, ORIGIN_CAUGHT, flags)
         + nickname_bytes
         + b"\x00"  # byte 47: reserved, must stay 0 (see decodeRecord() in PokemonTypes.cpp)
     )
@@ -848,9 +875,10 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
         set_state_bytes(save, OFF_CAUGHT_BITS, bytes(caught))
 
         recompute_crc(save)
+        shiny_suffix = " [SHINY]" if args.shiny else ""
         print(
-            f"{save.path.name}: added record #{new_id} {species.name} (species {species.id}) at level {args.level} "
-            f"into party slot {empty_slot}"
+            f"{save.path.name}: added record #{new_id} {species.name}{shiny_suffix} (species {species.id}) at level "
+            f"{args.level} into party slot {empty_slot}"
         )
     if not args.dry_run:
         write_saves(saves, backup=not args.no_backup)
@@ -937,6 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
     queue.add_argument("--level", type=int, required=True, help="1-100")
     queue.add_argument("--gender", choices=sorted(GENDER_NAMES_REVERSE), help="default: auto-picked to satisfy the species")
     queue.add_argument("--slot", type=int, help="pending-event slot 0-2 (default: first empty slot)")
+    queue.add_argument("--shiny", action="store_true", help="mark this encounter shiny (RecordFlag::Shiny on catch)")
     queue.set_defaults(func=cmd_queue_encounter)
 
     bag = subparsers.add_parser("set-bag-item", help="set an item's bag count directly (evolution stone or bag item)")
@@ -962,6 +991,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_member.add_argument("--level", type=int, required=True, help="1-100 (sets totalXp to exactly xpRequired(level))")
     add_member.add_argument("--gender", choices=sorted(GENDER_NAMES_REVERSE), help="default: auto-picked to satisfy the species")
     add_member.add_argument("--nickname", help="default: none")
+    add_member.add_argument("--shiny", action="store_true", help="set RecordFlag::Shiny on the new record")
     add_member.set_defaults(func=cmd_add_party_member)
 
     moves = subparsers.add_parser(
