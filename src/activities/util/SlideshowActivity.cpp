@@ -25,6 +25,22 @@ bool isViewableImageFile(const std::string& filename) {
 
 bool isMacOSSidecarFile(const std::string& filename) { return filename.rfind("._", 0) == 0; }
 
+// Experiment #8 in TASKS.md's X3-grayscale-quality investigation (2026-09-18):
+// every prior attempt (#1-7) changed the refresh MODE/sequencing while the
+// panel's power rails stayed continuously on for the whole Slideshow session
+// (Sleep Cover, by contrast, calls CMD_POWER_OFF via TURN_OFF_SCREEN_AFTER_-
+// SLEEP_REFRESH after every single render). None of those tried actually
+// power-cycling the panel between images. Uc8253X3Driver::displayStart()
+// forces at least a Half-strength waveform whenever the panel is waking from
+// a powered-off state ("wake transition gets a stronger waveform"), and a
+// cold CMD_POWER_ON re-charges the boost-converter rails from scratch -
+// neither is reflected in the _redRamSynced/_grayState software flags the
+// investigation traced so far, so this is a genuinely untested variable, not
+// a re-run of #1/#7. Kept as its own named constant (not reusing Sleep's) so
+// it can be flipped back to false in one place if it doesn't help on real
+// X3 hardware - UNVERIFIED, needs the user's own hardware test.
+constexpr bool TURN_OFF_SCREEN_BETWEEN_SLIDES = true;
+
 void drawSlideshowMessage(GfxRenderer& renderer, const MappedInputManager& mappedInput, const char* message) {
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2, message);
@@ -229,8 +245,9 @@ void SlideshowActivity::renderCurrentImage() {
   // despite several rounds of fixes here that each looked well-justified on
   // code-reading alone but were confirmed NOT to resolve it on real
   // hardware. See TASKS.md for the full investigation log (what's been
-  // ruled out, what's still unconfirmed, and the two remaining directions)
-  // before picking this back up - don't re-derive it from scratch.
+  // ruled out, and experiment #8 - TURN_OFF_SCREEN_BETWEEN_SLIDES above,
+  // UNVERIFIED as of this commit) before picking this back up - don't
+  // re-derive it from scratch.
   //
   // Ghost-cleanup pass before every single image (not just periodically -
   // slideshow already waits whole minutes between images, unlike the
@@ -344,7 +361,7 @@ void SlideshowActivity::renderCurrentImage() {
       // used to (copied from BmpViewerActivity's own, never-quite-right
       // pattern). That extra step visibly washed out the real grayscale
       // image displayGrayBuffer() had just shown correctly.
-      if (success) renderer.displayGrayBuffer();
+      if (success) renderer.displayGrayBuffer(TURN_OFF_SCREEN_BETWEEN_SLIDES);
       renderer.setRenderMode(GfxRenderer::BW);
     }
     if (!success) {
@@ -450,10 +467,10 @@ void SlideshowActivity::renderCurrentImage() {
     // see the PNG branch's identical comment above for why the extra
     // redraw+cleanupGrayscaleWithFrameBuffer() step this used to have is
     // gone.
-    if (success) renderer.displayGrayBuffer();
+    if (success) renderer.displayGrayBuffer(TURN_OFF_SCREEN_BETWEEN_SLIDES);
     renderer.setRenderMode(GfxRenderer::BW);
   } else if (success) {
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH, TURN_OFF_SCREEN_BETWEEN_SLIDES);
   }
   if (!success) {
     LOG_ERR("SLDSHW", "Failed to render complete BMP image");
