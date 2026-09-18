@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.25.4] - 2026-09-18
+
+### Fixed
+
+- Found the real cause of X3 grayscale images (Photo Slideshow, and the file browser's own image viewer) looking washed out/less detailed than the identical image on X4 Pro: X3's display driver could silently skip the strong panel-clearing pass before a grayscale image, unlike X4 Pro which never needs that pass at all. X3 now always forces a proper clean pass first, matching X4 Pro's consistently-clean rendering.
+- The file browser's own "open image" viewer (separate code from Photo Slideshow) had the exact same issue and is now fixed the same way.
+
 ## [0.25.3] - 2026-09-18
 
 ### Fixed
