@@ -14,6 +14,42 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
+## Ý tưởng cải tiến/tính năng mới (2026-09-18) — CHƯA LÀM, đang cân nhắc
+
+Từ một đợt rà soát toàn bộ tính năng hiện có so với các bản Pokémon gốc (agent
+nghiên cứu, không sửa code), xếp theo độ phù hợp với giới hạn của bản mod này
+(không multiplayer/wifi, flash hạn chế, core loop dựa thời gian đọc sách). Giữ
+lại đây để tham khảo khi có thời gian, **chưa quyết định làm cái nào**.
+
+1. **Màn hình tổng kết thành tích kiểu "Trainer Card"** — trùng với mục 2.2
+   round 7 bên dưới (lifetime reading minutes, % Pokédex, số badge...). Dữ
+   liệu đã có sẵn hết trong save, chỉ cần 1 màn hình hiển thị, không cần đổi
+   save format. Rẻ nhất, "shovel-ready" nhất trong 4 ý tưởng.
+2. **Thưởng/ghi nhận khi hoàn thành Pokédex 150/151** — hiện tại phần thưởng
+   duy nhất khi bắt đủ 150 loài (chưa tính Mew) là *mở khóa Mew làm encounter
+   hoang dã* (`mewIsReady()`, `lib/Pokemon/PokemonGame.cpp:239-245`), không
+   có banner/item/danh hiệu nào khác đánh dấu thành tích này. Có thể gộp
+   thành 1 banner trong màn hình ở mục 1 thay vì làm hệ thống riêng.
+3. **Hall of Fame** — hiện khi thắng Champion (Blue) lần đầu, chụp lại đội
+   hình 6 Pokémon lúc đó (sprite, tên/nickname, level, giới tính, shiny).
+   2 phương án đã thảo luận với user:
+   - **Phương án rẻ (đúng bản gốc)**: chỉ hiện 1 lần duy nhất lúc thắng, không
+     lưu lại xem sau — chỉ cần 1 bit cờ mới (`hallOfFameCleared` hay tương
+     tự) trong `PokemonState`.
+   - **Phương án lưu lại xem sau**: cần thêm 1 side-file nhỏ snapshot 6
+     record lúc thắng (để đội hình không bị "trôi" nếu sau này đổi/thả bớt
+     Pokémon trong đội) — tốn thêm flash nhưng có giá trị lưu niệm hơn.
+   User chưa chốt chọn phương án nào — hỏi lại khi bắt đầu làm.
+4. **Vitamin tăng EV trực tiếp** (HP Up/Protein/Iron/Calcium/Carbos) — hiện
+   EV chỉ tăng qua thắng battle (`awardBattleXp`'s EV yield), chưa có item
+   nào tăng EV trực tiếp. Kỹ thuật rẻ (giống hệt pattern PP Up đã có: item id
+   mới + công thức cộng có giới hạn + gắn vào drop pool Medicine có sẵn),
+   nhưng làm loãng triết lý "EV chỉ tăng gián tiếp qua đọc sách → battle" nếu
+   không cẩn thận định vị lại (ví dụ: vẫn chỉ rơi ra từ track đọc sách, không
+   mua được). Độ ưu tiên thấp hơn 3 mục trên.
+
+---
+
 ## Round 7 (2026-09-15) — bug 1.1 ĐÃ FIX (`v0.21.2`), tính năng pity-counter ĐÃ LÀM (`v0.22.0`)
 
 - [x] **1.1 — ĐÃ FIX (`v0.21.2`)**: `useEvolutionItem()` (`lib/Pokemon/PokemonGame.cpp`)
