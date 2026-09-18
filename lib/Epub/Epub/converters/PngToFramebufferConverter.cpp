@@ -246,7 +246,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   for (int dstY = firstDstY; dstY < endDstY; dstY++) {
     ctx->lastDstY = dstY;
     int outY = ctx->config->y + dstY;
-    if (outY >= ctx->screenHeight) continue;
+    if (outY < 0 || outY >= ctx->screenHeight) continue;
 
     pw.beginRow(outY);
 

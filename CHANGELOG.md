@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-18
+
+### Added
+
+- New "Photo Slideshow" entry on the Home menu (moved to the bottom of the list, below Settings): pick any folder of BMP/PNG images, set how long each one shows (1-60 minutes), choose Fit or Crop display mode, and it auto-cycles through the folder. The folder can also still be set from the File Browser's directory long-press menu ("Set as Slideshow Folder").
+
+### Fixed
+
+- Picking a folder for the slideshow (or any other folder-picker use) on touch-only hardware now has a real "Select" button in the header - previously there was no way to confirm a folder selection by touch at all.
+- Slideshow images now render with real grayscale instead of a hard black-and-white threshold that hid 3 of the 4 dither levels and left a visible checkerboard pattern.
+- The Photo Slideshow menu row was silently missing its icon on the Lyra theme - fixed.
+
 ## [0.22.0] - 2026-09-15
 
 ### Added

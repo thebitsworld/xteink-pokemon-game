@@ -120,6 +120,7 @@ class ActivityManager {
   void goToNearbyBookReceive();
   void goToSettings(bool dismissOnUpSwipe = false);
   void goToFileBrowser(std::string path = {});
+  void goToSlideshow();
   void goToRecentBooks();
   void goToBrowser();
   bool goToOpdsServer(uint32_t serverIndex, bool networkBootReady = false);

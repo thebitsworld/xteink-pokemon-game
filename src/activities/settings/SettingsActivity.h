@@ -306,6 +306,7 @@ class SettingsActivity final : public Activity {
   void openIdleTimeThresholdPicker();
   void toggleCurrentSetting();
   void openSleepTimeoutPicker();
+  void openSlideshowIntervalPicker();
   void openLineHeightPicker();
   void openFrontlightScheduleTimePicker(uint16_t CrossPointSettings::* valuePtr, StrId titleId);
   void openStringEditor(const SettingInfo& setting);
