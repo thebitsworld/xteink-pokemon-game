@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.25.3] - 2026-09-18
+
+### Fixed
+
+- Photo Slideshow images on X3 still looked washed out/less detailed than X4 Pro even after v0.25.2's full refresh - the missing piece was the same OEM grayscale pre-conditioning pass the book reader already uses on X3, which now runs before every slideshow image too.
+- The button-hint row ("Back") at the bottom of the screen no longer shows while a slideshow image is on screen (X3/other physical-button devices) - it was eating into the image area for no benefit, since Back already works via the physical button regardless.
+
 ## [0.25.2] - 2026-09-18
 
 ### Fixed

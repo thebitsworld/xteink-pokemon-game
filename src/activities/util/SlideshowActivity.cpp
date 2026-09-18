@@ -200,26 +200,22 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
 
-  // Ghost-cleanup pass before every single image, not just periodically
-  // (unlike the reader's own displayWithRefreshCycle() cadence, which this
-  // used to mirror - see git history). The grayscale composite below only
-  // ever asks for a FAST_REFRESH-class update - fine on X4 Pro (its
-  // Absolute-mode driver path never touches a B/W base pass at all), but on
-  // X3 the grayscale driver's steady-state path always takes a weak
-  // differential "nudge" refresh against whatever it last thinks is on
-  // screen and never on its own promotes to the strong clearing waveform -
-  // and since the composite's own final cleanup step (cleanupGrayscaleWith-
-  // FrameBuffer(), below) rebases that "last known" state to a plain B/W
-  // redraw rather than the true dithered grayscale image just shown, the
-  // next image's weak nudge runs against an already-wrong baseline on top of
-  // never clearing - compounding into visible detail loss/haze every image,
-  // not just after many. A real full-panel refresh (a full waveform flash,
-  // ignores any differential baseline) before each image physically
-  // resettles the panel so this image's own grayscale composite starts
-  // clean. Slideshow already waits whole minutes between images, so the
-  // extra refresh time here is a non-issue unlike the reader's page-turn
-  // budget.
+  // Ghost-cleanup pass before every single image (not just periodically -
+  // slideshow already waits whole minutes between images, unlike the
+  // reader's page-turn latency budget). A real full-panel refresh (ignores
+  // any differential baseline) physically resettles the panel so this
+  // image's own grayscale composite starts clean.
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  // The refresh above alone was NOT enough (confirmed by testing on real
+  // X3 hardware) - the reader hit this exact same problem and its own fix
+  // is the OEM grayscale pre-conditioning pass, run once right before the
+  // gray planes are written (see EpubReaderActivity.cpp/XtcReaderActivity.cpp,
+  // same call): "X3 grayscale overlays settle better if the OEM precondition
+  // step runs before the gray planes are written." Without it the B/W base
+  // pass alone leaves the panel under-conditioned for the LSB/MSB grayscale
+  // planes that follow, which is what actually showed up as X3 images
+  // looking washed out/less detailed than the identical image on X4 Pro.
+  renderer.preconditionGrayscale();
 
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";
@@ -261,17 +257,18 @@ void SlideshowActivity::renderCurrentImage() {
     config.useExactDimensions = true;
 
     PngToFramebufferConverter converter;
-    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
     // Each pass re-decodes the PNG under a different render mode (BW, then the
     // LSB/MSB grayscale planes) rather than resuming a stream - the dither in
     // DirectPixelWriter is purely positional, so re-decoding reproduces the
     // same quantized values per plane, matching the pattern already used for
     // BMP below and for the sleep cover (SleepActivity::renderBitmapSleepScreen).
+    // No button-hint row while an image is actually showing - on non-touch
+    // devices (X3) it ate into the image area for no real benefit (Back still
+    // works via the physical button either way, loop() handles it directly).
     const auto drawFrame = [&]() {
       renderer.clearScreen();
       if (!converter.decodeToFramebuffer(filePath, renderer, config)) return false;
       renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
-      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       return true;
     };
 
@@ -345,11 +342,10 @@ void SlideshowActivity::renderCurrentImage() {
     y = (pageHeight - bitmap.getHeight()) / 2;
   }
 
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
+  // No button-hint row while an image is actually showing - see the PNG
+  // branch's identical comment above.
   const auto drawFrame = [&]() {
-    if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY)) return false;
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    return true;
+    return renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
   };
 
   renderer.clearScreen();
