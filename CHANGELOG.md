@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.25.6] - 2026-09-18
+
+### Fixed
+
+- Found the actual root cause of Photo Slideshow images looking noticeably softer/less detailed than the exact same image shown as a Sleep Screen cover: Slideshow always rendered into whatever screen orientation happened to already be active, while Sleep Screen always switches to Portrait first. A portrait-shaped photo shown in a landscape frame (or vice versa) needs far more aggressive scaling than the photo actually requires, which is what was really behind the quality loss - not the grayscale rendering pipeline changes from the past several versions. Slideshow now matches each photo's own portrait/landscape orientation before displaying it, the same way Sleep Screen already did, and restores the original orientation when you leave Slideshow.
+
 ## [0.25.5] - 2026-09-18
 
 ### Fixed

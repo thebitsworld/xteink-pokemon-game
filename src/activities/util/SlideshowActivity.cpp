@@ -36,6 +36,29 @@ void drawSlideshowMessage(GfxRenderer& renderer, const MappedInputManager& mappe
 // Minutes between auto-advances, converted to milliseconds for millis() comparisons.
 unsigned long intervalMs() { return static_cast<unsigned long>(SETTINGS.slideshowIntervalMinutes) * 60UL * 1000UL; }
 
+bool isPortraitOrientation(const GfxRenderer::Orientation orientation) {
+  return orientation == GfxRenderer::Portrait || orientation == GfxRenderer::PortraitInverted;
+}
+
+// Picks whichever of Portrait/Landscape best matches an image's own aspect
+// ratio, instead of always rendering into whatever orientation happened to
+// be active before Slideshow opened. A folder can freely mix portrait and
+// landscape photos; rendering a portrait photo into a landscape frame (or
+// vice versa) forces a much more aggressive scale-down than the photo
+// actually needs, which is what was making some images look far softer/
+// less detailed than the identical file shown via Sleep Screen's cover
+// (SleepActivity always forces Portrait first, so a portrait-shaped cover
+// image never needed this kind of scaling at all). Reuses `fallback`'s exact
+// variant when its portrait/landscape-ness already matches the image, so an
+// already-correctly-oriented screen never gets flipped to the other variant
+// (e.g. Portrait -> PortraitInverted) for no reason.
+GfxRenderer::Orientation orientationForImage(const int width, const int height,
+                                             const GfxRenderer::Orientation fallback) {
+  const bool imageIsPortrait = height > width;
+  if (imageIsPortrait == isPortraitOrientation(fallback)) return fallback;
+  return imageIsPortrait ? GfxRenderer::Portrait : GfxRenderer::LandscapeCounterClockwise;
+}
+
 }  // namespace
 
 SlideshowActivity::SlideshowActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -54,6 +77,7 @@ void SlideshowActivity::onEnter() {
 
 void SlideshowActivity::onExit() {
   Activity::onExit();
+  renderer.setOrientation(entryOrientation);
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
@@ -184,6 +208,7 @@ void SlideshowActivity::loadImageList() {
 }
 
 void SlideshowActivity::startPlayback() {
+  entryOrientation = renderer.getOrientation();
   loadImageList();
   if (images.empty()) {
     screen = Screen::Empty;
@@ -221,8 +246,6 @@ void SlideshowActivity::renderCurrentImage() {
   if (dirPath.back() != '/') dirPath += "/";
   const std::string filePath = dirPath + images[currentIndex];
 
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   const bool cropMode = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
 
   if (FsHelpers::hasPngExtension(filePath)) {
@@ -231,6 +254,13 @@ void SlideshowActivity::renderCurrentImage() {
       drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
       return;
     }
+
+    // Match this image's own aspect ratio (Portrait vs Landscape) instead of
+    // always rendering into whatever orientation was already active - see
+    // orientationForImage()'s own comment for why.
+    renderer.setOrientation(orientationForImage(dims.width, dims.height, entryOrientation));
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
 
     float scale = 1.0f;
     const float scaleX = static_cast<float>(pageWidth) / static_cast<float>(dims.width);
@@ -317,6 +347,15 @@ void SlideshowActivity::renderCurrentImage() {
     file.close();
     return;
   }
+
+  // Match this image's own aspect ratio (Portrait vs Landscape) instead of
+  // always rendering into whatever orientation was already active - see
+  // orientationForImage()'s own comment for why. Uses the bitmap's raw
+  // dimensions (before any setDitheredOutputSize() call below changes what
+  // getWidth()/getHeight() report).
+  renderer.setOrientation(orientationForImage(bitmap.getWidth(), bitmap.getHeight(), entryOrientation));
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
 
   int x, y;
   float cropX = 0, cropY = 0;

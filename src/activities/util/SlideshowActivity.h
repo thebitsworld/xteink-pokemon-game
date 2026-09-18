@@ -39,4 +39,10 @@ class SlideshowActivity final : public Activity {
   std::vector<std::string> images;  // filenames only, sorted, within slideshowFolderPath
   int currentIndex = -1;
   unsigned long lastAdvanceMs = 0;
+  // Whatever orientation the app was already in when Slideshow started -
+  // renderCurrentImage() may temporarily switch to whichever of Portrait/
+  // Landscape best matches each individual image's own aspect ratio (see its
+  // own comment for why), restored here on exit so leaving Slideshow doesn't
+  // leave Home/whatever's next stuck in a rotated orientation.
+  GfxRenderer::Orientation entryOrientation = GfxRenderer::Portrait;
 };
