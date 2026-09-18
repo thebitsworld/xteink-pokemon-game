@@ -320,6 +320,21 @@ void SlideshowActivity::renderCurrentImage() {
 
   int x, y;
   float cropX = 0, cropY = 0;
+  if (!cropMode && (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight)) {
+    // Re-dither AT the final on-screen size instead of dithering at the
+    // source resolution and letting drawBitmap() point-sample it down
+    // afterward - matches SleepActivity::renderBitmapSleepScreen()'s own
+    // FIT-mode handling (confirmed correct on X3). Scaling an
+    // already-dithered bitmap breaks the dither pattern's regularity and
+    // is what was visibly losing contrast/detail here. Only applies to
+    // Fit (no crop) - setDitheredOutputSize() resizes the whole image
+    // uniformly, it has no concept of cropping a region first.
+    const float scale = std::min(static_cast<float>(pageWidth) / static_cast<float>(bitmap.getWidth()),
+                                 static_cast<float>(pageHeight) / static_cast<float>(bitmap.getHeight()));
+    const int targetWidth = static_cast<int>(std::floor((bitmap.getWidth() - 1) * scale)) + 1;
+    const int targetHeight = static_cast<int>(std::floor((bitmap.getHeight() - 1) * scale)) + 1;
+    bitmap.setDitheredOutputSize(targetWidth, targetHeight);
+  }
   if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
     float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
     const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);

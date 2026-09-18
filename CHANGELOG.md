@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.25.5] - 2026-09-18
+
+### Fixed
+
+- Found another real cause of X3 (and general) image quality loss when a photo needs to shrink to fit the screen in Photo Slideshow and the file browser's image viewer: the image was being dithered at its original size and only scaled down afterward, which breaks the dither pattern and visibly loses contrast/detail. Both now re-dither directly at the final on-screen size instead, matching how the Sleep Screen cover image has always handled this.
+
 ## [0.25.4] - 2026-09-18
 
 ### Fixed
