@@ -620,13 +620,18 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
                                const std::function<UIIcon(int index)>& rowIcon) const {
   const auto& menuMetrics = UITheme::getInstance().getMetrics();
 
-  constexpr int maxVisibleItems = 7;
-  const int pageItems = maxVisibleItems;
+  // How many rows actually fit `rect` (the real content area HomeActivity/
+  // callers computed), not a fixed guess - a hardcoded pageItems=7 here used
+  // to silently push whatever didn't fit (e.g. a 7th Home menu item, "Photo
+  // Slideshow") off the bottom of the screen on real hardware instead of
+  // paginating, even though the scrollbar/totalPages logic right below was
+  // already fully able to handle it once given a real page size.
+  const int rowStep = menuMetrics.menuRowHeight + menuMetrics.menuSpacing;
+  const int pageItems = rowStep > 0 ? std::max(1, rect.height / rowStep) : 1;
   const int totalPages = (buttonCount + pageItems - 1) / pageItems;
 
   if (totalPages > 1) {
-    const int scrollAreaHeight =
-        maxVisibleItems * (menuMetrics.menuRowHeight + menuMetrics.menuSpacing) - menuMetrics.menuSpacing;
+    const int scrollAreaHeight = pageItems * rowStep - menuMetrics.menuSpacing;
     const int scrollBarHeight = (scrollAreaHeight * pageItems) / buttonCount;
     const int currentPage = selectedIndex / pageItems;
     const int scrollBarY = rect.y + ((scrollAreaHeight - scrollBarHeight) * currentPage) / (totalPages - 1);

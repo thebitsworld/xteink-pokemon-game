@@ -192,6 +192,7 @@ void SlideshowActivity::startPlayback() {
   }
   screen = Screen::Playing;
   lastAdvanceMs = millis();
+  imagesUntilFullRefresh = 1;  // force a clean full refresh on the very first image
   renderCurrentImage();
 }
 
@@ -199,6 +200,25 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
+
+  // Periodic ghost-cleanup pass, same cadence idiom as the reader's
+  // displayWithRefreshCycle()/SETTINGS.getRefreshFrequency() (ReaderUtils.h).
+  // Every image change below only ever asks for a FAST_REFRESH-class
+  // grayscale composite - fine on X4 Pro (its Absolute-mode driver path
+  // never touches a B/W base pass at all), but on X3 the grayscale driver's
+  // steady-state path always takes a weak differential "nudge" refresh and
+  // never on its own promotes to the strong clearing waveform, so repeated
+  // image changes visibly accumulate ghosting/haze with no natural cleanup.
+  // A plain full-panel refresh of whatever's still on screen from the
+  // previous image (a real waveform flash, same as the reader's periodic
+  // HALF_REFRESH) physically resettles the panel before the new image is
+  // composited on top.
+  if (imagesUntilFullRefresh <= 1) {
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    imagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else {
+    --imagesUntilFullRefresh;
+  }
 
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";

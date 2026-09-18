@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.25.1] - 2026-09-18
+
+### Fixed
+
+- The Home menu's "Photo Slideshow" entry was getting cut off the bottom of the screen on real hardware (default Lyra theme) instead of paginating like every other overflowing list in the app.
+- Photo Slideshow images on X3 looked noticeably less detailed than on X4 Pro, with a faint white haze building up over time, and could show ghosting from the previous image after changing pictures. X3's panel now gets a clean full refresh periodically while the slideshow is running (same cadence as the book reader), which clears this up.
+
 ## [0.25.0] - 2026-09-18
 
 ### Added
