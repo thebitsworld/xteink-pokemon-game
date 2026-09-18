@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.7] - 2026-09-18
+
+### Fixed
+
+- Photo Slideshow: X3 (Overlay-mode grayscale) now uses the same refresh mode as Sleep Screen's own cover rendering when starting a new image's grayscale pass, instead of one that skipped a real-hardware panel-conditioning step - a genuine, verified-correct difference from Sleep Screen, though it did not fully close the remaining quality gap on its own (see the project's own notes for the ongoing investigation).
+
+### Known issue
+
+- Photo Slideshow / the file browser's image viewer still render grayscale images on X3 real hardware with noticeably less detail than the identical image shown as a Sleep Screen cover. Several confirmed-correct differences from Sleep Screen's own rendering have been found and fixed along the way, but none have fully closed the gap yet - still under investigation.
+
 ## [0.25.6] - 2026-09-18
 
 ### Fixed

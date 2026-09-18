@@ -225,12 +225,20 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
 
+  // X3 real-hardware image quality: still an OPEN issue as of this commit,
+  // despite several rounds of fixes here that each looked well-justified on
+  // code-reading alone but were confirmed NOT to resolve it on real
+  // hardware. See TASKS.md for the full investigation log (what's been
+  // ruled out, what's still unconfirmed, and the two remaining directions)
+  // before picking this back up - don't re-derive it from scratch.
+  //
   // Ghost-cleanup pass before every single image (not just periodically -
   // slideshow already waits whole minutes between images, unlike the
-  // reader's page-turn latency budget). A real full-panel refresh (ignores
-  // any differential baseline) physically resettles the panel so this
-  // image's own grayscale composite starts clean.
-  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  // reader's page-turn latency budget). HALF_REFRESH, not FULL_REFRESH -
+  // SleepActivity never uses FULL_REFRESH's multi-flash GC waveform, only
+  // HALF's single-pass one; both select the same strong-clear waveform bank
+  // at the driver level, so this keeps the same physical-resettle benefit.
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   // The refresh above alone was NOT enough (confirmed by testing on real
   // X3 hardware) - the reader hit this exact same problem and its own fix
   // is the OEM grayscale pre-conditioning pass, run once right before the
@@ -308,7 +316,17 @@ void SlideshowActivity::renderCurrentImage() {
       if (absolute) {
         success = renderer.displayAbsoluteGrayscaleBase();
       } else {
-        renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+        // HALF_REFRESH, not FAST_REFRESH - matches SleepActivity's own
+        // non-absolute branch. A debug overlay on real X3 hardware confirmed
+        // supportsAbsoluteGrayscale() is FALSE there (production X3 units
+        // use Uc8253X3Driver, Overlay-only - every earlier fix attempt in
+        // this file targeted the dead Absolute-mode branch instead), and
+        // HalDisplay::displayGrayscaleBase(fallback, ...) only calls
+        // requestResync() - the driver's clean-base request - when
+        // fallback != FAST_REFRESH. This looked like the real fix by that
+        // reasoning, but was confirmed NOT to resolve the issue on real
+        // hardware - see TASKS.md, still unexplained.
+        renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
       }
       for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
         if (!success) break;
@@ -411,7 +429,9 @@ void SlideshowActivity::renderCurrentImage() {
     if (absolute) {
       success = renderer.displayAbsoluteGrayscaleBase();
     } else {
-      renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+      // HALF_REFRESH, not FAST_REFRESH - see the PNG branch's identical
+      // comment above (still unresolved on real hardware, see TASKS.md).
+      renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
     }
     for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
       if (!success) break;

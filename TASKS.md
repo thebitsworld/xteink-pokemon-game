@@ -14,6 +14,100 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
+## VẤN ĐỀ CHƯA GIẢI QUYẾT: X3 thật hiển thị ảnh grayscale kém hơn X4 Pro (2026-09-18)
+
+**Hiện trạng: vẫn CHƯA fix được, 7 lần sửa liên tiếp đều không cải thiện gì
+trên thiết bị thật.** Đọc kỹ mục này trước khi bắt đầu điều tra lại, tránh lặp
+lại các hướng đã loại trừ.
+
+**Triệu chứng**: ảnh hiển thị qua `SlideshowActivity`/`BmpViewerActivity` trên
+X3 thật trông mờ/thiếu chi tiết hơn rõ rệt so với **cùng 1 file ảnh** hiển thị
+qua Sleep Cover (`SleepActivity`, chế độ Custom) — user xác nhận trực tiếp
+bằng mắt trên máy thật, không phải do ảnh chụp/moiré.
+
+**File test cụ thể**: `images/sleep/IMG_3096.BMP` — 528×792 (dọc), 8bpp,
+palette đã dither sẵn về gần 4 mức xám gốc (`nativePalette=true`, không qua
+Atkinson/Floyd-Steinberg dithering ở decode-time).
+
+**Đã LOẠI TRỪ (đã sửa, verify bằng debug overlay/build, KHÔNG cải thiện)**:
+1. Full-refresh mỗi ảnh thay vì định kỳ (`v0.25.2`).
+2. `renderer.preconditionGrayscale()` sau full-refresh (`v0.25.3`).
+3. Driver-level: thêm `Uc8279Driver::beginGrayscale()` override ép
+   `requestResync()` cho Absolute mode — **đã revert**, vì hóa ra
+   `Uc8279Driver` không phải driver thật của X3 sản xuất (xem mục quan trọng
+   bên dưới).
+4. Bỏ bước vẽ lại B/W thừa + `cleanupGrayscaleWithFrameBuffer()` sau
+   `displayGrayBuffer()` (copy nhầm từ `BmpViewerActivity`, `SleepActivity`
+   không có bước này) — có lý, đã sửa, nhưng không cải thiện.
+5. `bitmap.setDitheredOutputSize()` để re-dither đúng kích thước đích thay vì
+   scale sau khi dither — không áp dụng được cho ảnh test này vì
+   `nativePalette=true` (không qua ditherer nào cả, hàm no-op).
+6. **Orientation mismatch** (Slideshow không ép Portrait như Sleep) — **đã
+   xác nhận bằng debug overlay là fix đúng về mặt kỹ thuật**
+   (`page=528x792 bmp=528x792 xy=0,0`, khớp 1:1 tuyệt đối, không scale/crop
+   gì cả) nhưng **user xác nhận trực tiếp trên máy vẫn thấy khác biệt rõ
+   rệt** — nghĩa là vấn đề KHÔNG chỉ là scale/orientation, còn gì đó trong
+   pipeline grayscale.
+7. `displayGrayscaleBase(HalDisplay::FAST_REFRESH)` → `HALF_REFRESH` trong
+   nhánh Overlay (không phải Absolute) — có lý luận chặt chẽ (xem mục dưới)
+   nhưng **vẫn không cải thiện**.
+
+**Phát hiện quan trọng, GIỮ NGUYÊN (đã xác nhận đúng bằng debug overlay in
+lên màn hình thật, không phải suy đoán)**:
+- `renderer.supportsAbsoluteGrayscale()` trả về **FALSE** trên X3 sản xuất
+  thật (`abs=0`). Toàn bộ nhánh `displayAbsoluteGrayscaleBase()`/Absolute
+  mode KHÔNG BAO GIỜ chạy trên thiết bị này — mọi phân tích/sửa dựa trên
+  `Uc8279Driver` (driver hỗ trợ Absolute) đều SAI MỤC TIÊU.
+- Driver thật của X3 sản xuất là **`Uc8253X3Driver`**
+  (`freeink-sdk/libs/display/FreeInkDisplay/src/driver/Uc8253X3Driver.cpp`,
+  comment tự ghi "the production X3 implementation CrossPoint ships"),
+  không phải `Uc8279Driver` ("newer production run"). Chỉ hỗ trợ
+  `GrayscaleMode::Overlay`, không hỗ trợ `Absolute`.
+- Đã trace kỹ luồng gọi thật:
+  `GfxRenderer::displayGrayscaleBase(fallback)` →
+  `HalDisplay::displayGrayscaleBase(fallback,...)` (gọi `requestResync(1)`
+  nếu `fallback != FAST_REFRESH`) →
+  `FreeInkDisplay::displayGrayscaleBase(fallback,...)` (2-arg, Overlay-only)
+  → `_driver->beginGrayscale(bus, fb, Overlay, fallback, turnOff)` (KHÔNG
+  override trong `Uc8253X3Driver`, dùng default của `PanelDriver` → gọi
+  thẳng `displayGrayscaleBase(bus, fb, fallback, turnOff)`) →
+  `Uc8253X3Driver::displayGrayscaleBase()` check
+  `cleanBaseNeeded = !_redRamSynced || _grayState.lsbValid ||
+  _forceFullSyncNext || _initialFullSyncsRemaining > 0`.
+- `Uc8253X3Driver::requestResync()` **có** set `_forceFullSyncNext = true`
+  (khác gì so với `Uc8279Driver`, đã verify code). Về lý thuyết, việc đổi
+  `FAST_REFRESH` → `HALF_REFRESH` (mục 7 ở trên) PHẢI kích hoạt
+  `cleanBaseNeeded=true` đúng như Sleep Cover — nhưng thực tế vẫn không đổi
+  gì. **Chưa tìm ra tại sao lý luận này không khớp thực tế** — có thể còn 1
+  bước nào đó reset `_forceFullSyncNext` giữa chừng, hoặc `cleanBaseNeeded`
+  không phải là biến số quyết định chất lượng ảnh cuối cùng như đã giả định.
+
+**2 hướng còn lại, CHƯA THỬ**:
+1. **Debug qua serial/USB log thật** thay vì đoán qua ảnh chụp — thêm
+   `LOG_DBG` ở tầng driver (`Uc8253X3Driver::displayGrayscaleBase()`) in ra
+   giá trị `_redRamSynced`/`_grayState.lsbValid`/`_forceFullSyncNext` ngay
+   tại thời điểm check `cleanBaseNeeded`, so sánh trực tiếp giữa lúc gọi từ
+   Sleep Cover và lúc gọi từ Slideshow trên CÙNG 1 thiết bị — cần user có
+   khả năng xem log qua cổng serial (chưa xác nhận có hay không).
+2. **Bỏ hẳn grayscale, dùng B/W dither thuần cho Slideshow** — mirror đúng
+   cơ chế **Contrast filter** của Sleep Cover
+   (`SLEEP_SCREEN_COVER_FILTER::BLACK_AND_WHITE`/`INVERTED_BLACK_AND_WHITE`,
+   `SleepActivity.cpp:705-717`) — filter này set `hasGreyscale=false`, bỏ
+   HOÀN TOÀN pipeline grayscale (kể cả `cleanBaseNeeded` logic đang nghi
+   vấn), chỉ `displayBuffer(HALF_REFRESH)` ảnh B/W thường. User đã xác nhận
+   ban đầu filter này "hiển thị khá tốt" ở Sleep Cover. Đánh đổi: mất 4 mức
+   xám, ảnh sẽ "gắt" hơn kiểu B/W thay vì mượt như grayscale thật — nhưng là
+   hướng PRAGMATIC, không cần suy luận thêm về pipeline vì né được hoàn
+   toàn, chưa triển khai.
+
+**Trạng thái code hiện tại (đã commit)**: giữ nguyên tất cả các fix mục 1,
+2, 4, 5, 6, 7 ở trên (không hại gì, có thể vẫn hữu ích một phần, và fix #6
+orientation là cải tiến đúng đắn dù chưa giải quyết hết vấn đề chính) + đã
+sửa comment trong code để không còn khẳng định sai "đây là fix đúng" ở
+những chỗ đã chứng minh không đúng.
+
+---
+
 ## Ý tưởng cải tiến/tính năng mới (2026-09-18) — CHƯA LÀM, đang cân nhắc
 
 Từ một đợt rà soát toàn bộ tính năng hiện có so với các bản Pokémon gốc (agent
