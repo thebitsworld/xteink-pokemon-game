@@ -100,6 +100,54 @@ lên màn hình thật, không phải suy đoán)**:
    hướng PRAGMATIC, không cần suy luận thêm về pipeline vì né được hoàn
    toàn, chưa triển khai.
 
+**Experiment #8 (2026-09-18) — ĐÃ CODE, CHƯA VERIFY TRÊN MÁY THẬT**: hướng
+mới, từ câu hỏi trực tiếp của user "liệu do sleep tắt điện màn hình còn
+slideshow vẫn cấp điện?". Đọc kỹ
+`freeink-sdk/libs/display/FreeInkDisplay/src/driver/Uc8253X3Driver.cpp`
+(driver thật của X3, xem "Phát hiện quan trọng" ở trên) phát hiện:
+- `_isScreenOn` là state riêng, tách biệt hoàn toàn khỏi
+  `_redRamSynced`/`_grayState.lsbValid`/`_forceFullSyncNext`/
+  `_initialFullSyncsRemaining` (những biến quyết định `cleanBaseNeeded`/
+  `doFullSync` mà audit trước đã trace) — CMD_POWER_OFF/CMD_POWER_ON tự nó
+  KHÔNG làm thay đổi bất kỳ biến nào trong số đó. Vì vậy giả thuyết "tắt
+  điện ép full-sync" qua đúng con đường đã trace trước đây là SAI.
+- NHƯNG có 1 chỗ khác, chưa ai để ý: `Uc8253X3Driver::displayStart()` dòng
+  166-168 — `if (!_isScreenOn && !turnOff) { mode = RefreshMode::Half; }`
+  ("wake transition gets a stronger waveform") — mỗi lần panel đang tắt
+  điện và được bật lại để vẽ, driver TỰ ÉP waveform tối thiểu Half bất kể
+  caller yêu cầu gì. Đây là chỗ DUY NHẤT trạng thái nguồn điện thật sự ảnh
+  hưởng tới chất lượng refresh trong code.
+- `SleepActivity` luôn gọi `displayBuffer`/`displayGrayBuffer`/
+  `displayGrayscaleBase` với `turnOff=true` (hằng số
+  `TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH`) → panel tắt điện ngay sau khi vẽ
+  cover. `SlideshowActivity` thì NGƯỢC LẠI — mọi lời gọi hiển thị trước đây
+  đều dùng `turnOff` mặc định `false` (xem chữ ký `HalDisplay.h`), nghĩa là
+  panel giữ nguyên trạng thái "có điện" liên tục suốt cả phiên slideshow
+  (có thể hàng chục phút tới hàng giờ nếu user để chạy lâu), không bao giờ
+  power-cycle giữa các ảnh — khác biệt code-level THẬT, chưa từng được thử
+  nghiệm bởi 7 lần sửa trước (tất cả đều chỉ đổi refresh MODE/trình tự,
+  không đụng gì tới nguồn điện panel).
+- **Lưu ý quan trọng**: theo trace ở trên, bản thân lần vẽ cover CỦA SLEEP
+  không phải lúc nào cũng đến từ trạng thái `_isScreenOn=false` (thường vẫn
+  đang bật vì mới đọc sách xong) — nên dòng force-Half ở trên có thể KHÔNG
+  áp dụng trực tiếp cho chính lần vẽ cover, mà áp dụng cho màn hình kế tiếp
+  sau khi máy thức dậy. Vì vậy đây vẫn là **giả thuyết cần verify bằng máy
+  thật**, không phải kết luận chắc chắn từ đọc code.
+- **Đã code**: thêm hằng số `TURN_OFF_SCREEN_BETWEEN_SLIDES = true` trong
+  `SlideshowActivity.cpp`, áp dụng vào 3 lời gọi hiển thị CUỐI CÙNG của mỗi
+  ảnh (grayscale PNG, grayscale BMP, B/W-only BMP fallback) — mirror đúng
+  pattern `TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH` của Sleep Cover: mỗi ảnh
+  giờ tự power-cycle (bật điện đầu ảnh nhờ ghost-cleanup pass đã có sẵn →
+  tắt điện cuối ảnh) giống hệt 1 lần vẽ Sleep Cover, thay vì giữ điện suốt
+  phiên. Đánh đổi: mỗi lần chuyển ảnh chậm hơn 1 chút (thời gian
+  CMD_POWER_ON/CMD_POWER_OFF + `waitBusy`) — chấp nhận được vì slideshow đã
+  chờ hàng phút giữa các ảnh.
+- **CHƯA build/flash/test trên máy thật** — cần user tự build
+  `pio run -e pokemon-x3`, flash, chạy Slideshow so sánh lại với Sleep Cover
+  trên đúng ảnh `IMG_3096.BMP`. Nếu KHÔNG cải thiện, set
+  `TURN_OFF_SCREEN_BETWEEN_SLIDES = false` để revert nhanh (1 chỗ duy nhất)
+  và thêm vào danh sách "đã loại trừ" phía trên với ghi chú kết quả.
+
 **Trạng thái code hiện tại (đã commit)**: giữ nguyên tất cả các fix mục 1,
 2, 4, 5, 6, 7 ở trên (không hại gì, có thể vẫn hữu ích một phần, và fix #6
 orientation là cải tiến đúng đắn dù chưa giải quyết hết vấn đề chính) + đã
