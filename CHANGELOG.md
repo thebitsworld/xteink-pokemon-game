@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.25.4] - 2026-09-18
+
+### Fixed
+
+- Found the real cause of X3 grayscale images (Photo Slideshow, and the file browser's own image viewer) looking washed out/less detailed than the identical image on X4 Pro: both were redrawing a flat black-and-white version of the image right after the real grayscale image was already shown correctly, visibly dulling it. That extra step is now gone, matching how the (already correct) Sleep Screen cover rendering has always worked.
+
 ## [0.25.3] - 2026-09-18
 
 ### Fixed

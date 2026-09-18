@@ -290,12 +290,14 @@ void SlideshowActivity::renderCurrentImage() {
         else
           renderer.copyGrayscaleMsbBuffers();
       }
+      // Stop right here, matching SleepActivity::renderBitmapSleepScreen()
+      // (confirmed to render correctly on X3) - do NOT redraw a plain B/W
+      // frame and call cleanupGrayscaleWithFrameBuffer() afterward like this
+      // used to (copied from BmpViewerActivity's own, never-quite-right
+      // pattern). That extra step visibly washed out the real grayscale
+      // image displayGrayBuffer() had just shown correctly.
+      if (success) renderer.displayGrayBuffer();
       renderer.setRenderMode(GfxRenderer::BW);
-      if (success) {
-        renderer.displayGrayBuffer();
-        success = drawFrame();
-        if (success) renderer.cleanupGrayscaleWithFrameBuffer();
-      }
     }
     if (!success) {
       drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
@@ -370,13 +372,12 @@ void SlideshowActivity::renderCurrentImage() {
       else
         renderer.copyGrayscaleMsbBuffers();
     }
+    // Stop right here, matching SleepActivity::renderBitmapSleepScreen() -
+    // see the PNG branch's identical comment above for why the extra
+    // redraw+cleanupGrayscaleWithFrameBuffer() step this used to have is
+    // gone.
     if (success) renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
-    if (success) {
-      renderer.clearScreen();
-      success = bitmap.rewindToData() == BmpReaderError::Ok && drawFrame();
-      if (success) renderer.cleanupGrayscaleWithFrameBuffer();
-    }
   } else if (success) {
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   }

@@ -214,14 +214,16 @@ void BmpViewerActivity::onEnter() {
           else
             renderer.copyGrayscaleMsbBuffers();
         }
+        // Stop right here, matching SleepActivity::renderBitmapSleepScreen()
+        // (confirmed to render correctly on X3) - do NOT redraw a plain B/W
+        // frame and call cleanupGrayscaleWithFrameBuffer() afterward like
+        // this used to ("popups need the original B/W image" - but
+        // doSetSleepCover(), the only popup flow reachable from here, always
+        // calls onEnter() again right after anyway, which redraws this whole
+        // sequence from scratch). That extra step visibly washed out the
+        // real grayscale image displayGrayBuffer() had just shown correctly.
         if (success) renderer.displayGrayBuffer();
         renderer.setRenderMode(GfxRenderer::BW);
-        // Popups need the original B/W image, not the last gray selector plane.
-        if (success) {
-          renderer.clearScreen();
-          success = bitmap.rewindToData() == BmpReaderError::Ok && drawFrame();
-          if (success) renderer.cleanupGrayscaleWithFrameBuffer();
-        }
       } else if (success) {
         renderer.displayBuffer(HalDisplay::FAST_REFRESH);
       }
