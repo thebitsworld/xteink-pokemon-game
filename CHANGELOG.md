@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-18
+
+### Added
+
+- The Pokémon menu and the Photo Slideshow folder picker are now available in all 27 languages this app already supports, not just English. Pokémon/move/item names themselves stay in English (matching how the rest of the game already works), but every button, message, and prompt around them is now translated.
+
 ## [0.23.0] - 2026-09-18
 
 ### Added
