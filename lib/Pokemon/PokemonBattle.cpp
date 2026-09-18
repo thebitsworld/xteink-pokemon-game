@@ -1745,6 +1745,13 @@ void rollIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& outp
   }
 }
 
+void rollShinyIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& output) {
+  for (uint8_t& iv : output) {
+    uint32_t roll = 0;
+    iv = (rollBelow(random, 4U, roll) ? static_cast<uint8_t>(roll) : 0) + 12U;
+  }
+}
+
 uint8_t maxPpFor(const uint8_t basePp, uint8_t ppUpCount) {
   ppUpCount = std::min<uint8_t>(ppUpCount, 3U);
   const uint32_t bonus = (static_cast<uint32_t>(basePp) / 5U) * ppUpCount;

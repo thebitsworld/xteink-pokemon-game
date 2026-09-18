@@ -112,6 +112,12 @@ struct BattleCombatant {
   // opponent (whose fixed roster carries no gender of its own) gets one
   // rolled fresh via chooseGenderForSpecies() at battle setup.
   Gender gender = Gender::Unknown;
+  // Display-only, same idea as gender directly above: the player's side
+  // copies it from PokemonRecord's RecordFlag::Shiny bit, a wild opponent
+  // copies it from the PendingEvent's already-rolled isShiny, a gym/Elite
+  // Four/Champion trainer never sets it (their fixed roster has no
+  // persisted record to be shiny at all).
+  bool isShiny = false;
   // Gen 1 stat stages, -6..+6, reset to 0 whenever a fresh BattleCombatant is
   // built (a new battle, or either side switching) - matching how the real
   // games never carry stat stages across a switch/battle boundary. Never
@@ -507,6 +513,11 @@ uint16_t battleWorkingStat(uint8_t baseStat, uint8_t level, uint8_t iv = 0, uint
 // from before this mechanic existed) and for a wild encounter's own
 // BattleCombatant at fight time (not persisted unless the catch succeeds).
 void rollIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& output);
+
+// Same idea, but each IV rolls in 12-15 instead of 0-15 - used only for a
+// shiny Pokemon (see RecordFlag::Shiny), whose whole appeal is being both
+// visually and statistically special.
+void rollShinyIvSet(const RandomSource& random, std::array<uint8_t, STAT_COUNT>& output);
 
 // PP Up: a real Gen 1 item that permanently raises one move slot's max PP by
 // 1/5 of its base PP (floored) per use, up to 3 uses. `basePp` is the move's
