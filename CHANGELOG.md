@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.25.8] - 2026-09-18
+
+### Changed
+
+- Photo Slideshow (X3): the panel now fully powers off after each image and powers back on for the next, matching exactly how Sleep Screen's own cover rendering has always worked. This is a trial to test whether the panel staying continuously powered for the whole Slideshow session (instead of power-cycling like Sleep Screen) is part of why Slideshow images still look less detailed than the identical image shown as a Sleep Screen cover - not yet confirmed on real hardware, this build exists to test that specific theory.
+
+### Known issue
+
+- Photo Slideshow / the file browser's image viewer still render grayscale images on X3 real hardware with noticeably less detail than the identical image shown as a Sleep Screen cover. Several confirmed-correct differences from Sleep Screen's own rendering have been found and fixed along the way, but none have fully closed the gap yet - still under investigation.
+
 ## [0.25.7] - 2026-09-18
 
 ### Fixed
