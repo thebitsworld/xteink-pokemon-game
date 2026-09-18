@@ -37,7 +37,9 @@ void encodePendingEvent(const PendingEvent& event, uint8_t* bytes) {
   write32(bytes, 0, event.recordId);
   write16(bytes, 4, event.speciesId);
   bytes[6] = event.level;
-  bytes[7] = static_cast<uint8_t>(event.gender);
+  // Gender only ever holds values 0-3 (see the Gender enum), so bit 7 of this
+  // byte is free - reused for isShiny rather than growing PENDING_EVENT_BYTES.
+  bytes[7] = static_cast<uint8_t>(event.gender) | (event.isShiny ? 0x80U : 0U);
   bytes[8] = static_cast<uint8_t>(event.item);
   bytes[9] = static_cast<uint8_t>(event.kind);
 }
@@ -47,7 +49,8 @@ PendingEvent decodePendingEvent(const uint8_t* bytes) {
   event.recordId = read32(bytes, 0);
   event.speciesId = read16(bytes, 4);
   event.level = bytes[6];
-  event.gender = static_cast<Gender>(bytes[7]);
+  event.gender = static_cast<Gender>(bytes[7] & 0x7FU);
+  event.isShiny = (bytes[7] & 0x80U) != 0;
   event.item = static_cast<EvolutionItem>(bytes[8]);
   event.kind = static_cast<PendingEventKind>(bytes[9]);
   return event;

@@ -52,6 +52,7 @@ enum class Origin : uint8_t {
 
 enum class RecordFlag : uint8_t {
   EvolutionPromptsDisabled = 1U << 0U,
+  Shiny = 1U << 1U,
 };
 
 enum class EvolutionItem : uint8_t {
@@ -97,6 +98,10 @@ struct PokemonRecord {
   bool operator==(const PokemonRecord&) const = default;
 };
 
+constexpr bool isRecordShiny(const PokemonRecord& record) {
+  return (record.flags & recordFlag(RecordFlag::Shiny)) != 0;
+}
+
 struct LevelXpProgress {
   uint8_t level = 1;
   uint32_t earned = 0;
@@ -112,6 +117,13 @@ struct PendingEvent {
   Gender gender = Gender::Unknown;
   EvolutionItem item = EvolutionItem::None;
   PendingEventKind kind = PendingEventKind::None;
+  // Only meaningful for kind == Encounter - rolled once, right after the
+  // encounter is created (see PokemonService::creditMinutes()), so the shiny
+  // star is already visible on the "Wild X appeared!" screen, before the
+  // player even chooses Fight. Packed into a spare bit of the wire-format
+  // gender byte rather than growing PENDING_EVENT_BYTES - see
+  // encodePendingEvent()/decodePendingEvent().
+  bool isShiny = false;
 
   bool operator==(const PendingEvent&) const = default;
 };

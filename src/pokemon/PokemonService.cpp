@@ -14,6 +14,11 @@
 namespace pokemon {
 namespace {
 
+// 1/64 chance a wild encounter is shiny - independent per encounter, no pity
+// gate (see creditMinutes()'s own comment for why this is rolled here rather
+// than inside the pure PokemonGame.cpp encounter-creation chain).
+constexpr uint32_t SHINY_CHANCE_DENOMINATOR = 64;
+
 #if !defined(POKEMON_SERVICE_HOST_TEST)
 uint32_t deviceRandomBelow(void*, const uint32_t upperExclusive) {
   if (upperExclusive == 0) return 0;
@@ -764,7 +769,7 @@ void PokemonService::clearPendingIvEvRoll(const uint32_t recordId) {
   }
 }
 
-IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId) {
+IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId, const bool shiny) {
   if (recordId == 0) return {};
   if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) {
     clearPendingIvEvRoll(recordId);
@@ -775,6 +780,8 @@ IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId) {
   fresh.recordId = recordId;
   if (const IvEvEntry* pending = findPendingIvEvRoll(recordId); pending != nullptr) {
     fresh = *pending;  // reuse the same not-yet-persisted roll rather than rolling a new one
+  } else if (shiny) {
+    rollShinyIvSet(random_, fresh.iv);
   } else {
     rollIvSet(random_, fresh.iv);
   }
@@ -947,9 +954,13 @@ Gender PokemonService::rollGenderFor(const uint16_t speciesId) {
   return gender;
 }
 
-std::array<uint8_t, STAT_COUNT> PokemonService::rollWildIv() {
+std::array<uint8_t, STAT_COUNT> PokemonService::rollWildIv(const bool shiny) {
   std::array<uint8_t, STAT_COUNT> iv{};
-  rollIvSet(random_, iv);
+  if (shiny) {
+    rollShinyIvSet(random_, iv);
+  } else {
+    rollIvSet(random_, iv);
+  }
   return iv;
 }
 
@@ -1083,6 +1094,24 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
   const CreditResult result =
       applyCreditedMinutes(state, leader, minutes, bookProgressPercent, ownedEvolutionNeeds, random_);
   if (result.status != CreditStatus::Applied) return false;
+
+  // Shininess is rolled here, via this service's own random_, rather than
+  // inside applyCreditedMinutes()/finalizeEncounter() themselves - those pure
+  // functions are exercised by PokemonGameTest.cpp with exact, hand-scripted
+  // random-draw sequences, and adding a draw there would break every one of
+  // them for no real behavioral benefit. Safe to patch in after the fact: the
+  // pending-event queue is a compacted array (enqueuePendingEvent() always
+  // appends at pendingEventCount()), so the just-created Encounter is
+  // reliably the entry at index pendingEventCount(state) - 1.
+  if (result.generatedEvent == PendingEventKind::Encounter) {
+    const size_t pendingCount = pendingEventCount(state);
+    if (pendingCount > 0 && random_.below != nullptr) {
+      PendingEvent& justQueued = state.pendingEvents[pendingCount - 1];
+      if (justQueued.kind == PendingEventKind::Encounter) {
+        justQueued.isShiny = random_.below(random_.context, SHINY_CHANCE_DENOMINATOR) == 0;
+      }
+    }
+  }
 
   RecordMutation mutation{};
   if (leader.totalXp != originalLeaderXp) {

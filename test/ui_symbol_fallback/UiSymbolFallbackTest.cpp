@@ -11,6 +11,7 @@ namespace {
 constexpr uint32_t POWER = 0x23FB;
 constexpr uint32_t FEMALE = 0x2640;
 constexpr uint32_t MALE = 0x2642;
+constexpr uint32_t STAR = 0x2605;
 const EpdFont symbols(&ui_symbols_10);
 const EpdFont smallRegular(&inter_10_regular), smallBold(&inter_10_bold);
 const EpdFont largeRegular(&inter_12_regular), largeBold(&inter_12_bold);
@@ -18,17 +19,19 @@ const EpdFontFamily small(&smallRegular, &smallBold, nullptr, nullptr, &symbols)
 const EpdFontFamily large(&largeRegular, &largeBold, nullptr, nullptr, &symbols);
 }  // namespace
 
-TEST(UiSymbolFallback, ContainsExactlyThreeGlyphs) {
+TEST(UiSymbolFallback, ContainsExactlyFourGlyphs) {
   // Power (pre-existing) + the male/female gender glyphs (added for the
   // Pokemon Party row's gender indicator - see genderAbbrev() in
-  // PokemonActivity.cpp) - all three come from the same NotoSansSymbols
-  // font stack, so they share this one small fallback glyph set instead of
+  // PokemonActivity.cpp) + the shiny star (added for RecordFlag::Shiny - see
+  // genderShinySuffix()) - all four come from the same NotoSansSymbols font
+  // stack, so they share this one small fallback glyph set instead of
   // needing a font per codepoint.
-  EXPECT_EQ(sizeof(ui_symbols_10Glyphs) / sizeof(ui_symbols_10Glyphs[0]), 3u);
-  EXPECT_EQ(sizeof(ui_symbols_10Intervals) / sizeof(ui_symbols_10Intervals[0]), 3u);
+  EXPECT_EQ(sizeof(ui_symbols_10Glyphs) / sizeof(ui_symbols_10Glyphs[0]), 4u);
+  EXPECT_EQ(sizeof(ui_symbols_10Intervals) / sizeof(ui_symbols_10Intervals[0]), 4u);
   EXPECT_TRUE(symbols.hasCodepoint(POWER));
   EXPECT_TRUE(symbols.hasCodepoint(FEMALE));
   EXPECT_TRUE(symbols.hasCodepoint(MALE));
+  EXPECT_TRUE(symbols.hasCodepoint(STAR));
   EXPECT_FALSE(symbols.hasCodepoint('A'));
 }
 

@@ -222,8 +222,9 @@ class PokemonService {
   // at fight time - only becomes permanent (via ensureIvEv(), rolled
   // independently) if the catch succeeds. See
   // docs/development/pokemon-iv-ev-plan.md for why these two rolls are
-  // deliberately not the same one.
-  std::array<uint8_t, STAT_COUNT> rollWildIv();
+  // deliberately not the same one. `shiny` selects rollShinyIvSet() (12-15
+  // per stat) instead of the normal 0-15 roll.
+  std::array<uint8_t, STAT_COUNT> rollWildIv(bool shiny = false);
   // Grants battleVictoryXp(opponentLevel, isTrainerBattle) to recordId (the
   // Pokemon active when the battle was won), capped at MAXIMUM_TOTAL_XP same
   // as reading credit, and queues any move newly available from the level(s)
@@ -248,8 +249,12 @@ class PokemonService {
   // max HP flickering between values on every redraw once the store's
   // write could genuinely fail under real-device heap pressure (see
   // CHANGELOG v0.18.x). Persistence itself is still retried each call, so
-  // it catches up to disk as soon as a write succeeds.
-  IvEvEntry ensureIvEv(uint32_t recordId);
+  // it catches up to disk as soon as a write succeeds. `shiny` (pass
+  // isRecordShiny(record)) selects rollShinyIvSet() for a brand-new roll
+  // instead of the normal one - only matters the very first time a shiny
+  // record's IV/EV is looked up, since every later call finds the already-
+  // persisted entry regardless of this flag.
+  IvEvEntry ensureIvEv(uint32_t recordId, bool shiny = false);
   // Read-only: never rolls or persists anything, for display/HP-calc paths
   // that must not write just from being looked at (mirrors peekBattleMoves()
   // vs loadBattleEntry()). Returns a zero IV/EV entry if none exists yet -

@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-18
+
+### Added
+
+- Wild Pokémon you've already caught before now show a small Poké Ball icon on the encounter screen, so you can tell at a glance whether this one would be a new catch or a duplicate.
+- Shiny Pokémon: a rare (1/64) chance any wild encounter is shiny, marked with a ★ next to its name everywhere it appears (encounter screen, battle, Summary, Party, PC Box). Shiny Pokémon also roll noticeably higher IVs (12-15 per stat instead of the usual 0-15).
+
 ## [0.24.0] - 2026-09-18
 
 ### Added

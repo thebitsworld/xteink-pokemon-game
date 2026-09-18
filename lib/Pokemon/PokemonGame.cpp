@@ -222,6 +222,14 @@ bool finalizeEncounter(PokemonState& state, const uint16_t speciesId, const uint
   Gender gender = Gender::Unknown;
   if (species == nullptr || !chooseGender(*species, random, gender)) return false;
 
+  // Shininess is deliberately NOT rolled here via `random` - this whole call
+  // chain (applyCreditedMinutes -> processEncounterCheck -> createEncounter
+  // -> finalizeEncounter) is exercised by PokemonGameTest.cpp with exact,
+  // hand-scripted random-draw sequences; adding a draw here would need every
+  // one of those sequences re-threaded by hand for no behavioral benefit.
+  // PokemonService::creditMinutes() rolls it separately (its own real
+  // RandomSource, not this pure function's) and patches the just-enqueued
+  // PendingEvent afterward - see its own comment for why that's safe.
   const PendingEvent event{0, speciesId, level, gender, EvolutionItem::None, PendingEventKind::Encounter};
   if (!enqueuePendingEvent(state, event) || !markSpecies(state.seenSpecies, speciesId)) return false;
   refreshDashboardNotice(state);
@@ -700,6 +708,7 @@ bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, const En
     caught.caughtLevel = pending.level;
     caught.gender = pending.gender;
     caught.origin = Origin::Caught;
+    if (pending.isShiny) caught.flags |= recordFlag(RecordFlag::Shiny);
     if (!setNickname(caught, nickname == nullptr ? "" : nickname) || !validateRecord(caught) ||
         !markSpecies(stateCandidate.seenSpecies, caught.speciesId) ||
         !markSpecies(stateCandidate.caughtSpecies, caught.speciesId)) {

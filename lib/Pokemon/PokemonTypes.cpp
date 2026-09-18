@@ -10,7 +10,8 @@
 namespace pokemon {
 namespace {
 
-constexpr uint8_t ALLOWED_RECORD_FLAGS = recordFlag(RecordFlag::EvolutionPromptsDisabled);
+constexpr uint8_t ALLOWED_RECORD_FLAGS =
+    recordFlag(RecordFlag::EvolutionPromptsDisabled) | recordFlag(RecordFlag::Shiny);
 
 bool isContinuation(const uint8_t byte) { return (byte & 0xC0U) == 0x80U; }
 

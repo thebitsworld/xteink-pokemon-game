@@ -75,6 +75,38 @@ const char* genderAbbrev(const pokemon::Gender gender) {
   return "";
 }
 
+// A small hand-drawn Poké Ball silhouette - GfxRenderer has no circle
+// primitive and no bundled font glyph looks like one, so this approximates
+// the classic black-top/white-bottom-with-center-button shape using only
+// fillRect/drawRect. Used on the wild-encounter screen to flag a species
+// that's already been caught before (see isSpeciesMarked(caughtSpecies)).
+void drawCaughtBallIcon(const GfxRenderer& renderer, const int x, const int y, const int size) {
+  const int half = size / 2;
+  renderer.fillRect(x, y, size, half, true);
+  renderer.drawRect(x, y, size, size, true);
+  const int buttonSize = std::max(3, size / 3);
+  const int buttonX = x + (size - buttonSize) / 2;
+  const int buttonY = y + half - buttonSize / 2;
+  renderer.fillRect(buttonX, buttonY, buttonSize, buttonSize, false);
+  renderer.drawRect(buttonX, buttonY, buttonSize, buttonSize, true);
+}
+
+// Compact "♂★"/"★"/"♂"/"" suffix combining genderAbbrev() with a shiny star
+// (U+2605, added to ui_symbols_10 alongside the gender glyphs), for the
+// list-row idiom that measures one suffix string's width and draws it right
+// after the name (renderPartyRowHealth(), renderPartyRowMachineCapability(),
+// the Pc/BattleSwitch row labels).
+void genderShinySuffix(char* buffer, const size_t size, const pokemon::Gender gender, const bool isShiny) {
+  const char* gender_str = genderAbbrev(gender);
+  if (!isShiny) {
+    snprintf(buffer, size, "%s", gender_str);
+  } else if (gender_str[0] == '\0') {
+    snprintf(buffer, size, "★");
+  } else {
+    snprintf(buffer, size, "%s ★", gender_str);
+  }
+}
+
 const char* typeName(const pokemon::PokemonType type) {
   switch (type) {
     case pokemon::PokemonType::Normal:
@@ -921,7 +953,7 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
       // trainer's own side-wide Reflect/Light Screen/Mist must survive this
       // (see setupBattleOpponent()'s preserveSideEffects doc comment).
       setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId),
-                          /*preserveSideEffects=*/true);
+                          /*isShiny=*/false, /*preserveSideEffects=*/true);
       snprintf(buffer, size, tr(STR_POKEMON_SENT_OUT), leaderName, speciesName(battleOpponent_.speciesId));
       return true;
     }
@@ -1064,8 +1096,9 @@ bool PokemonActivity::setupBattlePlayer(const int slot, const bool preserveSideE
   battlePlayer_.mistActive = carryMist;
   battlePlayer_.speciesId = fighter.speciesId;
   battlePlayer_.gender = fighter.gender;
+  battlePlayer_.isShiny = pokemon::isRecordShiny(fighter);
   battlePlayer_.level = pokemon::levelForXp(fighter.totalXp);
-  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(fighter.recordId);
+  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(fighter.recordId, battlePlayer_.isShiny);
   battlePlayer_.iv = ivEv.iv;
   battlePlayer_.ev = ivEv.ev;
   const pokemon::BaseStats* playerStats = pokemon::baseStatsFor(fighter.speciesId);
@@ -1105,7 +1138,7 @@ bool PokemonActivity::setupBattlePlayer(const int slot, const bool preserveSideE
 
 void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_t level,
                                           const std::span<const uint8_t> fixedMoves, const pokemon::Gender gender,
-                                          const bool preserveSideEffects) {
+                                          const bool isShiny, const bool preserveSideEffects) {
   // Mirrors setupBattlePlayer()'s own trap-release check, roles reversed: if
   // the outgoing opponent Pokemon (fainted, or an AI voluntarily switching
   // mid-battle - a real mechanic since v0.17.0) was holding the player in a
@@ -1132,12 +1165,13 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
   battleOpponent_.speciesId = speciesId;
   battleOpponent_.level = level;
   battleOpponent_.gender = gender;
+  battleOpponent_.isShiny = isShiny;
   if (fixedMoves.empty()) {
     // Wild encounter: a fresh, unpersisted IV roll for this fight - if the
     // catch succeeds, the new record's IVs are rolled independently via
     // service_.ensureIvEv() rather than reusing this exact roll (a
     // deliberate simplification - see docs/development/pokemon-iv-ev-plan.md).
-    battleOpponent_.iv = service_.rollWildIv();
+    battleOpponent_.iv = service_.rollWildIv(isShiny);
   } else {
     // Gym/Elite Four/Champion trainer: fixed "perfect" IVs, no EVs - matches
     // the real games' own "trainer Pokemon have high, fixed DVs" convention,
@@ -1177,7 +1211,7 @@ void PokemonActivity::setupBattleOpponent(const uint16_t speciesId, const uint8_
 bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
   const int slot = firstUsablePartySlot();
   if (slot < 0 || !setupBattlePlayer(slot)) return false;
-  setupBattleOpponent(pending.speciesId, pending.level, {}, pending.gender);
+  setupBattleOpponent(pending.speciesId, pending.level, {}, pending.gender, pending.isShiny);
   gymChallengeIndex_ = 0;
   forcedBattleSwitch_ = false;
   battleRunAttempts_ = 0;
@@ -1384,7 +1418,7 @@ void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
     // Screen/Mist must survive this (see setupBattleOpponent()'s
     // preserveSideEffects doc comment).
     setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId),
-                        /*preserveSideEffects=*/true);
+                        /*isShiny=*/false, /*preserveSideEffects=*/true);
     const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
     snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
              speciesName(battleOpponent_.speciesId));
@@ -2660,9 +2694,9 @@ void PokemonActivity::buildRows() {
           break;
         }
         const auto& record = snapshot_.party[index];
-        char value[24];
-        snprintf(value, sizeof(value), "%s %u  %s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
-                 genderText(record.gender));
+        char value[32];
+        snprintf(value, sizeof(value), "%s %u  %s%s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
+                 genderText(record.gender), pokemon::isRecordShiny(record) ? " ★" : "");
         row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), value);
         break;
       }
@@ -2775,10 +2809,11 @@ void PokemonActivity::buildRows() {
         // - a value slot there was cutting off longer Pokemon names. Gender
         // is appended straight onto the label instead, right after the
         // name, matching Party/Battle's placement.
-        char label[40];
+        char genderSuffix[8];
+        genderShinySuffix(genderSuffix, sizeof(genderSuffix), record.gender, pokemon::isRecordShiny(record));
+        char label[48];
         snprintf(label, sizeof(label), "%s %s",
-                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
-                 genderAbbrev(record.gender));
+                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), genderSuffix);
         row(local, label);
         snprintf(values_[local].data(), values_[local].size(), "%s %u", tr(STR_POKEMON_LEVEL),
                  pokemon::levelForXp(record.totalXp));
@@ -2963,10 +2998,11 @@ void PokemonActivity::buildRows() {
         // (showsPartyHealthRows()) instead of a plain "HP %u" value text -
         // the value slot shows Level instead, matching Party's row. Gender
         // is appended onto the label instead, right after the name.
-        char label[40];
+        char genderSuffix[8];
+        genderShinySuffix(genderSuffix, sizeof(genderSuffix), record.gender, pokemon::isRecordShiny(record));
+        char label[48];
         snprintf(label, sizeof(label), "%s %s",
-                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
-                 genderAbbrev(record.gender));
+                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), genderSuffix);
         char value[16];
         snprintf(value, sizeof(value), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
         row(local, label, value);
@@ -3249,7 +3285,10 @@ void PokemonActivity::renderFocused() {
     pokemon::drawPokemonSpeciesArt(renderer, record.speciesId, true, Rect{artX, artY, 120, 90});
     const int textX = landscape ? 178 : 28;
     int y = landscape ? contentTop + 8 : artY + 106;
-    renderer.drawText(UI_12_FONT_ID, textX, y, speciesName(record.speciesId), true, EpdFontFamily::BOLD);
+    const bool shiny = pokemon::isRecordShiny(record);
+    char nameLine[48];
+    snprintf(nameLine, sizeof(nameLine), "%s%s", speciesName(record.speciesId), shiny ? " ★" : "");
+    renderer.drawText(UI_12_FONT_ID, textX, y, nameLine, true, EpdFontFamily::BOLD);
     y += 25;
     renderer.drawText(UI_10_FONT_ID, textX, y, record.nickname[0] == '\0' ? "" : record.nickname.data());
     y += 27;
@@ -3267,7 +3306,7 @@ void PokemonActivity::renderFocused() {
     // ensureIvEv(), not peekIvEv() - a Pokemon's IV should be visible the
     // first time its own Summary is ever opened, not stay stuck at a
     // never-been-battled-yet 0 until its first real fight rolls one.
-    const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId);
+    const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId, pokemon::isRecordShiny(record));
     {
       const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
       const pokemon::BaseStats* baseStats = pokemon::baseStatsFor(record.speciesId);
@@ -3419,8 +3458,17 @@ void PokemonActivity::renderFocused() {
                                    Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 8, 120, 90});
     snprintf(line, sizeof(line), tr(STR_POKEMON_WILD_APPEARED), speciesName(pending.speciesId));
     centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
-    snprintf(line, sizeof(line), "%s %u    %s", tr(STR_POKEMON_LEVEL), pending.level, genderText(pending.gender));
+    snprintf(line, sizeof(line), "%s %u    %s%s", tr(STR_POKEMON_LEVEL), pending.level, genderText(pending.gender),
+             pending.isShiny ? " ★" : "");
     centered(renderer, UI_10_FONT_ID, contentTop + 140, line);
+    // "Caught before" indicator - a small Poké Ball icon below the name/
+    // level/gender text, shown only if this species is already in
+    // caughtSpecies (Pokedex-owned), so the player can tell at a glance
+    // whether this encounter would be a new catch or a duplicate.
+    if (pokemon::isSpeciesMarked(snapshot_.state.caughtSpecies, pending.speciesId)) {
+      constexpr int ballSize = 16;
+      drawCaughtBallIcon(renderer, (renderer.getScreenWidth() - ballSize) / 2, contentTop + 164, ballSize);
+    }
   } else if (pending.kind == pokemon::PendingEventKind::Item) {
     pokemon::drawPokemonItemArt(renderer, pending.item, true,
                                 Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 8, 120, 90}, false);
@@ -3842,8 +3890,10 @@ void PokemonActivity::renderBattleHud() {
     const int levelW = renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR);
 
     const int nameY = panelY + 8;
-    char nameWithGender[40];
-    snprintf(nameWithGender, sizeof(nameWithGender), "%s %s", nameText, genderAbbrev(combatant.gender));
+    char genderSuffix[8];
+    genderShinySuffix(genderSuffix, sizeof(genderSuffix), combatant.gender, combatant.isShiny);
+    char nameWithGender[48];
+    snprintf(nameWithGender, sizeof(nameWithGender), "%s %s", nameText, genderSuffix);
     renderer.drawText(UI_10_FONT_ID, panelX + 8, nameY, nameWithGender, true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, panelX + panelWidth - 8 - levelW, nameY, levelLine);
 
@@ -4163,7 +4213,7 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   // ensureIvEv(), not peekIvEv() - the party list's max-HP figure should
   // reflect a Pokemon's real (rolled) IV as soon as it's on the team, not
   // stay at the IV-less-0 default until its first battle rolls one.
-  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId);
+  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId, pokemon::isRecordShiny(record));
   constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
   const uint16_t maxHp = stats == nullptr ? 1
                                           : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp),
@@ -4201,7 +4251,8 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
     char meta[16];
     snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
     const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
-    const char* gender = genderAbbrev(record.gender);
+    char gender[8];
+    genderShinySuffix(gender, sizeof(gender), record.gender, pokemon::isRecordShiny(record));
     const int genderWidth = gender[0] == '\0' ? 0 : renderer.getTextWidth(UI_12_FONT_ID, gender) + 4;
     const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - genderWidth - 10);
     const std::string name = renderer.truncatedText(
@@ -4269,7 +4320,8 @@ void PokemonActivity::renderPartyRowMachineCapability(const int rowY, const poke
   char meta[16];
   snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
   const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
-  const char* gender = genderAbbrev(record.gender);
+  char gender[8];
+  genderShinySuffix(gender, sizeof(gender), record.gender, pokemon::isRecordShiny(record));
   const int genderWidth = gender[0] == '\0' ? 0 : renderer.getTextWidth(UI_12_FONT_ID, gender) + 4;
   const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - genderWidth - 10);
   const std::string name = renderer.truncatedText(

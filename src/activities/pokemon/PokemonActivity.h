@@ -124,7 +124,8 @@ class PokemonActivity final : public Activity {
   // forward - see docs/development/pokemon-gen1-audit-round6.md item 2.5.
   bool setupBattlePlayer(int slot, bool preserveSideEffects = false);
   void setupBattleOpponent(uint16_t speciesId, uint8_t level, std::span<const uint8_t> fixedMoves = {},
-                           pokemon::Gender gender = pokemon::Gender::Unknown, bool preserveSideEffects = false);
+                           pokemon::Gender gender = pokemon::Gender::Unknown, bool isShiny = false,
+                           bool preserveSideEffects = false);
   bool enterBattle(const pokemon::PendingEvent& pending);
   bool enterGymBattle(uint8_t gymIndex);
   void savePlayerBattleEntry();
