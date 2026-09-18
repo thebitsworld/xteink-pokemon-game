@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.25.2] - 2026-09-18
+
+### Fixed
+
+- Photo Slideshow on X3 still lost detail and ghosting was still visible after v0.25.1's periodic cleanup - per further testing, X3 now does a full refresh before *every* image instead of periodically (a real waveform flash, unlike the reader's page-turn budget the slideshow doesn't need to protect - it already waits whole minutes between images either way).
+
 ## [0.25.1] - 2026-09-18
 
 ### Fixed

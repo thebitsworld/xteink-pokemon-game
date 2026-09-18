@@ -192,7 +192,6 @@ void SlideshowActivity::startPlayback() {
   }
   screen = Screen::Playing;
   lastAdvanceMs = millis();
-  imagesUntilFullRefresh = 1;  // force a clean full refresh on the very first image
   renderCurrentImage();
 }
 
@@ -201,24 +200,26 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
 
-  // Periodic ghost-cleanup pass, same cadence idiom as the reader's
-  // displayWithRefreshCycle()/SETTINGS.getRefreshFrequency() (ReaderUtils.h).
-  // Every image change below only ever asks for a FAST_REFRESH-class
-  // grayscale composite - fine on X4 Pro (its Absolute-mode driver path
-  // never touches a B/W base pass at all), but on X3 the grayscale driver's
-  // steady-state path always takes a weak differential "nudge" refresh and
-  // never on its own promotes to the strong clearing waveform, so repeated
-  // image changes visibly accumulate ghosting/haze with no natural cleanup.
-  // A plain full-panel refresh of whatever's still on screen from the
-  // previous image (a real waveform flash, same as the reader's periodic
-  // HALF_REFRESH) physically resettles the panel before the new image is
-  // composited on top.
-  if (imagesUntilFullRefresh <= 1) {
-    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-    imagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else {
-    --imagesUntilFullRefresh;
-  }
+  // Ghost-cleanup pass before every single image, not just periodically
+  // (unlike the reader's own displayWithRefreshCycle() cadence, which this
+  // used to mirror - see git history). The grayscale composite below only
+  // ever asks for a FAST_REFRESH-class update - fine on X4 Pro (its
+  // Absolute-mode driver path never touches a B/W base pass at all), but on
+  // X3 the grayscale driver's steady-state path always takes a weak
+  // differential "nudge" refresh against whatever it last thinks is on
+  // screen and never on its own promotes to the strong clearing waveform -
+  // and since the composite's own final cleanup step (cleanupGrayscaleWith-
+  // FrameBuffer(), below) rebases that "last known" state to a plain B/W
+  // redraw rather than the true dithered grayscale image just shown, the
+  // next image's weak nudge runs against an already-wrong baseline on top of
+  // never clearing - compounding into visible detail loss/haze every image,
+  // not just after many. A real full-panel refresh (a full waveform flash,
+  // ignores any differential baseline) before each image physically
+  // resettles the panel so this image's own grayscale composite starts
+  // clean. Slideshow already waits whole minutes between images, so the
+  // extra refresh time here is a non-issue unlike the reader's page-turn
+  // budget.
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
 
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";
