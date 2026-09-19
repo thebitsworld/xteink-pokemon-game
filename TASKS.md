@@ -39,7 +39,17 @@ lại đây để tham khảo khi có thời gian, **chưa quyết định làm 
    - **Phương án lưu lại xem sau**: cần thêm 1 side-file nhỏ snapshot 6
      record lúc thắng (để đội hình không bị "trôi" nếu sau này đổi/thả bớt
      Pokémon trong đội) — tốn thêm flash nhưng có giá trị lưu niệm hơn.
-   User chưa chốt chọn phương án nào — hỏi lại khi bắt đầu làm.
+   **ĐÃ CHỐT (2026-09-19): chọn phương án lưu lại xem sau** — làm sau, chưa bắt
+   đầu. Thiết kế đã thống nhất:
+   - Ghi đúng 1 lần khi thắng Champion (gym không đánh lại được), snapshot đội
+     hình lúc đó + số giờ đọc lúc thắng vào side-file mới `pokemon-hof-{a,b}.bin`
+     (double-buffered như store IV/EV; không nhét vào `PokemonState`).
+   - Ngay sau khi thắng hiện màn Hall of Fame 1 lần; xem lại từ **Trainer Card**
+     (chạm ô Champion, hoặc Confirm khi dùng nút), chỉ mở được sau khi đã thắng.
+     Không thêm nút thứ 9 vào menu chính.
+   - Màn hình: lưới 2 cột x 3 hàng (dùng lại `pokemonTrainerCardGrid()`), mỗi ô
+     gồm sprite hero 120x90, tên/nickname, level + giới tính + ★ nếu shiny;
+     dòng đầu "Cleared after N h M m". Thiếu ảnh thì hiện tên.
 4. ~~**Vitamin tăng EV trực tiếp** (HP Up/Protein/Iron/Calcium/Carbos)~~ — ĐÃ LÀM (`v0.28.0`: +10 EV/lần, dùng đến 100 EV/chỉ số, chỉ rơi từ track đọc sách; save v7) — hiện
    EV chỉ tăng qua thắng battle (`awardBattleXp`'s EV yield), chưa có item
    nào tăng EV trực tiếp. Kỹ thuật rẻ (giống hệt pattern PP Up đã có: item id
