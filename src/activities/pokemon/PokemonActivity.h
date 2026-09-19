@@ -152,6 +152,7 @@ class PokemonActivity final : public Activity {
   // PokemonState fields the engine already persists (encounterMisses/
   // ballMisses/medicineMisses/machineMisses/itemMisses) - no new save data.
   void renderMenuPityBars();
+  void renderTrainerCard(int contentTop);
   void renderBagGrid();
   void renderPcOrderButtons();
   int buttonGridTop() const;

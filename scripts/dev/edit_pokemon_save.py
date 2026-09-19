@@ -21,6 +21,7 @@ Examples:
     python3 scripts/dev/edit_pokemon_save.py dump
     python3 scripts/dev/edit_pokemon_save.py reset-battle-store
     python3 scripts/dev/edit_pokemon_save.py reset-gym-progress
+    python3 scripts/dev/edit_pokemon_save.py set-trainer-card --badges 0x1fff --lifetime-minutes 2535 --caught 150 --seen 151
     python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --level 5
     python3 scripts/dev/edit_pokemon_save.py set-bag-item --item "poke-ball" --count 10
     python3 scripts/dev/edit_pokemon_save.py set-all-bag-items --count 5
@@ -677,6 +678,51 @@ def cmd_reset_gym_progress(args: argparse.Namespace) -> None:
         write_saves(saves, backup=not args.no_backup)
 
 
+def _dex_bits(count: int) -> bytes:
+    bits = bytearray(19)
+    for species in range(1, count + 1):
+        bits[(species - 1) // 8] |= 1 << ((species - 1) % 8)
+    return bytes(bits)
+
+
+def _owned_species(save: SaveFile) -> list[int]:
+    record_count, = struct.unpack_from("<I", save.data, 16)
+    records_offset = HEADER_BYTES + STATE_BYTES_V6
+    return [
+        struct.unpack_from("<H", save.data, records_offset + i * RECORD_BYTES + 8)[0] for i in range(record_count)
+    ]
+
+
+def _dex_bits_with(count: int, extra_species: list[int]) -> bytes:
+    bits = bytearray(_dex_bits(count))
+    for species in extra_species:
+        if 1 <= species <= 151:
+            bits[(species - 1) // 8] |= 1 << ((species - 1) % 8)
+    return bytes(bits)
+
+
+def cmd_set_trainer_card(args: argparse.Namespace) -> None:
+    """Set the values the Trainer Card screen shows, without playing for hours."""
+    saves = load_saves(args.save_dir)
+    for save in saves:
+        if args.badges is not None:
+            set_state_bytes(save, OFF_BATTLE_PROGRESS, struct.pack("<H", args.badges & 0xFFFF))
+        if args.lifetime_minutes is not None:
+            set_state_bytes(save, OFF_LIFETIME_MINUTES, struct.pack("<I", args.lifetime_minutes))
+        if args.caught is not None or args.seen is not None:
+            caught = args.caught if args.caught is not None else 0
+            seen = max(args.seen if args.seen is not None else 0, caught)  # every caught species is also seen
+            # The firmware rejects a save whose owned Pokemon are not all marked
+            # caught (PokemonStore load check), so always keep those species set.
+            owned = _owned_species(save)
+            set_state_bytes(save, OFF_SEEN_BITS, _dex_bits_with(seen, owned))
+            set_state_bytes(save, OFF_CAUGHT_BITS, _dex_bits_with(caught, owned))
+        recompute_crc(save)
+        print(f"{save.path.name}: trainer card values updated")
+    if not args.dry_run:
+        write_saves(saves, backup=not args.no_backup)
+
+
 def cmd_queue_encounter(args: argparse.Namespace) -> None:
     species_map = load_species()
     species = find_species(species_map, args.species)
@@ -959,6 +1005,15 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("reset-gym-progress", help="zero out battleProgress (clears gym history AND badges)").set_defaults(
         func=cmd_reset_gym_progress
     )
+
+    card = subparsers.add_parser(
+        "set-trainer-card", help="set badge progress, reading minutes and Pokedex counts for the Trainer Card screen"
+    )
+    card.add_argument("--badges", type=lambda v: int(v, 0), help="battleProgress bitmask: bits 0-7 gyms, 8-11 Elite Four, 12 Champion (0x1fff = all)")
+    card.add_argument("--lifetime-minutes", type=int, help="total credited reading minutes, e.g. 2535 = 42 h 15 m")
+    card.add_argument("--seen", type=int, help="mark species 1..N as seen (0-151)")
+    card.add_argument("--caught", type=int, help="mark species 1..N as caught (0-151); also marks them seen")
+    card.set_defaults(func=cmd_set_trainer_card)
 
     queue = subparsers.add_parser("queue-encounter", help="queue a wild-Pokemon pending event to test the catch flow")
     queue.add_argument("--species", required=True, help="species id or name, e.g. 16 or pidgey")

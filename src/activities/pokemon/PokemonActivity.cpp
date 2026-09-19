@@ -609,7 +609,7 @@ bool PokemonActivity::isListScreen() const {
   // Bag/Menu/PcOrder kept the button treatment.
   return screen_ != Screen::Summary && screen_ != Screen::PokedexDetail && screen_ != Screen::Message &&
          screen_ != Screen::Battle && screen_ != Screen::BattleMoves && screen_ != Screen::Menu &&
-         screen_ != Screen::Bag && screen_ != Screen::PcOrder;
+         screen_ != Screen::Bag && screen_ != Screen::PcOrder && screen_ != Screen::Badges;
 }
 
 int PokemonActivity::logicalCount() const {
@@ -695,8 +695,7 @@ int PokemonActivity::logicalCount() const {
       return static_cast<int>(usablePartySlotCount());
     case Screen::GymList:
       return pokemon::GYM_COUNT;
-    case Screen::Badges:
-      return 8;  // gym badges only - Elite Four members award no badge
+    case Screen::Badges:  // display-only Trainer Card, no selectable rows
     case Screen::Summary:
     case Screen::PokedexDetail:
     case Screen::Message:
@@ -2648,7 +2647,7 @@ void PokemonActivity::buildRows() {
                    : index == 3 ? tr(STR_POKEMON_PC_SORT)
                    : index == 4 ? tr(STR_POKEMON_BAG)
                    : index == 5 ? tr(STR_POKEMON_GYM_BATTLE)
-                   : index == 6 ? tr(STR_POKEMON_BADGES)
+                   : index == 6 ? tr(STR_POKEMON_TRAINER_CARD)
                                 : tr(STR_POKEMON_SETTINGS));
         break;
       case Screen::Settings:
@@ -3051,23 +3050,7 @@ void PokemonActivity::buildRows() {
         }
         break;
       }
-      case Screen::Badges: {
-        const auto gymIndex = static_cast<uint8_t>(index + 1);
-        const pokemon::GymData* gym = pokemon::gymData(gymIndex);
-        const bool earned =
-            pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) == pokemon::GymProgress::Defeated;
-        // Defeated/Locked used to be the row's value, sharing the label's
-        // line with the full badge name ("Cascade Badge" etc) - several
-        // real badge names overflowed that combination and got
-        // ellipsis-truncated (measured against the real inter_12 font
-        // metrics and this list's actual available width). Moving it to a
-        // subtitle line instead (mirroring GymList's own leaderName/"Elite
-        // Four" split just above) fixes it: the badge name gets the full
-        // row content width instead of sharing it with the value slot.
-        row(local, gym == nullptr ? "?" : gym->badgeName);
-        rows_[local].subtitle = earned ? tr(STR_POKEMON_GYM_DEFEATED) : tr(STR_POKEMON_GYM_LOCKED);
-        break;
-      }
+      case Screen::Badges:
       case Screen::Summary:
       case Screen::PokedexDetail:
       case Screen::Message:
@@ -3083,8 +3066,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
                        screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
-                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges ||
-                       screen_ == Screen::GymList;
+                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::GymList;
   int top = listTop();
   rowHeight_ = rowHeightForScreen();
   // BattleBalls stays bottom-anchored, overlaid on the still-visible battle
@@ -3422,6 +3404,10 @@ void PokemonActivity::renderFocused() {
     renderBagGrid();
     return;
   }
+  if (screen_ == Screen::Badges) {
+    renderTrainerCard(contentTop);
+    return;
+  }
   if (screen_ == Screen::PcOrder) {
     renderPcOrderButtons();
     return;
@@ -3575,7 +3561,7 @@ void PokemonActivity::renderMenuGrid() {
                         : index == 3 ? tr(STR_POKEMON_PC_SORT)
                         : index == 4 ? tr(STR_POKEMON_BAG)
                         : index == 5 ? tr(STR_POKEMON_GYM_BATTLE)
-                        : index == 6 ? tr(STR_POKEMON_BADGES)
+                        : index == 6 ? tr(STR_POKEMON_TRAINER_CARD)
                                      : tr(STR_POKEMON_SETTINGS);
     drawGridButton(buttonGridCellRect(index), index == selected_, label);
   }
@@ -3674,6 +3660,76 @@ void PokemonActivity::renderMenuPityBars() {
     char frac[16];
     snprintf(frac, sizeof(frac), "%u/%u", misses, row.threshold);
     renderer.drawText(UI_10_FONT_ID, fracX, textY, frac);
+  }
+}
+
+// Trainer Card (replaces the old Badges list): total reading time, one Pokedex
+// stats line, then a 2-column icon-only grid of the 8 gym badges followed by the
+// Elite Four and the Champion (13 tiles, GYM_COUNT). Earned tiles show their
+// art (badge icon for gyms, trainer sprite for Elite Four/Champion - those have
+// no badge art); locked ones show "?". If the art file is missing from the SD
+// card the tile falls back to the badge/leader name instead. Display-only, so
+// it bypasses buildList() (see isListScreen()) and needs no input handling
+// beyond the generic Back.
+void PokemonActivity::renderTrainerCard(const int contentTop) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  constexpr uint8_t GYM_BADGE_COUNT = 8;  // gyms 1-8 have badge art; 9-13 use trainer sprites
+  constexpr int iconSize = 32;
+  constexpr uint16_t POKEDEX_STAR_CAUGHT = 150;  // Mew becomes available here
+
+  const uint32_t minutes = snapshot_.state.lifetimeMinutes;
+  char line[96];
+  snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_READING), static_cast<unsigned long>(minutes / 60U),
+           static_cast<unsigned long>(minutes % 60U));
+  centered(renderer, UI_12_FONT_ID, contentTop, line, EpdFontFamily::BOLD);
+
+  const unsigned seen = pokemon::countMarkedSpecies(snapshot_.state.seenSpecies);
+  const unsigned caught = pokemon::countMarkedSpecies(snapshot_.state.caughtSpecies);
+  const unsigned percent = caught * 100U / pokemon::KANTO_SPECIES_COUNT;
+  const int pokedexLen = snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_POKEDEX), seen, caught, percent);
+  if (caught >= POKEDEX_STAR_CAUGHT && pokedexLen > 0 && static_cast<size_t>(pokedexLen) + 4 < sizeof(line)) {
+    snprintf(line + pokedexLen, sizeof(line) - static_cast<size_t>(pokedexLen), " ★");
+  }
+  const int pokedexY = contentTop + renderer.getLineHeight(UI_12_FONT_ID) + 8;
+  centered(renderer, UI_10_FONT_ID, pokedexY, line);
+
+  int viewableTop = 0;
+  int viewableRight = 0;
+  int viewableBottom = 0;
+  int viewableLeft = 0;
+  renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
+  const int gridTop = pokedexY + renderer.getLineHeight(UI_10_FONT_ID) + 20;
+  const int gridBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - viewableBottom - 8;
+
+  pokemon::PokemonUiRect cells[pokemon::GYM_COUNT]{};
+  const int cellCount = pokemon::pokemonTrainerCardGrid(cells, pokemon::GYM_COUNT, renderer.getScreenWidth(), gridTop,
+                                                       gridBottom, pokemon::GYM_COUNT, 2);
+  for (int i = 0; i < cellCount; ++i) {
+    const auto gymIndex = static_cast<uint8_t>(i + 1);
+    const pokemon::PokemonUiRect& cell = cells[i];
+    renderer.drawRect(cell.x, cell.y, cell.width, cell.height);
+
+    const bool earned =
+        pokemon::gymProgressFor(snapshot_.state.battleProgress, gymIndex) == pokemon::GymProgress::Defeated;
+    if (!earned) {
+      const int markWidth = renderer.getTextWidth(UI_12_FONT_ID, "?", EpdFontFamily::BOLD);
+      renderer.drawText(UI_12_FONT_ID, cell.x + pokemon::pokemonCenteredOffset(cell.width, markWidth),
+                        cell.y + pokemon::pokemonCenteredOffset(cell.height, renderer.getLineHeight(UI_12_FONT_ID)),
+                        "?", true, EpdFontFamily::BOLD);
+      continue;
+    }
+    const Rect icon{cell.x + pokemon::pokemonCenteredOffset(cell.width, iconSize),
+                    cell.y + pokemon::pokemonCenteredOffset(cell.height, iconSize), iconSize, iconSize};
+    const bool drawn = gymIndex <= GYM_BADGE_COUNT ? pokemon::drawPokemonBadgeArt(renderer, gymIndex, icon, false)
+                                                   : pokemon::drawPokemonTrainerArt(renderer, gymIndex, icon, false);
+    if (drawn) continue;
+    const pokemon::GymData* gym = pokemon::gymData(gymIndex);
+    const char* name = gym == nullptr ? "?" : (gymIndex <= GYM_BADGE_COUNT ? gym->badgeName : gym->leaderName);
+    const std::string fitted = renderer.truncatedText(UI_10_FONT_ID, name, cell.width - 12);
+    const int nameWidth = renderer.getTextWidth(UI_10_FONT_ID, fitted.c_str());
+    renderer.drawText(UI_10_FONT_ID, cell.x + pokemon::pokemonCenteredOffset(cell.width, nameWidth),
+                      cell.y + pokemon::pokemonCenteredOffset(cell.height, renderer.getLineHeight(UI_10_FONT_ID)),
+                      fitted.c_str());
   }
 }
 
@@ -4063,8 +4119,7 @@ void PokemonActivity::renderRowArt() {
                        screen_ == Screen::Pc || screen_ == Screen::BagEvolution || screen_ == Screen::ItemTarget ||
                        screen_ == Screen::Pokedex || screen_ == Screen::BattleSwitch || screen_ == Screen::BagBalls ||
                        screen_ == Screen::BagMedicine || screen_ == Screen::BagMachine ||
-                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::Badges ||
-                       screen_ == Screen::GymList;
+                       screen_ == Screen::BattleBag || screen_ == Screen::BattleBalls || screen_ == Screen::GymList;
   if (!artRows) return;
   const int start = pageStart();
   for (int local = 0; local < rowCount_; ++local) {
@@ -4135,13 +4190,6 @@ void PokemonActivity::renderRowArt() {
           renderer, bagItemId,
           Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, itemSize),
                rowY + pokemon::pokemonCenteredOffset(rowHeight_, itemSize), itemSize, itemSize});
-    } else if (screen_ == Screen::Badges) {
-      const auto gymIndex = static_cast<uint8_t>(start + local + 1);
-      constexpr int badgeSize = 32;
-      pokemon::drawPokemonBadgeArt(
-          renderer, gymIndex,
-          Rect{listBounds_.x + ROW_ICON_X + pokemon::pokemonCenteredOffset(80, badgeSize),
-               rowY + pokemon::pokemonCenteredOffset(rowHeight_, badgeSize), badgeSize, badgeSize});
     } else if (screen_ == Screen::GymList) {
       const auto gymIndex = static_cast<uint8_t>(start + local + 1);
       constexpr int trainerSize = 32;
@@ -4380,7 +4428,7 @@ void PokemonActivity::renderHeaderAndHints() {
   else if (screen_ == Screen::GymList)
     title = tr(STR_POKEMON_GYM_BATTLE);
   else if (screen_ == Screen::Badges)
-    title = tr(STR_POKEMON_BADGES);
+    title = tr(STR_POKEMON_TRAINER_CARD);
   else if (screen_ == Screen::Settings || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal)
     title = tr(STR_POKEMON_SETTINGS);
   else if (screen_ == Screen::PcReleaseConfirm)

@@ -14,18 +14,18 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
-## Ý tưởng cải tiến/tính năng mới (2026-09-18) — CHƯA LÀM, đang cân nhắc
+## Ý tưởng cải tiến/tính năng mới (2026-09-18) — mục 1 và 2 ĐÃ LÀM (`v0.27.0`), còn lại đang cân nhắc
 
 Từ một đợt rà soát toàn bộ tính năng hiện có so với các bản Pokémon gốc (agent
 nghiên cứu, không sửa code), xếp theo độ phù hợp với giới hạn của bản mod này
 (không multiplayer/wifi, flash hạn chế, core loop dựa thời gian đọc sách). Giữ
 lại đây để tham khảo khi có thời gian, **chưa quyết định làm cái nào**.
 
-1. **Màn hình tổng kết thành tích kiểu "Trainer Card"** — trùng với mục 2.2
+1. ~~**Màn hình tổng kết thành tích kiểu "Trainer Card"**~~ — ĐÃ LÀM (`v0.27.0`) — trùng với mục 2.2
    round 7 bên dưới (lifetime reading minutes, % Pokédex, số badge...). Dữ
    liệu đã có sẵn hết trong save, chỉ cần 1 màn hình hiển thị, không cần đổi
    save format. Rẻ nhất, "shovel-ready" nhất trong 4 ý tưởng.
-2. **Thưởng/ghi nhận khi hoàn thành Pokédex 150/151** — hiện tại phần thưởng
+2. ~~**Thưởng/ghi nhận khi hoàn thành Pokédex 150/151**~~ — ĐÃ LÀM (`v0.27.0`, dấu ★ trên Trainer Card) — hiện tại phần thưởng
    duy nhất khi bắt đủ 150 loài (chưa tính Mew) là *mở khóa Mew làm encounter
    hoang dã* (`mewIsReady()`, `lib/Pokemon/PokemonGame.cpp:239-245`), không
    có banner/item/danh hiệu nào khác đánh dấu thành tích này. Có thể gộp
@@ -62,8 +62,9 @@ lại đây để tham khảo khi có thời gian, **chưa quyết định làm 
   trắng, tự bỏ qua nếu không đủ chỗ. Không làm phần lifetimeMinutes/tier
   tiến độ sách (thấy dòng đó gây khó hiểu khi thảo luận, đã bỏ khỏi thiết
   kế cuối).
-- [ ] *(chưa làm)* 2.2 — Màn hình tổng kết thành tích (lifetime minutes, %
-  Pokédex, số huy hiệu...).
+- [x] **2.2 — ĐÃ LÀM (`v0.27.0`)**: Màn hình Trainer Card thay thế màn Badges
+  (giờ đọc, seen/caught/151 + %, lưới 13 icon huy hiệu/Elite Four/Champion, ★
+  khi caught ≥ 150).
 
 ## Round 6 (2026-09-15, tại `v0.21.1`) — 5/7 bug ĐÃ FIX (`v0.21.2`), 2 mục giữ nguyên theo quyết định user
 

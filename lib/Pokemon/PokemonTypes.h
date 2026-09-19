@@ -180,6 +180,8 @@ uint8_t levelForXp(uint32_t totalXp);
 LevelXpProgress levelXpProgress(uint32_t totalXp);
 bool markSpecies(PokedexBits& bits, uint16_t speciesId);
 bool isSpeciesMarked(const PokedexBits& bits, uint16_t speciesId);
+// Number of Kanto species (1..KANTO_SPECIES_COUNT) marked in `bits`; bits beyond that range are ignored.
+uint16_t countMarkedSpecies(const PokedexBits& bits);
 size_t pendingEventCount(const PokemonState& state);
 const PendingEvent* pendingEventFront(const PokemonState& state);
 PendingEvent* pendingEventFront(PokemonState& state);
