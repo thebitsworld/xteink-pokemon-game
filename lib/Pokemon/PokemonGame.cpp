@@ -575,6 +575,10 @@ bool processHourlyItem(PokemonState& state, const RandomSource& random, const Ow
 
 }  // namespace
 
+bool queueEvolutionIfEligible(PokemonState& state, const PokemonRecord& record, bool& queued) {
+  return queueEvolutionAfterLevelGain(state, record, queued);
+}
+
 CreditResult applyCreditedMinutes(PokemonState& state, PokemonRecord& leader, const uint16_t minutes,
                                   const uint8_t bookProgressPercent, const OwnedEvolutionNeeds ownedEvolutionNeeds,
                                   const RandomSource& random) {

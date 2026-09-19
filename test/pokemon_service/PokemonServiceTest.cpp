@@ -1460,6 +1460,35 @@ TEST(PokemonService, AwardBattleXpAppliesWildOrTrainerMultiplierAndCapsAtLevel10
   EXPECT_EQ(leader.totalXp, pokemon::xpRequired(100));
 }
 
+TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptOncePastTheLevelRule) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  // Oddish (43) evolves into Gloom (44) at level 21; sit it just below that.
+  pokemon::PokemonRecord record{};
+  ASSERT_TRUE(store.readRecord(1, record));
+  record.speciesId = 43;
+  record.totalXp = pokemon::xpRequired(20);
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 43));
+  ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 43));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, record, pokemon::RecordMutationKind::Replace}));
+
+  // A trainer win at level 30 is 180 XP, far more than one level: crosses 21.
+  ASSERT_EQ(service.awardBattleXp(1, 30, true, 4), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.loadState(state));
+  const pokemon::PendingEvent* pending = pokemon::pendingEventFront(state);
+  ASSERT_NE(pending, nullptr);
+  EXPECT_EQ(pending->kind, pokemon::PendingEventKind::Evolution);
+  EXPECT_EQ(pending->recordId, 1U);
+  EXPECT_EQ(pending->speciesId, 44U);
+}
+
 TEST(PokemonService, EnsureIvEvRollsOnceAndPersistsForSubsequentCalls) {
   Storage.clear();
   pokemon::PokemonStore store;

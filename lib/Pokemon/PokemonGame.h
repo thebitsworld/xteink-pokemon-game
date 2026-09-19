@@ -102,6 +102,12 @@ bool acknowledgeItem(PokemonState& state, const PokemonRecord& leader);
 // (PokemonService), out of reach of this pure, storage-agnostic layer, so
 // this only ever pops the queue entry.
 bool acknowledgeMoveLearn(PokemonState& state, const PokemonRecord& record);
+// Queues a level-evolution prompt if `record` is at/above a Level rule's minimum
+// level (no-op when prompts are disabled, one is already pending, or the queue
+// is full). Safe to call after any level gain (reading, battle XP, Rare Candy)
+// and idempotent, so it also backfills a Pokemon that already passed its level.
+bool queueEvolutionIfEligible(PokemonState& state, const PokemonRecord& record, bool& queued);
+
 bool setEvolutionPrompts(PokemonState& state, PokemonRecord& record, bool enabled, RecordMutation& mutation);
 bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, EncounterChoice choice, const char* nickname,
                       RecordMutation& mutation);

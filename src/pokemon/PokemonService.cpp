@@ -597,6 +597,8 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
     const uint8_t nextLevel = static_cast<uint8_t>(level + 1U);
     record.totalXp = xpRequired(nextLevel);
     queueMoveLearnIfNeeded(state, record, level, nextLevel);
+    bool evolutionQueued = false;
+    if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return UseConsumableOutcome::Failed;
     const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
     if (!store_.commit(state, mutation)) {
       LOG_ERR("PokemonService", "Failed to use Rare Candy");
@@ -1055,6 +1057,8 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   const ServiceStatus stateStatus = loadReadyState(state);
   if (stateStatus != ServiceStatus::Ok) return stateStatus;
   queueMoveLearnIfNeeded(state, record, previousLevel, currentLevel);
+  bool evolutionQueued = false;
+  if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return ServiceStatus::StorageError;
   const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to award battle XP");
