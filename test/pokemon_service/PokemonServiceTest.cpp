@@ -1238,6 +1238,43 @@ TEST(PokemonService, TeachMoveChecksCompatibilityThenFreeSlotThenAllowsAReplaceS
   EXPECT_EQ(afterReplace->moves[1], 25U);
 }
 
+// Round 8 audit item C: teachMove() then a separate consumeBagItem() call
+// (the old PokemonActivity.cpp flow) could learn the move and then, if the
+// second write failed, keep it without ever charging the TM/HM.
+// teachMoveAndConsumeItem() fixes the order - verify it only ever spends the
+// item once a move is actually about to be learned.
+TEST(PokemonService, TeachMoveAndConsumeItemSpendsExactlyOneItemOnlyWhenLearned) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.bagCounts[22] = 2;  // TM01 (item id 29), teaches Mega Punch (move id 5)
+  ASSERT_TRUE(store.commit(state));
+
+  // AlreadyKnown/Incompatible leave the bag untouched, exactly like teachMove().
+  EXPECT_EQ(service.teachMoveAndConsumeItem(1, 84, 29), pokemon::TeachMoveOutcome::AlreadyKnown);
+  EXPECT_EQ(service.teachMoveAndConsumeItem(1, 1, 29), pokemon::TeachMoveOutcome::Incompatible);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.bagCounts[22], 2U);  // nothing spent yet
+
+  ASSERT_EQ(service.teachMoveAndConsumeItem(1, 5, 29), pokemon::TeachMoveOutcome::Learned);  // fills slot 2
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.bagCounts[22], 1U);  // exactly one TM spent
+  const pokemon::BattleRecordEntry* afterFirst = battleStore.findEntry(1);
+  ASSERT_NE(afterFirst, nullptr);
+  EXPECT_EQ(afterFirst->moves[2], 5U);
+
+  // A full moveset must not spend the item either - the caller still has to
+  // ask which slot to overwrite before anything is consumed.
+  ASSERT_EQ(service.teachMove(1, 6), pokemon::TeachMoveOutcome::Learned);  // fills the last slot directly
+  EXPECT_EQ(service.teachMoveAndConsumeItem(1, 25, 33), pokemon::TeachMoveOutcome::MovesetFull);
+}
+
 TEST(PokemonService, PeekBattleMovesNeverPersistsWhenNoEntryExistsYet) {
   Storage.clear();
   pokemon::PokemonStore store;
@@ -1606,6 +1643,42 @@ TEST(PokemonService, UseConsumableRareCandyAddsOneLevelAndRejectsAtLevel100) {
   ASSERT_TRUE(store.loadState(state));
   ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
   EXPECT_EQ(service.useConsumable(1, 24), pokemon::UseConsumableOutcome::NotApplicable);  // already level 100
+}
+
+// Round 8 audit item C: useConsumable() then a separate consumeBagItem() call
+// (the old PokemonActivity.cpp flow) could apply the effect and then, if the
+// second write failed, keep it without ever charging the item.
+// useConsumableAndConsumeItem() fixes the order - verify it only ever spends
+// the item once the effect is actually about to be applied.
+TEST(PokemonService, UseConsumableAndConsumeItemSpendsExactlyOneItemOnlyWhenApplied) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // Pikachu, currentHp starts at maxHp (18) once synthesized
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.bagCounts[4] = 2;  // Potion (item id 11)
+  ASSERT_TRUE(store.commit(state));
+
+  // Already at full HP - NotApplicable, and the bag must stay untouched.
+  EXPECT_EQ(service.useConsumableAndConsumeItem(1, 11), pokemon::UseConsumableOutcome::NotApplicable);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.bagCounts[4], 2U);
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  entry.currentHp = 5;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_EQ(service.useConsumableAndConsumeItem(1, 11), pokemon::UseConsumableOutcome::Applied);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.bagCounts[4], 1U);  // exactly one Potion spent
+  const pokemon::BattleRecordEntry* healed = battleStore.findEntry(1);
+  ASSERT_NE(healed, nullptr);
+  EXPECT_EQ(healed->currentHp, 18U);
 }
 
 TEST(PokemonService, LearnMoveIntoSlotOverwritesUnconditionallyAtFullPp) {

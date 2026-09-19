@@ -165,6 +165,18 @@ class PokemonService {
   // two-call shape).
   TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId, int replaceSlot = -1);
 
+  // Same operation as teachMove(), but also spends `itemId` from the bag as
+  // part of it: resolves whether the move can be learned (and into which
+  // slot) first, without writing anything, THEN consumes the item, THEN
+  // writes the moveset - only ever spending the TM/HM once the move is known
+  // to be learnable. AlreadyKnown/Incompatible/MovesetFull are all returned
+  // with nothing consumed, same as teachMove(). If the moveset write still
+  // fails after the item was spent (round 8 audit item C - a caller doing
+  // teachMove() then a separate consumeBagItem() could keep the learned move
+  // even if that second write failed), the item is handed back and Failed is
+  // returned - same reasoning as usePpUp()/useVitamin().
+  TeachMoveOutcome teachMoveAndConsumeItem(uint32_t recordId, uint8_t moveId, uint8_t itemId, int replaceSlot = -1);
+
   // Player-driven moveset management (Party > Actions > Moves): overwrites
   // one move slot with moveId unconditionally, at full PP. The caller (the
   // Moveset UI) is responsible for only ever offering moves the Pokemon can
@@ -219,8 +231,24 @@ class PokemonService {
   // reading credit instead of duplicating that private check here).
   // Returns NotApplicable when the item would have no effect (already at
   // full HP/PP, no matching status, already level 100) without consuming
-  // anything - the caller is responsible for consumeBagItem() on Applied.
+  // anything. Does NOT itself touch the bag - UI callers that need the item
+  // actually spent should use useConsumableAndConsumeItem() instead, which
+  // gets the check/consume/apply ordering right; this bare version stays
+  // around for callers (mid-battle item use, tests) that manage the bag
+  // decrement themselves for other reasons.
   UseConsumableOutcome useConsumable(uint32_t recordId, uint8_t itemId);
+
+  // Same effect as useConsumable(), but also spends `itemId` from the bag as
+  // part of it, in the right order: checks whether the item would have any
+  // effect first (nothing written), THEN consumes the item, THEN applies the
+  // effect - only ever spending the item once it's known to do something.
+  // NotApplicable/Failed from that first check leaves the bag untouched. If
+  // the effect's own write still fails after the item was spent (round 8
+  // audit item C - a caller doing useConsumable() then a separate
+  // consumeBagItem() could keep the healed HP/cured status/leveled-up Candy
+  // even if that second write failed), the item is handed back and Failed is
+  // returned - same reasoning as usePpUp()/useVitamin().
+  UseConsumableOutcome useConsumableAndConsumeItem(uint32_t recordId, uint8_t itemId);
 
   // Thin wrappers around the pure engine (PokemonBattle.h) using this
   // service's own RandomSource, so the UI layer never touches RNG directly -
@@ -292,6 +320,25 @@ class PokemonService {
   ServiceStatus prepareStore();
   ServiceStatus loadReadyState(PokemonState& output);
   BattleRecordEntry synthesizeBattleEntry(const PokemonRecord& record, const IvEvEntry& ivEv) const;
+  // Inverse of consumeBagItem(): hands one `itemId` back to the bag, capped
+  // at each counter's own max like the other refund paths (usePpUp()/
+  // useVitamin()). Used by teachMoveAndConsumeItem()/
+  // useConsumableAndConsumeItem() when the item was already spent but the
+  // effect's own write then failed.
+  ServiceStatus refundBagItem(uint8_t itemId);
+  // Shared by teachMove()/teachMoveAndConsumeItem(): resolves AlreadyKnown/
+  // Incompatible/MovesetFull, or the slot the move would land in, without
+  // writing anything. Returns TeachMoveOutcome::Learned as a "proceed"
+  // sentinel when a slot was found - the caller still has to do the actual
+  // write.
+  TeachMoveOutcome resolveTeachTarget(uint32_t recordId, uint8_t moveId, int replaceSlot, BattleRecordEntry& entry,
+                                      int& targetSlot);
+  // Shared by useConsumable()/useConsumableAndConsumeItem(): dryRun=true
+  // stops just short of the one write useConsumable() would make (the
+  // Candy/Medicine/StatusCure/PPRestore branches share this same read-then-
+  // decide-then-write shape), so callers can check applicability before
+  // touching the bag without duplicating all of that branching.
+  UseConsumableOutcome useConsumableImpl(uint32_t recordId, uint8_t itemId, bool dryRun);
   void healPartyOnRead(const PokemonState& state, uint16_t minutes, uint8_t previousMinuteRemainder);
   // Checks the leader's learnset for any move newly available between
   // previousLevel (exclusive) and currentLevel (inclusive): auto-fills an

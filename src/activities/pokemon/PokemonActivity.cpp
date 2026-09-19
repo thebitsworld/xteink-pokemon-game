@@ -1769,13 +1769,13 @@ void PokemonActivity::activate() {
         return;
       }
       if (bagCategory_ == BagCategory::BattleMedicine) {
-        const pokemon::UseConsumableOutcome outcome = service_.useConsumable(recordId, selectedMedicineItemId_);
+        const pokemon::UseConsumableOutcome outcome =
+            service_.useConsumableAndConsumeItem(recordId, selectedMedicineItemId_);
         if (outcome == pokemon::UseConsumableOutcome::NotApplicable) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), bagScreen);
           return;
         }
-        if (outcome != pokemon::UseConsumableOutcome::Applied ||
-            service_.consumeBagItem(selectedMedicineItemId_) != pokemon::ServiceStatus::Ok) {
+        if (outcome != pokemon::UseConsumableOutcome::Applied) {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
           return;
         }
@@ -1808,7 +1808,11 @@ void PokemonActivity::activate() {
         return;
       }
       if (bagCategory_ == BagCategory::Machine) {
-        const pokemon::TeachMoveOutcome outcome = service_.teachMove(recordId, selectedMachineMoveId_);
+        // teachMoveAndConsumeItem() resolves whether the move can be learned,
+        // then spends the TM/HM, then writes the moveset - in that order, so
+        // a failed write can never leave a learned move behind uncharged.
+        const pokemon::TeachMoveOutcome outcome =
+            service_.teachMoveAndConsumeItem(recordId, selectedMachineMoveId_, selectedMachineItemId_);
         if (outcome == pokemon::TeachMoveOutcome::AlreadyKnown) {
           showMessage(tr(STR_POKEMON_ALREADY_KNOWS_MOVE), bagScreen);
         } else if (outcome == pokemon::TeachMoveOutcome::Incompatible) {
@@ -1816,12 +1820,12 @@ void PokemonActivity::activate() {
         } else if (outcome == pokemon::TeachMoveOutcome::MovesetFull) {
           // Full moveset no longer just blocks the TM - let the player
           // choose which of the 4 current moves to overwrite (Stage 12).
+          // Nothing was spent yet - teachMoveAndConsumeItem() only consumes
+          // the item once a target slot is actually known.
           focusedRecordId_ = recordId;
           focusedRecord_ = selectedRecord();
           setScreen(Screen::TmReplaceSlot);
         } else if (outcome != pokemon::TeachMoveOutcome::Learned) {
-          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
-        } else if (service_.consumeBagItem(selectedMachineItemId_) != pokemon::ServiceStatus::Ok) {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
         } else if (refreshSnapshot()) {
           setScreen(Screen::Party);
@@ -1829,12 +1833,11 @@ void PokemonActivity::activate() {
         return;
       }
       if (bagCategory_ == BagCategory::Medicine) {
-        const pokemon::UseConsumableOutcome outcome = service_.useConsumable(recordId, selectedMedicineItemId_);
+        const pokemon::UseConsumableOutcome outcome =
+            service_.useConsumableAndConsumeItem(recordId, selectedMedicineItemId_);
         if (outcome == pokemon::UseConsumableOutcome::NotApplicable) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), bagScreen);
         } else if (outcome != pokemon::UseConsumableOutcome::Applied) {
-          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
-        } else if (service_.consumeBagItem(selectedMedicineItemId_) != pokemon::ServiceStatus::Ok) {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
         } else if (refreshSnapshot()) {
           setScreen(Screen::Party);
@@ -1857,12 +1860,10 @@ void PokemonActivity::activate() {
         setScreen(Screen::BagMachine);
         return;
       }
-      const pokemon::TeachMoveOutcome outcome = service_.teachMove(focusedRecordId_, selectedMachineMoveId_, selected_);
+      // Same check-then-consume-then-apply order as the direct-teach path above.
+      const pokemon::TeachMoveOutcome outcome =
+          service_.teachMoveAndConsumeItem(focusedRecordId_, selectedMachineMoveId_, selectedMachineItemId_, selected_);
       if (outcome != pokemon::TeachMoveOutcome::Learned) {
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMachine);
-        return;
-      }
-      if (service_.consumeBagItem(selectedMachineItemId_) != pokemon::ServiceStatus::Ok) {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMachine);
         return;
       }
