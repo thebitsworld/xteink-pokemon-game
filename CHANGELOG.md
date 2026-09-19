@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.27.1] - 2026-09-19
+
+### Fixed
+
+- A Pokémon using Rage now gets its Attack boost when it is hit by a released Bide, like any other hit it takes.
+- Using a PP Up can no longer leave you with the boost but keep the PP Up in your bag if saving fails partway: the item is spent first, and handed back if the boost could not be saved.
+
 ## [0.27.0] - 2026-09-19
 
 ### Changed

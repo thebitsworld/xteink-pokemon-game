@@ -6,6 +6,7 @@
 #include <PokemonSpecies.h>
 
 #include <algorithm>
+#include <limits>
 
 #if !defined(POKEMON_SERVICE_HOST_TEST)
 #include <Arduino.h>
@@ -307,9 +308,7 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
     for (const uint32_t partyRecordId : state.partyRecordIds) {
       if (partyRecordId != 0) ++partyCount;
     }
-    const bool partyFull = partyCount == PARTY_SIZE;
-    const uint32_t boxCount = store_.recordCount() - partyCount;
-    if (partyFull && boxCount >= PC_BOX_MAX_RECORDS) return ServiceStatus::BoxFull;
+    if (catchBlockedByFullBox(partyCount, store_.recordCount())) return ServiceStatus::BoxFull;
     // NOT recordCount() + 1 - once Release can remove a record from the
     // middle of the file, recordCount() drops but surviving ids don't shift
     // down, so ids are sparse and recordCount() + 1 can collide with an id
@@ -532,6 +531,28 @@ ServiceStatus PokemonService::applyPpUp(const uint32_t recordId, const uint8_t s
     return ServiceStatus::StorageError;
   }
   return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::usePpUp(const uint32_t recordId, const uint8_t slot) {
+  if (slot >= BATTLE_MOVE_SLOTS) return ServiceStatus::Invalid;
+
+  BattleRecordEntry entry{};
+  if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+  if (entry.moves[slot] == 0 || entry.ppUp[slot] >= 3) return ServiceStatus::NotApplicable;
+
+  const ServiceStatus consumed = consumeBagItem(PP_UP_ITEM_ID);
+  if (consumed != ServiceStatus::Ok) return consumed;
+
+  const ServiceStatus applied = applyPpUp(recordId, slot);
+  if (applied == ServiceStatus::Ok) return ServiceStatus::Ok;
+
+  // The boost did not land, so give the item back rather than eating it.
+  PokemonState state{};
+  if (loadReadyState(state) == ServiceStatus::Ok && state.ppUpCount < std::numeric_limits<uint8_t>::max()) {
+    ++state.ppUpCount;
+    if (!store_.commit(state)) LOG_ERR("PokemonService", "Failed to refund PP Up after a failed apply");
+  }
+  return applied;
 }
 
 UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, const uint8_t itemId) {

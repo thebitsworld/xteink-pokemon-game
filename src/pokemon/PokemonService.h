@@ -22,6 +22,15 @@ namespace pokemon {
 // a persisted IV/EV entry.
 constexpr uint32_t PC_BOX_MAX_RECORDS = 512;
 
+// The one place the "catch has nowhere to go" rule lives: a catch is only
+// blocked once BOTH the party is full and the Box is at its cap (a full Box
+// never blocks catching into an empty party slot). `totalRecords` counts every
+// owned record, party included. resolveEncounter() enforces it; the battle UI
+// calls the same function before spending a Ball so the two can never drift.
+constexpr bool catchBlockedByFullBox(const size_t partyCount, const size_t totalRecords) {
+  return partyCount >= PARTY_SIZE && totalRecords >= partyCount && totalRecords - partyCount >= PC_BOX_MAX_RECORDS;
+}
+
 enum class TeachMoveOutcome : uint8_t {
   Learned,
   AlreadyKnown,
@@ -178,6 +187,14 @@ class PokemonService {
   // (a full move stays full); otherwise current PP is left untouched -
   // matches the real games exactly.
   ServiceStatus applyPpUp(uint32_t recordId, uint8_t slot);
+
+  // Spends one PP Up from the bag and applies it to `slot` as one operation:
+  // checks the slot can take it (NotApplicable, nothing written, if not),
+  // consumes the item, then applies. The order matters - applying first and
+  // consuming second meant a failed second write kept the boost without
+  // spending the item. If the apply write fails after the item was consumed,
+  // the item is handed back (best effort) and StorageError is returned.
+  ServiceStatus usePpUp(uint32_t recordId, uint8_t slot);
 
   // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
   // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine

@@ -1842,7 +1842,9 @@ void PokemonActivity::activate() {
         setScreen(Screen::BagMedicine);
         return;
       }
-      const pokemon::ServiceStatus outcome = service_.applyPpUp(focusedRecordId_, static_cast<uint8_t>(selected_));
+      // usePpUp() checks the slot, spends the item, then applies - in that
+      // order, so a failed write can never leave a free boost behind.
+      const pokemon::ServiceStatus outcome = service_.usePpUp(focusedRecordId_, static_cast<uint8_t>(selected_));
       if (outcome == pokemon::ServiceStatus::NotApplicable) {
         // Empty slot or already at 3 uses - stay here so the player can pick
         // a different slot instead of losing the item back to the bag.
@@ -1850,10 +1852,6 @@ void PokemonActivity::activate() {
         return;
       }
       if (outcome != pokemon::ServiceStatus::Ok) {
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMedicine);
-        return;
-      }
-      if (service_.consumeBagItem(pokemon::PP_UP_ITEM_ID) != pokemon::ServiceStatus::Ok) {
         showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::BagMedicine);
         return;
       }
@@ -1995,8 +1993,7 @@ void PokemonActivity::activate() {
         // (party full AND Box at its cap) - checked here too so a throw
         // never spends a ball/awards XP only to find out afterward that
         // there was nowhere to put the catch (round 3 audit bug 2.6).
-        if (snapshot_.partyCount == pokemon::PARTY_SIZE &&
-            snapshot_.ownedCount - snapshot_.partyCount >= pokemon::PC_BOX_MAX_RECORDS) {
+        if (pokemon::catchBlockedByFullBox(snapshot_.partyCount, snapshot_.ownedCount)) {
           showMessage(tr(STR_POKEMON_BOX_FULL), Screen::Battle);
           return;
         }

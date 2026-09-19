@@ -94,9 +94,10 @@ lại đây để tham khảo khi có thời gian, **chưa quyết định làm 
 - [x] **2.7 — ĐÃ FIX (`v0.21.2`)** — Ném Ball thất bại giờ gọi
   `finishItemUseMidBattle()` (dùng lại y hệt cơ chế item/switch), cho đối thủ
   ra đòn đúng luật.
-- [ ] *(độ tin cậy thấp hơn, chưa quyết định, chưa fix)* 2.8 — Rage không
-  tính damage từ Bide release hoặc tự đánh do Confusion.
-- [ ] *(độ tin cậy thấp hơn, chưa quyết định, chưa fix)* 2.9 — PP Up áp dụng +
+- [x] **2.8 — ĐÃ FIX (`v0.27.1`)** — Bide release giờ kích hoạt Rage (đòn của
+  đối thủ). Confusion self-hit cố ý KHÔNG kích hoạt: Rage chỉ phản ứng với đòn
+  của đối thủ (định nghĩa trong `BattleCombatant::enraged`).
+- [x] **2.9 — ĐÃ FIX (`v0.27.1`, `PokemonService::usePpUp()` kiểm tra → tiêu item → áp dụng, hoàn lại item nếu ghi lỗi)** — PP Up áp dụng +
   lưu trước khi xác nhận tiêu item thành công — cùng dạng bug round 3 đã fix
   cho battle-boost item nhưng chưa áp dụng cho đường PP Up.
 
@@ -128,7 +129,7 @@ khớp convention có sẵn). Phát hiện 1 bug mới:
 
 - [x] **2.9** — Mutual-KO tự gây ra giờ báo "Pokémon của bạn cũng ngất" + ép đổi
   Pokémon trước khi tiếp tục Gym/Elite Four/Champion.
-- [ ] *(ghi chú rủi ro còn treo, không phải bug đang xảy ra)* fix bug 2.6
+- [x] *(ĐÃ DỌN `v0.27.1`: 1 hàm `catchBlockedByFullBox()` dùng chung cho service và UI)* fix bug 2.6
   (Box-full gate trước khi ném Ball) dùng 1 gate trùng lặp riêng thay vì sửa
   tận gốc thứ tự gọi hàm gốc — nếu sau này 2 công thức lệch nhau, lỗi cũ có
   thể quay lại. Cân nhắc dọn lại khi có dịp đụng tới `Screen::BattleBalls`.
