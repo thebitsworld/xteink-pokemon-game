@@ -220,6 +220,17 @@ PokemonState validState() {
   return state;
 }
 
+void countMarkedSpeciesCountsOnlyKantoSpecies() {
+  pokemon::PokedexBits bits{};
+  CHECK(pokemon::countMarkedSpecies(bits) == 0);
+  CHECK(pokemon::markSpecies(bits, 1));
+  CHECK(pokemon::markSpecies(bits, 25));
+  CHECK(pokemon::markSpecies(bits, 151));
+  CHECK(pokemon::countMarkedSpecies(bits) == 3);
+  bits.fill(0xFF);  // every bit set, including the unused tail past species 151
+  CHECK(pokemon::countMarkedSpecies(bits) == pokemon::KANTO_SPECIES_COUNT);
+}
+
 void stateValidationRejectsPartyAndPokedexCorruption() {
   const PokemonState valid = validState();
   CHECK(pokemon::validateState(valid));
@@ -507,6 +518,7 @@ int main() {
   recordValidationRejectsImpossibleLevelAndGender();
   xpBoundariesStartAtZeroAndClampAtLevelOneHundred();
   levelProgressIsRelativeToTheCurrentLevel();
+  countMarkedSpeciesCountsOnlyKantoSpecies();
   stateValidationRejectsPartyAndPokedexCorruption();
   pendingEventValidationFollowsItsTag();
   pendingEventQueueIsFixedFifoAndCompacted();

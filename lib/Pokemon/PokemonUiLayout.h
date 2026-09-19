@@ -26,4 +26,11 @@ PokemonUiRect pokemonPokedexCardBounds(int screenWidth, int screenHeight, int ma
                                        int footerHeight, bool landscape);
 bool pokemonNeedsCleanRefresh(bool previousWasDetail, bool nextIsDetail, bool firstRender);
 
+// Lays `tileCount` equal tiles into `columns` columns inside [top, bottom), top-anchored,
+// writing the cells in reading order to `out` (at most `capacity`). Cell height is capped so
+// small counts do not stretch; a short last row is centered. Returns the number of cells
+// written, or 0 if the area cannot hold the grid at the minimum tile size.
+int pokemonTrainerCardGrid(PokemonUiRect* out, int capacity, int screenWidth, int top, int bottom, int tileCount,
+                           int columns);
+
 }  // namespace pokemon

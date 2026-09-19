@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-19
+
+### Changed
+
+- The Pokémon menu's "Badges" screen is now a **Trainer Card**. The top line shows your total reading time (for example `42 h 15 m`), the next line shows your Pokédex progress (`Seen N   Caught N/151 (P%)`, with a ★ once you've caught 150 or more), and below that is a two-column grid of icons: the 8 gym badges, then the four Elite Four members and the Champion. Anything you haven't earned yet shows a `?`. If a picture is missing from the SD card, that slot shows the badge or trainer's name instead.
+
 ## [0.26.0] - 2026-09-19
 
 ### Fixed

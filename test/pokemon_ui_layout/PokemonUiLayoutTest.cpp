@@ -171,3 +171,50 @@ TEST(PokemonUiLayoutTest, UsesCleanRefreshOnlyAtActivityAndDetailBoundaries) {
   EXPECT_FALSE(pokemon::pokemonNeedsCleanRefresh(false, false, false));
   EXPECT_FALSE(pokemon::pokemonNeedsCleanRefresh(true, true, false));
 }
+
+TEST(PokemonUiLayoutTest, TrainerCardGridFitsThirteenTilesOnBothPortraitPanels) {
+  struct Panel {
+    int width;
+    int height;
+  };
+  for (const Panel panel : {Panel{480, 800}, Panel{528, 792}}) {
+    const int top = 200;
+    const int bottom = panel.height - 20;
+    pokemon::PokemonUiRect cells[13]{};
+    ASSERT_EQ(pokemon::pokemonTrainerCardGrid(cells, 13, panel.width, top, bottom, 13, 2), 13);
+    for (int i = 0; i < 13; ++i) {
+      EXPECT_GE(cells[i].x, 0);
+      EXPECT_LE(cells[i].x + cells[i].width, panel.width);
+      EXPECT_GE(cells[i].y, top);
+      EXPECT_LE(cells[i].y + cells[i].height, bottom);
+      EXPECT_EQ(cells[i].width, cells[0].width);
+      EXPECT_EQ(cells[i].height, cells[0].height);
+      for (int j = i + 1; j < 13; ++j) {
+        const bool apart = cells[i].x + cells[i].width <= cells[j].x || cells[j].x + cells[j].width <= cells[i].x ||
+                           cells[i].y + cells[i].height <= cells[j].y || cells[j].y + cells[j].height <= cells[i].y;
+        EXPECT_TRUE(apart) << "tiles " << i << " and " << j << " overlap on " << panel.width;
+      }
+    }
+    EXPECT_EQ(cells[0].y, cells[1].y);   // two columns per row
+    EXPECT_LT(cells[0].x, cells[1].x);
+    EXPECT_EQ(cells[0].x, cells[2].x);   // columns line up down the grid
+    EXPECT_GT(cells[2].y, cells[0].y);
+  }
+}
+
+TEST(PokemonUiLayoutTest, TrainerCardGridCentersTheLoneLastTile) {
+  pokemon::PokemonUiRect cells[13]{};
+  ASSERT_EQ(pokemon::pokemonTrainerCardGrid(cells, 13, 480, 200, 780, 13, 2), 13);
+  const int leftEdge = cells[0].x;
+  const int rightEdge = cells[1].x + cells[1].width;
+  const int lastCenter = cells[12].x + cells[12].width / 2;
+  EXPECT_NEAR(lastCenter, (leftEdge + rightEdge) / 2, 1);
+  EXPECT_GT(cells[12].y, cells[10].y);
+}
+
+TEST(PokemonUiLayoutTest, TrainerCardGridRefusesAnAreaTooShortForTheGrid) {
+  pokemon::PokemonUiRect cells[13]{};
+  EXPECT_EQ(pokemon::pokemonTrainerCardGrid(cells, 13, 480, 200, 400, 13, 2), 0);
+  EXPECT_EQ(pokemon::pokemonTrainerCardGrid(cells, 12, 480, 200, 780, 13, 2), 0);  // capacity too small
+  EXPECT_EQ(pokemon::pokemonTrainerCardGrid(nullptr, 13, 480, 200, 780, 13, 2), 0);
+}

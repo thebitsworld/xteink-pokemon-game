@@ -222,6 +222,14 @@ bool isSpeciesMarked(const PokedexBits& bits, const uint16_t speciesId) {
   return (bits[zeroBased / 8U] & static_cast<uint8_t>(1U << (zeroBased % 8U))) != 0;
 }
 
+uint16_t countMarkedSpecies(const PokedexBits& bits) {
+  uint16_t count = 0;
+  for (uint16_t speciesId = 1; speciesId <= KANTO_SPECIES_COUNT; ++speciesId) {
+    if (isSpeciesMarked(bits, speciesId)) ++count;
+  }
+  return count;
+}
+
 size_t pendingEventCount(const PokemonState& state) {
   size_t count = 0;
   while (count < state.pendingEvents.size() && state.pendingEvents[count].kind != PendingEventKind::None) ++count;

@@ -22,6 +22,30 @@ int pokemonCenteredOffset(const int containerExtent, const int contentExtent) {
 
 int pokemonRightAlignedX(const int rightEdge, const int contentWidth) { return rightEdge - std::max(0, contentWidth); }
 
+int pokemonTrainerCardGrid(PokemonUiRect* out, const int capacity, const int screenWidth, const int top,
+                           const int bottom, const int tileCount, const int columns) {
+  constexpr int sidePadding = 16;
+  constexpr int gap = 12;
+  constexpr int minTileHeight = 40;
+  constexpr int maxTileHeight = 72;
+  if (out == nullptr || capacity < tileCount || tileCount <= 0 || columns <= 0) return 0;
+  const int tileWidth = (screenWidth - sidePadding * 2 - gap * (columns - 1)) / columns;
+  const int rows = (tileCount + columns - 1) / columns;
+  const int tileHeight = std::min(maxTileHeight, (bottom - top - gap * (rows - 1)) / rows);
+  if (tileWidth <= 0 || tileHeight < minTileHeight) return 0;
+
+  const int fullRowWidth = tileWidth * columns + gap * (columns - 1);
+  for (int index = 0; index < tileCount; ++index) {
+    const int row = index / columns;
+    const int column = index % columns;
+    const int inRow = row == rows - 1 ? tileCount - row * columns : columns;
+    const int rowWidth = tileWidth * inRow + gap * (inRow - 1);
+    const int rowX = sidePadding + (fullRowWidth - rowWidth) / 2;
+    out[index] = PokemonUiRect{rowX + column * (tileWidth + gap), top + row * (tileHeight + gap), tileWidth, tileHeight};
+  }
+  return tileCount;
+}
+
 PokemonListPresentation pokemonListPresentation(const bool hasArtwork) {
   freeink::ui::StyleSet styles = freeink::ui::selectedPlainListRowStyles();
   styles.selected = styles.normal;
