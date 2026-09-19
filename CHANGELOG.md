@@ -5,6 +5,7 @@
 ### Fixed
 
 - Pokémon in your party never recovered PP while you read. PP is meant to come back at +1 per move for every 10 minutes of reading, but the reading timer only reports in ~5-minute steps and each step was rounded down to zero PP, so it never kicked in. The 10-minute count now carries over between steps, so PP recovers as intended (HP recovery was not affected).
+- Photo Slideshow on X3 could still look hazy/low-detail or ghost between images. Images are now drawn with the exact same grayscale sequence the custom sleep screen uses (which looks correct on X3): a proper half-refresh base pass, gray layers cleared to black on X3's panel, no button hints painted into the image, and Fit-mode downscaling dithered at screen size. The periodic full-refresh workaround from 0.25.1 is no longer needed and was removed.
 
 ## [0.25.1] - 2026-09-18
 

@@ -39,11 +39,4 @@ class SlideshowActivity final : public Activity {
   std::vector<std::string> images;  // filenames only, sorted, within slideshowFolderPath
   int currentIndex = -1;
   unsigned long lastAdvanceMs = 0;
-  // Same cadence idiom as ReaderUtils::displayWithRefreshCycle()'s
-  // pagesUntilFullRefresh - counts down to 1 (SETTINGS.getRefreshFrequency()
-  // images apart), then forces one FULL_REFRESH pass before the next image is
-  // drawn, to settle the panel and clear accumulated ghosting/haze. See
-  // renderCurrentImage()'s own comment for why this is needed at all on top
-  // of the per-image grayscale composite.
-  int imagesUntilFullRefresh = 1;
 };

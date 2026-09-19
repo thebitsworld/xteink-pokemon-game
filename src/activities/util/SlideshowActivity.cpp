@@ -192,7 +192,6 @@ void SlideshowActivity::startPlayback() {
   }
   screen = Screen::Playing;
   lastAdvanceMs = millis();
-  imagesUntilFullRefresh = 1;  // force a clean full refresh on the very first image
   renderCurrentImage();
 }
 
@@ -200,25 +199,6 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
-
-  // Periodic ghost-cleanup pass, same cadence idiom as the reader's
-  // displayWithRefreshCycle()/SETTINGS.getRefreshFrequency() (ReaderUtils.h).
-  // Every image change below only ever asks for a FAST_REFRESH-class
-  // grayscale composite - fine on X4 Pro (its Absolute-mode driver path
-  // never touches a B/W base pass at all), but on X3 the grayscale driver's
-  // steady-state path always takes a weak differential "nudge" refresh and
-  // never on its own promotes to the strong clearing waveform, so repeated
-  // image changes visibly accumulate ghosting/haze with no natural cleanup.
-  // A plain full-panel refresh of whatever's still on screen from the
-  // previous image (a real waveform flash, same as the reader's periodic
-  // HALF_REFRESH) physically resettles the panel before the new image is
-  // composited on top.
-  if (imagesUntilFullRefresh <= 1) {
-    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-    imagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else {
-    --imagesUntilFullRefresh;
-  }
 
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";
@@ -260,30 +240,30 @@ void SlideshowActivity::renderCurrentImage() {
     config.useExactDimensions = true;
 
     PngToFramebufferConverter converter;
-    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
-    // Each pass re-decodes the PNG under a different render mode (BW, then the
-    // LSB/MSB grayscale planes) rather than resuming a stream - the dither in
-    // DirectPixelWriter is purely positional, so re-decoding reproduces the
-    // same quantized values per plane, matching the pattern already used for
-    // BMP below and for the sleep cover (SleepActivity::renderBitmapSleepScreen).
+    // Same grayscale sequence as SleepActivity::renderBitmapSleepScreen() (the
+    // custom sleep cover, no filter), which is known-good on X3: HALF_REFRESH
+    // base pass, gray planes cleared to 0x00 on non-absolute panels, no button
+    // hints painted into any plane, and no extra BW redraw afterwards. Each
+    // pass re-decodes the PNG (the dither is purely positional, so every pass
+    // quantizes identically).
     const auto drawFrame = [&]() {
-      renderer.clearScreen();
       if (!converter.decodeToFramebuffer(filePath, renderer, config)) return false;
       renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
-      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       return true;
     };
 
+    renderer.clearScreen();
     bool success = drawFrame();
     if (success) {
       const bool absolute = renderer.supportsAbsoluteGrayscale();
       if (absolute) {
         success = renderer.displayAbsoluteGrayscaleBase();
       } else {
-        renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+        renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
       }
       for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
         if (!success) break;
+        renderer.clearScreen(absolute ? 0xFF : 0x00);
         renderer.setRenderMode(mode);
         success = drawFrame();
         if (!success) break;
@@ -292,14 +272,11 @@ void SlideshowActivity::renderCurrentImage() {
         else
           renderer.copyGrayscaleMsbBuffers();
       }
+      if (success) renderer.displayGrayBuffer();
       renderer.setRenderMode(GfxRenderer::BW);
-      if (success) {
-        renderer.displayGrayBuffer();
-        success = drawFrame();
-        if (success) renderer.cleanupGrayscaleWithFrameBuffer();
-      }
     }
     if (!success) {
+      renderer.setRenderMode(GfxRenderer::BW);
       drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
     }
     return;
@@ -316,6 +293,16 @@ void SlideshowActivity::renderCurrentImage() {
     drawSlideshowMessage(renderer, mappedInput, "Invalid BMP File");
     file.close();
     return;
+  }
+
+  // Keep error diffusion on the screen-sized grid (see the same note in
+  // SleepActivity::renderBitmapSleepScreen()): resampling an already dithered
+  // source makes the source pattern alias into regular seams/haze.
+  if (!cropMode && (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight)) {
+    const float fitScale = std::min(static_cast<float>(pageWidth) / bitmap.getWidth(),
+                                    static_cast<float>(pageHeight) / bitmap.getHeight());
+    bitmap.setDitheredOutputSize(static_cast<int>(std::floor((bitmap.getWidth() - 1) * fitScale)) + 1,
+                                 static_cast<int>(std::floor((bitmap.getHeight() - 1) * fitScale)) + 1);
   }
 
   int x, y;
@@ -344,12 +331,10 @@ void SlideshowActivity::renderCurrentImage() {
     y = (pageHeight - bitmap.getHeight()) / 2;
   }
 
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), "", "", "");
-  const auto drawFrame = [&]() {
-    if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY)) return false;
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    return true;
-  };
+  // Same sequence as SleepActivity::renderBitmapSleepScreen() (custom sleep
+  // cover, no filter): no button hints in any plane, HALF_REFRESH base pass,
+  // gray planes cleared to 0x00 on non-absolute (X3) panels, no BW redraw.
+  const auto drawFrame = [&]() { return renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY); };
 
   renderer.clearScreen();
   bool success = drawFrame();
@@ -358,13 +343,13 @@ void SlideshowActivity::renderCurrentImage() {
     if (absolute) {
       success = renderer.displayAbsoluteGrayscaleBase();
     } else {
-      renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+      renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
     }
     for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
       if (!success) break;
       success = bitmap.rewindToData() == BmpReaderError::Ok;
       if (!success) break;
-      renderer.clearScreen();
+      renderer.clearScreen(absolute ? 0xFF : 0x00);
       renderer.setRenderMode(mode);
       success = drawFrame();
       if (!success) break;
@@ -375,15 +360,11 @@ void SlideshowActivity::renderCurrentImage() {
     }
     if (success) renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
-    if (success) {
-      renderer.clearScreen();
-      success = bitmap.rewindToData() == BmpReaderError::Ok && drawFrame();
-      if (success) renderer.cleanupGrayscaleWithFrameBuffer();
-    }
   } else if (success) {
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
   if (!success) {
+    renderer.setRenderMode(GfxRenderer::BW);
     LOG_ERR("SLDSHW", "Failed to render complete BMP image");
     drawSlideshowMessage(renderer, mappedInput, tr(STR_FAILED_LOWER));
   }
