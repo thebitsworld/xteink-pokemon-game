@@ -182,9 +182,9 @@ bool isBattleUsableCategory(const pokemon::ItemCategory category) {
          category == pokemon::ItemCategory::PPRestore || category == pokemon::ItemCategory::BattleBoost;
 }
 
-// PP Up and the 6 battle-boost items (X Attack/X Defense/X Speed/X Special/
-// Guard Spec./Dire Hit) all live outside bagCounts (see PokemonState::
-// ppUpCount/battleBoostCounts) - none of the generic bagItemIdAt()/
+// PP Up, the 6 battle-boost items (X Attack/X Defense/X Speed/X Special/
+// Guard Spec./Dire Hit) and the 5 EV vitamins all live outside bagCounts (see
+// PokemonState::ppUpCount/battleBoostCounts/vitaminCounts) - none of the generic bagItemIdAt()/
 // bagItemCount() machinery above can see them. extraItemIdAt()/
 // extraItemCount() below are their equivalent, walking this small fixed id
 // list instead of bagCounts; `matches` narrows which screen's extras show
@@ -194,16 +194,21 @@ bool isBattleUsableCategory(const pokemon::ItemCategory category) {
 // since PP Up can't be used in battle at all).
 constexpr uint8_t EXTRA_ITEM_IDS[] = {pokemon::PP_UP_ITEM_ID,   pokemon::ITEM_X_ATTACK,  pokemon::ITEM_X_DEFENSE,
                                       pokemon::ITEM_X_SPEED,    pokemon::ITEM_X_SPECIAL, pokemon::ITEM_GUARD_SPEC,
-                                      pokemon::ITEM_DIRE_HIT};
+                                      pokemon::ITEM_DIRE_HIT,   pokemon::ITEM_HP_UP,     pokemon::ITEM_PROTEIN,
+                                      pokemon::ITEM_IRON,       pokemon::ITEM_CALCIUM,   pokemon::ITEM_CARBOS};
 
 bool isMedicineExtraCategory(const pokemon::ItemCategory category) {
-  return category == pokemon::ItemCategory::PpUp || category == pokemon::ItemCategory::BattleBoost;
+  return category == pokemon::ItemCategory::PpUp || category == pokemon::ItemCategory::BattleBoost ||
+         category == pokemon::ItemCategory::Vitamin;
 }
 
 uint8_t extraItemCountFor(const pokemon::PokemonState& state, const uint8_t itemId) {
   if (itemId == pokemon::PP_UP_ITEM_ID) return state.ppUpCount;
   if (itemId >= pokemon::BATTLE_BOOST_ITEM_ID_FIRST && itemId <= pokemon::BATTLE_BOOST_ITEM_ID_LAST) {
     return state.battleBoostCounts[itemId - pokemon::BATTLE_BOOST_ITEM_ID_FIRST];
+  }
+  if (itemId >= pokemon::VITAMIN_ITEM_ID_FIRST && itemId <= pokemon::VITAMIN_ITEM_ID_LAST) {
+    return state.vitaminCounts[itemId - pokemon::VITAMIN_ITEM_ID_FIRST];
   }
   return 0;
 }
@@ -1689,6 +1694,12 @@ void PokemonActivity::activate() {
           setScreen(Screen::ItemTarget);
           return;
         }
+        if (itemId >= pokemon::VITAMIN_ITEM_ID_FIRST && itemId <= pokemon::VITAMIN_ITEM_ID_LAST) {
+          bagCategory_ = BagCategory::Vitamin;
+          selectedMedicineItemId_ = itemId;
+          setScreen(Screen::ItemTarget);
+          return;
+        }
         // Battle-boost items (X Attack, Guard Spec., ...) only ever do
         // anything mid-battle - there's nothing to use outside an active
         // fight, even though they're viewable/counted here.
@@ -1726,7 +1737,29 @@ void PokemonActivity::activate() {
                                : bagCategory_ == BagCategory::Medicine       ? Screen::BagMedicine
                                : bagCategory_ == BagCategory::BattleMedicine ? Screen::BattleBag
                                : bagCategory_ == BagCategory::PpUp           ? Screen::BagMedicine
+                               : bagCategory_ == BagCategory::Vitamin        ? Screen::BagMedicine
                                                                              : Screen::BagMachine;
+      if (bagCategory_ == BagCategory::Vitamin) {
+        const pokemon::ServiceStatus outcome = service_.useVitamin(recordId, selectedMedicineItemId_);
+        if (outcome == pokemon::ServiceStatus::NotApplicable) {
+          // Stat already at the vitamin cap (or none left) - nothing was spent.
+          showMessage(tr(STR_POKEMON_NOT_APPLICABLE), bagScreen);
+          return;
+        }
+        if (outcome != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
+          return;
+        }
+        static constexpr const char* VITAMIN_STAT_NAMES[] = {"HP", "Attack", "Defense", "Special", "Speed"};
+        const pokemon::PokemonRecord target = selectedRecord();
+        char line[96];
+        snprintf(line, sizeof(line), tr(STR_POKEMON_VITAMIN_RAISED),
+                 target.nickname[0] == '\0' ? speciesName(target.speciesId) : target.nickname.data(),
+                 VITAMIN_STAT_NAMES[selectedMedicineItemId_ - pokemon::VITAMIN_ITEM_ID_FIRST]);
+        if (!refreshSnapshot()) return;
+        showMessage(line, Screen::Party);
+        return;
+      }
       if (bagCategory_ == BagCategory::PpUp) {
         // No MovesetFull-style branching - every occupied slot is always a
         // valid PP Up target, so this always goes straight to the picker.
@@ -2304,6 +2337,7 @@ void PokemonActivity::goBack() {
                 : bagCategory_ == BagCategory::Medicine       ? Screen::BagMedicine
                 : bagCategory_ == BagCategory::BattleMedicine ? Screen::BattleBag
                 : bagCategory_ == BagCategory::PpUp           ? Screen::BagMedicine
+                : bagCategory_ == BagCategory::Vitamin        ? Screen::BagMedicine
                                                               : Screen::BagMachine);
       return;
     case Screen::BagEvolution:

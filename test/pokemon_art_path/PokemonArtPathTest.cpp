@@ -66,11 +66,14 @@ TEST(PokemonArtPath, BuildsBagItemPathsForBagItemsOnly) {
   EXPECT_STREQ(path, "/pokemon/items/084.bmp");
   ASSERT_NE(pokemon::pokemonBagItemArtPath(90, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "/pokemon/items/090.bmp");
+  // 91-95 are the EV vitamins, same "outside bagCounts" exception.
+  ASSERT_NE(pokemon::pokemonBagItemArtPath(95, path, sizeof(path)), nullptr);
+  EXPECT_STREQ(path, "/pokemon/items/095.bmp");
   // Evolution items (ids 1-6) go through pokemonItemArtPath()'s slug-based
   // path instead, not this one.
   EXPECT_EQ(pokemon::pokemonBagItemArtPath(6, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "");
-  EXPECT_EQ(pokemon::pokemonBagItemArtPath(91, path, sizeof(path)), nullptr);
+  EXPECT_EQ(pokemon::pokemonBagItemArtPath(96, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "");
 }
 

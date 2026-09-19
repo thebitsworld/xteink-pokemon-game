@@ -48,13 +48,15 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonicalV6Layout() {
+void stateCodecUsesTheCanonicalV7Layout() {
   static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
   static_assert(pokemon::POKEMON_STATE_V3_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
   static_assert(pokemon::POKEMON_STATE_V4_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
   static_assert(pokemon::POKEMON_STATE_V5_BYTES == pokemon::POKEMON_STATE_V4_BYTES + 1);
-  static_assert(pokemon::POKEMON_STATE_BYTES ==
+  static_assert(pokemon::POKEMON_STATE_V6_BYTES ==
                 pokemon::POKEMON_STATE_V5_BYTES + pokemon::POKEMON_BATTLE_BOOST_ITEM_COUNT);
+  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V6_BYTES + pokemon::POKEMON_VITAMIN_ITEM_COUNT);
+  static_assert(pokemon::POKEMON_STATE_BYTES == 210);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
   state.partyRecordIds[0] = 7;
@@ -82,6 +84,7 @@ void stateCodecUsesTheCanonicalV6Layout() {
   state.machineMisses = 1;
   state.ppUpCount = 4;
   state.battleBoostCounts = {1, 2, 3, 4, 5, 6};
+  state.vitaminCounts = {7, 8, 9, 10, 11};
 
   pokemon::StateBytes bytes{};
   CHECK(pokemon::encodeState(state, bytes));
@@ -110,6 +113,9 @@ void stateCodecUsesTheCanonicalV6Layout() {
   CHECK(bytes[pokemon::POKEMON_STATE_V4_BYTES] == 4);
   for (size_t index = 0; index < state.battleBoostCounts.size(); ++index) {
     CHECK(bytes[pokemon::POKEMON_STATE_V5_BYTES + index] == state.battleBoostCounts[index]);
+  }
+  for (size_t index = 0; index < state.vitaminCounts.size(); ++index) {
+    CHECK(bytes[pokemon::POKEMON_STATE_V6_BYTES + index] == state.vitaminCounts[index]);
   }
 
   pokemon::PokemonState decoded{};
@@ -204,6 +210,30 @@ void v5StateDecodesWithZeroedBattleBoostCounts() {
   for (const uint8_t slot : decoded.battleBoostCounts) CHECK(slot == 0);
 }
 
+void v6StateDecodesWithZeroedVitaminCounts() {
+  pokemon::PokemonState v6State{};
+  v6State.partyRecordIds[0] = 3;
+  v6State.lifetimeMinutes = 500;
+  v6State.ppUpCount = 4;
+  v6State.battleBoostCounts = {1, 2, 3, 4, 5, 6};
+
+  std::array<uint8_t, pokemon::POKEMON_STATE_V6_BYTES> bytes{};
+  write32(bytes.data(), 0, v6State.partyRecordIds[0]);
+  write32(bytes.data(), 104, v6State.lifetimeMinutes);
+  write32(bytes.data(), 108, 1);
+  bytes[pokemon::POKEMON_STATE_V4_BYTES] = v6State.ppUpCount;
+  for (size_t index = 0; index < v6State.battleBoostCounts.size(); ++index) {
+    bytes[pokemon::POKEMON_STATE_V5_BYTES + index] = v6State.battleBoostCounts[index];
+  }
+
+  pokemon::PokemonState decoded{};
+  decoded.vitaminCounts.fill(0xAA);  // prove the decoder zeroes these rather than leaving them alone
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V6, decoded));
+  CHECK(decoded.ppUpCount == 4);
+  CHECK(decoded.battleBoostCounts == v6State.battleBoostCounts);  // v6 fields still decode correctly
+  for (const uint8_t slot : decoded.vitaminCounts) CHECK(slot == 0);
+}
+
 void battleProgressReservedBitsAreRejected() {
   pokemon::PokemonState state{};
   state.battleProgress = static_cast<uint16_t>(pokemon::POKEMON_GYM_PROGRESS_MASK + 1U);  // first reserved bit set
@@ -276,6 +306,7 @@ void snapshotHeaderUsesCanonical24ByteLayout() {
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V1) == 96);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V2) == 116);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V5) == pokemon::POKEMON_STATE_V5_BYTES);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V6) == pokemon::POKEMON_STATE_V6_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION) == pokemon::POKEMON_STATE_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION + 1U) == 0);
 
@@ -340,10 +371,11 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonicalV6Layout();
+  stateCodecUsesTheCanonicalV7Layout();
   v3StateDecodesWithZeroedMissCounters();
   v4StateDecodesWithZeroedPpUpCount();
   v5StateDecodesWithZeroedBattleBoostCounts();
+  v6StateDecodesWithZeroedVitaminCounts();
   v2StateDecodesWithZeroedBagAndBattleProgress();
   battleProgressReservedBitsAreRejected();
   legacyStateDecodesItsPendingEventIntoTheQueue();

@@ -26,6 +26,13 @@ short summary of what shipped and exactly which files changed.
   instead of 2) change. Matches this project's established precedent of rejecting a real Gen
   1 formula when its native numbers don't fit this game's much slower, reading-driven pace
   (same reasoning `battleVictoryXp()` used to reject the real species-yield XP formula).
+- **EV vitamins exist (v0.28.0), on top of the automatic battle EVs.** HP Up/Protein/Iron/
+  Calcium/Carbos each add **+10 EV** to one stat per use, usable while that stat's EV is
+  **below 100** (real Gen 1: +2560 stat exp per vitamin up to 25600 of a 65535 cap - the same
+  1:10 ratio on this project's 0-255 scale). Battles can still push a stat past 100 up to 255;
+  vitamins only speed up the first 100. They are never sold - they drop from the reading-time
+  Medicine track (rare, `drop_weight` 2), so EVs stay tied to reading progress. Implemented in
+  `PokemonService::useVitamin()`; counts live in `PokemonState::vitaminCounts` (save version 7).
 - **Gym/Elite Four/Champion trainer Pokémon get a fixed IV of 15 in every stat, EV 0.**
   Mirrors the real games' own "trainer Pokémon have high, fixed DVs" convention, and avoids
   needing any persistence at all for non-`PokemonRecord` battle combatants (gym teams are

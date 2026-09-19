@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-19
+
+### Added
+
+- Vitamins: HP Up, Protein, Iron, Calcium and Carbos. Each one adds +10 to one of your Pokémon's hidden training values (HP, Attack, Defense, Special or Speed) and makes that stat a little higher, up to a limit of 100 from vitamins alone. They can't be bought; like PP Up, they turn up rarely while you read and are listed in Bag > Medicine. Using one shows a short "Charizard's Attack rose!" message, and the Summary screen's EV table shows the new value. Battles can still raise a stat beyond that limit.
+- If your Bag icons show a `?` for the new vitamins, the Pokémon art pack on your SD card just needs refreshing; everything else works without it.
+
+### Changed
+
+- Saves are upgraded to a new format the first time the game writes one. Older saves load as normal (with no vitamins yet); after the upgrade, an older version of the firmware will no longer read that save.
+
 ## [0.27.1] - 2026-09-19
 
 ### Fixed

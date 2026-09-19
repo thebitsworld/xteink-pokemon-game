@@ -288,6 +288,9 @@ bool itemCountIsFull(const PokemonState& state, const uint8_t itemId) {
   if (itemId >= BATTLE_BOOST_ITEM_ID_FIRST && itemId <= BATTLE_BOOST_ITEM_ID_LAST) {
     return state.battleBoostCounts[itemId - BATTLE_BOOST_ITEM_ID_FIRST] == UINT8_MAX;
   }
+  if (itemId >= VITAMIN_ITEM_ID_FIRST && itemId <= VITAMIN_ITEM_ID_LAST) {
+    return state.vitaminCounts[itemId - VITAMIN_ITEM_ID_FIRST] == UINT8_MAX;
+  }
   return state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U] == UINT8_MAX;
 }
 
@@ -298,6 +301,8 @@ void incrementItemCount(PokemonState& state, const uint8_t itemId) {
     ++state.ppUpCount;
   } else if (itemId >= BATTLE_BOOST_ITEM_ID_FIRST && itemId <= BATTLE_BOOST_ITEM_ID_LAST) {
     ++state.battleBoostCounts[itemId - BATTLE_BOOST_ITEM_ID_FIRST];
+  } else if (itemId >= VITAMIN_ITEM_ID_FIRST && itemId <= VITAMIN_ITEM_ID_LAST) {
+    ++state.vitaminCounts[itemId - VITAMIN_ITEM_ID_FIRST];
   } else {
     ++state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U];
   }
@@ -307,16 +312,16 @@ bool isStoneCategory(const ItemCategory category) { return category == ItemCateg
 
 // Matches what the Bag > Medicine screen shows, so "the medicine you collect"
 // means the same set in the drop rules as it does on screen. PP Up
-// (ItemCategory::PpUp) and the 6 battle-boost items (ItemCategory::
-// BattleBoost) are both included here so they drop from reading the same way
+// (ItemCategory::PpUp), the 6 battle-boost items (ItemCategory::BattleBoost)
+// and the 5 EV vitamins (ItemCategory::Vitamin) are all included here so they drop from reading the same way
 // every other medicine-track item does - itemCountIsFull()/incrementItemCount()
-// above already route them to state.ppUpCount/battleBoostCounts instead of
+// above already route them to state.ppUpCount/battleBoostCounts/vitaminCounts instead of
 // bagCounts, so the generic buildItemCandidates()/incrementItemCount() flow
 // handles them correctly with no further special-casing needed here.
 bool isMedicineCategory(const ItemCategory category) {
   return category == ItemCategory::Medicine || category == ItemCategory::StatusCure ||
          category == ItemCategory::PPRestore || category == ItemCategory::Candy ||
-         category == ItemCategory::PpUp || category == ItemCategory::BattleBoost;
+         category == ItemCategory::PpUp || category == ItemCategory::BattleBoost || category == ItemCategory::Vitamin;
 }
 
 bool isMachineCategory(const ItemCategory category) { return category == ItemCategory::Machine; }

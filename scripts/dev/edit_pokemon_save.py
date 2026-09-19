@@ -7,7 +7,7 @@ set up scenarios (queue a wild encounter, wipe HP/PP/status back to full,
 clear gym progress, hand a Pokemon some items) without waiting on real
 gameplay/RNG. See docs/file-formats.md for the on-disk layout this assumes;
 this tool only understands the CURRENT save format used by this branch
-(main save version 6, 205-byte state; battle-store version 2, 20-byte
+(main save version 7, 210-byte state; battle-store version 2, 20-byte
 entries) and refuses to touch anything else rather than risk corrupting an
 unfamiliar layout.
 
@@ -53,7 +53,7 @@ MAGIC = b"PKV2"
 HEADER_BYTES = 24
 OFF_HEADER_RECORD_COUNT = 16  # u32
 OFF_HEADER_PAYLOAD_BYTES = 20  # u32: stateBytes + recordCount * RECORD_BYTES - see decodeSnapshotHeader()
-STATE_BYTES_V6 = 205
+STATE_BYTES_V7 = 210
 RECORD_BYTES = 48
 POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
 PENDING_EVENT_BYTES = 10
@@ -64,12 +64,16 @@ PP_UP_ITEM_ID = 84  # tracked in ppUpCount, not bagCounts - see PP_UP_ITEM_ID in
 BATTLE_BOOST_ITEM_ID_FIRST = 85  # X Attack..Dire Hit (90) - tracked in battleBoostCounts, not bagCounts
 BATTLE_BOOST_ITEM_ID_LAST = 90
 BATTLE_BOOST_ITEM_COUNT = BATTLE_BOOST_ITEM_ID_LAST - BATTLE_BOOST_ITEM_ID_FIRST + 1
+VITAMIN_ITEM_ID_FIRST = 91  # HP Up..Carbos (95) - tracked in vitaminCounts, not bagCounts
+VITAMIN_ITEM_ID_LAST = 95
+VITAMIN_ITEM_COUNT = VITAMIN_ITEM_ID_LAST - VITAMIN_ITEM_ID_FIRST + 1
 
-# State-relative byte offsets (version 6 - see docs/file-formats.md). Bytes
+# State-relative byte offsets (version 7 - see docs/file-formats.md). Bytes
 # 0-194 are unchanged from version 3; 195-197 are version-4 pity counters for
 # the ball/medicine/TM-HM drop tracks (Stage 23); 198 is version 5's PP Up
 # item count; 199-204 are version 6's 6 battle-boost item counts (X Attack/
-# X Defense/X Speed/X Special/Guard Spec./Dire Hit).
+# X Defense/X Speed/X Special/Guard Spec./Dire Hit); 205-209 are version 7's 5
+# EV vitamin counts (HP Up/Protein/Iron/Calcium/Carbos).
 OFF_PARTY_IDS = 0  # 6 x u32
 OFF_PENDING_EVENTS = 24  # 3 x 10 bytes
 OFF_ITEM_COUNTS = 54  # 6 x u16 (evolution stones, ids 1-6)
@@ -88,6 +92,7 @@ OFF_MEDICINE_MISSES = 196  # u8
 OFF_MACHINE_MISSES = 197  # u8
 OFF_PPUP_COUNT = 198  # u8 - how many PP Up items (id 84) the player holds, tracked outside bagCounts
 OFF_BATTLE_BOOST_COUNTS = 199  # 6 x u8 - ids 85-90, tracked outside bagCounts, same reason as PP Up
+OFF_VITAMIN_COUNTS = 205  # 5 x u8 - ids 91-95, tracked outside bagCounts, same reason as PP Up
 
 # The battle-store side file (pokemon-battle-{a,b}.bin) - see
 # lib/Pokemon/PokemonBattleStoreCodec.h. Version 2 entries add a per-slot PP
@@ -352,10 +357,11 @@ def load_save(path: Path) -> SaveFile:
     state_size, record_size = struct.unpack_from("<HH", data, 12)
     if header_size != HEADER_BYTES:
         raise ToolError(f"{path}: unexpected header size {header_size} (expected {HEADER_BYTES})")
-    if state_size != STATE_BYTES_V6:
+    if state_size != STATE_BYTES_V7:
         raise ToolError(
-            f"{path}: this tool only understands version-6 saves (205-byte state), got {state_size} bytes "
-            f"(version {version}) - refusing to touch an unfamiliar layout"
+            f"{path}: this tool only understands version-7 saves (210-byte state), got {state_size} bytes "
+            f"(version {version}) - refusing to touch an unfamiliar layout. A version-6 save (205 bytes) "
+            f"is upgraded the next time the game writes it - run the game once first."
         )
     if record_size != RECORD_BYTES:
         raise ToolError(f"{path}: unexpected record size {record_size} (expected {RECORD_BYTES})")
@@ -380,7 +386,7 @@ def set_header_record_count(save: SaveFile, new_count: int) -> None:
     load - writing recordCount alone leaves a stale payload size and the
     device rejects the whole file as corrupt on next boot."""
     struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
-    payload_bytes = STATE_BYTES_V6 + new_count * RECORD_BYTES
+    payload_bytes = STATE_BYTES_V7 + new_count * RECORD_BYTES
     struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
@@ -566,7 +572,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     print("\nparty record ids:", [rid for rid in party_ids if rid != 0])
 
     header_record_count, = struct.unpack_from("<I", active.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V6
+    records_offset = HEADER_BYTES + STATE_BYTES_V7
     print(f"\nrecords ({header_record_count}):")
     for i in range(header_record_count):
         offset = records_offset + i * RECORD_BYTES
@@ -611,6 +617,12 @@ def cmd_dump(args: argparse.Namespace) -> None:
     for i, count in enumerate(battle_boost_counts):
         if count:
             item_id = BATTLE_BOOST_ITEM_ID_FIRST + i
+            item = item_map.get(item_id)
+            print(f"  id {item_id} ({item.name if item else '?'}): {count}")
+    vitamin_counts = struct.unpack_from("<5B", state_bytes(active, OFF_VITAMIN_COUNTS, VITAMIN_ITEM_COUNT))
+    for i, count in enumerate(vitamin_counts):
+        if count:
+            item_id = VITAMIN_ITEM_ID_FIRST + i
             item = item_map.get(item_id)
             print(f"  id {item_id} ({item.name if item else '?'}): {count}")
 
@@ -687,7 +699,7 @@ def _dex_bits(count: int) -> bytes:
 
 def _owned_species(save: SaveFile) -> list[int]:
     record_count, = struct.unpack_from("<I", save.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V6
+    records_offset = HEADER_BYTES + STATE_BYTES_V7
     return [
         struct.unpack_from("<H", save.data, records_offset + i * RECORD_BYTES + 8)[0] for i in range(record_count)
     ]
@@ -784,6 +796,12 @@ def set_bag_item_count(save: SaveFile, item: Item, count: int) -> int:
         before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
         set_state_bytes(save, offset, struct.pack("<B", count))
         return before
+    if VITAMIN_ITEM_ID_FIRST <= item.id <= VITAMIN_ITEM_ID_LAST:
+        # Tracked in vitaminCounts, not bagCounts - same reasoning as PP Up.
+        offset = OFF_VITAMIN_COUNTS + (item.id - VITAMIN_ITEM_ID_FIRST)
+        before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
+        set_state_bytes(save, offset, struct.pack("<B", count))
+        return before
     offset = OFF_BAG_COUNTS + (item.id - EVOLUTION_ITEM_COUNT - 1)
     before, = struct.unpack_from("<B", state_bytes(save, offset, 1))
     set_state_bytes(save, offset, struct.pack("<B", count))
@@ -830,7 +848,7 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         raise ToolError("--xp must be >= 0")
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, 16)
-        records_offset = HEADER_BYTES + STATE_BYTES_V6
+        records_offset = HEADER_BYTES + STATE_BYTES_V7
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES
@@ -863,7 +881,7 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
     nickname_bytes = nickname_text + b"\x00" * (POKEMON_NICKNAME_BYTES - len(nickname_text))
 
     saves = load_saves(args.save_dir)
-    records_offset = HEADER_BYTES + STATE_BYTES_V6
+    records_offset = HEADER_BYTES + STATE_BYTES_V7
 
     # pokemon-a.bin and pokemon-b.bin can legitimately hold different
     # generations of state (that is the whole point of the double buffer),
@@ -935,7 +953,7 @@ def cmd_set_moves(args: argparse.Namespace) -> None:
     saves = load_saves(args.save_dir)
     active = max(saves, key=lambda s: s.sequence)
     record_count, = struct.unpack_from("<I", active.data, OFF_HEADER_RECORD_COUNT)
-    records_offset = HEADER_BYTES + STATE_BYTES_V6
+    records_offset = HEADER_BYTES + STATE_BYTES_V7
     species_id = None
     total_xp = None
     for i in range(record_count):

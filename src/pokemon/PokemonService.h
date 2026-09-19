@@ -196,6 +196,15 @@ class PokemonService {
   // the item is handed back (best effort) and StorageError is returned.
   ServiceStatus usePpUp(uint32_t recordId, uint8_t slot);
 
+  // Spends one EV vitamin (itemId in VITAMIN_ITEM_ID_FIRST..LAST) on recordId:
+  // +VITAMIN_EV_PER_USE to the matching stat's EV (HP Up -> HP, Protein ->
+  // Attack, Iron -> Defense, Calcium -> Special, Carbos -> Speed), capped at
+  // 255. Returns NotApplicable, with nothing consumed, once that stat's EV is
+  // already at VITAMIN_EV_CAP or more (battles can still push it higher).
+  // Same order as usePpUp(): check, consume the item, apply, and hand the item
+  // back if the apply write fails.
+  ServiceStatus useVitamin(uint32_t recordId, uint8_t itemId);
+
   // Uses one Medicine-pocket item (ItemCategory::Medicine/StatusCure/
   // PPRestore/Candy - the "Bag > Medicine" category; Stone/Ball/Machine
   // items go through useEvolutionItem/teachMove/attemptBattleCatch
