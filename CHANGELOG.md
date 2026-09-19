@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-19
+
+### Fixed
+
+- Pokémon in your party never recovered PP while you read. PP is meant to come back at +1 per move for every 10 minutes of reading, but the reading timer only reports in ~5-minute steps and each step was rounded down to zero PP, so it never kicked in. The 10-minute count now carries over between steps, so PP recovers as intended (HP recovery was not affected).
+
 ## [0.25.1] - 2026-09-18
 
 ### Fixed
