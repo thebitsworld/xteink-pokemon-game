@@ -14,6 +14,38 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
+## Round 8 (2026-09-19, tại `v0.28.0`) — rà soát toàn code, user đã triage, CHƯA LÀM
+
+**Cần fix (làm sau):**
+- **A. Đọc TXT/XTC không được cộng điểm Pokémon.** Chỉ `EpubReaderActivity.cpp`
+  gọi `beginReadingSession` / `onSuccessfulPageTurn` / `checkpointIfDue` /
+  `flushOnExit` (bọc `#if defined(CROSSINK_ENABLE_POKEMON)`). Các reader TXT và
+  XTC không có hook nào → không EXP, PP, encounter, drop. Cách fix: thêm đúng 4
+  hook đó vào từng reader (giống EPUB: onEnter / loop / pageTurn bỏ qua auto /
+  onExit). Nên thêm test/ghi chú hồi quy, vì suite hiện không chứng minh được
+  reader nào có nối dây.
+- **C. Áp tác dụng trước khi trừ item** (cùng dạng bug PP Up đã sửa ở `v0.27.1`).
+  `PokemonActivity.cpp` ~l.1860-1865 (TM/HM: `teachMove` rồi mới
+  `consumeBagItem`), và Medicine ~l.1778 / ~l.1837. Nếu ghi SD lần 2 lỗi thì
+  effect còn mà item không mất. Fix theo mẫu `usePpUp`/`useVitamin`: kiểm tra
+  áp dụng được → trừ item → áp dụng → hoàn item nếu áp dụng lỗi (đặt trong
+  `PokemonService`, không đặt ở UI).
+
+**Hoãn (tạm thời không fix):**
+- **F. Slideshow nhẹ:** thư mục chỉ có 1 ảnh vẫn vẽ lại mỗi chu kỳ; danh sách
+  ảnh không có giới hạn số lượng.
+
+**Đã quyết định giữ nguyên (không phải bug):**
+- **B.** Merge PR #2 (`e051b975`) hoàn nguyên các sửa Slideshow X3 của agent
+  khác (vd. hướng xoay theo từng ảnh `orientationForImage`) — chủ đích, vì các
+  fix trước đó không hiệu quả.
+- **D.** `healPartyOnRead` hồi cả Pokémon đã ngất khi đọc sách — giữ, vì Revive
+  khá hiếm.
+- **E.** Mất phần lẻ dưới 1 phút khi checkpoint và thời gian trước lần lật
+  trang đầu tiên — bỏ qua.
+
+---
+
 ## Ý tưởng cải tiến/tính năng mới (2026-09-18) — mục 1 và 2 ĐÃ LÀM (`v0.27.0`), còn lại đang cân nhắc
 
 Từ một đợt rà soát toàn bộ tính năng hiện có so với các bản Pokémon gốc (agent
