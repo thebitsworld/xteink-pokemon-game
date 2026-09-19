@@ -807,7 +807,8 @@ ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
   return ServiceStatus::Ok;
 }
 
-void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t minutes) {
+void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t minutes,
+                                     const uint8_t previousMinuteRemainder) {
   constexpr uint16_t HP_HEAL_PER_MINUTE = 1;
   constexpr uint16_t MINUTES_PER_PP_TICK = 10;
 
@@ -853,7 +854,12 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
         static_cast<uint32_t>(healed.currentHp) + static_cast<uint32_t>(HP_HEAL_PER_MINUTE) * minutes;
     healed.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healedHp));
 
-    const uint16_t ppTicks = static_cast<uint16_t>(minutes / MINUTES_PER_PP_TICK);
+    // Credits arrive in ~5-minute checkpoints, so `minutes / 10` alone is
+    // always 0 and PP would never recover. Count how many 10-minute marks the
+    // persistent per-hour minute counter crossed instead (60 is a multiple of
+    // 10, so the count stays consistent across the hourly wrap).
+    const uint16_t ppTicks = static_cast<uint16_t>((previousMinuteRemainder + minutes) / MINUTES_PER_PP_TICK -
+                                                   previousMinuteRemainder / MINUTES_PER_PP_TICK);
     if (ppTicks > 0) {
       for (size_t moveSlot = 0; moveSlot < BATTLE_MOVE_SLOTS; ++moveSlot) {
         if (healed.moves[moveSlot] == 0) continue;
@@ -1091,6 +1097,7 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
   }
 
   const uint32_t originalLeaderXp = leader.totalXp;
+  const uint8_t previousMinuteRemainder = state.readingMinuteRemainder;
   const CreditResult result =
       applyCreditedMinutes(state, leader, minutes, bookProgressPercent, ownedEvolutionNeeds, random_);
   if (result.status != CreditStatus::Applied) return false;
@@ -1124,7 +1131,7 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
     LOG_ERR("PokemonService", "Failed to commit credited reading");
     return false;
   }
-  healPartyOnRead(state, minutes);
+  healPartyOnRead(state, minutes, previousMinuteRemainder);
   return true;
 }
 

@@ -266,7 +266,7 @@ class PokemonService {
   ServiceStatus prepareStore();
   ServiceStatus loadReadyState(PokemonState& output);
   BattleRecordEntry synthesizeBattleEntry(const PokemonRecord& record, const IvEvEntry& ivEv) const;
-  void healPartyOnRead(const PokemonState& state, uint16_t minutes);
+  void healPartyOnRead(const PokemonState& state, uint16_t minutes, uint8_t previousMinuteRemainder);
   // Checks the leader's learnset for any move newly available between
   // previousLevel (exclusive) and currentLevel (inclusive): auto-fills an
   // empty move slot if there's room, or queues a MoveLearn event for the UI

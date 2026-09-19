@@ -25,22 +25,6 @@ bool isViewableImageFile(const std::string& filename) {
 
 bool isMacOSSidecarFile(const std::string& filename) { return filename.rfind("._", 0) == 0; }
 
-// Experiment #8 in TASKS.md's X3-grayscale-quality investigation (2026-09-18):
-// every prior attempt (#1-7) changed the refresh MODE/sequencing while the
-// panel's power rails stayed continuously on for the whole Slideshow session
-// (Sleep Cover, by contrast, calls CMD_POWER_OFF via TURN_OFF_SCREEN_AFTER_-
-// SLEEP_REFRESH after every single render). None of those tried actually
-// power-cycling the panel between images. Uc8253X3Driver::displayStart()
-// forces at least a Half-strength waveform whenever the panel is waking from
-// a powered-off state ("wake transition gets a stronger waveform"), and a
-// cold CMD_POWER_ON re-charges the boost-converter rails from scratch -
-// neither is reflected in the _redRamSynced/_grayState software flags the
-// investigation traced so far, so this is a genuinely untested variable, not
-// a re-run of #1/#7. Kept as its own named constant (not reusing Sleep's) so
-// it can be flipped back to false in one place if it doesn't help on real
-// X3 hardware - UNVERIFIED, needs the user's own hardware test.
-constexpr bool TURN_OFF_SCREEN_BETWEEN_SLIDES = true;
-
 void drawSlideshowMessage(GfxRenderer& renderer, const MappedInputManager& mappedInput, const char* message) {
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2, message);
@@ -51,29 +35,6 @@ void drawSlideshowMessage(GfxRenderer& renderer, const MappedInputManager& mappe
 
 // Minutes between auto-advances, converted to milliseconds for millis() comparisons.
 unsigned long intervalMs() { return static_cast<unsigned long>(SETTINGS.slideshowIntervalMinutes) * 60UL * 1000UL; }
-
-bool isPortraitOrientation(const GfxRenderer::Orientation orientation) {
-  return orientation == GfxRenderer::Portrait || orientation == GfxRenderer::PortraitInverted;
-}
-
-// Picks whichever of Portrait/Landscape best matches an image's own aspect
-// ratio, instead of always rendering into whatever orientation happened to
-// be active before Slideshow opened. A folder can freely mix portrait and
-// landscape photos; rendering a portrait photo into a landscape frame (or
-// vice versa) forces a much more aggressive scale-down than the photo
-// actually needs, which is what was making some images look far softer/
-// less detailed than the identical file shown via Sleep Screen's cover
-// (SleepActivity always forces Portrait first, so a portrait-shaped cover
-// image never needed this kind of scaling at all). Reuses `fallback`'s exact
-// variant when its portrait/landscape-ness already matches the image, so an
-// already-correctly-oriented screen never gets flipped to the other variant
-// (e.g. Portrait -> PortraitInverted) for no reason.
-GfxRenderer::Orientation orientationForImage(const int width, const int height,
-                                             const GfxRenderer::Orientation fallback) {
-  const bool imageIsPortrait = height > width;
-  if (imageIsPortrait == isPortraitOrientation(fallback)) return fallback;
-  return imageIsPortrait ? GfxRenderer::Portrait : GfxRenderer::LandscapeCounterClockwise;
-}
 
 }  // namespace
 
@@ -93,7 +54,6 @@ void SlideshowActivity::onEnter() {
 
 void SlideshowActivity::onExit() {
   Activity::onExit();
-  renderer.setOrientation(entryOrientation);
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
@@ -224,7 +184,6 @@ void SlideshowActivity::loadImageList() {
 }
 
 void SlideshowActivity::startPlayback() {
-  entryOrientation = renderer.getOrientation();
   loadImageList();
   if (images.empty()) {
     screen = Screen::Empty;
@@ -241,36 +200,12 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
 
-  // X3 real-hardware image quality: still an OPEN issue as of this commit,
-  // despite several rounds of fixes here that each looked well-justified on
-  // code-reading alone but were confirmed NOT to resolve it on real
-  // hardware. See TASKS.md for the full investigation log (what's been
-  // ruled out, and experiment #8 - TURN_OFF_SCREEN_BETWEEN_SLIDES above,
-  // UNVERIFIED as of this commit) before picking this back up - don't
-  // re-derive it from scratch.
-  //
-  // Ghost-cleanup pass before every single image (not just periodically -
-  // slideshow already waits whole minutes between images, unlike the
-  // reader's page-turn latency budget). HALF_REFRESH, not FULL_REFRESH -
-  // SleepActivity never uses FULL_REFRESH's multi-flash GC waveform, only
-  // HALF's single-pass one; both select the same strong-clear waveform bank
-  // at the driver level, so this keeps the same physical-resettle benefit.
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-  // The refresh above alone was NOT enough (confirmed by testing on real
-  // X3 hardware) - the reader hit this exact same problem and its own fix
-  // is the OEM grayscale pre-conditioning pass, run once right before the
-  // gray planes are written (see EpubReaderActivity.cpp/XtcReaderActivity.cpp,
-  // same call): "X3 grayscale overlays settle better if the OEM precondition
-  // step runs before the gray planes are written." Without it the B/W base
-  // pass alone leaves the panel under-conditioned for the LSB/MSB grayscale
-  // planes that follow, which is what actually showed up as X3 images
-  // looking washed out/less detailed than the identical image on X4 Pro.
-  renderer.preconditionGrayscale();
-
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";
   const std::string filePath = dirPath + images[currentIndex];
 
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
   const bool cropMode = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
 
   if (FsHelpers::hasPngExtension(filePath)) {
@@ -279,13 +214,6 @@ void SlideshowActivity::renderCurrentImage() {
       drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
       return;
     }
-
-    // Match this image's own aspect ratio (Portrait vs Landscape) instead of
-    // always rendering into whatever orientation was already active - see
-    // orientationForImage()'s own comment for why.
-    renderer.setOrientation(orientationForImage(dims.width, dims.height, entryOrientation));
-    const auto pageWidth = renderer.getScreenWidth();
-    const auto pageHeight = renderer.getScreenHeight();
 
     float scale = 1.0f;
     const float scaleX = static_cast<float>(pageWidth) / static_cast<float>(dims.width);
@@ -312,41 +240,30 @@ void SlideshowActivity::renderCurrentImage() {
     config.useExactDimensions = true;
 
     PngToFramebufferConverter converter;
-    // Each pass re-decodes the PNG under a different render mode (BW, then the
-    // LSB/MSB grayscale planes) rather than resuming a stream - the dither in
-    // DirectPixelWriter is purely positional, so re-decoding reproduces the
-    // same quantized values per plane, matching the pattern already used for
-    // BMP below and for the sleep cover (SleepActivity::renderBitmapSleepScreen).
-    // No button-hint row while an image is actually showing - on non-touch
-    // devices (X3) it ate into the image area for no real benefit (Back still
-    // works via the physical button either way, loop() handles it directly).
+    // Same grayscale sequence as SleepActivity::renderBitmapSleepScreen() (the
+    // custom sleep cover, no filter), which is known-good on X3: HALF_REFRESH
+    // base pass, gray planes cleared to 0x00 on non-absolute panels, no button
+    // hints painted into any plane, and no extra BW redraw afterwards. Each
+    // pass re-decodes the PNG (the dither is purely positional, so every pass
+    // quantizes identically).
     const auto drawFrame = [&]() {
-      renderer.clearScreen();
       if (!converter.decodeToFramebuffer(filePath, renderer, config)) return false;
       renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
       return true;
     };
 
+    renderer.clearScreen();
     bool success = drawFrame();
     if (success) {
       const bool absolute = renderer.supportsAbsoluteGrayscale();
       if (absolute) {
         success = renderer.displayAbsoluteGrayscaleBase();
       } else {
-        // HALF_REFRESH, not FAST_REFRESH - matches SleepActivity's own
-        // non-absolute branch. A debug overlay on real X3 hardware confirmed
-        // supportsAbsoluteGrayscale() is FALSE there (production X3 units
-        // use Uc8253X3Driver, Overlay-only - every earlier fix attempt in
-        // this file targeted the dead Absolute-mode branch instead), and
-        // HalDisplay::displayGrayscaleBase(fallback, ...) only calls
-        // requestResync() - the driver's clean-base request - when
-        // fallback != FAST_REFRESH. This looked like the real fix by that
-        // reasoning, but was confirmed NOT to resolve the issue on real
-        // hardware - see TASKS.md, still unexplained.
         renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
       }
       for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
         if (!success) break;
+        renderer.clearScreen(absolute ? 0xFF : 0x00);
         renderer.setRenderMode(mode);
         success = drawFrame();
         if (!success) break;
@@ -355,16 +272,11 @@ void SlideshowActivity::renderCurrentImage() {
         else
           renderer.copyGrayscaleMsbBuffers();
       }
-      // Stop right here, matching SleepActivity::renderBitmapSleepScreen()
-      // (confirmed to render correctly on X3) - do NOT redraw a plain B/W
-      // frame and call cleanupGrayscaleWithFrameBuffer() afterward like this
-      // used to (copied from BmpViewerActivity's own, never-quite-right
-      // pattern). That extra step visibly washed out the real grayscale
-      // image displayGrayBuffer() had just shown correctly.
-      if (success) renderer.displayGrayBuffer(TURN_OFF_SCREEN_BETWEEN_SLIDES);
+      if (success) renderer.displayGrayBuffer();
       renderer.setRenderMode(GfxRenderer::BW);
     }
     if (!success) {
+      renderer.setRenderMode(GfxRenderer::BW);
       drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
     }
     return;
@@ -383,32 +295,18 @@ void SlideshowActivity::renderCurrentImage() {
     return;
   }
 
-  // Match this image's own aspect ratio (Portrait vs Landscape) instead of
-  // always rendering into whatever orientation was already active - see
-  // orientationForImage()'s own comment for why. Uses the bitmap's raw
-  // dimensions (before any setDitheredOutputSize() call below changes what
-  // getWidth()/getHeight() report).
-  renderer.setOrientation(orientationForImage(bitmap.getWidth(), bitmap.getHeight(), entryOrientation));
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  // Keep error diffusion on the screen-sized grid (see the same note in
+  // SleepActivity::renderBitmapSleepScreen()): resampling an already dithered
+  // source makes the source pattern alias into regular seams/haze.
+  if (!cropMode && (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight)) {
+    const float fitScale = std::min(static_cast<float>(pageWidth) / bitmap.getWidth(),
+                                    static_cast<float>(pageHeight) / bitmap.getHeight());
+    bitmap.setDitheredOutputSize(static_cast<int>(std::floor((bitmap.getWidth() - 1) * fitScale)) + 1,
+                                 static_cast<int>(std::floor((bitmap.getHeight() - 1) * fitScale)) + 1);
+  }
 
   int x, y;
   float cropX = 0, cropY = 0;
-  if (!cropMode && (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight)) {
-    // Re-dither AT the final on-screen size instead of dithering at the
-    // source resolution and letting drawBitmap() point-sample it down
-    // afterward - matches SleepActivity::renderBitmapSleepScreen()'s own
-    // FIT-mode handling (confirmed correct on X3). Scaling an
-    // already-dithered bitmap breaks the dither pattern's regularity and
-    // is what was visibly losing contrast/detail here. Only applies to
-    // Fit (no crop) - setDitheredOutputSize() resizes the whole image
-    // uniformly, it has no concept of cropping a region first.
-    const float scale = std::min(static_cast<float>(pageWidth) / static_cast<float>(bitmap.getWidth()),
-                                 static_cast<float>(pageHeight) / static_cast<float>(bitmap.getHeight()));
-    const int targetWidth = static_cast<int>(std::floor((bitmap.getWidth() - 1) * scale)) + 1;
-    const int targetHeight = static_cast<int>(std::floor((bitmap.getHeight() - 1) * scale)) + 1;
-    bitmap.setDitheredOutputSize(targetWidth, targetHeight);
-  }
   if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
     float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
     const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
@@ -433,11 +331,10 @@ void SlideshowActivity::renderCurrentImage() {
     y = (pageHeight - bitmap.getHeight()) / 2;
   }
 
-  // No button-hint row while an image is actually showing - see the PNG
-  // branch's identical comment above.
-  const auto drawFrame = [&]() {
-    return renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
-  };
+  // Same sequence as SleepActivity::renderBitmapSleepScreen() (custom sleep
+  // cover, no filter): no button hints in any plane, HALF_REFRESH base pass,
+  // gray planes cleared to 0x00 on non-absolute (X3) panels, no BW redraw.
+  const auto drawFrame = [&]() { return renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY); };
 
   renderer.clearScreen();
   bool success = drawFrame();
@@ -446,15 +343,13 @@ void SlideshowActivity::renderCurrentImage() {
     if (absolute) {
       success = renderer.displayAbsoluteGrayscaleBase();
     } else {
-      // HALF_REFRESH, not FAST_REFRESH - see the PNG branch's identical
-      // comment above (still unresolved on real hardware, see TASKS.md).
       renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
     }
     for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
       if (!success) break;
       success = bitmap.rewindToData() == BmpReaderError::Ok;
       if (!success) break;
-      renderer.clearScreen();
+      renderer.clearScreen(absolute ? 0xFF : 0x00);
       renderer.setRenderMode(mode);
       success = drawFrame();
       if (!success) break;
@@ -463,16 +358,13 @@ void SlideshowActivity::renderCurrentImage() {
       else
         renderer.copyGrayscaleMsbBuffers();
     }
-    // Stop right here, matching SleepActivity::renderBitmapSleepScreen() -
-    // see the PNG branch's identical comment above for why the extra
-    // redraw+cleanupGrayscaleWithFrameBuffer() step this used to have is
-    // gone.
-    if (success) renderer.displayGrayBuffer(TURN_OFF_SCREEN_BETWEEN_SLIDES);
+    if (success) renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
   } else if (success) {
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH, TURN_OFF_SCREEN_BETWEEN_SLIDES);
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
   if (!success) {
+    renderer.setRenderMode(GfxRenderer::BW);
     LOG_ERR("SLDSHW", "Failed to render complete BMP image");
     drawSlideshowMessage(renderer, mappedInput, tr(STR_FAILED_LOWER));
   }

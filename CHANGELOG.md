@@ -1,55 +1,11 @@
 ## [Unreleased]
 
-## [0.25.8] - 2026-09-18
-
-### Changed
-
-- Photo Slideshow (X3): the panel now fully powers off after each image and powers back on for the next, matching exactly how Sleep Screen's own cover rendering has always worked. This is a trial to test whether the panel staying continuously powered for the whole Slideshow session (instead of power-cycling like Sleep Screen) is part of why Slideshow images still look less detailed than the identical image shown as a Sleep Screen cover - not yet confirmed on real hardware, this build exists to test that specific theory.
-
-### Known issue
-
-- Photo Slideshow / the file browser's image viewer still render grayscale images on X3 real hardware with noticeably less detail than the identical image shown as a Sleep Screen cover. Several confirmed-correct differences from Sleep Screen's own rendering have been found and fixed along the way, but none have fully closed the gap yet - still under investigation.
-
-## [0.25.7] - 2026-09-18
+## [0.26.0] - 2026-09-19
 
 ### Fixed
 
-- Photo Slideshow: X3 (Overlay-mode grayscale) now uses the same refresh mode as Sleep Screen's own cover rendering when starting a new image's grayscale pass, instead of one that skipped a real-hardware panel-conditioning step - a genuine, verified-correct difference from Sleep Screen, though it did not fully close the remaining quality gap on its own (see the project's own notes for the ongoing investigation).
-
-### Known issue
-
-- Photo Slideshow / the file browser's image viewer still render grayscale images on X3 real hardware with noticeably less detail than the identical image shown as a Sleep Screen cover. Several confirmed-correct differences from Sleep Screen's own rendering have been found and fixed along the way, but none have fully closed the gap yet - still under investigation.
-
-## [0.25.6] - 2026-09-18
-
-### Fixed
-
-- Found the actual root cause of Photo Slideshow images looking noticeably softer/less detailed than the exact same image shown as a Sleep Screen cover: Slideshow always rendered into whatever screen orientation happened to already be active, while Sleep Screen always switches to Portrait first. A portrait-shaped photo shown in a landscape frame (or vice versa) needs far more aggressive scaling than the photo actually requires, which is what was really behind the quality loss - not the grayscale rendering pipeline changes from the past several versions. Slideshow now matches each photo's own portrait/landscape orientation before displaying it, the same way Sleep Screen already did, and restores the original orientation when you leave Slideshow.
-
-## [0.25.5] - 2026-09-18
-
-### Fixed
-
-- Found another real cause of X3 (and general) image quality loss when a photo needs to shrink to fit the screen in Photo Slideshow and the file browser's image viewer: the image was being dithered at its original size and only scaled down afterward, which breaks the dither pattern and visibly loses contrast/detail. Both now re-dither directly at the final on-screen size instead, matching how the Sleep Screen cover image has always handled this.
-
-## [0.25.4] - 2026-09-18
-
-### Fixed
-
-- Found the real cause of X3 grayscale images (Photo Slideshow, and the file browser's own image viewer) looking washed out/less detailed than the identical image on X4 Pro: both were redrawing a flat black-and-white version of the image right after the real grayscale image was already shown correctly, visibly dulling it. That extra step is now gone, matching how the (already correct) Sleep Screen cover rendering has always worked.
-
-## [0.25.3] - 2026-09-18
-
-### Fixed
-
-- Photo Slideshow images on X3 still looked washed out/less detailed than X4 Pro even after v0.25.2's full refresh - the missing piece was the same OEM grayscale pre-conditioning pass the book reader already uses on X3, which now runs before every slideshow image too.
-- The button-hint row ("Back") at the bottom of the screen no longer shows while a slideshow image is on screen (X3/other physical-button devices) - it was eating into the image area for no benefit, since Back already works via the physical button regardless.
-
-## [0.25.2] - 2026-09-18
-
-### Fixed
-
-- Photo Slideshow on X3 still lost detail and ghosting was still visible after v0.25.1's periodic cleanup - per further testing, X3 now does a full refresh before *every* image instead of periodically (a real waveform flash, unlike the reader's page-turn budget the slideshow doesn't need to protect - it already waits whole minutes between images either way).
+- Pokémon in your party never recovered PP while you read. PP is meant to come back at +1 per move for every 10 minutes of reading, but the reading timer only reports in ~5-minute steps and each step was rounded down to zero PP, so it never kicked in. The 10-minute count now carries over between steps, so PP recovers as intended (HP recovery was not affected).
+- Photo Slideshow on X3 could still look hazy/low-detail or ghost between images. Images are now drawn with the exact same grayscale sequence the custom sleep screen uses (which looks correct on X3): a proper half-refresh base pass, gray layers cleared to black on X3's panel, no button hints painted into the image, and Fit-mode downscaling dithered at screen size. The periodic full-refresh workaround from 0.25.1 is no longer needed and was removed.
 
 ## [0.25.1] - 2026-09-18
 
