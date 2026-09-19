@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.28.1] - 2026-09-19
+
 ### Fixed
 
 - A Pokémon that reached its evolution level by winning battles or using a Rare Candy never got the evolution prompt (only levelling up from reading did). It now gets the prompt after any level-up, and a Pokémon that is already past its evolution level gets it after its next battle win.
