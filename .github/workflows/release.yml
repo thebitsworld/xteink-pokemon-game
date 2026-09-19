@@ -23,13 +23,12 @@ name: Release
 # in-app "Check for Update" over Wi-Fi. None of the public xteink-pokemon-* names
 # match that, so OTA would otherwise silently find no compatible asset.
 #
-# Each firmware builds in its OWN job (its own runner/VM), matching ci.yml's
-# per-environment matrix - a first (cold-cache) run of this workflow found that
+# Each firmware builds in its OWN job (its own runner/VM) - a first (cold-cache) run of this workflow found that
 # building both pokemon-x3 (ESP32-C3/riscv32 toolchain) and pokemon-x4-pro
 # (ESP32-S3/xtensa toolchain, plus a much larger Arduino-ESP32 libs bundle) inside
 # ONE job/runner exhausted the runner's disk mid-build, silently losing the first
 # build's output before the packaging step ran. Splitting into separate jobs gives
-# each build its own disk budget, same as ci.yml already does successfully.
+# each build its own disk budget.
 on:
   push:
     tags:
