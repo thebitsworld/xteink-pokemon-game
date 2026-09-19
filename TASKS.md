@@ -14,22 +14,37 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
-## Round 8 (2026-09-19, tại `v0.28.0`) — rà soát toàn code, user đã triage, CHƯA LÀM
+## Round 8 (2026-09-19, tại `v0.28.0`) — rà soát toàn code, user đã triage
 
-**Cần fix (làm sau):**
-- **A. Đọc TXT/XTC không được cộng điểm Pokémon.** Chỉ `EpubReaderActivity.cpp`
-  gọi `beginReadingSession` / `onSuccessfulPageTurn` / `checkpointIfDue` /
-  `flushOnExit` (bọc `#if defined(CROSSINK_ENABLE_POKEMON)`). Các reader TXT và
-  XTC không có hook nào → không EXP, PP, encounter, drop. Cách fix: thêm đúng 4
-  hook đó vào từng reader (giống EPUB: onEnter / loop / pageTurn bỏ qua auto /
-  onExit). Nên thêm test/ghi chú hồi quy, vì suite hiện không chứng minh được
-  reader nào có nối dây.
-- **C. Áp tác dụng trước khi trừ item** (cùng dạng bug PP Up đã sửa ở `v0.27.1`).
-  `PokemonActivity.cpp` ~l.1860-1865 (TM/HM: `teachMove` rồi mới
-  `consumeBagItem`), và Medicine ~l.1778 / ~l.1837. Nếu ghi SD lần 2 lỗi thì
-  effect còn mà item không mất. Fix theo mẫu `usePpUp`/`useVitamin`: kiểm tra
-  áp dụng được → trừ item → áp dụng → hoàn item nếu áp dụng lỗi (đặt trong
-  `PokemonService`, không đặt ở UI).
+**Đã fix (`v0.28.2`, trên branch, chưa merge vào `main`):**
+- **A. Đọc TXT/XTC không được cộng điểm Pokémon.** Đã thêm đúng 4 hook
+  (`beginReadingSession` ở `onEnter`, `checkpointIfDue` ở `loop`,
+  `setBookProgressPercent`+`onSuccessfulPageTurn` sau mỗi lần đổi trang thật,
+  `flushOnExit` ở `onExit`) vào cả `TxtReaderActivity.cpp` và
+  `XtcReaderActivity.cpp`, bọc `#if defined(CROSSINK_ENABLE_POKEMON)`, đúng
+  mẫu EPUB (2 reader này không có khái niệm "auto page-turn" nên không cần lọc
+  `source == "auto"`). **Chưa có test hồi quy tự động** - `TxtReaderActivity`/
+  `XtcReaderActivity` cần toàn bộ framework Arduino/ESP32 (`HalStorage`,
+  `GfxRenderer`...) nên không build được trong native test suite; đã build
+  thực tế qua `pio run -e pokemon-x3` để xác nhận biên dịch thay vì unit test
+  (xem ghi chú build bên dưới). Cùng khoảng trống như session sửa EPUB gốc đã
+  từng ghi nhận và để lại chưa làm.
+- **C. Áp tác dụng trước khi trừ item.** Thêm `PokemonService::
+  teachMoveAndConsumeItem()`/`useConsumableAndConsumeItem()` (kiểm tra không
+  ghi gì → trừ item → áp dụng → hoàn item nếu ghi lỗi, đúng mẫu
+  `usePpUp`/`useVitamin`; `teachMove()` tách phần kiểm tra ra
+  `resolveTeachTarget()` dùng chung, `useConsumable()` tách thành
+  `useConsumableImpl(dryRun)` dùng chung) và cập nhật 4 điểm gọi trong
+  `PokemonActivity.cpp` (TM/HM trực tiếp, `TmReplaceSlot`, Medicine thường,
+  Medicine giữa trận). Thêm 2 test mới trong `PokemonServiceTest.cpp`. 24/24
+  test Pokemon native pass.
+  - **Lưu ý build**: `pio run -e pokemon-x3` không chạy được hết trong sandbox
+    phiên này - bước bootstrap Python deps của platform `pioarduino/
+    platform-espressif32` tải `platformio-core` từ một zip archive trên
+    GitHub, bị proxy egress của môi trường chặn 403 (chính sách tổ chức, không
+    phải bug code) - **cần người dùng tự chạy `pio run -e pokemon-x3` trước
+    khi merge**, đúng quy ước cũ ("Standing conventions") là mọi thay đổi
+    chạm code cần build thật trước khi merge vào `main`.
 
 **Hoãn (tạm thời không fix):**
 - **F. Slideshow nhẹ:** thư mục chỉ có 1 ảnh vẫn vẽ lại mỗi chu kỳ; danh sách
