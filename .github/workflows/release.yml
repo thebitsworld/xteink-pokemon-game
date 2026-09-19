@@ -194,10 +194,19 @@ jobs:
       - name: Extract changelog section
         run: |
           set -euo pipefail
-          python3 scripts/extract_changelog_section.py \
-            --changelog CHANGELOG.md \
-            --version "${{ steps.package.outputs.version }}" \
-            > release-notes.md
+          version="${{ steps.package.outputs.version }}"
+          # A tag with a hyphen suffix (v0.27.0-rc1, v0.27.0-beta.2) is a
+          # release candidate: it is published as a GitHub *pre-release*, which
+          # /releases/latest (README links, in-app Wi-Fi update) never returns.
+          # A CHANGELOG section is optional for those.
+          if python3 scripts/extract_changelog_section.py --changelog CHANGELOG.md \
+               --version "${version}" > release-notes.md; then
+            :
+          elif [[ "${version}" == *-* ]]; then
+            echo "Release candidate ${version}. Not a stable release - for testing only." > release-notes.md
+          else
+            exit 1
+          fi
           cat release-notes.md
 
       - name: Create GitHub release
@@ -205,13 +214,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${{ github.ref_name }}" \
-            "dist/xteink-pokemon-x3-x4-firmware-v${{ steps.package.outputs.version }}.bin" \
-            "dist/xteink-pokemon-x4-pro-firmware-v${{ steps.package.outputs.version }}.bin" \
-            dist/xteink-pokemon-x3-x4-firmware-latest.bin \
-            dist/xteink-pokemon-x4-pro-firmware-latest.bin \
-            dist/firmware-x3-x4.bin \
-            dist/firmware-x4-pro.bin \
-            dist/SHA256SUMS.txt \
+          version="${{ steps.package.outputs.version }}"
+          assets=(
+            "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin"
+            "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
+            dist/SHA256SUMS.txt
+          )
+          flags=(--latest)
+          if [[ "${version}" == *-* ]]; then
+            # Release candidate: pre-release, never "latest". Skip the
+            # version-less -latest aliases and the OTA-named files so nothing
+            # that resolves through /releases/latest can pick this build up.
+            flags=(--prerelease --latest=false)
+          else
+            assets+=(
+              dist/xteink-pokemon-x3-x4-firmware-latest.bin
+              dist/xteink-pokemon-x4-pro-firmware-latest.bin
+              dist/firmware-x3-x4.bin
+              dist/firmware-x4-pro.bin
+            )
+          fi
+          gh release create "${{ github.ref_name }}" "${assets[@]}" \
             --title "${{ github.ref_name }}" \
-            --notes-file release-notes.md
+            --notes-file release-notes.md \
+            "${flags[@]}"
