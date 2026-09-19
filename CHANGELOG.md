@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.28.2] - 2026-09-19
+
+### Fixed
+
+- Reading a `.txt` or a pre-rendered `.xtc` book never counted toward Pokémon progress at all - no EXP, no wild encounters, no item drops. Only EPUB books were ever wired up to reading credit; TXT and XTC now credit reading time, page turns, and book progress exactly like EPUB does.
+- Teaching a move via TM/HM, or using a Medicine-pocket item (Potion, a status cure, a PP restore, Rare Candy, etc.), could - in the rare case where saving to the SD card failed right after - apply its effect (the move learned, the Pokémon healed/cured/levelled up) without the item actually being spent. The item is now only spent once its effect is confirmed, and handed back if that confirmation save fails.
+
 ## [0.28.1] - 2026-09-19
 
 ### Fixed
