@@ -1645,6 +1645,29 @@ void rageRaisesAttackEachTimeItsUserIsHitWhileEnraged() {
   CHECK(rager.attackStage == 1);
 }
 
+void rageRaisesAttackWhenAReleasedBideHitsTheEnragedPokemon() {
+  // Bulbasaur (level 80, faster) releases a stored Bide on its turn; Charmander
+  // was enraged going in. Charmander's own follow-up move (Growl) then ends the
+  // rage, but the +1 Attack from being hit stays. Confusion's self-hit is not
+  // an opposing move, so it is deliberately not covered here.
+  BattleCombatant bulbasaur = makeCombatant(1, 80, {117});  // Bide, one turn from releasing
+  bulbasaur.bideTurnsRemaining = 1;
+  bulbasaur.bideDamageStored = 20;
+  BattleCombatant charmander = makeCombatant(4, 50, {45});  // Growl - harmless filler
+  charmander.enraged = true;
+  pokemon::stepBattle(bulbasaur, charmander, 0, MAX_RANDOM);
+  CHECK(charmander.attackStage == 1);
+}
+
+void aReleasedBideDoesNotRaiseAttackOfAPokemonThatIsNotEnraged() {
+  BattleCombatant bulbasaur = makeCombatant(1, 80, {117});
+  bulbasaur.bideTurnsRemaining = 1;
+  bulbasaur.bideDamageStored = 20;
+  BattleCombatant charmander = makeCombatant(4, 50, {45});
+  pokemon::stepBattle(bulbasaur, charmander, 0, MAX_RANDOM);
+  CHECK(charmander.attackStage == 0);
+}
+
 void ragingEndsAsSoonAsADifferentMoveIsChosen() {
   BattleCombatant rager = makeCombatant(4, 50, {99, 33});  // slot 0 Rage, slot 1 Tackle
   rager.enraged = true;
@@ -2258,6 +2281,8 @@ int main() {
   dreamEaterDamagesAndDrainsASleepingTarget();
   hyperBeamForcesARechargeTurnAfterHitting();
   rageRaisesAttackEachTimeItsUserIsHitWhileEnraged();
+  rageRaisesAttackWhenAReleasedBideHitsTheEnragedPokemon();
+  aReleasedBideDoesNotRaiseAttackOfAPokemonThatIsNotEnraged();
   ragingEndsAsSoonAsADifferentMoveIsChosen();
   thrashLocksTheUserForTwoTurnsThenConfusesIt();
   wrapImmobilizesTheTargetWhileTrapped();

@@ -1697,6 +1697,74 @@ TEST(PokemonService, ApplyPpUpDoesNotGrantFreePpWhenPartiallyUsed) {
   EXPECT_EQ(updated->pp[0], 10U);  // current PP untouched - matches the real games exactly
 }
 
+namespace {
+void setPpUpCount(pokemon::PokemonStore& store, const uint8_t count) {
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.ppUpCount = count;
+  ASSERT_TRUE(store.commit(state));
+}
+
+uint8_t storedPpUpCount(pokemon::PokemonStore& store) {
+  pokemon::PokemonState state{};
+  EXPECT_TRUE(store.loadState(state));
+  return state.ppUpCount;
+}
+}  // namespace
+
+TEST(PokemonService, UsePpUpSpendsExactlyOneItemAndRaisesMaxPp) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  setPpUpCount(store, 2);
+
+  ASSERT_EQ(service.usePpUp(1, 0), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(storedPpUpCount(store), 1U);
+  const pokemon::BattleRecordEntry* entry = battleStore.findEntry(1);
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->ppUp[0], 1U);
+}
+
+TEST(PokemonService, UsePpUpDoesNotConsumeAnItemForASlotThatCannotTakeIt) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // moves [84, 45, 0, 0] - slot 3 is empty
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  setPpUpCount(store, 2);
+
+  EXPECT_EQ(service.usePpUp(1, 3), pokemon::ServiceStatus::NotApplicable);
+  EXPECT_EQ(service.usePpUp(1, pokemon::BATTLE_MOVE_SLOTS), pokemon::ServiceStatus::Invalid);
+  EXPECT_EQ(storedPpUpCount(store), 2U);
+}
+
+TEST(PokemonService, UsePpUpAppliesNothingWhenTheBagHasNoPpUp) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  setPpUpCount(store, 0);
+
+  EXPECT_EQ(service.usePpUp(1, 0), pokemon::ServiceStatus::NotApplicable);
+  const pokemon::BattleRecordEntry* entry = battleStore.findEntry(1);
+  if (entry != nullptr) EXPECT_EQ(entry->ppUp[0], 0U);  // no free boost without an item
+}
+
+TEST(PokemonService, CatchBlockedByFullBoxOnlyWhenPartyAndBoxAreBothFull) {
+  constexpr size_t party = pokemon::PARTY_SIZE;
+  constexpr size_t box = pokemon::PC_BOX_MAX_RECORDS;
+  EXPECT_TRUE(pokemon::catchBlockedByFullBox(party, party + box));
+  EXPECT_FALSE(pokemon::catchBlockedByFullBox(party, party + box - 1));    // one Box slot left
+  EXPECT_FALSE(pokemon::catchBlockedByFullBox(party - 1, party - 1 + box));  // party has a free slot
+  EXPECT_FALSE(pokemon::catchBlockedByFullBox(0, 0));
+}
+
 TEST(PokemonService, ForgetMoveShiftsPpUpAlongWithMovesAndPp) {
   Storage.clear();
   pokemon::PokemonStore store;

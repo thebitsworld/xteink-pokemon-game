@@ -643,6 +643,9 @@ bool statusPreventsAction(BattleCombatant& combatant, const RandomSource& random
         confusionHit.power = CONFUSION_SELF_HIT_POWER;
         confusionHit.category = MoveCategory::Physical;
         const uint16_t selfDamage = computeDamage(combatant, combatant, confusionHit, 0, random, false);
+        // Deliberately no raiseAttackIfEnraged() here: Rage only reacts to being hit by
+        // an OPPOSING move (BattleCombatant::enraged), and a confused Pokemon hurting
+        // itself is not one.
         combatant.currentHp =
             combatant.currentHp > selfDamage ? static_cast<uint16_t>(combatant.currentHp - selfDamage) : 0;
         event = BattleLogEvent::ConfusionSelfHit;
@@ -902,6 +905,9 @@ BattleActionResult resolveAction(BattleCombatant& attacker, BattleCombatant& def
     }
     const uint16_t bideDamage = clampToUint16(static_cast<uint32_t>(attacker.bideDamageStored) * 2U);
     applyDamageRespectingSubstitute(defender, bideDamage);
+    // A released Bide is an opposing move's damage like any other hit, so an
+    // enraged defender's Attack rises (see BattleCombatant::enraged).
+    raiseAttackIfEnraged(defender, bideDamage);
     result.event = bideDamage > 0 ? BattleLogEvent::MoveHit : BattleLogEvent::MoveNoEffect;
     return result;
   }
