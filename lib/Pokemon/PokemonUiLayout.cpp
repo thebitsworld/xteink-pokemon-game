@@ -23,11 +23,10 @@ int pokemonCenteredOffset(const int containerExtent, const int contentExtent) {
 int pokemonRightAlignedX(const int rightEdge, const int contentWidth) { return rightEdge - std::max(0, contentWidth); }
 
 int pokemonTrainerCardGrid(PokemonUiRect* out, const int capacity, const int screenWidth, const int top,
-                           const int bottom, const int tileCount, const int columns) {
+                           const int bottom, const int tileCount, const int columns, const int maxTileHeight) {
   constexpr int sidePadding = 16;
   constexpr int gap = 12;
   constexpr int minTileHeight = 40;
-  constexpr int maxTileHeight = 72;
   if (out == nullptr || capacity < tileCount || tileCount <= 0 || columns <= 0) return 0;
   const int tileWidth = (screenWidth - sidePadding * 2 - gap * (columns - 1)) / columns;
   const int rows = (tileCount + columns - 1) / columns;

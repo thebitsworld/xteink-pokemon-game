@@ -614,7 +614,8 @@ bool PokemonActivity::isListScreen() const {
   // Bag/Menu/PcOrder kept the button treatment.
   return screen_ != Screen::Summary && screen_ != Screen::PokedexDetail && screen_ != Screen::Message &&
          screen_ != Screen::Battle && screen_ != Screen::BattleMoves && screen_ != Screen::Menu &&
-         screen_ != Screen::Bag && screen_ != Screen::PcOrder && screen_ != Screen::Badges;
+         screen_ != Screen::Bag && screen_ != Screen::PcOrder && screen_ != Screen::Badges &&
+         screen_ != Screen::HallOfFame;
 }
 
 int PokemonActivity::logicalCount() const {
@@ -700,7 +701,8 @@ int PokemonActivity::logicalCount() const {
       return static_cast<int>(usablePartySlotCount());
     case Screen::GymList:
       return pokemon::GYM_COUNT;
-    case Screen::Badges:  // display-only Trainer Card, no selectable rows
+    case Screen::Badges:      // display-only Trainer Card, no selectable rows
+    case Screen::HallOfFame:  // display-only, no selectable rows
     case Screen::Summary:
     case Screen::PokedexDetail:
     case Screen::Message:
@@ -1464,7 +1466,16 @@ void PokemonActivity::finishGymChallenge(const bool won, const bool playerAlsoFa
     snprintf(line, sizeof(line), "%s", winLine);
   }
   if (!refreshSnapshot()) return;
-  showMessage(line, Screen::GymList);
+  // The Champion can never be re-fought (gymProgressFor() blocks re-entry
+  // the moment markGymDefeated() above lands), so captureHallOfFame()
+  // returning Ok here means this is genuinely the first time - go straight
+  // to the Hall of Fame reveal instead of the Gym list. A stray re-trigger
+  // (or the capture itself failing) just falls back to the Gym list, same
+  // as every other gym win; the player can still open Hall of Fame later
+  // from the Trainer Card if the capture did succeed.
+  const bool showHallOfFame =
+      gymIndex == pokemon::CHAMPION_GYM_INDEX && service_.captureHallOfFame() == pokemon::ServiceStatus::Ok;
+  showMessage(line, showHallOfFame ? Screen::HallOfFame : Screen::GymList);
 }
 
 void PokemonActivity::buildBattleLog(const pokemon::BattleTurnResult& result) {
@@ -2258,6 +2269,14 @@ void PokemonActivity::activate() {
       return;
     }
     case Screen::Badges:
+      // Confirm on a button device has nothing else to do on this
+      // display-only screen (no per-cell selection to move onto), so it
+      // doubles as "open the Champion's tile" once there's something to
+      // open - see renderTrainerCard()'s matching frame-drawn hint and
+      // loop()'s touch-tap handling for the same gate on touch devices.
+      if (service_.peekHallOfFame().cleared) setScreen(Screen::HallOfFame);
+      return;
+    case Screen::HallOfFame:
       return;  // display-only, nothing to activate
     case Screen::ResetFirst:
       if (selected_ == 0)
@@ -2394,6 +2413,9 @@ void PokemonActivity::goBack() {
     case Screen::PcReleaseConfirm:
       setScreen(Screen::Actions);
       return;
+    case Screen::HallOfFame:
+      setScreen(Screen::Badges);
+      return;
     default:
       setScreen(Screen::Menu);
       return;
@@ -2428,6 +2450,23 @@ void PokemonActivity::loop() {
     if (mappedInput.wasScreenTapped(x, y)) {
       activate();
       return;
+    }
+  }
+  // The Trainer Card is otherwise display-only (logicalCount() == 0, no
+  // fui::list()/grid dispatch reaches it at all), but its Champion tile
+  // becomes a real tap target once Hall of Fame has something to show -
+  // hit-test it directly against the exact same rect renderTrainerCard()
+  // draws into (trainerCardCells()), so a tap can never land somewhere the
+  // drawing doesn't agree with. wasTapInRect() is a no-op stub on
+  // CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
+  if (screen_ == Screen::Badges && mappedInput.hasTouchHardware() && service_.peekHallOfFame().cleared) {
+    pokemon::PokemonUiRect cells[pokemon::GYM_COUNT]{};
+    if (trainerCardCells(cells, pokemon::GYM_COUNT, /*hallOfFame=*/false) == pokemon::GYM_COUNT) {
+      const pokemon::PokemonUiRect& championCell = cells[pokemon::GYM_COUNT - 1];
+      if (mappedInput.wasTapInRect(championCell.x, championCell.y, championCell.width, championCell.height)) {
+        setScreen(Screen::HallOfFame);
+        return;
+      }
     }
   }
   const int count = logicalCount();
@@ -3083,6 +3122,7 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::Badges:
+      case Screen::HallOfFame:
       case Screen::Summary:
       case Screen::PokedexDetail:
       case Screen::Message:
@@ -3440,6 +3480,10 @@ void PokemonActivity::renderFocused() {
     renderTrainerCard(contentTop);
     return;
   }
+  if (screen_ == Screen::HallOfFame) {
+    renderHallOfFame(contentTop);
+    return;
+  }
   if (screen_ == Screen::PcOrder) {
     renderPcOrderButtons();
     return;
@@ -3695,6 +3739,34 @@ void PokemonActivity::renderMenuPityBars() {
   }
 }
 
+// Shared by renderTrainerCard()/renderHallOfFame() (what gets drawn) and
+// loop()'s touch hit-test for the Champion cell (what gets tapped), same
+// reasoning as battleGridCellRect()/buttonGridCellRect() - the two never
+// drift apart. Both screens share the same header shape (a bold title line,
+// then a 10pt line, then the grid), so the grid's top anchor is computed
+// identically; they differ only in tile count/columns/height cap (the
+// Trainer Card's 13 icon-only badge/trainer tiles vs. Hall of Fame's 6
+// sprite+text party tiles, comfortably taller).
+int PokemonActivity::trainerCardCells(pokemon::PokemonUiRect* cells, const int capacity,
+                                      const bool hallOfFame) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
+  const int subtitleY = contentTop + renderer.getLineHeight(UI_12_FONT_ID) + 8;
+  int viewableTop = 0;
+  int viewableRight = 0;
+  int viewableBottom = 0;
+  int viewableLeft = 0;
+  renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
+  const int gridTop = subtitleY + renderer.getLineHeight(UI_10_FONT_ID) + 20;
+  const int gridBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - viewableBottom - 8;
+  constexpr int HALL_OF_FAME_TILE_HEIGHT = 150;  // room for a 90px sprite plus two lines of text, unlike a bare icon
+  return hallOfFame ? pokemon::pokemonTrainerCardGrid(cells, capacity, renderer.getScreenWidth(), gridTop, gridBottom,
+                                                      static_cast<int>(pokemon::PARTY_SIZE), 2,
+                                                      HALL_OF_FAME_TILE_HEIGHT)
+                    : pokemon::pokemonTrainerCardGrid(cells, capacity, renderer.getScreenWidth(), gridTop, gridBottom,
+                                                      pokemon::GYM_COUNT, 2);
+}
+
 // Trainer Card (replaces the old Badges list): total reading time, one Pokedex
 // stats line, then a 2-column icon-only grid of the 8 gym badges followed by the
 // Elite Four and the Champion (13 tiles, GYM_COUNT). Earned tiles show their
@@ -3704,7 +3776,6 @@ void PokemonActivity::renderMenuPityBars() {
 // it bypasses buildList() (see isListScreen()) and needs no input handling
 // beyond the generic Back.
 void PokemonActivity::renderTrainerCard(const int contentTop) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
   constexpr uint8_t GYM_BADGE_COUNT = 8;  // gyms 1-8 have badge art; 9-13 use trainer sprites
   constexpr int iconSize = 32;
   constexpr uint16_t POKEDEX_STAR_CAUGHT = 150;  // Mew becomes available here
@@ -3725,17 +3796,9 @@ void PokemonActivity::renderTrainerCard(const int contentTop) {
   const int pokedexY = contentTop + renderer.getLineHeight(UI_12_FONT_ID) + 8;
   centered(renderer, UI_10_FONT_ID, pokedexY, line);
 
-  int viewableTop = 0;
-  int viewableRight = 0;
-  int viewableBottom = 0;
-  int viewableLeft = 0;
-  renderer.getOrientedViewableTRBL(&viewableTop, &viewableRight, &viewableBottom, &viewableLeft);
-  const int gridTop = pokedexY + renderer.getLineHeight(UI_10_FONT_ID) + 20;
-  const int gridBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - viewableBottom - 8;
-
   pokemon::PokemonUiRect cells[pokemon::GYM_COUNT]{};
-  const int cellCount = pokemon::pokemonTrainerCardGrid(cells, pokemon::GYM_COUNT, renderer.getScreenWidth(), gridTop,
-                                                       gridBottom, pokemon::GYM_COUNT, 2);
+  const int cellCount = trainerCardCells(cells, pokemon::GYM_COUNT, /*hallOfFame=*/false);
+  const bool hallOfFameReady = service_.peekHallOfFame().cleared;
   for (int i = 0; i < cellCount; ++i) {
     const auto gymIndex = static_cast<uint8_t>(i + 1);
     const pokemon::PokemonUiRect& cell = cells[i];
@@ -3754,6 +3817,14 @@ void PokemonActivity::renderTrainerCard(const int contentTop) {
                     cell.y + pokemon::pokemonCenteredOffset(cell.height, iconSize), iconSize, iconSize};
     const bool drawn = gymIndex <= GYM_BADGE_COUNT ? pokemon::drawPokemonBadgeArt(renderer, gymIndex, icon, false)
                                                    : pokemon::drawPokemonTrainerArt(renderer, gymIndex, icon, false);
+    // The Champion tile doubles as the Hall of Fame entry point once it's
+    // been captured - a thin frame around its art/fallback is the only extra
+    // affordance a touch-only device gets (there is no per-cell selection
+    // state on this display-only screen for a highlight to move onto -
+    // Confirm on a button device just opens it directly, see activate()).
+    if (gymIndex == pokemon::CHAMPION_GYM_INDEX && hallOfFameReady) {
+      renderer.drawRect(cell.x + 2, cell.y + 2, cell.width - 4, cell.height - 4);
+    }
     if (drawn) continue;
     const pokemon::GymData* gym = pokemon::gymData(gymIndex);
     const char* name = gym == nullptr ? "?" : (gymIndex <= GYM_BADGE_COUNT ? gym->badgeName : gym->leaderName);
@@ -3762,6 +3833,59 @@ void PokemonActivity::renderTrainerCard(const int contentTop) {
     renderer.drawText(UI_10_FONT_ID, cell.x + pokemon::pokemonCenteredOffset(cell.width, nameWidth),
                       cell.y + pokemon::pokemonCenteredOffset(cell.height, renderer.getLineHeight(UI_10_FONT_ID)),
                       fitted.c_str());
+  }
+}
+
+// Hall of Fame: the one-time snapshot of the party that beat the Champion
+// (PokemonService::captureHallOfFame()), reachable from the Trainer Card's
+// Champion tile once it exists. A 2x3 grid (trainerCardCells(), sized for a
+// hero sprite plus two lines of text unlike the Trainer Card's bare icons) -
+// one cell per party slot at the moment of that win; a party of fewer than
+// PARTY_SIZE simply leaves the remaining cells blank (speciesId 0). Display-
+// only, so it bypasses buildList() (see isListScreen()) and needs no input
+// handling beyond the generic Back (see goBack()'s Screen::HallOfFame case).
+void PokemonActivity::renderHallOfFame(const int contentTop) {
+  const pokemon::HallOfFameState hallOfFame = service_.peekHallOfFame();
+  const uint32_t minutes = hallOfFame.lifetimeMinutesAtClear;
+  char line[96];
+  snprintf(line, sizeof(line), tr(STR_POKEMON_HOF_CLEARED_AFTER), static_cast<unsigned long>(minutes / 60U),
+           static_cast<unsigned long>(minutes % 60U));
+  centered(renderer, UI_12_FONT_ID, contentTop, line, EpdFontFamily::BOLD);
+
+  pokemon::PokemonUiRect cells[pokemon::PARTY_SIZE]{};
+  const int cellCount = trainerCardCells(cells, pokemon::PARTY_SIZE, /*hallOfFame=*/true);
+  constexpr int spriteWidth = 120;
+  constexpr int spriteHeight = 90;
+  for (int i = 0; i < cellCount; ++i) {
+    const pokemon::PokemonUiRect& cell = cells[i];
+    const pokemon::HallOfFameMember& member = hallOfFame.members[i];
+    renderer.drawRect(cell.x, cell.y, cell.width, cell.height);
+    if (member.speciesId == 0) continue;  // party had fewer than PARTY_SIZE members at the time
+
+    const Rect sprite{cell.x + pokemon::pokemonCenteredOffset(cell.width, spriteWidth), cell.y + 4, spriteWidth,
+                      spriteHeight};
+    const bool drawn = pokemon::drawPokemonSpeciesArt(renderer, member.speciesId, true, sprite, false);
+    const char* name = member.nickname[0] != '\0' ? member.nickname.data() : speciesName(member.speciesId);
+    // No sprite drawn (art missing on the SD card) - just the name, centered
+    // in the whole cell like the Trainer Card's own name fallback; a level/
+    // gender/shiny second line would have nothing to visually anchor to.
+    const int textTop = drawn ? sprite.y + sprite.height + 4
+                              : cell.y + pokemon::pokemonCenteredOffset(cell.height, renderer.getLineHeight(UI_10_FONT_ID));
+
+    const std::string fittedName = renderer.truncatedText(UI_10_FONT_ID, name, cell.width - 12);
+    const int nameWidth = renderer.getTextWidth(UI_10_FONT_ID, fittedName.c_str());
+    renderer.drawText(UI_10_FONT_ID, cell.x + pokemon::pokemonCenteredOffset(cell.width, nameWidth), textTop,
+                      fittedName.c_str(), true, EpdFontFamily::BOLD);
+    if (!drawn) continue;  // no room/reason for a second line under a name-only fallback
+
+    char suffix[8];
+    genderShinySuffix(suffix, sizeof(suffix), member.gender, member.shiny);
+    char levelLine[32];
+    snprintf(levelLine, sizeof(levelLine), suffix[0] != '\0' ? "%s %u  %s" : "%s %u", tr(STR_POKEMON_LEVEL),
+             member.level, suffix);
+    const int levelWidth = renderer.getTextWidth(UI_10_FONT_ID, levelLine);
+    renderer.drawText(UI_10_FONT_ID, cell.x + pokemon::pokemonCenteredOffset(cell.width, levelWidth),
+                      textTop + renderer.getLineHeight(UI_10_FONT_ID) + 2, levelLine);
   }
 }
 
@@ -4461,6 +4585,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_GYM_BATTLE);
   else if (screen_ == Screen::Badges)
     title = tr(STR_POKEMON_TRAINER_CARD);
+  else if (screen_ == Screen::HallOfFame)
+    title = tr(STR_POKEMON_HALL_OF_FAME);
   else if (screen_ == Screen::Settings || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal)
     title = tr(STR_POKEMON_SETTINGS);
   else if (screen_ == Screen::PcReleaseConfirm)

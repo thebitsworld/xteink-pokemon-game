@@ -63,7 +63,8 @@ TEST(PokemonService, VerifiedCheckpointDurablyCreditsStateAndLeader) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_TRUE(service.beginReadingSession());
   service.setBookProgressPercent(64);
@@ -86,7 +87,8 @@ TEST(PokemonService, FailedSnapshotWriteAdvancesNeitherStateNorLeader) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   ASSERT_TRUE(service.beginReadingSession());
 
   Storage.setFailWritableOpen(true);
@@ -109,7 +111,8 @@ TEST(PokemonService, FailedSyncRetryCannotDoubleCreditOnTheNextReaderSession) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   ASSERT_TRUE(service.beginReadingSession());
   service.setBookProgressPercent(64);
   service.onSuccessfulPageTurn(0);
@@ -134,7 +137,8 @@ TEST(PokemonService, ReadingSessionDoesNotStartBeforeStarterExists) {
   pokemon::PokemonIvEvStore ivEvStore;
   ASSERT_EQ(store.begin(), pokemon::StoreBeginResult::Empty);
   ASSERT_TRUE(store.commit({}));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_FALSE(service.beginReadingSession());
 }
@@ -144,7 +148,8 @@ TEST(PokemonService, CreatesOneDurableStarterWithChosenIdentity) {
   pokemon::PokemonStore store;
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.createStarter(25, pokemon::Gender::Female, "CinderVolt"), pokemon::ServiceStatus::Ok);
 
@@ -175,7 +180,8 @@ TEST(PokemonService, RejectsSecondStarterWithoutChangingTheSave) {
   pokemon::PokemonStore store;
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   ASSERT_EQ(service.createStarter(1, pokemon::Gender::Male, ""), pokemon::ServiceStatus::Ok);
 
   EXPECT_EQ(service.createStarter(4, pokemon::Gender::Female, ""), pokemon::ServiceStatus::AlreadyStarted);
@@ -193,7 +199,8 @@ TEST(PokemonService, RenamesDurablyAndLeavesTheOldNameWhenSavingFails) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.renamePokemon(1, "Sparky"), pokemon::ServiceStatus::Ok);
   pokemon::PokemonRecord renamed{};
@@ -216,7 +223,8 @@ TEST(PokemonService, RejectsMovingOnlyMemberIntoAnEmptySlotWithoutWriting) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.movePartyMember(0, 5), pokemon::ServiceStatus::Invalid);
 
@@ -237,7 +245,8 @@ TEST(PokemonService, ReordersOnlyOccupiedPartySlotsAndChangesTheLeader) {
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 4), true);
   appendOwnedPokemon(store, caughtPokemon(3, 7), true);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.movePartyMember(2, 0), pokemon::ServiceStatus::Ok);
 
@@ -256,7 +265,8 @@ TEST(PokemonService, ProtectsTheLastPartyMemberAndSupportsDepositWithdraw) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   EXPECT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::LastPokemon);
 
   appendOwnedPokemon(store, caughtPokemon(2, 4), true);
@@ -279,7 +289,8 @@ TEST(PokemonService, DepositingAPokemonFreesItsBattleStoreSlot) {
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 4), true);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // Give recordId 1 a real battle-store entry, matching a Pokemon that's
   // actually fought at least once (loadBattleEntry synthesizes and persists
@@ -303,7 +314,8 @@ TEST(PokemonService, ReleasePokemonRemovesTheRecordAndFreesItsSideStoreSlots) {
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 4), false);  // Box record, not party
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // Give recordId 2 real battle-store and IV/EV entries, matching a Pokemon
   // that's actually fought and had its IV/EV rolled at least once.
@@ -332,7 +344,8 @@ TEST(PokemonService, ReleasePokemonRejectsAPartyMember) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.releasePokemon(1), pokemon::ServiceStatus::NotApplicable);
   pokemon::PokemonRecord stillThere{};
@@ -345,7 +358,8 @@ TEST(PokemonService, ReleasePokemonRejectsAnUnknownRecordId) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.releasePokemon(999), pokemon::ServiceStatus::NotFound);
 }
@@ -364,7 +378,8 @@ TEST(PokemonService, ReleasingAMiddleRecordDoesNotBreakSubsequentCatches) {
   seedStarter(store);                                     // record 1
   appendOwnedPokemon(store, caughtPokemon(2, 4), false);   // Box record
   appendOwnedPokemon(store, caughtPokemon(3, 7), false);   // Box record
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.releasePokemon(2), pokemon::ServiceStatus::Ok);
   ASSERT_EQ(store.recordCount(), 2U);  // records {1, 3} remain
@@ -400,7 +415,8 @@ TEST(PokemonService, ReleasingTheHighestIdRecordAllowsTheNextCatchToReuseThatIdS
   appendOwnedPokemon(store, caughtPokemon(2, 4), false);
   appendOwnedPokemon(store, caughtPokemon(3, 7), false);   // highest id
 
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   ASSERT_EQ(service.releasePokemon(3), pokemon::ServiceStatus::Ok);
   ASSERT_EQ(store.recordCount(), 2U);  // records {1, 2} remain
 
@@ -427,7 +443,8 @@ TEST(PokemonService, RejectsWithdrawalWhenThePartyIsFull) {
   for (uint32_t id = 2; id <= 7; ++id) {
     appendOwnedPokemon(store, caughtPokemon(id, static_cast<uint16_t>(id + 3)), id <= 6);
   }
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.withdrawPokemon(7), pokemon::ServiceStatus::PartyFull);
 
@@ -450,7 +467,8 @@ TEST(PokemonService, ResolvesEncounterCatchThenAllowsNickname) {
   state.pendingEvents[0].gender = pokemon::Gender::Female;
   state.dashboardNotice = pokemon::DashboardNotice::NewPokemon;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   uint32_t caughtRecordId = 0;
   ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId), pokemon::ServiceStatus::Ok);
@@ -479,7 +497,8 @@ TEST(PokemonService, ResolveEncounterBlockedOnlyWhenPartyAndBoxAreBothFull) {
   for (uint32_t i = 0; i < pokemon::PC_BOX_MAX_RECORDS; ++i) {  // fill the Box to its own cap
     appendOwnedPokemon(store, caughtPokemon(nextId++, 4), false);
   }
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // Party still has one empty slot (5/6) - a full Box must not block this
   // catch, since it goes into the party, not the Box.
@@ -521,7 +540,8 @@ TEST(PokemonService, ResolvesEncounterPassWithoutCreatingARecord) {
   state.pendingEvents[0].gender = pokemon::Gender::Male;
   state.dashboardNotice = pokemon::DashboardNotice::NewPokemon;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   uint32_t caughtRecordId = 99;
   ASSERT_EQ(service.resolveEncounter(pokemon::EncounterChoice::Pass, caughtRecordId), pokemon::ServiceStatus::Ok);
@@ -549,7 +569,8 @@ TEST(PokemonService, AcknowledgesItemAndPublishesBoundedDashboardSnapshot) {
   state.itemCounts[2] = 1;
   state.dashboardNotice = pokemon::DashboardNotice::ItemFound;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::PokemonDashboardSnapshot dashboard{};
   ASSERT_EQ(service.loadDashboardSnapshot(dashboard), pokemon::ServiceStatus::Ok);
@@ -587,7 +608,8 @@ TEST(PokemonService, EvolvesByLevelAndCanDisableFuturePrompts) {
   ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 1));
   ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 1));
   ASSERT_TRUE(store.commit(state, {1, bulbasaur, pokemon::RecordMutationKind::Append}));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.resolveEvolution(pokemon::EvolutionChoice::Evolve), pokemon::ServiceStatus::Ok);
   pokemon::PokemonRecord evolved{};
@@ -619,7 +641,8 @@ TEST(PokemonService, EvolvingByLevelBackfillsTheNewSpeciesLevelAppropriateMoves)
   ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 10));
   ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 10));
   ASSERT_TRUE(store.commit(state, {1, caterpie, pokemon::RecordMutationKind::Append}));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // defaultMovesetForLevel() walks the learnset backwards to fill slots
   // (most-recently-learned first), so among Caterpie's two same-level
@@ -655,7 +678,8 @@ TEST(PokemonService, EvolvingViaStoneBackfillsTheNewSpeciesLevelAppropriateMoves
   ASSERT_TRUE(store.loadState(state));
   state.itemCounts[3] = 1;  // Water Stone (EvolutionItem::WaterStone == 4, itemCounts index 3)
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // Same backwards-fill ordering as above: Tackle (33) lands in slot 0,
   // Sand Attack (28) in slot 1.
@@ -682,7 +706,8 @@ TEST(PokemonService, MarkSpeciesSeenMarksOnceAndIsANoOpIfAlreadySeen) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::PokemonSnapshot before{};
   ASSERT_EQ(service.loadSnapshot(before), pokemon::ServiceStatus::Ok);
@@ -707,7 +732,8 @@ TEST(PokemonService, ConsumesStoneOnlyForApplicableEvolution) {
   ASSERT_TRUE(store.loadState(state));
   state.itemCounts[2] = 1;
   ASSERT_TRUE(store.commit(state));
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.useEvolutionItem(1, pokemon::EvolutionItem::WaterStone), pokemon::ServiceStatus::NotApplicable);
   ASSERT_EQ(service.useEvolutionItem(1, pokemon::EvolutionItem::ThunderStone), pokemon::ServiceStatus::Ok);
@@ -726,7 +752,8 @@ TEST(PokemonService, ReadsBoundedPcPagesAndResetsToEmpty) {
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 7), false);
   appendOwnedPokemon(store, caughtPokemon(3, 4), false);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   std::array<pokemon::PokemonRecord, 6> page{};
   size_t count = 0;
@@ -751,7 +778,8 @@ TEST(PokemonService, PcReadFailureReturnsStorageErrorInsteadOfAnEmptyPage) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   std::array<pokemon::PokemonRecord, 6> page{};
   size_t count = 99;
 
@@ -767,7 +795,8 @@ TEST(PokemonService, LoadBattleEntrySynthesizesFromTheLearnsetWhenNoneExists) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu (species 25), level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -792,7 +821,8 @@ TEST(PokemonService, SaveBattleEntryPersistsAndAFollowingLoadReturnsTheSavedVers
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -812,7 +842,8 @@ TEST(PokemonService, ResetAlsoClearsTheBattleStoreSoTheNextStarterDoesNotInherit
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu (species 25), level 5, recordId 1
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -840,7 +871,8 @@ TEST(PokemonService, ConsumeBagItemDecrementsStonesAndNonStoneItemsInTheirOwnArr
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.consumeBagItem(1), pokemon::ServiceStatus::NotApplicable);  // Moon Stone count is 0
   EXPECT_EQ(service.consumeBagItem(7), pokemon::ServiceStatus::NotApplicable);  // Poke Ball count is 0
@@ -866,7 +898,8 @@ TEST(PokemonService, MarkGymDefeatedEnforcesLinearUnlockAndIsIdempotent) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.markGymDefeated(2), pokemon::ServiceStatus::NotApplicable);  // gym 1 not yet defeated
   EXPECT_EQ(service.markGymDefeated(9), pokemon::ServiceStatus::NotApplicable);  // no gyms defeated yet
@@ -896,7 +929,8 @@ TEST(PokemonService, ReadingCreditHealsAnExistingBattleEntryAndClearsStatusOnceF
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -927,7 +961,8 @@ TEST(PokemonService, ReadingCreditHealsEveryDamagedPartyMemberInOneBatchedWrite)
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
   appendOwnedPokemon(store, caughtPokemon(2, 1), true);  // Bulbasaur, party slot 1
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry first{};
   ASSERT_EQ(service.loadBattleEntry(1, first), pokemon::ServiceStatus::Ok);
@@ -959,7 +994,8 @@ TEST(PokemonService, ReadingCreditRestoresPpAcrossFiveMinuteCheckpoints) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -987,7 +1023,8 @@ TEST(PokemonService, ReadingCreditLeavesAPartyMemberWithNoBattleEntryAlone) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_TRUE(service.creditMinutes(5, 10));
   EXPECT_EQ(battleStore.findEntry(1), nullptr);
@@ -1002,7 +1039,8 @@ TEST(PokemonService, ResolveBattleTurnDelegatesToTheEngineWithItsOwnRandomSource
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleCombatant player{};
   player.speciesId = 25;  // Pikachu
@@ -1032,7 +1070,8 @@ TEST(PokemonService, ResolveOpponentOnlyTurnDelegatesToTheEngineWithItsOwnRandom
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleCombatant player{};
   player.speciesId = 25;  // Pikachu
@@ -1062,7 +1101,8 @@ TEST(PokemonService, AttemptBattleCatchDelegatesToTheEngineWithItsOwnRandomSourc
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleCombatant wild{};
   wild.speciesId = 1;
@@ -1105,7 +1145,8 @@ TEST(PokemonService, CreditingMinutesAutoLearnsIntoAFreeSlotWithoutQueuingAnEven
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu (species 25), level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1136,7 +1177,8 @@ TEST(PokemonService, CreditingMinutesQueuesAMoveLearnEventWhenTheMovesetIsFull) 
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
   seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(store, battleStore);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_TRUE(service.creditMinutes(1, 10));
 
@@ -1161,7 +1203,8 @@ TEST(PokemonService, ResolveMoveLearnReplacesTheChosenSlotAndDequeuesTheEvent) {
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
   seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(store, battleStore);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   ASSERT_TRUE(service.creditMinutes(1, 10));
 
   ASSERT_EQ(service.resolveMoveLearn(1), pokemon::ServiceStatus::Ok);  // replace slot 1
@@ -1184,7 +1227,8 @@ TEST(PokemonService, ResolveMoveLearnWithANegativeSlotSkipsLearningButStillDeque
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
   seedPikachuWithAFullMovesetOneMinuteBeforeLevel26(store, battleStore);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   ASSERT_TRUE(service.creditMinutes(1, 10));
 
   ASSERT_EQ(service.resolveMoveLearn(-1), pokemon::ServiceStatus::Ok);
@@ -1205,7 +1249,8 @@ TEST(PokemonService, ResolveMoveLearnIsNotApplicableWithoutAPendingMoveLearnEven
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.resolveMoveLearn(0), pokemon::ServiceStatus::NotApplicable);
 }
@@ -1216,7 +1261,8 @@ TEST(PokemonService, TeachMoveChecksCompatibilityThenFreeSlotThenAllowsAReplaceS
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.teachMove(1, 84), pokemon::TeachMoveOutcome::AlreadyKnown);
   // Pound (1) is not in Pikachu's real TM/HM compatibility list (Stage 12).
@@ -1249,7 +1295,8 @@ TEST(PokemonService, TeachMoveAndConsumeItemSpendsExactlyOneItemOnlyWhenLearned)
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
@@ -1281,7 +1328,8 @@ TEST(PokemonService, PeekBattleMovesNeverPersistsWhenNoEntryExistsYet) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::PokemonRecord record{};
   ASSERT_TRUE(store.readRecord(1, record));
@@ -1304,7 +1352,8 @@ TEST(PokemonService, UseConsumableHealsWithMedicineAndRejectsAtFullHp) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu, currentHp starts at maxHp (18) once synthesized
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1325,7 +1374,8 @@ TEST(PokemonService, UseConsumableRejectsPlainMedicineOnAFaintedPokemonAndRequir
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu, maxHp 18 once synthesized
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1377,7 +1427,8 @@ TEST(PokemonService, UseConsumableCuresOnlyTheMatchingStatusWithStatusCureItems)
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1397,7 +1448,8 @@ TEST(PokemonService, UseConsumableFullRestoreHealsAndCuresAnyStatus) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1421,7 +1473,8 @@ TEST(PokemonService, UseConsumableCuringPoisonAlsoClearsTheToxicCounter) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1442,7 +1495,8 @@ TEST(PokemonService, UseConsumablePPRestoreTopsUpEveryKnownMoveSlot) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes moves [84, 45, 0, 0] at full PP [30, 40]
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1466,7 +1520,8 @@ TEST(PokemonService, AwardBattleXpAppliesWildOrTrainerMultiplierAndCapsAtLevel10
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu, level 5, totalXp starts at xpRequired(5)
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::PokemonRecord leader{};
   ASSERT_TRUE(store.readRecord(1, leader));
@@ -1503,7 +1558,8 @@ TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptOncePastTheLevelRule) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // Oddish (43) evolves into Gloom (44) at level 21; sit it just below that.
   pokemon::PokemonRecord record{};
@@ -1532,7 +1588,8 @@ TEST(PokemonService, EnsureIvEvRollsOnceAndPersistsForSubsequentCalls) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // No entry yet - peek returns a zero default without creating anything.
   const pokemon::IvEvEntry peeked = service.peekIvEv(1);
@@ -1569,7 +1626,8 @@ TEST(PokemonService, EnsureIvEvReturnsAStableRollEvenWhilePersistingKeepsFailing
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   Storage.setFailWritableOpen(true);
   const pokemon::IvEvEntry first = service.ensureIvEv(1);
@@ -1600,7 +1658,8 @@ TEST(PokemonService, AwardBattleXpAccumulatesEvYieldAndSaturatesAt255) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu, level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   // Charizard (species 6) yields 3 Special EV per real PokeAPI data (see
   // scripts/data/pokemon-stats.csv).
@@ -1631,7 +1690,8 @@ TEST(PokemonService, UseConsumableRareCandyAddsOneLevelAndRejectsAtLevel100) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu, level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.useConsumable(1, 24), pokemon::UseConsumableOutcome::Applied);  // Rare Candy
   pokemon::PokemonRecord leader{};
@@ -1656,7 +1716,8 @@ TEST(PokemonService, UseConsumableAndConsumeItemSpendsExactlyOneItemOnlyWhenAppl
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // Pikachu, currentHp starts at maxHp (18) once synthesized
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
@@ -1687,7 +1748,8 @@ TEST(PokemonService, LearnMoveIntoSlotOverwritesUnconditionallyAtFullPp) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.learnMoveIntoSlot(1, 1, 98), pokemon::ServiceStatus::Ok);  // overwrite slot 1 with Quick Attack
   const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
@@ -1712,7 +1774,8 @@ TEST(PokemonService, LearnMoveIntoSlotRedirectsToTheFirstEmptySlotInsteadOfLeavi
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.learnMoveIntoSlot(1, 3, 98), pokemon::ServiceStatus::Ok);  // Quick Attack into slot 3
   const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
@@ -1735,7 +1798,8 @@ TEST(PokemonService, ForgetMoveRepacksTheRemainingMovesInsteadOfLeavingAGap) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1759,7 +1823,8 @@ TEST(PokemonService, ApplyPpUpRaisesMaxPpAndCapsAtThreeUses) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] - move 84 (Thunder Shock) has 30 base PP
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::Ok);
   const pokemon::BattleRecordEntry* entry = battleStore.findEntry(1);
@@ -1785,7 +1850,8 @@ TEST(PokemonService, ApplyPpUpDoesNotGrantFreePpWhenPartiallyUsed) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1820,7 +1886,8 @@ TEST(PokemonService, UsePpUpSpendsExactlyOneItemAndRaisesMaxPp) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   setPpUpCount(store, 2);
 
   ASSERT_EQ(service.usePpUp(1, 0), pokemon::ServiceStatus::Ok);
@@ -1836,7 +1903,8 @@ TEST(PokemonService, UsePpUpDoesNotConsumeAnItemForASlotThatCannotTakeIt) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // moves [84, 45, 0, 0] - slot 3 is empty
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   setPpUpCount(store, 2);
 
   EXPECT_EQ(service.usePpUp(1, 3), pokemon::ServiceStatus::NotApplicable);
@@ -1850,7 +1918,8 @@ TEST(PokemonService, UsePpUpAppliesNothingWhenTheBagHasNoPpUp) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   setPpUpCount(store, 0);
 
   EXPECT_EQ(service.usePpUp(1, 0), pokemon::ServiceStatus::NotApplicable);
@@ -1879,7 +1948,8 @@ TEST(PokemonService, UseVitaminRaisesOnlyTheMatchingStatByTenAndSpendsOneItem) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   setVitaminCount(store, 1, 2);  // Protein -> Attack
 
   ASSERT_EQ(service.useVitamin(1, pokemon::ITEM_PROTEIN), pokemon::ServiceStatus::Ok);
@@ -1896,7 +1966,8 @@ TEST(PokemonService, EachVitaminMapsToItsOwnStat) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   for (size_t i = 0; i < pokemon::VITAMIN_ITEM_COUNT; ++i) setVitaminCount(store, i, 1);
 
   for (uint8_t id = pokemon::VITAMIN_ITEM_ID_FIRST; id <= pokemon::VITAMIN_ITEM_ID_LAST; ++id) {
@@ -1916,7 +1987,8 @@ TEST(PokemonService, UseVitaminStopsAtTheVitaminCapWithoutConsumingTheItem) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
   setVitaminCount(store, 0, 11);  // HP Up
 
   for (int use = 0; use < 10; ++use) {
@@ -1933,7 +2005,8 @@ TEST(PokemonService, UseVitaminDoesNothingWithoutOneInTheBagOrForABadItemId) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   EXPECT_EQ(service.useVitamin(1, pokemon::ITEM_CARBOS), pokemon::ServiceStatus::NotApplicable);
   EXPECT_EQ(service.peekIvEv(1).ev[static_cast<size_t>(pokemon::StatIndex::Speed)], 0U);
@@ -1956,7 +2029,8 @@ TEST(PokemonService, ForgetMoveShiftsPpUpAlongWithMovesAndPp) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -1978,7 +2052,8 @@ TEST(PokemonService, TeachMoveKeepsTheSlotsExistingPpUpForTheNewMove) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   ASSERT_EQ(service.applyPpUp(1, 1), pokemon::ServiceStatus::Ok);  // PP-Up slot 1 (Growl) once
 
@@ -1999,7 +2074,8 @@ TEST(PokemonService, ForgetMoveRefusesToClearAPokemonsLastRemainingMove) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
@@ -2019,7 +2095,8 @@ TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   pokemon::PokemonBattleStore battleStore;
   pokemon::PokemonIvEvStore ivEvStore;
   seedStarter(store);
-  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, itemEventRandom});
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, itemEventRandom});
   ASSERT_TRUE(service.beginReadingSession());
 
   ASSERT_TRUE(service.creditMinutes(60, 64));
@@ -2029,6 +2106,53 @@ TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
   EXPECT_EQ(state.pendingEvents[0].kind, pokemon::PendingEventKind::Item);
   EXPECT_EQ(state.pendingEvents[0].item, pokemon::EvolutionItem::ThunderStone);
   EXPECT_EQ(state.itemCounts[2], 1U);
+}
+
+TEST(PokemonService, CaptureHallOfFameSnapshotsThePartyOnceThenRefusesToOverwriteIt) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // party[0] = Pikachu, recordId 1, level 5
+  appendOwnedPokemon(store, caughtPokemon(2, 6), /*addToParty=*/true);   // party[1] = Charizard
+  appendOwnedPokemon(store, caughtPokemon(3, 9), /*addToParty=*/false);  // in the PC Box, not the party
+  pokemon::PokemonState seeded{};
+  ASSERT_TRUE(store.loadState(seeded));
+  seeded.lifetimeMinutes = 754;
+  ASSERT_TRUE(store.commit(seeded));
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.captureHallOfFame(), pokemon::ServiceStatus::Ok);
+  const pokemon::HallOfFameState snapshot = service.peekHallOfFame();
+  EXPECT_TRUE(snapshot.cleared);
+  EXPECT_EQ(snapshot.lifetimeMinutesAtClear, 754U);
+  EXPECT_EQ(snapshot.members[0].speciesId, 25U);  // Pikachu
+  EXPECT_EQ(snapshot.members[0].level, 5U);
+  EXPECT_EQ(snapshot.members[0].gender, pokemon::Gender::Female);
+  EXPECT_EQ(snapshot.members[1].speciesId, 6U);  // Charizard
+  EXPECT_EQ(snapshot.members[1].gender, pokemon::Gender::Male);
+  EXPECT_EQ(snapshot.members[2].speciesId, 0U);  // the boxed Pokemon was never in the party
+  EXPECT_EQ(snapshot.members[3].speciesId, 0U);
+
+  // The Champion can never be re-fought, so a second capture attempt (should
+  // this ever be reached) must leave the frozen snapshot untouched.
+  EXPECT_EQ(service.captureHallOfFame(), pokemon::ServiceStatus::NotApplicable);
+  const pokemon::HallOfFameState unchanged = service.peekHallOfFame();
+  EXPECT_EQ(unchanged, snapshot);
+}
+
+TEST(PokemonService, PeekHallOfFameIsUnclearedBeforeAnyCapture) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  const pokemon::HallOfFameState snapshot = service.peekHallOfFame();
+  EXPECT_FALSE(snapshot.cleared);
 }
 
 }  // namespace

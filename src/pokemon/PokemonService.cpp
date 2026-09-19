@@ -946,6 +946,38 @@ IvEvEntry PokemonService::peekIvEv(const uint32_t recordId) const {
   return {};
 }
 
+ServiceStatus PokemonService::captureHallOfFame() {
+  if (hallOfFameStore_.hasEntry()) return ServiceStatus::NotApplicable;  // already captured, ever - never overwrite
+
+  PokemonState state{};
+  if (loadReadyState(state) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+
+  HallOfFameState snapshot{};
+  snapshot.lifetimeMinutesAtClear = state.lifetimeMinutes;
+  size_t written = 0;
+  for (size_t slot = 0; slot < PARTY_SIZE && state.partyRecordIds[slot] != 0; ++slot) {
+    PokemonRecord record{};
+    if (!store_.readRecord(state.partyRecordIds[slot], record)) continue;  // best-effort, see doc comment
+    HallOfFameMember& member = snapshot.members[written];
+    member.speciesId = record.speciesId;
+    member.nickname = record.nickname;
+    member.level = levelForXp(record.totalXp);
+    member.gender = record.gender;
+    member.shiny = isRecordShiny(record);
+    ++written;
+  }
+  if (!hallOfFameStore_.captureOnce(snapshot)) {
+    LOG_ERR("PokemonService", "Failed to capture Hall of Fame");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+HallOfFameState PokemonService::peekHallOfFame() const {
+  const HallOfFameState* entry = hallOfFameStore_.entry();
+  return entry != nullptr ? *entry : HallOfFameState{};
+}
+
 ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to save battle entry");
@@ -1183,6 +1215,11 @@ ServiceStatus PokemonService::reset() {
   if (!ivEvStore_.reset()) {
     LOG_ERR("PokemonService", "Failed to reset Pokemon IV/EV store");
   }
+  // Same best-effort spirit again - a fresh game should not read back a
+  // previous playthrough's Hall of Fame.
+  if (!hallOfFameStore_.reset()) {
+    LOG_ERR("PokemonService", "Failed to reset Pokemon Hall of Fame store");
+  }
   return ServiceStatus::Ok;
 }
 
@@ -1289,7 +1326,8 @@ PokemonService& devicePokemonService() {
   static PokemonStore store;
   static PokemonBattleStore battleStore;
   static PokemonIvEvStore ivEvStore;
-  static PokemonService service(store, battleStore, ivEvStore, {nullptr, deviceRandomBelow});
+  static PokemonHallOfFameStore hallOfFameStore;
+  static PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, deviceRandomBelow});
   return service;
 }
 #endif

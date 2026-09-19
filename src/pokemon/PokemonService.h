@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "PokemonBattleStore.h"
+#include "PokemonHallOfFameStore.h"
 #include "PokemonIvEvStore.h"
 #include "PokemonStore.h"
 
@@ -78,10 +79,11 @@ struct PokemonDashboardSnapshot {
 class PokemonService {
  public:
   PokemonService(PokemonStore& store, PokemonBattleStore& battleStore, PokemonIvEvStore& ivEvStore,
-                 RandomSource random)
+                 PokemonHallOfFameStore& hallOfFameStore, RandomSource random)
       : store_(store),
         battleStore_(battleStore),
         ivEvStore_(ivEvStore),
+        hallOfFameStore_(hallOfFameStore),
         random_(random),
         tracker_(&PokemonService::creditFromTracker, this) {}
 
@@ -316,6 +318,25 @@ class PokemonService {
   // battle/creation calls ensureIvEv() for real.
   IvEvEntry peekIvEv(uint32_t recordId) const;
 
+  // Snapshots the current party (species, nickname, level, gender, shiny -
+  // see HallOfFameMember) plus lifetimeMinutes into the Hall of Fame store,
+  // the moment the Champion is defeated for the first time. Called only from
+  // PokemonActivity::finishGymChallenge() when gymIndex == CHAMPION_GYM_INDEX
+  // and the win is real; the gym itself can never be re-fought once
+  // defeated, so this should only ever be reachable once per playthrough,
+  // but this method is idempotent regardless - a second call is a no-op
+  // (NotApplicable, nothing touched) rather than overwriting the frozen
+  // snapshot. A party record that fails to read is skipped rather than
+  // failing the whole capture (best-effort, matching upsertEntries()'s own
+  // one-bad-entry-shouldn't-lose-the-rest philosophy) - vanishingly unlikely
+  // right after a real battle win, but there's no reason a transient read
+  // glitch here should cost the player their whole Hall of Fame entry.
+  ServiceStatus captureHallOfFame();
+  // Read-only: never writes. Returns a default (HallOfFameState{}, `cleared`
+  // false) if no snapshot has ever been captured - callers check `.cleared`
+  // rather than needing a separate "has one" query.
+  HallOfFameState peekHallOfFame() const;
+
  private:
   ServiceStatus prepareStore();
   ServiceStatus loadReadyState(PokemonState& output);
@@ -356,6 +377,7 @@ class PokemonService {
   PokemonStore& store_;
   PokemonBattleStore& battleStore_;
   PokemonIvEvStore& ivEvStore_;
+  PokemonHallOfFameStore& hallOfFameStore_;
   RandomSource random_{};
   PokemonTracker tracker_;
   bool readingSessionActive_ = false;
