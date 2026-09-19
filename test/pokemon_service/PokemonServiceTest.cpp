@@ -949,6 +949,35 @@ TEST(PokemonService, ReadingCreditHealsEveryDamagedPartyMemberInOneBatchedWrite)
   EXPECT_GT(healedSecond->currentHp, 1U);
 }
 
+TEST(PokemonService, ReadingCreditRestoresPpAcrossFiveMinuteCheckpoints) {
+  // Regression: reading credits arrive as ~5-minute checkpoints, and PP used
+  // to be restored with `minutes / 10` per call - always 0 for a 5-minute
+  // credit - so PP never recovered from reading. The 10-minute cadence must
+  // accumulate across calls.
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  ASSERT_NE(entry.moves[0], 0U);
+  const uint8_t fullPp = entry.pp[0];
+  ASSERT_GE(fullPp, 3U);
+  entry.pp[0] = static_cast<uint8_t>(fullPp - 3);
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_TRUE(service.creditMinutes(5, 10));
+  EXPECT_EQ(battleStore.findEntry(1)->pp[0], fullPp - 3);  // 5 minutes: no tick yet
+  ASSERT_TRUE(service.creditMinutes(5, 10));
+  EXPECT_EQ(battleStore.findEntry(1)->pp[0], fullPp - 2);  // 10 minutes total: +1
+  ASSERT_TRUE(service.creditMinutes(5, 10));
+  ASSERT_TRUE(service.creditMinutes(5, 10));
+  EXPECT_EQ(battleStore.findEntry(1)->pp[0], fullPp - 1);  // 20 minutes total: +2
+}
+
 TEST(PokemonService, ReadingCreditLeavesAPartyMemberWithNoBattleEntryAlone) {
   // A Pokemon that has never fought has no battle-store entry yet; crediting
   // reading minutes must not create or touch one on its behalf - it will be

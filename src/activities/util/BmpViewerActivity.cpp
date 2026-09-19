@@ -164,22 +164,6 @@ void BmpViewerActivity::onEnter() {
       int x, y;
 
       if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
-        // Re-dither AT the final on-screen size instead of dithering at the
-        // source resolution and letting drawBitmap() point-sample it down
-        // afterward - matches SleepActivity::renderBitmapSleepScreen()'s own
-        // FIT-mode handling (confirmed correct on X3). Scaling an
-        // already-dithered bitmap breaks the dither pattern's regularity
-        // and is what was visibly losing contrast/detail here. This viewer
-        // always fits (no crop option), so this always applies when scaling
-        // down is needed.
-        const float scale = std::min(static_cast<float>(pageWidth) / static_cast<float>(bitmap.getWidth()),
-                                     static_cast<float>(pageHeight) / static_cast<float>(bitmap.getHeight()));
-        const int targetWidth = static_cast<int>(std::floor((bitmap.getWidth() - 1) * scale)) + 1;
-        const int targetHeight = static_cast<int>(std::floor((bitmap.getHeight() - 1) * scale)) + 1;
-        bitmap.setDitheredOutputSize(targetWidth, targetHeight);
-      }
-
-      if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
         float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
         const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
 
@@ -230,16 +214,14 @@ void BmpViewerActivity::onEnter() {
           else
             renderer.copyGrayscaleMsbBuffers();
         }
-        // Stop right here, matching SleepActivity::renderBitmapSleepScreen()
-        // (confirmed to render correctly on X3) - do NOT redraw a plain B/W
-        // frame and call cleanupGrayscaleWithFrameBuffer() afterward like
-        // this used to ("popups need the original B/W image" - but
-        // doSetSleepCover(), the only popup flow reachable from here, always
-        // calls onEnter() again right after anyway, which redraws this whole
-        // sequence from scratch). That extra step visibly washed out the
-        // real grayscale image displayGrayBuffer() had just shown correctly.
         if (success) renderer.displayGrayBuffer();
         renderer.setRenderMode(GfxRenderer::BW);
+        // Popups need the original B/W image, not the last gray selector plane.
+        if (success) {
+          renderer.clearScreen();
+          success = bitmap.rewindToData() == BmpReaderError::Ok && drawFrame();
+          if (success) renderer.cleanupGrayscaleWithFrameBuffer();
+        }
       } else if (success) {
         renderer.displayBuffer(HalDisplay::FAST_REFRESH);
       }
