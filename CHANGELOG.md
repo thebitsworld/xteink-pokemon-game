@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-19
+
+### Added
+
+- Hall of Fame: beating the Champion for the first time now shows your winning team - sprite, name, level, gender and shiny star - along with how many hours and minutes of reading it took to get there. Shown once right after the win, and viewable afterward any time from the Trainer Card (tap the Champion's tile, or press Confirm on a button device once it's unlocked). The snapshot is frozen at the moment you win - releasing or evolving those Pokémon afterward doesn't change it.
+
 ## [0.28.2] - 2026-09-19
 
 ### Fixed
