@@ -61,7 +61,7 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
-## Ý tưởng cải tiến/tính năng mới (2026-09-18) — mục 1 và 2 ĐÃ LÀM (`v0.27.0`), còn lại đang cân nhắc
+## Ý tưởng cải tiến/tính năng mới (2026-09-18) — mục 1, 2, 4 ĐÃ LÀM, mục 3 ĐÃ CODE XONG (`v0.29.0`, chưa merge)
 
 Từ một đợt rà soát toàn bộ tính năng hiện có so với các bản Pokémon gốc (agent
 nghiên cứu, không sửa code), xếp theo độ phù hợp với giới hạn của bản mod này
@@ -77,26 +77,42 @@ lại đây để tham khảo khi có thời gian, **chưa quyết định làm 
    hoang dã* (`mewIsReady()`, `lib/Pokemon/PokemonGame.cpp:239-245`), không
    có banner/item/danh hiệu nào khác đánh dấu thành tích này. Có thể gộp
    thành 1 banner trong màn hình ở mục 1 thay vì làm hệ thống riêng.
-3. **Hall of Fame** — hiện khi thắng Champion (Blue) lần đầu, chụp lại đội
-   hình 6 Pokémon lúc đó (sprite, tên/nickname, level, giới tính, shiny).
-   2 phương án đã thảo luận với user:
-   - **Phương án rẻ (đúng bản gốc)**: chỉ hiện 1 lần duy nhất lúc thắng, không
-     lưu lại xem sau — chỉ cần 1 bit cờ mới (`hallOfFameCleared` hay tương
-     tự) trong `PokemonState`.
-   - **Phương án lưu lại xem sau**: cần thêm 1 side-file nhỏ snapshot 6
-     record lúc thắng (để đội hình không bị "trôi" nếu sau này đổi/thả bớt
-     Pokémon trong đội) — tốn thêm flash nhưng có giá trị lưu niệm hơn.
-   **ĐÃ CHỐT (2026-09-19): chọn phương án lưu lại xem sau** — làm sau, chưa bắt
-   đầu. Thiết kế đã thống nhất:
-   - Ghi đúng 1 lần khi thắng Champion (gym không đánh lại được), snapshot đội
-     hình lúc đó + số giờ đọc lúc thắng vào side-file mới `pokemon-hof-{a,b}.bin`
-     (double-buffered như store IV/EV; không nhét vào `PokemonState`).
-   - Ngay sau khi thắng hiện màn Hall of Fame 1 lần; xem lại từ **Trainer Card**
-     (chạm ô Champion, hoặc Confirm khi dùng nút), chỉ mở được sau khi đã thắng.
-     Không thêm nút thứ 9 vào menu chính.
-   - Màn hình: lưới 2 cột x 3 hàng (dùng lại `pokemonTrainerCardGrid()`), mỗi ô
-     gồm sprite hero 120x90, tên/nickname, level + giới tính + ★ nếu shiny;
-     dòng đầu "Cleared after N h M m". Thiếu ảnh thì hiện tên.
+3. **Hall of Fame** — ĐÃ CODE XONG (`v0.29.0`, trên branch, chưa merge vào
+   `main`), theo đúng thiết kế đã chốt 2026-09-19 (phương án lưu lại xem sau):
+   - `lib/Pokemon/PokemonHallOfFameCodec.h/.cpp` +
+     `src/pokemon/PokemonHallOfFameStore.h/.cpp`: side-file mới
+     `pokemon-hof-{a,b}.bin`, double-buffered đúng mẫu IV/EV/battle-store
+     nhưng đơn giản hơn (1 snapshot cố định, không phải collection theo
+     recordId) - header 9 byte + payload cố định (cờ `cleared` + số phút đọc
+     lúc thắng + 6 slot `HallOfFameMember`) + CRC32. `cleared` nằm trong
+     payload thay vì suy ra từ việc file có tồn tại hay không, để `reset()`
+     dùng chung đúng 1 cơ chế ghi (write-verify-flip) thay vì phải xoá file
+     riêng.
+   - `PokemonService::captureHallOfFame()`: chỉ ghi 1 lần duy nhất (từ chối
+     ghi đè nếu đã có), snapshot species/nickname/level/gender/shiny của
+     từng slot party hiện tại + `lifetimeMinutes`. `peekHallOfFame()` đọc,
+     không bao giờ ghi. `reset()` cũng dọn side-file này.
+   - `PokemonActivity.cpp`: `finishGymChallenge()` gọi `captureHallOfFame()`
+     ngay khi thắng Champion (`gymIndex == CHAMPION_GYM_INDEX`), rồi hiện màn
+     Hall of Fame 1 lần ngay sau message thắng. Xem lại từ **Trainer Card**
+     (chạm ô Champion - viền nhấn thêm khi đã mở khoá, hoặc Confirm khi dùng
+     nút vì màn Trainer Card không có ô nào để chọn). Không thêm nút thứ 9
+     vào menu chính. Màn hình: lưới 2 cột x 3 hàng dùng lại
+     `pokemonTrainerCardGrid()` (hàm này được thêm tham số `maxTileHeight`
+     tuỳ chọn, mặc định giữ nguyên 72px cho Trainer Card - Hall of Fame
+     truyền 150px vì mỗi ô có sprite hero 120x90 + 2 dòng chữ, không chỉ 1
+     icon). Thiếu ảnh thì hiện tên, đúng như Trainer Card.
+   - Test mới: `PokemonHallOfFameCodecTest`/`PokemonHallOfFameStoreTest`
+     (round-trip, validate, double-buffer, capture-once, reset) +
+     2 test `PokemonServiceTest` cho `captureHallOfFame`/`peekHallOfFame`.
+     26/26 test Pokemon native pass.
+   - **Chưa verify được trên `pio run -e pokemon-x3` hay simulator** - cùng
+     giới hạn mạng sandbox đã ghi ở mục A/C phía trên (bootstrap PlatformIO
+     bị proxy egress chặn 403). `PokemonActivity.cpp` không nằm trong native
+     test suite (cần toàn bộ framework Arduino/ESP32) nên phần UI (layout
+     lưới, chạm ô Champion, luồng message → Hall of Fame) mới chỉ được review
+     kỹ bằng tay, **chưa click-test thật** - bắt buộc phải làm trước khi
+     merge vào `main`, đúng quy ước cũ.
 4. ~~**Vitamin tăng EV trực tiếp** (HP Up/Protein/Iron/Calcium/Carbos)~~ — ĐÃ LÀM (`v0.28.0`: +10 EV/lần, dùng đến 100 EV/chỉ số, chỉ rơi từ track đọc sách; save v7) — hiện
    EV chỉ tăng qua thắng battle (`awardBattleXp`'s EV yield), chưa có item
    nào tăng EV trực tiếp. Kỹ thuật rẻ (giống hệt pattern PP Up đã có: item id
