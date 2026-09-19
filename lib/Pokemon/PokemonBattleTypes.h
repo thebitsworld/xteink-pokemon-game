@@ -11,7 +11,7 @@ namespace pokemon {
 
 constexpr uint8_t MOVE_COUNT = 165;
 // 83 original items + PP Up (id 84) + 6 battle-boost items (ids 85-90).
-constexpr uint8_t ITEM_COUNT = 90;
+constexpr uint8_t ITEM_COUNT = 95;
 constexpr uint8_t GYM_COUNT = 13;  // 8 gyms + 4 Elite Four + the Champion (Blue), in challenge order
 // The Champion is always the last entry - see gymProgressFor()'s Champion
 // branch and PokemonActivity's dynamic final-slot substitution.
@@ -109,6 +109,12 @@ enum class ItemCategory : uint8_t {
   // directly to the live BattleCombatant via applyBattleBoostItem()
   // (PokemonBattle.h/.cpp), never persisted to a BattleRecordEntry.
   BattleBoost = 8,
+  // ids 91-95 (VITAMIN_ITEM_ID_FIRST..LAST) - HP Up/Protein/Iron/Calcium/
+  // Carbos. Same "outside bagCounts" exception as PpUp/BattleBoost: tracked in
+  // PokemonState::vitaminCounts (save v7). Each use adds VITAMIN_EV_PER_USE to
+  // one stat's EV while it is still below VITAMIN_EV_CAP (see
+  // PokemonService::useVitamin()).
+  Vitamin = 9,
 };
 
 // The one and only PP Up item id - deliberately outside the
@@ -135,6 +141,23 @@ constexpr uint8_t ITEM_DIRE_HIT = 90;
 constexpr uint8_t BATTLE_BOOST_ITEM_ID_FIRST = ITEM_X_ATTACK;
 constexpr uint8_t BATTLE_BOOST_ITEM_ID_LAST = ITEM_DIRE_HIT;
 constexpr size_t BATTLE_BOOST_ITEM_COUNT = BATTLE_BOOST_ITEM_ID_LAST - BATTLE_BOOST_ITEM_ID_FIRST + 1U;
+
+// The 5 EV vitamins, same "outside bagCounts" exception as above (see
+// PokemonState::vitaminCounts, v7). In Gen 1 order of the stat each raises:
+// HP Up -> HP, Protein -> Attack, Iron -> Defense, Calcium -> Special,
+// Carbos -> Speed. Real Gen 1 gives +2560 stat exp per vitamin up to 25600 of a
+// 65535 cap; this project's EVs are a simplified 0-255 scale, so the same
+// 1:10 ratio is +10 EV per use, usable while that EV is still below 100.
+constexpr uint8_t ITEM_HP_UP = 91;
+constexpr uint8_t ITEM_PROTEIN = 92;
+constexpr uint8_t ITEM_IRON = 93;
+constexpr uint8_t ITEM_CALCIUM = 94;
+constexpr uint8_t ITEM_CARBOS = 95;
+constexpr uint8_t VITAMIN_ITEM_ID_FIRST = ITEM_HP_UP;
+constexpr uint8_t VITAMIN_ITEM_ID_LAST = ITEM_CARBOS;
+constexpr size_t VITAMIN_ITEM_COUNT = VITAMIN_ITEM_ID_LAST - VITAMIN_ITEM_ID_FIRST + 1U;
+constexpr uint8_t VITAMIN_EV_PER_USE = 10;
+constexpr uint8_t VITAMIN_EV_CAP = 100;
 
 struct ItemData {
   uint8_t itemId;

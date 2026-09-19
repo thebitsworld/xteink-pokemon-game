@@ -555,6 +555,33 @@ ServiceStatus PokemonService::usePpUp(const uint32_t recordId, const uint8_t slo
   return applied;
 }
 
+ServiceStatus PokemonService::useVitamin(const uint32_t recordId, const uint8_t itemId) {
+  if (itemId < VITAMIN_ITEM_ID_FIRST || itemId > VITAMIN_ITEM_ID_LAST) return ServiceStatus::Invalid;
+  const size_t statIndex = itemId - VITAMIN_ITEM_ID_FIRST;  // vitamin order matches StatIndex order
+
+  PokemonRecord record{};
+  if (readRecord(recordId, record) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+  IvEvEntry entry = ensureIvEv(recordId);
+  if (entry.recordId != recordId) return ServiceStatus::StorageError;
+  if (entry.ev[statIndex] >= VITAMIN_EV_CAP) return ServiceStatus::NotApplicable;
+
+  const ServiceStatus consumed = consumeBagItem(itemId);
+  if (consumed != ServiceStatus::Ok) return consumed;
+
+  const uint16_t raised = static_cast<uint16_t>(entry.ev[statIndex]) + VITAMIN_EV_PER_USE;
+  entry.ev[statIndex] = static_cast<uint8_t>(std::min<uint16_t>(raised, std::numeric_limits<uint8_t>::max()));
+  if (ivEvStore_.upsertEntry(entry)) return ServiceStatus::Ok;
+
+  LOG_ERR("PokemonService", "Failed to save vitamin EV for record %u", recordId);
+  // The stat did not change, so give the vitamin back rather than eating it.
+  PokemonState state{};
+  if (loadReadyState(state) == ServiceStatus::Ok && state.vitaminCounts[statIndex] < std::numeric_limits<uint8_t>::max()) {
+    ++state.vitaminCounts[statIndex];
+    if (!store_.commit(state)) LOG_ERR("PokemonService", "Failed to refund vitamin after a failed apply");
+  }
+  return ServiceStatus::StorageError;
+}
+
 UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, const uint8_t itemId) {
   const ItemData* item = itemData(itemId);
   if (item == nullptr) return UseConsumableOutcome::Failed;
@@ -688,6 +715,10 @@ ServiceStatus PokemonService::consumeBagItem(const uint8_t itemId) {
     const size_t index = itemId - BATTLE_BOOST_ITEM_ID_FIRST;
     if (state.battleBoostCounts[index] == 0) return ServiceStatus::NotApplicable;
     --state.battleBoostCounts[index];
+  } else if (itemId >= VITAMIN_ITEM_ID_FIRST && itemId <= VITAMIN_ITEM_ID_LAST) {
+    const size_t index = itemId - VITAMIN_ITEM_ID_FIRST;
+    if (state.vitaminCounts[index] == 0) return ServiceStatus::NotApplicable;
+    --state.vitaminCounts[index];
   } else {
     const size_t index = itemId - EVOLUTION_ITEM_COUNT - 1U;
     if (state.bagCounts[index] == 0) return ServiceStatus::NotApplicable;

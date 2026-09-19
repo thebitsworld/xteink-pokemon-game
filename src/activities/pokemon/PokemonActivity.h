@@ -83,6 +83,12 @@ class PokemonActivity final : public Activity {
     // Screen::PpUpSlot (always - no MovesetFull-style retry branching, every
     // occupied slot is valid).
     PpUp,
+    // EV vitamins (HP Up/Protein/Iron/Calcium/Carbos) - trailing synthetic rows
+    // in Screen::BagMedicine like PpUp (counts live in vitaminCounts, not
+    // bagCounts). Picking one goes to Screen::ItemTarget, then applies straight
+    // to the chosen Pokemon via PokemonService::useVitamin() and confirms with a
+    // message (the change is otherwise invisible outside the Summary EV table).
+    Vitamin,
   };
 
   static constexpr uint8_t ROW_CAPACITY = 10;

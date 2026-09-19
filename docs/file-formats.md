@@ -86,10 +86,10 @@ written. The file is:
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 4 | Magic `PKV2` |
-| 4 | 2 | Format version (`1`, `2`, `3`, or `4`; a build always writes the newest it knows) |
+| 4 | 2 | Format version (`1` through `7`; a build always writes the newest it knows) |
 | 6 | 2 | Header size (`24`) |
 | 8 | 4 | Non-zero snapshot sequence |
-| 12 | 2 | State size (`116` for version 2, `195` for version 3, `198` for version 4 — see per-version tables below) |
+| 12 | 2 | State size (`116` for version 2 up to `210` for version 7 — see the version table below) |
 | 14 | 2 | Record size (`48`) |
 | 16 | 4 | Record count |
 | 20 | 4 | Payload size (`116 + recordCount * 48`) |
@@ -116,6 +116,20 @@ The 116-byte state payload is:
 Each 10-byte pending event contains record ID at offset 0, species ID at 4,
 level at 6, gender at 7, item at 8, and kind at 9. Empty entries follow all
 populated entries. Index zero is the event currently shown to the user.
+
+### State bytes appended by later versions (append-only)
+
+Every later version only appends to the state; bytes 0-115 never change. A
+build reads any version it knows (the file header's version selects the state
+size) and treats the fields a file predates as zero; it always writes the newest.
+
+| Version | State size | Appended fields |
+| ---: | ---: | --- |
+| 3 | 195 | 116: bag counts (`u8` x 77, item ids 7-83); 193: battle progress (`u16`, bits 0-7 gyms, 8-11 Elite Four, 12 Champion) |
+| 4 | 198 | 195-197: ball / medicine / TM-HM pity counters |
+| 5 | 199 | 198: PP Up count |
+| 6 | 205 | 199-204: battle-boost item counts (X Attack, X Defense, X Speed, X Special, Guard Spec., Dire Hit; ids 85-90) |
+| 7 | 210 | 205-209: EV vitamin counts (HP Up, Protein, Iron, Calcium, Carbos; ids 91-95) |
 
 ### Legacy version 1
 

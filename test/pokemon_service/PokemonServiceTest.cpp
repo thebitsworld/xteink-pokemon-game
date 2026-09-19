@@ -1756,6 +1756,89 @@ TEST(PokemonService, UsePpUpAppliesNothingWhenTheBagHasNoPpUp) {
   if (entry != nullptr) EXPECT_EQ(entry->ppUp[0], 0U);  // no free boost without an item
 }
 
+namespace {
+void setVitaminCount(pokemon::PokemonStore& store, const size_t index, const uint8_t count) {
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.vitaminCounts[index] = count;
+  ASSERT_TRUE(store.commit(state));
+}
+
+uint8_t storedVitaminCount(pokemon::PokemonStore& store, const size_t index) {
+  pokemon::PokemonState state{};
+  EXPECT_TRUE(store.loadState(state));
+  return state.vitaminCounts[index];
+}
+}  // namespace
+
+TEST(PokemonService, UseVitaminRaisesOnlyTheMatchingStatByTenAndSpendsOneItem) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  setVitaminCount(store, 1, 2);  // Protein -> Attack
+
+  ASSERT_EQ(service.useVitamin(1, pokemon::ITEM_PROTEIN), pokemon::ServiceStatus::Ok);
+  const pokemon::IvEvEntry ivEv = service.peekIvEv(1);
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Attack)], 10U);
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Hp)], 0U);
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Speed)], 0U);
+  EXPECT_EQ(storedVitaminCount(store, 1), 1U);
+}
+
+TEST(PokemonService, EachVitaminMapsToItsOwnStat) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  for (size_t i = 0; i < pokemon::VITAMIN_ITEM_COUNT; ++i) setVitaminCount(store, i, 1);
+
+  for (uint8_t id = pokemon::VITAMIN_ITEM_ID_FIRST; id <= pokemon::VITAMIN_ITEM_ID_LAST; ++id) {
+    ASSERT_EQ(service.useVitamin(1, id), pokemon::ServiceStatus::Ok);
+  }
+  const pokemon::IvEvEntry ivEv = service.peekIvEv(1);
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Hp)], 10U);       // HP Up
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Attack)], 10U);   // Protein
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Defense)], 10U);  // Iron
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Special)], 10U);  // Calcium
+  EXPECT_EQ(ivEv.ev[static_cast<size_t>(pokemon::StatIndex::Speed)], 10U);    // Carbos
+}
+
+TEST(PokemonService, UseVitaminStopsAtTheVitaminCapWithoutConsumingTheItem) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+  setVitaminCount(store, 0, 11);  // HP Up
+
+  for (int use = 0; use < 10; ++use) {
+    ASSERT_EQ(service.useVitamin(1, pokemon::ITEM_HP_UP), pokemon::ServiceStatus::Ok);
+  }
+  EXPECT_EQ(service.peekIvEv(1).ev[static_cast<size_t>(pokemon::StatIndex::Hp)], pokemon::VITAMIN_EV_CAP);
+  EXPECT_EQ(service.useVitamin(1, pokemon::ITEM_HP_UP), pokemon::ServiceStatus::NotApplicable);
+  EXPECT_EQ(storedVitaminCount(store, 0), 1U);  // the 11th was not spent
+}
+
+TEST(PokemonService, UseVitaminDoesNothingWithoutOneInTheBagOrForABadItemId) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.useVitamin(1, pokemon::ITEM_CARBOS), pokemon::ServiceStatus::NotApplicable);
+  EXPECT_EQ(service.peekIvEv(1).ev[static_cast<size_t>(pokemon::StatIndex::Speed)], 0U);
+  EXPECT_EQ(service.useVitamin(1, pokemon::ITEM_DIRE_HIT), pokemon::ServiceStatus::Invalid);
+  EXPECT_EQ(service.useVitamin(1, pokemon::VITAMIN_ITEM_ID_LAST + 1), pokemon::ServiceStatus::Invalid);
+}
+
 TEST(PokemonService, CatchBlockedByFullBoxOnlyWhenPartyAndBoxAreBothFull) {
   constexpr size_t party = pokemon::PARTY_SIZE;
   constexpr size_t box = pokemon::PC_BOX_MAX_RECORDS;

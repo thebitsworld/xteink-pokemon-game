@@ -13,7 +13,8 @@ constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V2 = 2;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V3 = 3;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V4 = 4;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V5 = 5;
-constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 6;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V6 = 6;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 7;
 constexpr size_t POKEMON_STATE_V1_BYTES = 96;
 constexpr size_t POKEMON_STATE_V2_BYTES = 116;
 // v3 appends bagCounts[POKEMON_BAG_SLOT_COUNT] and battleProgress (uint16_t)
@@ -27,7 +28,10 @@ constexpr size_t POKEMON_STATE_V4_BYTES = POKEMON_STATE_V3_BYTES + 3;
 constexpr size_t POKEMON_STATE_V5_BYTES = POKEMON_STATE_V4_BYTES + 1;
 // v6 (battle-boost items) appends battleBoostCounts[POKEMON_BATTLE_BOOST_ITEM_COUNT]
 // (uint8_t each) - see PokemonState in PokemonTypes.h.
-constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V5_BYTES + POKEMON_BATTLE_BOOST_ITEM_COUNT;
+constexpr size_t POKEMON_STATE_V6_BYTES = POKEMON_STATE_V5_BYTES + POKEMON_BATTLE_BOOST_ITEM_COUNT;
+// v7 (EV vitamins) appends vitaminCounts[POKEMON_VITAMIN_ITEM_COUNT] (uint8_t each) -
+// see PokemonState in PokemonTypes.h.
+constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V6_BYTES + POKEMON_VITAMIN_ITEM_COUNT;
 using StateBytes = std::array<uint8_t, POKEMON_STATE_BYTES>;
 
 constexpr size_t POKEMON_SNAPSHOT_HEADER_BYTES = 24;

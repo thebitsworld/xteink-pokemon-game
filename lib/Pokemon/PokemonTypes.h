@@ -26,14 +26,17 @@ constexpr uint16_t POKEMON_MOVE_ID_MAX = 165;
 // ITEM_COUNT(90) - the 6 evolution stones (tracked in itemCounts) - PP Up
 // (id 84, tracked in its own PokemonState::ppUpCount field, not bagCounts -
 // see PP_UP_ITEM_ID in PokemonBattleTypes.h for why) - the 6 battle-boost
-// items (ids 85-90, tracked in PokemonState::battleBoostCounts, same reason).
+// items (ids 85-90, tracked in PokemonState::battleBoostCounts, same reason) -
+// the 5 EV vitamins (ids 91-95, tracked in PokemonState::vitaminCounts, same reason).
 constexpr size_t POKEMON_BAG_SLOT_COUNT = 77;
-// = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT + 1 (PP Up) + 6 (battle-boost items).
-constexpr uint8_t POKEMON_ITEM_ID_MAX = 90;
+// = EVOLUTION_ITEM_COUNT + POKEMON_BAG_SLOT_COUNT + 1 (PP Up) + 6 (battle-boost items) + 5 (vitamins).
+constexpr uint8_t POKEMON_ITEM_ID_MAX = 95;
 // Pinned copy of PokemonBattleTypes.h's BATTLE_BOOST_ITEM_COUNT (same
 // cross-layer-dependency reason as POKEMON_BAG_SLOT_COUNT/POKEMON_ITEM_ID_MAX
 // above) - PokemonItemData.cpp's static_assert keeps these in sync.
 constexpr size_t POKEMON_BATTLE_BOOST_ITEM_COUNT = 6;
+// Pinned copy of PokemonBattleTypes.h's VITAMIN_ITEM_COUNT, same reason.
+constexpr size_t POKEMON_VITAMIN_ITEM_COUNT = 5;
 constexpr uint16_t POKEMON_GYM_PROGRESS_BITS = 13;  // 8 gyms + 4 Elite Four + the Champion
 constexpr uint16_t POKEMON_GYM_PROGRESS_MASK = static_cast<uint16_t>((1U << POKEMON_GYM_PROGRESS_BITS) - 1U);
 
@@ -166,6 +169,11 @@ struct PokemonState {
   // ItemCategory::BattleBoost order) - same reason as ppUpCount above: none
   // of these fit bagCounts without growing it and breaking every earlier save.
   std::array<uint8_t, POKEMON_BATTLE_BOOST_ITEM_COUNT> battleBoostCounts{};
+  // v7: appended after the v6 layout (PokemonStoreCodec.cpp's byte 205). One
+  // count per EV vitamin (HP Up/Protein/Iron/Calcium/Carbos, indices 0-4
+  // matching VITAMIN_ITEM_ID_FIRST.. in ItemCategory::Vitamin order) - same
+  // reason as ppUpCount/battleBoostCounts above.
+  std::array<uint8_t, POKEMON_VITAMIN_ITEM_COUNT> vitaminCounts{};
 
   bool operator==(const PokemonState&) const = default;
 };

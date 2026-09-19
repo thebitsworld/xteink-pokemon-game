@@ -40,7 +40,7 @@ lại đây để tham khảo khi có thời gian, **chưa quyết định làm 
      record lúc thắng (để đội hình không bị "trôi" nếu sau này đổi/thả bớt
      Pokémon trong đội) — tốn thêm flash nhưng có giá trị lưu niệm hơn.
    User chưa chốt chọn phương án nào — hỏi lại khi bắt đầu làm.
-4. **Vitamin tăng EV trực tiếp** (HP Up/Protein/Iron/Calcium/Carbos) — hiện
+4. ~~**Vitamin tăng EV trực tiếp** (HP Up/Protein/Iron/Calcium/Carbos)~~ — ĐÃ LÀM (`v0.28.0`: +10 EV/lần, dùng đến 100 EV/chỉ số, chỉ rơi từ track đọc sách; save v7) — hiện
    EV chỉ tăng qua thắng battle (`awardBattleXp`'s EV yield), chưa có item
    nào tăng EV trực tiếp. Kỹ thuật rẻ (giống hệt pattern PP Up đã có: item id
    mới + công thức cộng có giới hạn + gắn vào drop pool Medicine có sẵn),

@@ -409,6 +409,28 @@ void forcedItemWithLevelGainQueuesItemBeforeEvolution() {
   CHECK(sequence.index == std::size(draws));
 }
 
+void vitaminsDropFromTheMedicineTrackAndAreCountedOutsideTheBag() {
+  // Everything else on the medicine track is sold out, and its pity counter is
+  // already at the guarantee, so the 15-minute check must hand out a vitamin -
+  // the only candidates left - and count it in vitaminCounts (not bagCounts).
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  state.bagCounts.fill(UINT8_MAX);
+  state.ppUpCount = UINT8_MAX;
+  state.battleBoostCounts.fill(UINT8_MAX);
+  state.medicineMisses = pokemon::ITEM_TRACK_MISSES_BEFORE_GUARANTEE;
+  pokemon::RandomSource random{nullptr, chooseFirst};
+
+  const pokemon::CreditResult result =
+      pokemon::applyCreditedMinutes(state, leader, 15, 10, pokemon::OwnedEvolutionNeeds{}, random);
+
+  CHECK(result.status == pokemon::CreditStatus::Applied);
+  unsigned vitaminTotal = 0;
+  for (const uint8_t count : state.vitaminCounts) vitaminTotal += count;
+  CHECK(vitaminTotal == 1);
+  for (const uint8_t count : state.bagCounts) CHECK(count == UINT8_MAX);  // untouched
+}
+
 void multiHourCreditUsesLifetimeAtEachHourlyBoundary() {
   // Ball/medicine/TM-HM now check at the same 15-minute cadence as encounter,
   // each with its own pity counter - across 121 minutes (9 such checks) any
@@ -426,11 +448,13 @@ void multiHourCreditUsesLifetimeAtEachHourlyBoundary() {
   state.encounterMisses = 3;
   state.bagCounts.fill(UINT8_MAX);
   state.bagCounts[0] = state.bagCounts[1] = state.bagCounts[2] = state.bagCounts[3] = 0;  // balls stay available
-  // PP Up and the 6 battle-boost items live outside bagCounts (their own
-  // ppUpCount/battleBoostCounts fields), so they need their own "sold out"
-  // cap to stay neutralized like every other medicine-track item here.
+  // PP Up, the 6 battle-boost items and the 5 vitamins live outside bagCounts
+  // (their own ppUpCount/battleBoostCounts/vitaminCounts fields), so they need
+  // their own "sold out" cap to stay neutralized like every other
+  // medicine-track item here.
   state.ppUpCount = UINT8_MAX;
   state.battleBoostCounts.fill(UINT8_MAX);
+  state.vitaminCounts.fill(UINT8_MAX);
   constexpr uint32_t draws[] = {
       1,
       3,
@@ -1379,6 +1403,7 @@ int main() {
   resolvingEventsPopsOnlyTheFrontAndRefreshesTheNotice();
   encounterDueWithLevelGainQueuesEncounterBeforeEvolution();
   forcedItemWithLevelGainQueuesItemBeforeEvolution();
+  vitaminsDropFromTheMedicineTrackAndAreCountedOutsideTheBag();
   multiHourCreditUsesLifetimeAtEachHourlyBoundary();
   progressBandsGateStagesAndEncounterLevels();
   everyEligibleRegularEncounterWeightIntervalSelectsItsSpecies();
