@@ -33,6 +33,11 @@ on:
   push:
     tags:
       - "v*.*.*"
+  # Manual test build of whatever branch/tag is picked in the Actions UI
+  # ("Run workflow" > choose branch). Builds both firmwares and leaves them as
+  # downloadable run artifacts only - no GitHub release, no tag, nothing that
+  # /releases/latest or the in-app updater can see.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -78,7 +83,7 @@ jobs:
           # scripts/git_branch.py) so the device's Wi-Fi "Check for Update"
           # can actually compare against future release tags. Without this,
           # the build falls back to a dev version and never detects updates.
-          CROSSINK_RELEASE_VERSION: ${{ github.ref_name }}
+          CROSSINK_RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-rc.{0}', github.run_number) }}
         run: pio run -e pokemon-x3
 
       - name: Verify build output
@@ -123,7 +128,7 @@ jobs:
       - name: Build pokemon-x4-pro firmware
         env:
           # See the matching comment on the pokemon-x3 build step above.
-          CROSSINK_RELEASE_VERSION: ${{ github.ref_name }}
+          CROSSINK_RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-rc.{0}', github.run_number) }}
         run: pio run -e pokemon-x4-pro
 
       - name: Verify build output
@@ -137,6 +142,8 @@ jobs:
 
   release:
     needs: [build-x3-x4, build-x4-pro]
+    # Manual (workflow_dispatch) runs stop after the builds above.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
