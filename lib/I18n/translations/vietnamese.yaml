@@ -752,6 +752,8 @@ STR_POKEMON_CANNOT_LEARN_MACHINE: "Pokémon này không thể học chiêu thứ
 STR_POKEMON_MACHINE_ALREADY_KNOWS: "Đã biết chiêu thức này"
 STR_POKEMON_MACHINE_CAN_LEARN: "Có thể học chiêu thức này"
 STR_POKEMON_EVOLVES_INTO: "Tiến hóa thành %s"
+STR_POKEMON_EVOLVE_QUESTION: "Tiến hóa %s thành %s?"
+STR_POKEMON_EVOLVE_NOW: "Tiến hóa ngay"
 STR_POKEMON_FORGET: "Quên"
 STR_POKEMON_MOON_STONE: "Đá Mặt Trăng"
 STR_POKEMON_FIRE_STONE: "Đá Lửa"

@@ -41,6 +41,7 @@ class PokemonActivity final : public Activity {
     Pc,
     PcOrder,
     PcReleaseConfirm,
+    EvolveConfirm,
     Bag,
     BagEvolution,
     BagMedicine,
@@ -194,6 +195,7 @@ class PokemonActivity final : public Activity {
   int logicalCount() const;
   int listTop() const;
   int rowHeightForScreen() const;
+  bool canEvolveFocused() const;
   bool showsPartyHealthRows() const;
   bool showsMachineCapabilityRows() const;
   int rowsPerPage() const;

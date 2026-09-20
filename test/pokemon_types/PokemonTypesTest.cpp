@@ -317,8 +317,12 @@ void pendingEventQueueIsFixedFifoAndCompacted() {
   CHECK(pokemon::enqueuePendingEvent(state, encounter));
   CHECK(pokemon::enqueuePendingEvent(state, item));
   CHECK(pokemon::enqueuePendingEvent(state, evolution));
+  while (pokemon::pendingEventCount(state) < pokemon::PENDING_EVENT_CAPACITY - 1U) {
+    CHECK(pokemon::enqueuePendingEvent(state, item));  // filler up to one short of full
+  }
+  CHECK(pokemon::enqueuePendingEvent(state, fourth));
   const PokemonState full = state;
-  CHECK(!pokemon::enqueuePendingEvent(state, fourth));
+  CHECK(!pokemon::enqueuePendingEvent(state, encounter));
   CHECK(state == full);
   CHECK(pokemon::pendingEventCount(state) == pokemon::PENDING_EVENT_CAPACITY);
   CHECK(pokemon::pendingEventFront(state) != nullptr);
@@ -327,9 +331,10 @@ void pendingEventQueueIsFixedFifoAndCompacted() {
   CHECK(pokemon::dequeuePendingEvent(state));
   CHECK(*pokemon::pendingEventFront(state) == item);
   CHECK(pokemon::removePendingEvolutionsForRecord(state, evolution.recordId) == 1);
-  CHECK(pokemon::pendingEventCount(state) == 1);
+  CHECK(pokemon::pendingEventCount(state) == pokemon::PENDING_EVENT_CAPACITY - 2U);
   CHECK(*pokemon::pendingEventFront(state) == item);
-  CHECK(pokemon::dequeuePendingEvent(state));
+  while (pokemon::dequeuePendingEvent(state)) {
+  }
   CHECK(!pokemon::dequeuePendingEvent(state));
   CHECK(pokemon::pendingEventFront(state) == nullptr);
 

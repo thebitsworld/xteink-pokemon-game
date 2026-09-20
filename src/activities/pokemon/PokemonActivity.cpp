@@ -628,6 +628,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::ResetFirst:
     case Screen::ResetFinal:
     case Screen::PcReleaseConfirm:
+    case Screen::EvolveConfirm:
       return screen_ == Screen::Move ? snapshot_.partyCount : 2;
     case Screen::Menu:
       return 8;
@@ -636,7 +637,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::Party:
       return pokemon::PARTY_SIZE;
     case Screen::Actions: {
-      const auto actions = pokemon::collectionActions(actionSource_ == Screen::Party, snapshot_.partyCount);
+      const auto actions = pokemon::collectionActions(actionSource_ == Screen::Party, snapshot_.partyCount, canEvolveFocused());
       return actions.count;
     }
     case Screen::Moveset:
@@ -715,7 +716,7 @@ int PokemonActivity::listTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   int top = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + metrics.verticalSpacing;
   if (screen_ == Screen::Starter || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal ||
-      screen_ == Screen::PcReleaseConfirm)
+      screen_ == Screen::PcReleaseConfirm || screen_ == Screen::EvolveConfirm)
     top += 72;
   if (screen_ == Screen::Gender) top += 180;
   if (screen_ == Screen::NicknameQuestion) top += 210;
@@ -729,6 +730,10 @@ int PokemonActivity::listTop() const {
 // (Evolution/Machine targets have no HP to show); and for
 // Screen::BattleSwitch, where seeing HP/status is exactly what decides
 // which Pokemon to send out.
+bool PokemonActivity::canEvolveFocused() const {
+  return focusedRecord_.recordId != 0 && pokemon::levelEvolutionAvailable(focusedRecord_) != nullptr;
+}
+
 bool PokemonActivity::showsPartyHealthRows() const {
   if (screen_ == Screen::Party || screen_ == Screen::BattleSwitch) return true;
   return screen_ == Screen::ItemTarget &&
@@ -1565,7 +1570,7 @@ void PokemonActivity::activate() {
       return;
     case Screen::Actions: {
       const bool party = actionSource_ == Screen::Party;
-      const auto actions = pokemon::collectionActions(party, snapshot_.partyCount);
+      const auto actions = pokemon::collectionActions(party, snapshot_.partyCount, canEvolveFocused());
       if (selected_ < 0 || selected_ >= actions.count) return;
       switch (actions.items[selected_]) {
         case pokemon::CollectionAction::Summary:
@@ -1574,6 +1579,16 @@ void PokemonActivity::activate() {
         case pokemon::CollectionAction::Moveset:
           setScreen(Screen::Moveset);
           return;
+        case pokemon::CollectionAction::Evolve: {
+          const pokemon::EvolutionRule* rule = pokemon::levelEvolutionAvailable(focusedRecord_);
+          if (focusedRecord_.recordId == 0 || rule == nullptr) return;
+          snprintf(message_, sizeof(message_), tr(STR_POKEMON_EVOLVE_QUESTION),
+                   focusedRecord_.nickname[0] == '\0' ? speciesName(focusedRecord_.speciesId)
+                                                       : focusedRecord_.nickname.data(),
+                   speciesName(rule->targetSpeciesId));
+          setScreen(Screen::EvolveConfirm);
+          return;
+        }
         case pokemon::CollectionAction::Move: {
           int slot = 0;
           while (slot < snapshot_.partyCount && snapshot_.party[slot].recordId != focusedRecordId_) ++slot;
@@ -2295,6 +2310,18 @@ void PokemonActivity::activate() {
       else
         setScreen(Screen::Settings);
       return;
+    case Screen::EvolveConfirm:
+      if (selected_ != 0) {
+        setScreen(Screen::Actions);
+        return;
+      }
+      if (service_.evolveNow(focusedRecordId_) != pokemon::ServiceStatus::Ok) {
+        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Actions);
+        return;
+      }
+      if (!refreshSnapshot()) return;
+      setScreen(Screen::Summary);
+      return;
     case Screen::PcReleaseConfirm:
       if (selected_ != 0) {
         setScreen(Screen::Actions);
@@ -2413,6 +2440,7 @@ void PokemonActivity::goBack() {
       setScreen(Screen::Settings);
       return;
     case Screen::PcReleaseConfirm:
+    case Screen::EvolveConfirm:
       setScreen(Screen::Actions);
       return;
     case Screen::HallOfFame:
@@ -2708,6 +2736,7 @@ void PokemonActivity::buildRows() {
       case Screen::ResetFirst:
       case Screen::ResetFinal:
       case Screen::PcReleaseConfirm:
+      case Screen::EvolveConfirm:
         row(local, index == 0 ? tr(STR_YES) : tr(STR_NO));
         break;
       // Unreachable in practice: isListScreen() excludes Screen::Menu (it
@@ -2757,7 +2786,7 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::Actions: {
-        const auto actions = pokemon::collectionActions(actionSource_ == Screen::Party, snapshot_.partyCount);
+        const auto actions = pokemon::collectionActions(actionSource_ == Screen::Party, snapshot_.partyCount, canEvolveFocused());
         if (index >= actions.count) break;
         const char* label = nullptr;
         switch (actions.items[index]) {
@@ -2766,6 +2795,9 @@ void PokemonActivity::buildRows() {
             break;
           case pokemon::CollectionAction::Moveset:
             label = tr(STR_POKEMON_MOVES);
+            break;
+          case pokemon::CollectionAction::Evolve:
+            label = tr(STR_POKEMON_EVOLVE_NOW);
             break;
           case pokemon::CollectionAction::Move:
             label = tr(STR_POKEMON_MOVE);
@@ -3290,8 +3322,10 @@ void PokemonActivity::renderFocused() {
     return;
   }
   if (screen_ == Screen::NicknameQuestion || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal ||
-      screen_ == Screen::PcReleaseConfirm) {
-    const char* prompt = screen_ == Screen::NicknameQuestion || screen_ == Screen::PcReleaseConfirm ? message_
+      screen_ == Screen::PcReleaseConfirm || screen_ == Screen::EvolveConfirm) {
+    const char* prompt = screen_ == Screen::NicknameQuestion || screen_ == Screen::PcReleaseConfirm ||
+                                 screen_ == Screen::EvolveConfirm
+                             ? message_
                          : screen_ == Screen::ResetFirst                                            ? tr(STR_POKEMON_RESET_QUESTION)
                                                              : tr(STR_POKEMON_RESET_CONFIRM);
     centered(renderer, UI_12_FONT_ID, contentTop + 18, prompt, EpdFontFamily::BOLD);
@@ -4606,6 +4640,8 @@ void PokemonActivity::renderHeaderAndHints() {
     title = tr(STR_POKEMON_SETTINGS);
   else if (screen_ == Screen::PcReleaseConfirm)
     title = tr(STR_POKEMON_PC_BOX);
+  else if (screen_ == Screen::EvolveConfirm)
+    title = tr(STR_POKEMON_SUMMARY);
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
   if (mappedInput.hasTouchHardware())
     TouchHeaderBackButton::draw(renderer, uiTarget_, header, title, false);

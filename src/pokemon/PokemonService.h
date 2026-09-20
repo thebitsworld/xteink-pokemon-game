@@ -167,6 +167,10 @@ class PokemonService {
   // two-call shape).
   TeachMoveOutcome teachMove(uint32_t recordId, uint8_t moveId, int replaceSlot = -1);
 
+  // Manual evolution through an already-met Level rule, without waiting for a
+  // queued prompt. NotApplicable if the Pokemon has no such rule available.
+  ServiceStatus evolveNow(uint32_t recordId);
+
   // Same operation as teachMove(), but also spends `itemId` from the bag as
   // part of it: resolves whether the move can be learned (and into which
   // slot) first, without writing anything, THEN consumes the item, THEN
@@ -368,7 +372,7 @@ class PokemonService {
   // entry yet is skipped - its first battle synthesizes an up-to-date
   // moveset for its current level already, so there is nothing to catch up.
   void queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader, uint8_t previousLevel,
-                              uint8_t currentLevel);
+                              uint8_t currentLevel, bool queuePrompts = true);
   static bool creditFromTracker(void* context, uint16_t minutes, uint8_t bookProgressPercent);
   IvEvEntry* findPendingIvEvRoll(uint32_t recordId);
   void cachePendingIvEvRoll(const IvEvEntry& entry);

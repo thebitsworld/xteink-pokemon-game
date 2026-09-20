@@ -258,6 +258,12 @@ void fullQueuePrimesGuaranteesButStillHandsOutBalls() {
                             pokemon::Gender::Unknown,
                             pokemon::EvolutionItem::None,
                             pokemon::PendingEventKind::Evolution};
+  // The queue grew past 3 in save v8 - top it up with filler items so it is
+  // genuinely full whatever PENDING_EVENT_CAPACITY is.
+  for (size_t slot = 3; slot < pokemon::PENDING_EVENT_CAPACITY; ++slot) {
+    state.pendingEvents[slot] = {
+        0, 0, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::MoonStone, pokemon::PendingEventKind::Item};
+  }
   state.readingMinuteRemainder = 59;
   const auto pendingBefore = state.pendingEvents;
   const uint32_t xpBefore = leader.totalXp;
@@ -1377,6 +1383,35 @@ void useEvolutionItemIgnoresAPendingMoveLearnForTheSameRecord() {
   CHECK(state.itemCounts[itemIndex] == 0);
 }
 
+void evolveByLevelNowEvolvesWithoutAPromptAndDropsAQueuedOne() {
+  pokemon::PokemonRecord record = leaderAtLevelFive();
+  record.speciesId = 1;  // Bulbasaur, evolves at 16
+  record.gender = validGenderForSpecies(record.speciesId);
+  record.totalXp = pokemon::xpRequired(15);
+  pokemon::PokemonState state{};
+  pokemon::RecordMutation mutation{};
+  CHECK(pokemon::levelEvolutionAvailable(record) == nullptr);
+  CHECK(!pokemon::evolveByLevelNow(state, record, mutation));
+
+  record.totalXp = pokemon::xpRequired(16);
+  CHECK(pokemon::levelEvolutionAvailable(record) != nullptr);
+  state.pendingEvents[0] = {
+      record.recordId, 2, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::None, pokemon::PendingEventKind::Evolution};
+  CHECK(pokemon::evolveByLevelNow(state, record, mutation));
+  CHECK(record.speciesId == 2);
+  CHECK(pokemon::pendingEventCount(state) == 0);
+  CHECK(mutation.kind == pokemon::RecordMutationKind::Replace);
+}
+
+void collectionActionsOfferEvolveOnlyWhenAvailable() {
+  const pokemon::CollectionActionSet without = pokemon::collectionActions(true, 2, false);
+  const pokemon::CollectionActionSet with = pokemon::collectionActions(true, 2, true);
+  CHECK(with.count == without.count + 1);
+  CHECK(with.items[1] == pokemon::CollectionAction::Evolve);
+  CHECK(with.items[2] == pokemon::CollectionAction::Moveset);
+  for (uint8_t index = 0; index < without.count; ++index) CHECK(without.items[index] != pokemon::CollectionAction::Evolve);
+}
+
 void rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate() {
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
@@ -1451,6 +1486,8 @@ int main() {
   useEvolutionItemIgnoresAnUnrelatedPendingEventForADifferentRecord();
   useEvolutionItemIsStillBlockedByAPendingEventForTheSameRecord();
   useEvolutionItemIgnoresAPendingMoveLearnForTheSameRecord();
+  evolveByLevelNowEvolvesWithoutAPromptAndDropsAQueuedOne();
+  collectionActionsOfferEvolveOnlyWhenAvailable();
   rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate();
   return failures == 0 ? 0 : 1;
 }

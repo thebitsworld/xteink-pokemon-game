@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-20
+
+### Added
+
+- Evolve now: when a Pokémon has already reached the level it evolves at, Summary > Actions shows an "Evolve now" row (after asking for confirmation), so you no longer have to wait for the evolution prompt.
+
+### Changed
+
+- The list of things waiting for you (wild encounters, items, evolutions, moves to learn) now holds 10 instead of 3, so it fills up far less often.
+- Evolving no longer queues one "learn this move?" prompt per move the new form could know. Moves go straight into any empty move slot, and any others can be learned from Party > Actions > Moves at any time.
+- Saves are upgraded to a new format the first time the game writes one. Older saves load as normal with everything intact; after the upgrade, an older version of the firmware will no longer read that save.
+
 ## [0.29.1] - 2026-09-20
 
 ### Changed

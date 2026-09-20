@@ -89,7 +89,7 @@ written. The file is:
 | 4 | 2 | Format version (`1` through `7`; a build always writes the newest it knows) |
 | 6 | 2 | Header size (`24`) |
 | 8 | 4 | Non-zero snapshot sequence |
-| 12 | 2 | State size (`116` for version 2 up to `210` for version 7 — see the version table below) |
+| 12 | 2 | State size (`116` for version 2 up to `280` for version 8 — see the version table below) |
 | 14 | 2 | Record size (`48`) |
 | 16 | 4 | Record count |
 | 20 | 4 | Payload size (`116 + recordCount * 48`) |
@@ -102,7 +102,7 @@ The 116-byte state payload is:
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 24 | Six Party record IDs (`u32` each; packed from slot 1) |
-| 24 | 30 | Three compacted pending events (`10` bytes each) |
+| 24 | 30 | The first three compacted pending events (`10` bytes each); slots 4-10 are appended by version 8 |
 | 54 | 12 | Six evolution-item counts (`u16` each) |
 | 66 | 19 | Seen Pokédex bitset, species 1-151 |
 | 85 | 19 | Caught Pokédex bitset, species 1-151 |
@@ -113,7 +113,8 @@ The 116-byte state payload is:
 | 114 | 1 | Item misses (`0-19`) |
 | 115 | 1 | Dashboard notice for the first queued event |
 
-Each 10-byte pending event contains record ID at offset 0, species ID at 4,
+The pending-event queue holds 10 events in total: slots 1-3 sit here and slots 4-10 at
+bytes 210-279 (version 8). Each 10-byte pending event contains record ID at offset 0, species ID at 4,
 level at 6, gender at 7, item at 8, and kind at 9. Empty entries follow all
 populated entries. Index zero is the event currently shown to the user.
 
@@ -130,6 +131,7 @@ size) and treats the fields a file predates as zero; it always writes the newest
 | 5 | 199 | 198: PP Up count |
 | 6 | 205 | 199-204: battle-boost item counts (X Attack, X Defense, X Speed, X Special, Guard Spec., Dire Hit; ids 85-90) |
 | 7 | 210 | 205-209: EV vitamin counts (HP Up, Protein, Iron, Calcium, Carbos; ids 91-95) |
+| 8 | 280 | 210-279: pending-event slots 4-10 (`10` bytes each, same compacted queue as the first three) |
 
 ### Legacy version 1
 
