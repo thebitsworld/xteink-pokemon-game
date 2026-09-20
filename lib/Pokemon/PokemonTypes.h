@@ -211,6 +211,9 @@ PendingEvent* pendingEventFront(PokemonState& state);
 bool enqueuePendingEvent(PokemonState& state, const PendingEvent& event);
 bool dequeuePendingEvent(PokemonState& state);
 size_t removePendingEvolutionsForRecord(PokemonState& state, uint32_t recordId);
+// Removes every queued prompt that refers to `recordId` (Evolution AND MoveLearn) - used when the record
+// itself goes away, so no prompt is left pointing at a Pokemon that no longer exists.
+size_t removePendingEventsForRecord(PokemonState& state, uint32_t recordId);
 bool validateState(const PokemonState& state);
 
 }  // namespace pokemon
