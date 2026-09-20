@@ -948,6 +948,43 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
         write_saves(saves, backup=not args.no_backup)
 
 
+def cmd_set_species(args: argparse.Namespace) -> None:
+    species = find_species(load_species(), args.species)
+    gender = GENDER_NAMES_REVERSE.get(args.gender) if args.gender else default_gender_for(species)
+    if gender is None:
+        raise ToolError(f"--gender must be one of: {', '.join(GENDER_NAMES_REVERSE)}")
+    validate_gender(species, gender)
+    saves = load_saves(args.save_dir)
+    for save in saves:
+        record_count, = struct.unpack_from("<I", save.data, OFF_HEADER_RECORD_COUNT)
+        records_offset = HEADER_BYTES + STATE_BYTES_V7
+        found = False
+        for i in range(record_count):
+            offset = records_offset + i * RECORD_BYTES
+            record_id, = struct.unpack_from("<I", save.data, offset)
+            if record_id != args.record_id:
+                continue
+            # Record layout: id(4) xp(4) species(2) caughtLevel(1) gender(1) origin(1) flags(1) ...
+            struct.pack_into("<H", save.data, offset + 8, species.id)
+            struct.pack_into("<B", save.data, offset + 11, gender)
+            found = True
+            break
+        if not found:
+            raise ToolError(f"{save.path.name}: no record with id {args.record_id}")
+        # Owned species must be seen+caught (validateState()).
+        seen = bytearray(state_bytes(save, OFF_SEEN_BITS, 19))
+        caught = bytearray(state_bytes(save, OFF_CAUGHT_BITS, 19))
+        zero_based = species.id - 1
+        seen[zero_based // 8] |= 1 << (zero_based % 8)
+        caught[zero_based // 8] |= 1 << (zero_based % 8)
+        set_state_bytes(save, OFF_SEEN_BITS, bytes(seen))
+        set_state_bytes(save, OFF_CAUGHT_BITS, bytes(caught))
+        recompute_crc(save)
+        print(f"{save.path.name}: record #{args.record_id} is now {species.name} (species {species.id})")
+    if not args.dry_run:
+        write_saves(saves, backup=not args.no_backup)
+
+
 def cmd_set_moves(args: argparse.Namespace) -> None:
     move_map = load_moves()
     saves = load_saves(args.save_dir)
@@ -1066,6 +1103,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_member.add_argument("--nickname", help="default: none")
     add_member.add_argument("--shiny", action="store_true", help="set RecordFlag::Shiny on the new record")
     add_member.set_defaults(func=cmd_add_party_member)
+
+    set_species = subparsers.add_parser(
+        "set-species", help="change an existing record's species (keeps level/XP; re-picks a valid gender)"
+    )
+    set_species.add_argument("--record-id", type=int, required=True)
+    set_species.add_argument("--species", required=True, help="species id or name")
+    set_species.add_argument("--gender", choices=sorted(GENDER_NAMES_REVERSE), help="default: auto-picked")
+    set_species.set_defaults(func=cmd_set_species)
 
     moves = subparsers.add_parser(
         "set-moves", help="set a record's 4 battle move slots (auto-picked from its real learnset if --moves is omitted)"
