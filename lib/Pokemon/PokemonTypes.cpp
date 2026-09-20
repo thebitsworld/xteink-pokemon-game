@@ -279,6 +279,24 @@ size_t removePendingEvolutionsForRecord(PokemonState& state, const uint32_t reco
   return removed;
 }
 
+size_t removePendingEventsForRecord(PokemonState& state, const uint32_t recordId) {
+  if (recordId == 0) return 0;
+  size_t writeIndex = 0;
+  size_t removed = 0;
+  for (const PendingEvent& event : state.pendingEvents) {
+    const bool refersToRecord =
+        (event.kind == PendingEventKind::Evolution || event.kind == PendingEventKind::MoveLearn) &&
+        event.recordId == recordId;
+    if (refersToRecord) {
+      ++removed;
+      continue;
+    }
+    if (event.kind != PendingEventKind::None) state.pendingEvents[writeIndex++] = event;
+  }
+  while (writeIndex < state.pendingEvents.size()) state.pendingEvents[writeIndex++] = {};
+  return removed;
+}
+
 bool validateState(const PokemonState& state) {
   bool foundEmptyPartySlot = false;
   for (size_t slot = 0; slot < state.partyRecordIds.size(); ++slot) {

@@ -315,6 +315,9 @@ class PokemonService {
   // record's IV/EV is looked up, since every later call finds the already-
   // persisted entry regardless of this flag.
   IvEvEntry ensureIvEv(uint32_t recordId, bool shiny = false);
+  // True when the stored record is shiny - ensureIvEv() consults this itself so a first-time roll is right even if
+  // the caller didn't pass `shiny`.
+  bool recordIsShiny(uint32_t recordId);
   // Read-only: never rolls or persists anything, for display/HP-calc paths
   // that must not write just from being looked at (mirrors peekBattleMoves()
   // vs loadBattleEntry()). Returns a zero IV/EV entry if none exists yet -

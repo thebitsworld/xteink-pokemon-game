@@ -659,6 +659,13 @@ bool acknowledgeItem(PokemonState& state, const PokemonRecord& leader) {
   return true;
 }
 
+bool discardFrontPendingEvent(PokemonState& state) {
+  PokemonState candidate = state;
+  if (!popPendingEvent(candidate)) return false;
+  state = candidate;
+  return true;
+}
+
 bool acknowledgeMoveLearn(PokemonState& state, const PokemonRecord& record) {
   const PendingEvent* pending = pendingEventFront(state);
   if (!validateState(state) || !validateRecord(record) || pending == nullptr ||
@@ -751,7 +758,10 @@ bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutat
   }
 
   PokemonState stateCandidate = state;
-  removePendingEvolutionsForRecord(stateCandidate, record.recordId);
+  // Evolution AND MoveLearn prompts: a MoveLearn left pointing at a released
+  // record can never be resolved and would stay at the front of the queue,
+  // blocking every later event.
+  removePendingEventsForRecord(stateCandidate, record.recordId);
   refreshDashboardNotice(stateCandidate);
   if (!validateState(stateCandidate)) return false;
 

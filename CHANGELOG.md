@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- Releasing a Pokémon that still had a "learn this move?" prompt waiting could freeze the whole list of waiting events for good (encounters and items stopped arriving). Such prompts are now cleared when the Pokémon is released, and a leftover one is simply dropped.
+- After cancelling an evolution, the game asked again after every battle win. It now only asks when a win actually levels the Pokémon up; use Summary > Actions > Evolve now for one that is already past its evolution level.
+- A shiny Pokémon that was first used with a vitamin, medicine or battle before its Summary was opened could get ordinary hidden stats instead of a shiny's; a wild encounter that arrived in the same reading update as an evolution prompt could miss its shiny chance; and a Pokémon caught after a release could inherit leftover data from the old one.
+- Long Release/Evolve questions in wordier languages with long nicknames are no longer cut off, and the Dutch vitamin message reads in the right order.
 - Save-file corruption checking silently stopped verifying pending evolution events in the last two slots of the 10-slot queue added in v0.30.0 (an 8-bit bitmask couldn't fit slot indices 8-9). A save with a dangling reference there could now be caught again instead of being accepted as valid.
 
 ### Fixed

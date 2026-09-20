@@ -321,7 +321,14 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
     LOG_ERR("PokemonService", "Failed to resolve encounter");
     return ServiceStatus::StorageError;
   }
-  if (mutation.kind == RecordMutationKind::Append) caughtRecordId = mutation.record.recordId;
+  if (mutation.kind == RecordMutationKind::Append) {
+    caughtRecordId = mutation.record.recordId;
+    // A released record's ids can be handed out again; if its best-effort side-store cleanup ever failed, drop the
+    // stale battle/IV entries now so the new Pokemon doesn't inherit them.
+    if (battleStore_.findEntry(caughtRecordId) != nullptr) battleStore_.removeEntry(caughtRecordId);
+    if (ivEvStore_.findEntry(caughtRecordId) != nullptr) ivEvStore_.removeEntry(caughtRecordId);
+    clearPendingIvEvRoll(caughtRecordId);
+  }
   return ServiceStatus::Ok;
 }
 
@@ -379,7 +386,12 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
   if (pending == nullptr || pending->kind != PendingEventKind::MoveLearn) return ServiceStatus::NotApplicable;
   const PendingEvent event = *pending;
   PokemonRecord record{};
-  if (!store_.readRecord(event.recordId, record)) return ServiceStatus::StorageError;
+  if (!store_.readRecord(event.recordId, record)) {
+    // A prompt for a Pokemon that no longer exists can never be answered;
+    // drop it instead of leaving it at the front of the queue forever.
+    if (!pokemon::discardFrontPendingEvent(state) || !store_.commit(state)) return ServiceStatus::StorageError;
+    return ServiceStatus::Ok;
+  }
 
   if (replaceSlot >= 0 && replaceSlot < static_cast<int>(BATTLE_MOVE_SLOTS)) {
     BattleRecordEntry entry{};
@@ -934,6 +946,11 @@ void PokemonService::clearPendingIvEvRoll(const uint32_t recordId) {
   }
 }
 
+bool PokemonService::recordIsShiny(const uint32_t recordId) {
+  PokemonRecord record{};
+  return store_.readRecord(recordId, record) && isRecordShiny(record);
+}
+
 IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId, const bool shiny) {
   if (recordId == 0) return {};
   if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) {
@@ -945,7 +962,7 @@ IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId, const bool shiny) 
   fresh.recordId = recordId;
   if (const IvEvEntry* pending = findPendingIvEvRoll(recordId); pending != nullptr) {
     fresh = *pending;  // reuse the same not-yet-persisted roll rather than rolling a new one
-  } else if (shiny) {
+  } else if (shiny || recordIsShiny(recordId)) {
     rollShinyIvSet(random_, fresh.iv);
   } else {
     rollIvSet(random_, fresh.iv);
@@ -1191,23 +1208,23 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   }
 
   const uint8_t previousLevel = levelForXp(record.totalXp);
-  // At level 100 there is no XP left to gain, but a Pokemon that is already
-  // past its evolution level still deserves its prompt, so that check below
-  // must not be skipped.
-  const bool atMaxXp = record.totalXp >= MAXIMUM_TOTAL_XP;
-  if (!atMaxXp) {
-    const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
-    record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
-  }
+  if (record.totalXp >= MAXIMUM_TOTAL_XP) return ServiceStatus::Ok;  // already level 100 - nothing to gain
+
+  const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
+  record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
   const uint8_t currentLevel = levelForXp(record.totalXp);
 
   PokemonState state{};
   const ServiceStatus stateStatus = loadReadyState(state);
   if (stateStatus != ServiceStatus::Ok) return stateStatus;
   queueMoveLearnIfNeeded(state, record, previousLevel, currentLevel);
-  bool evolutionQueued = false;
-  if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return ServiceStatus::StorageError;
-  if (atMaxXp && !evolutionQueued) return ServiceStatus::Ok;  // nothing changed - skip the write
+  // Only when this win actually gained a level, like the reading path: checking after
+  // every win re-asked a player who had just cancelled an evolution after each later
+  // battle. A Pokemon already past its evolution level can use "Evolve now".
+  if (currentLevel > previousLevel) {
+    bool evolutionQueued = false;
+    if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return ServiceStatus::StorageError;
+  }
   const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to award battle XP");
@@ -1307,6 +1324,7 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
   }
 
   const uint32_t originalLeaderXp = leader.totalXp;
+  const size_t pendingBefore = pendingEventCount(state);
   const uint8_t previousMinuteRemainder = state.readingMinuteRemainder;
   const CreditResult result =
       applyCreditedMinutes(state, leader, minutes, bookProgressPercent, ownedEvolutionNeeds, random_);
@@ -1320,12 +1338,14 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
   // pending-event queue is a compacted array (enqueuePendingEvent() always
   // appends at pendingEventCount()), so the just-created Encounter is
   // reliably the entry at index pendingEventCount(state) - 1.
-  if (result.generatedEvent == PendingEventKind::Encounter) {
+  // Every Encounter this call queued (not just "the last event"): generatedEvent only keeps the LAST kind, so an
+  // Encounter followed by an Evolution in the same call used to miss its shiny roll.
+  if (random_.below != nullptr) {
     const size_t pendingCount = pendingEventCount(state);
-    if (pendingCount > 0 && random_.below != nullptr) {
-      PendingEvent& justQueued = state.pendingEvents[pendingCount - 1];
-      if (justQueued.kind == PendingEventKind::Encounter) {
-        justQueued.isShiny = random_.below(random_.context, SHINY_CHANCE_DENOMINATOR) == 0;
+    for (size_t index = pendingBefore; index < pendingCount; ++index) {
+      PendingEvent& queued = state.pendingEvents[index];
+      if (queued.kind == PendingEventKind::Encounter) {
+        queued.isShiny = random_.below(random_.context, SHINY_CHANCE_DENOMINATOR) == 0;
       }
     }
   }

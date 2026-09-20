@@ -236,7 +236,7 @@ class PokemonActivity final : public Activity {
   uint8_t selectedMachineMoveId_ = 0;
   uint8_t selectedMedicineItemId_ = 0;
   uint8_t movesetSlot_ = 0;
-  char message_[96]{};
+  char message_[192]{};  // long enough for a 32-byte nickname inside a translated (up to ~2 bytes per letter) sentence
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};
   char battleLog_[160]{};

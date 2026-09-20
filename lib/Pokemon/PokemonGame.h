@@ -127,6 +127,9 @@ bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, Encounte
 // Pokedex forever, matching every mainline game.
 bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutation& mutation);
 bool resolveEvolution(PokemonState& state, PokemonRecord& record, EvolutionChoice choice, RecordMutation& mutation);
+// Drops the front pending event unconditionally (refreshing the dashboard notice). Used to clear a stale
+// prompt whose record no longer exists, so it can't block the rest of the queue.
+bool discardFrontPendingEvent(PokemonState& state);
 // The Level-trigger rule this Pokemon already meets (level >= minimumLevel),
 // or nullptr. Drives the manual "Evolve" action.
 const EvolutionRule* levelEvolutionAvailable(const PokemonRecord& record);

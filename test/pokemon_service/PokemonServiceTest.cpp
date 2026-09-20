@@ -1582,7 +1582,7 @@ TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptOncePastTheLevelRule) {
   EXPECT_EQ(pending->speciesId, 44U);
 }
 
-TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptForLevel100Pokemon) {
+TEST(PokemonService, AwardBattleXpDoesNotReAskForAnEvolutionThatWasAlreadyCancelled) {
   Storage.clear();
   pokemon::PokemonStore store;
   pokemon::PokemonBattleStore battleStore;
@@ -1591,9 +1591,10 @@ TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptForLevel100Pokemon) {
   seedStarter(store);
   pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
+  // A Level 100 Oddish is long past its evolution level (21) and gains no XP from a win.
   pokemon::PokemonRecord record{};
   ASSERT_TRUE(store.readRecord(1, record));
-  record.speciesId = 43;  // Oddish, evolves at 21
+  record.speciesId = 43;
   record.totalXp = pokemon::xpRequired(100);
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
@@ -1603,10 +1604,71 @@ TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptForLevel100Pokemon) {
 
   ASSERT_EQ(service.awardBattleXp(1, 30, true, 4), pokemon::ServiceStatus::Ok);
   ASSERT_TRUE(store.loadState(state));
-  const pokemon::PendingEvent* pending = pokemon::pendingEventFront(state);
-  ASSERT_NE(pending, nullptr);
-  EXPECT_EQ(pending->kind, pokemon::PendingEventKind::Evolution);
-  EXPECT_EQ(pending->speciesId, 44U);
+  EXPECT_EQ(pokemon::pendingEventFront(state), nullptr);  // no level gained -> no prompt ("Evolve now" covers it)
+}
+
+TEST(PokemonService, ReleasingAPokemonWithAQueuedMoveLearnDoesNotLeaveTheQueueStuck) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 4), true);  // second party member
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0] = {2, 33, 9, pokemon::Gender::Unknown, pokemon::EvolutionItem::None,
+                            pokemon::PendingEventKind::MoveLearn};
+  ASSERT_TRUE(store.commit(state));
+
+  ASSERT_EQ(service.depositPokemon(2), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.releasePokemon(2), pokemon::ServiceStatus::Ok);
+
+  ASSERT_TRUE(store.loadState(state));
+  const pokemon::PendingEvent* front = pokemon::pendingEventFront(state);
+  EXPECT_TRUE(front == nullptr || front->recordId != 2U);
+}
+
+TEST(PokemonService, ResolveMoveLearnDropsAPromptWhoseRecordIsGone) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  // A stale prompt (e.g. from a save made before the release fix) for a record that doesn't exist.
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0] = {77, 33, 9, pokemon::Gender::Unknown, pokemon::EvolutionItem::None,
+                            pokemon::PendingEventKind::MoveLearn};
+  ASSERT_TRUE(store.commit(state));
+
+  EXPECT_EQ(service.resolveMoveLearn(-1), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(pokemon::pendingEventFront(state), nullptr);
+}
+
+TEST(PokemonService, EnsureIvEvRollsShinyIvsForAShinyRecordEvenWithoutTheFlag) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonRecord shiny = caughtPokemon(2, 4);
+  shiny.flags = static_cast<uint8_t>(shiny.flags | pokemon::recordFlag(pokemon::RecordFlag::Shiny));
+  appendOwnedPokemon(store, shiny, false);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  // No `shiny` argument, as the vitamin/medicine/XP call sites pass none.
+  const pokemon::IvEvEntry entry = service.ensureIvEv(2);
+  std::array<uint8_t, pokemon::STAT_COUNT> expected{};
+  pokemon::rollShinyIvSet({nullptr, zeroRandom}, expected);
+  EXPECT_EQ(entry.iv, expected);
 }
 
 TEST(PokemonService, EnsureIvEvRollsOnceAndPersistsForSubsequentCalls) {

@@ -14,10 +14,10 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
-## Round 9 (2026-09-20, tại `main` sau `v0.30.0` + save v9) — rà soát lại, CHƯA FIX (chờ user triage)
+## Round 9 (2026-09-20, tại `main` sau `v0.30.0` + save v9) — 7/7 ĐÃ FIX (branch `fix/round9-bugs`)
 
 Đã sửa ngay trong lượt rà soát (`a6d04a24`, merge `7c29a0a0`): `inspectSnapshot()` dùng mask 8-bit
-cho hàng đợi 10 chỗ nên bỏ sót chỗ 9-10 (tôi gây ra ở save v8). Danh sách bug CÒN TỒN TẠI:
+cho hàng đợi 10 chỗ nên bỏ sót chỗ 9-10 (tôi gây ra ở save v8). Danh sách bug (tất cả đã sửa, xem CHANGELOG [Unreleased]; #6 và #7 chưa có test riêng):
 
 1. **[Trung bình-Cao] Thả (Release) một Pokémon đang có prompt "học move" chờ sẽ kẹt cứng
    hàng đợi vĩnh viễn.** `releaseRecord()` chỉ xoá sự kiện Tiến hóa (`removePendingEvolutionsForRecord`),
