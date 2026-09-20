@@ -735,12 +735,14 @@ bool PokemonActivity::showsPartyHealthRows() const {
          (bagCategory_ == BagCategory::Medicine || bagCategory_ == BagCategory::BattleMedicine);
 }
 
-// Screen::ItemTarget while picking who to teach a TM/HM to - a taller row so
-// the party member's full name (not squeezed onto a shared label/value line)
-// and whether it can learn this move both fit, matching the two-line shape
-// showsPartyHealthRows() already uses for Medicine/BattleMedicine targets.
+// Screen::ItemTarget while picking who to teach a TM/HM to, or who to use an
+// evolution stone/Link Cable on - a taller row so the party member's full name
+// (not squeezed onto a shared label/value line) and whether this item works on
+// it both fit, matching the two-line shape showsPartyHealthRows() already uses
+// for Medicine/BattleMedicine targets.
 bool PokemonActivity::showsMachineCapabilityRows() const {
-  return screen_ == Screen::ItemTarget && bagCategory_ == BagCategory::Machine;
+  return screen_ == Screen::ItemTarget &&
+         (bagCategory_ == BagCategory::Machine || bagCategory_ == BagCategory::Evolution);
 }
 
 int PokemonActivity::rowHeightForScreen() const {
@@ -4524,6 +4526,19 @@ void PokemonActivity::renderPartyRowMachineCapability(const int rowY, const poke
   renderer.drawText(UI_12_FONT_ID, textX, blockTop, name.c_str(), true, EpdFontFamily::BOLD);
   if (gender[0] != '\0') renderer.drawText(UI_12_FONT_ID, textX + nameWidth + 4, blockTop, gender);
   renderer.drawText(UI_12_FONT_ID, textRight - metaWidth, blockTop, meta);
+
+  if (bagCategory_ == BagCategory::Evolution) {
+    // Which species this stone/Link Cable turns this Pokemon into, if any -
+    // the same findEvolution() rule useEvolutionItem() itself checks.
+    for (const pokemon::EvolutionRule& rule : pokemon::evolutionsFor(record.speciesId)) {
+      if (rule.trigger != pokemon::EvolutionTrigger::Item || rule.item != selectedItem_) continue;
+      char line[64];
+      snprintf(line, sizeof(line), tr(STR_POKEMON_EVOLVES_INTO), speciesName(rule.targetSpeciesId));
+      renderer.drawText(UI_10_FONT_ID, textX, line2Top, line);
+      break;
+    }
+    return;
+  }
 
   const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   bool alreadyKnown = false;
