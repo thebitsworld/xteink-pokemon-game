@@ -19,7 +19,17 @@ constexpr size_t EVOLUTION_ITEM_COUNT = 6;
 // are appended at the end of the state (see PokemonStoreCodec.h), so older
 // saves keep decoding unchanged.
 constexpr size_t PENDING_EVENT_LEGACY_SLOTS = 3;
-constexpr size_t PENDING_EVENT_CAPACITY = 10;
+// Save v8 grew the queue from 3 to 10; save v9 grows it again, to 16 - using
+// up the rest of the room inspectSnapshot()'s now-16-bit pending-record
+// bitmask (see PokemonStore.cpp) already has. PENDING_EVENT_V8_CAPACITY marks
+// where v8's own fixed-size region ends, so the codec (PokemonStoreCodec.h/
+// .cpp) knows where to append v9's further slots without shifting v8's.
+constexpr size_t PENDING_EVENT_V8_CAPACITY = 10;
+constexpr size_t PENDING_EVENT_CAPACITY = 16;
+// PokemonStore.cpp's inspectSnapshot() packs one bit per slot into a
+// uint16_t bitmask when cross-checking pending Evolution events against the
+// record list - grow that mask's type too if this ever exceeds 16.
+static_assert(PENDING_EVENT_CAPACITY <= 16, "inspectSnapshot()'s pending-record bitmask is 16 bits wide");
 
 // Pinned copies of constants that really live in PokemonBattleTypes.h
 // (MOVE_COUNT, ITEM_COUNT, GYM_COUNT). PokemonTypes.h/.cpp is the core layer

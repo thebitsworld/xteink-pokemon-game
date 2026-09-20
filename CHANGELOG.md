@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Changed
+
+- The list of things waiting for you now holds 16 instead of 10. Saves are upgraded to a new format the first time the game writes one; older saves (including ones from the previous version) load as normal, but after the upgrade an older version of the firmware will no longer read that save.
+
+### Fixed
+
+- Save-file corruption checking silently stopped verifying pending evolution events in the last two slots of the 10-slot queue added in v0.30.0 (an 8-bit bitmask couldn't fit slot indices 8-9). A save with a dangling reference there could now be caught again instead of being accepted as valid.
+
 ### Fixed
 
 - The stat names shown in the Pokémon Summary, in battle messages ("Attack rose!") and after using a vitamin (HP, Attack, Defense, Special, Speed, Accuracy, Evasion), and the Pokédex "No." label, were always English; they are now translated in every language. Move, item and species names stay in English.

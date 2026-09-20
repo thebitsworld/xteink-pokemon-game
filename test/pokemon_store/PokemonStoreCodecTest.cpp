@@ -48,7 +48,7 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonicalV8Layout() {
+void stateCodecUsesTheCanonicalV9Layout() {
   static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
   static_assert(pokemon::POKEMON_STATE_V3_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
   static_assert(pokemon::POKEMON_STATE_V4_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
@@ -58,9 +58,12 @@ void stateCodecUsesTheCanonicalV8Layout() {
   static_assert(pokemon::POKEMON_STATE_V7_BYTES ==
                 pokemon::POKEMON_STATE_V6_BYTES + pokemon::POKEMON_VITAMIN_ITEM_COUNT);
   static_assert(pokemon::POKEMON_STATE_V7_BYTES == 210);
-  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V7_BYTES + 7 * 10);
-  static_assert(pokemon::POKEMON_STATE_BYTES == 280);
-  static_assert(pokemon::PENDING_EVENT_CAPACITY == 10);
+  static_assert(pokemon::POKEMON_STATE_V8_BYTES == pokemon::POKEMON_STATE_V7_BYTES + 7 * 10);
+  static_assert(pokemon::POKEMON_STATE_V8_BYTES == 280);
+  static_assert(pokemon::PENDING_EVENT_V8_CAPACITY == 10);
+  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V8_BYTES + 6 * 10);
+  static_assert(pokemon::POKEMON_STATE_BYTES == 340);
+  static_assert(pokemon::PENDING_EVENT_CAPACITY == 16);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
   state.partyRecordIds[0] = 7;
@@ -89,11 +92,11 @@ void stateCodecUsesTheCanonicalV8Layout() {
   state.ppUpCount = 4;
   state.battleBoostCounts = {1, 2, 3, 4, 5, 6};
   state.vitaminCounts = {7, 8, 9, 10, 11};
-  for (size_t slot = 3; slot < 9; ++slot) {  // the queue must stay compacted, so fill every slot up to the last
+  for (size_t slot = 3; slot < 15; ++slot) {  // the queue must stay compacted, so fill every slot up to the last
     state.pendingEvents[slot] = {
         0, 0, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::MoonStone, pokemon::PendingEventKind::Item};
   }
-  state.pendingEvents[9] = {
+  state.pendingEvents[15] = {
       0, 4, 6, pokemon::Gender::Female, pokemon::EvolutionItem::None, pokemon::PendingEventKind::Encounter};
 
   pokemon::StateBytes bytes{};
@@ -128,14 +131,43 @@ void stateCodecUsesTheCanonicalV8Layout() {
     CHECK(bytes[pokemon::POKEMON_STATE_V6_BYTES + index] == state.vitaminCounts[index]);
   }
 
-  // Slots past the original 3 live after the v7 layout, in order.
+  // Slots 3-9 (v8's own region) live after the v7 layout, in order; slots
+  // 10-15 (v9's further region) live after v8's own fixed region.
   CHECK(bytes[pokemon::POKEMON_STATE_V7_BYTES + 9] == static_cast<uint8_t>(pokemon::PendingEventKind::Item));
-  CHECK(bytes[pokemon::POKEMON_STATE_V7_BYTES + 6 * 10 + 9] ==
+  CHECK(bytes[pokemon::POKEMON_STATE_V8_BYTES + 5 * 10 + 9] ==
         static_cast<uint8_t>(pokemon::PendingEventKind::Encounter));
 
   pokemon::PokemonState decoded{};
   CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION, decoded));
   CHECK(decoded == state);
+}
+
+void v8StateDecodesWithEmptyExtraPendingSlots() {
+  pokemon::PokemonState v8State{};
+  v8State.partyRecordIds[0] = 3;
+  for (size_t slot = 0; slot < 8; ++slot) {  // compacted queue: no gaps before the last event
+    v8State.pendingEvents[slot] = {
+        0, 0, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::MoonStone, pokemon::PendingEventKind::Item};
+  }
+  v8State.pendingEvents[8] = {
+      3, 26, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::None, pokemon::PendingEventKind::Evolution};
+  v8State.vitaminCounts = {1, 2, 3, 4, 5};
+  pokemon::StateBytes v9Bytes{};
+  CHECK(pokemon::encodeState(v8State, v9Bytes));
+
+  // A v8 file is exactly the v9 bytes minus the appended extra (v9-only) slots.
+  std::array<uint8_t, pokemon::POKEMON_STATE_V8_BYTES> bytes{};
+  for (size_t index = 0; index < bytes.size(); ++index) bytes[index] = v9Bytes[index];
+
+  pokemon::PokemonState decoded{};
+  decoded.pendingEvents[11] = {
+      0, 4, 6, pokemon::Gender::Female, pokemon::EvolutionItem::None, pokemon::PendingEventKind::Encounter};
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V8, decoded));
+  CHECK(decoded.pendingEvents[8].kind == pokemon::PendingEventKind::Evolution);
+  CHECK(decoded.vitaminCounts == v8State.vitaminCounts);
+  for (size_t slot = 9; slot < pokemon::PENDING_EVENT_CAPACITY; ++slot) {
+    CHECK(decoded.pendingEvents[slot].kind == pokemon::PendingEventKind::None);
+  }
 }
 
 void v7StateDecodesWithEmptyExtraPendingSlots() {
@@ -351,6 +383,7 @@ void snapshotHeaderUsesCanonical24ByteLayout() {
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V5) == pokemon::POKEMON_STATE_V5_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V6) == pokemon::POKEMON_STATE_V6_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V7) == pokemon::POKEMON_STATE_V7_BYTES);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V8) == pokemon::POKEMON_STATE_V8_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION) == pokemon::POKEMON_STATE_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION + 1U) == 0);
 
@@ -415,12 +448,13 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonicalV8Layout();
+  stateCodecUsesTheCanonicalV9Layout();
   v3StateDecodesWithZeroedMissCounters();
   v4StateDecodesWithZeroedPpUpCount();
   v5StateDecodesWithZeroedBattleBoostCounts();
   v6StateDecodesWithZeroedVitaminCounts();
   v7StateDecodesWithEmptyExtraPendingSlots();
+  v8StateDecodesWithEmptyExtraPendingSlots();
   v2StateDecodesWithZeroedBagAndBattleProgress();
   battleProgressReservedBitsAreRejected();
   legacyStateDecodesItsPendingEventIntoTheQueue();

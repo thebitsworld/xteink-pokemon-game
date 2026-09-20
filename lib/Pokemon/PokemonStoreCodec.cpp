@@ -66,6 +66,7 @@ size_t snapshotStateBytes(const uint16_t version) {
   if (version == POKEMON_SNAPSHOT_VERSION_V5) return POKEMON_STATE_V5_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION_V6) return POKEMON_STATE_V6_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION_V7) return POKEMON_STATE_V7_BYTES;
+  if (version == POKEMON_SNAPSHOT_VERSION_V8) return POKEMON_STATE_V8_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION) return POKEMON_STATE_BYTES;
   return 0;
 }
@@ -130,10 +131,15 @@ bool encodeState(const PokemonState& state, StateBytes& output) {
   for (size_t index = 0; index < PENDING_EVENT_LEGACY_SLOTS; ++index) {
     encodePendingEvent(state.pendingEvents[index], candidate.data() + 24U + index * PENDING_EVENT_BYTES);
   }
-  for (size_t index = PENDING_EVENT_LEGACY_SLOTS; index < PENDING_EVENT_CAPACITY; ++index) {
+  for (size_t index = PENDING_EVENT_LEGACY_SLOTS; index < PENDING_EVENT_V8_CAPACITY; ++index) {
     encodePendingEvent(state.pendingEvents[index],
                        candidate.data() + POKEMON_STATE_V7_BYTES +
                            (index - PENDING_EVENT_LEGACY_SLOTS) * PENDING_EVENT_BYTES);
+  }
+  for (size_t index = PENDING_EVENT_V8_CAPACITY; index < PENDING_EVENT_CAPACITY; ++index) {
+    encodePendingEvent(state.pendingEvents[index],
+                       candidate.data() + POKEMON_STATE_V8_BYTES +
+                           (index - PENDING_EVENT_V8_CAPACITY) * PENDING_EVENT_BYTES);
   }
   for (size_t index = 0; index < EVOLUTION_ITEM_COUNT; ++index) {
     write16(candidate.data(), 54U + index * 2U, state.itemCounts[index]);
@@ -217,10 +223,16 @@ bool decodeState(const uint8_t* bytes, const size_t size, const uint16_t version
     if (version >= POKEMON_SNAPSHOT_VERSION_V7) {
       std::memcpy(candidate.vitaminCounts.data(), bytes + POKEMON_STATE_V6_BYTES, candidate.vitaminCounts.size());
     }
-    if (version >= POKEMON_SNAPSHOT_VERSION) {
-      for (size_t index = PENDING_EVENT_LEGACY_SLOTS; index < PENDING_EVENT_CAPACITY; ++index) {
+    if (version >= POKEMON_SNAPSHOT_VERSION_V8) {
+      for (size_t index = PENDING_EVENT_LEGACY_SLOTS; index < PENDING_EVENT_V8_CAPACITY; ++index) {
         candidate.pendingEvents[index] = decodePendingEvent(
             bytes + POKEMON_STATE_V7_BYTES + (index - PENDING_EVENT_LEGACY_SLOTS) * PENDING_EVENT_BYTES);
+      }
+    }
+    if (version >= POKEMON_SNAPSHOT_VERSION) {
+      for (size_t index = PENDING_EVENT_V8_CAPACITY; index < PENDING_EVENT_CAPACITY; ++index) {
+        candidate.pendingEvents[index] = decodePendingEvent(
+            bytes + POKEMON_STATE_V8_BYTES + (index - PENDING_EVENT_V8_CAPACITY) * PENDING_EVENT_BYTES);
       }
     }
   }
