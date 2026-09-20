@@ -30,6 +30,9 @@
 #include "components/UITheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "fontIds.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonService.h"
+#endif
 #include "util/BookCacheUtils.h"
 
 namespace {
@@ -134,6 +137,13 @@ void XtcReaderActivity::onEnter() {
   }
   SleepCoverAssets::prepareXtc(*xtc);
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Returns false when there's no starter yet (party empty) or the save isn't
+  // ready - both routine, not worth logging; PokemonService itself already
+  // logs the one real failure case (store I/O error).
+  pokemon::devicePokemonService().beginReadingSession();
+#endif
+
   // Trigger first update
   requestUpdate();
 }
@@ -152,6 +162,13 @@ void XtcReaderActivity::onExit() {
   APP_STATE.saveToFile();
 
   commitReadingStats();
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Independent of any CrossInk reading-stats setting - Pokemon crediting is
+  // its own feature. Flushes any not-yet-checkpointed credited minutes so a
+  // normal exit loses nothing.
+  pokemon::devicePokemonService().flushOnExit(millis());
+#endif
 
   // Generate carousel thumbnails while XTC is still loaded so the home screen
   // can display the cover on the very first render without a loading popup.
@@ -194,6 +211,12 @@ void XtcReaderActivity::loop() {
   if (!xtc) {
     return;
   }
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Checked every loop iteration (not just on page turns) so credited time
+  // accrues, and gets checkpointed to disk, even across a long stretch of
+  // reading without an actual page turn in between.
+  pokemon::devicePokemonService().checkpointIfDue(millis());
+#endif
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
   const bool shortcutPageTurn = shortcutPageTurnPending;
@@ -558,6 +581,14 @@ void XtcReaderActivity::loop() {
       needsUpdate = true;
     }
   }
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (needsUpdate) {
+    auto& pokemonService = pokemon::devicePokemonService();
+    pokemonService.setBookProgressPercent(
+        static_cast<uint8_t>(std::clamp(static_cast<int>(getCurrentBookProgressPercent() + 0.5f), 0, 100)));
+    pokemonService.onSuccessfulPageTurn(millis());
+  }
+#endif
   if (goHome) {
     onGoHome();
   } else if (needsUpdate) {

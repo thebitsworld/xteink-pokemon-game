@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-19
+
+### Added
+
+- Hall of Fame: beating the Champion for the first time now shows your winning team - sprite, name, level, gender and shiny star - along with how many hours and minutes of reading it took to get there. Shown once right after the win, and viewable afterward any time from the Trainer Card (tap the Champion's tile, or press Confirm on a button device once it's unlocked). The snapshot is frozen at the moment you win - releasing or evolving those Pokémon afterward doesn't change it.
+
+## [0.28.2] - 2026-09-19
+
+### Fixed
+
+- Reading a `.txt` or a pre-rendered `.xtc` book never counted toward Pokémon progress at all - no EXP, no wild encounters, no item drops. Only EPUB books were ever wired up to reading credit; TXT and XTC now credit reading time, page turns, and book progress exactly like EPUB does.
+- Teaching a move via TM/HM, or using a Medicine-pocket item (Potion, a status cure, a PP restore, Rare Candy, etc.), could - in the rare case where saving to the SD card failed right after - apply its effect (the move learned, the Pokémon healed/cured/levelled up) without the item actually being spent. The item is now only spent once its effect is confirmed, and handed back if that confirmation save fails.
+
 ## [0.28.1] - 2026-09-19
 
 ### Fixed

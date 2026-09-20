@@ -5,6 +5,7 @@
 #include <FreeInkApp.h>
 #include <FreeInkUIGfxRenderer.h>
 #include <PokemonPromptContext.h>
+#include <PokemonUiLayout.h>
 
 #include <array>
 #include <atomic>
@@ -57,6 +58,7 @@ class PokemonActivity final : public Activity {
     BattleSwitch,
     GymList,
     Badges,
+    HallOfFame,
     Settings,
     ResetFirst,
     ResetFinal,
@@ -159,6 +161,12 @@ class PokemonActivity final : public Activity {
   // ballMisses/medicineMisses/machineMisses/itemMisses) - no new save data.
   void renderMenuPityBars();
   void renderTrainerCard(int contentTop);
+  void renderHallOfFame(int contentTop);
+  // Shared by renderTrainerCard() (what gets drawn) and loop()'s touch
+  // hit-test for the Champion cell (what gets tapped) - the two grids differ
+  // only in tile count/columns/height cap, both driven by
+  // pokemonTrainerCardGrid(). `hallOfFame` picks which of the two.
+  int trainerCardCells(pokemon::PokemonUiRect* cells, int capacity, bool hallOfFame) const;
   void renderBagGrid();
   void renderPcOrderButtons();
   int buttonGridTop() const;

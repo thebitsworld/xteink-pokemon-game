@@ -405,8 +405,9 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
   return ServiceStatus::Ok;
 }
 
-TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_t moveId, const int replaceSlot) {
-  BattleRecordEntry entry{};
+TeachMoveOutcome PokemonService::resolveTeachTarget(const uint32_t recordId, const uint8_t moveId,
+                                                     const int replaceSlot, BattleRecordEntry& entry,
+                                                     int& targetSlot) {
   if (loadBattleEntry(recordId, entry) != ServiceStatus::Ok) return TeachMoveOutcome::Failed;
   for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
     if (entry.moves[slot] == moveId) return TeachMoveOutcome::AlreadyKnown;
@@ -419,7 +420,7 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
   if (readRecord(recordId, record) != ServiceStatus::Ok) return TeachMoveOutcome::Failed;
   if (!canLearnViaMachine(record.speciesId, moveId)) return TeachMoveOutcome::Incompatible;
 
-  int targetSlot = -1;
+  targetSlot = -1;
   for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
     if (entry.moves[slot] == 0) {
       targetSlot = static_cast<int>(slot);
@@ -430,6 +431,18 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
     if (replaceSlot < 0 || replaceSlot >= static_cast<int>(BATTLE_MOVE_SLOTS)) return TeachMoveOutcome::MovesetFull;
     targetSlot = replaceSlot;
   }
+  // "Proceed" sentinel - resolution succeeded, the actual write is still up
+  // to the caller (teachMove() writes immediately; teachMoveAndConsumeItem()
+  // spends the item first).
+  return TeachMoveOutcome::Learned;
+}
+
+TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_t moveId, const int replaceSlot) {
+  BattleRecordEntry entry{};
+  int targetSlot = -1;
+  const TeachMoveOutcome resolved = resolveTeachTarget(recordId, moveId, replaceSlot, entry, targetSlot);
+  if (resolved != TeachMoveOutcome::Learned) return resolved;
+
   const MoveData* move = moveData(moveId);
   entry.moves[targetSlot] = moveId;
   // maxPpFor(), not the move's raw base PP - see resolveMoveLearn()'s same
@@ -440,6 +453,30 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
     return TeachMoveOutcome::Failed;
   }
   return TeachMoveOutcome::Learned;
+}
+
+TeachMoveOutcome PokemonService::teachMoveAndConsumeItem(const uint32_t recordId, const uint8_t moveId,
+                                                          const uint8_t itemId, const int replaceSlot) {
+  BattleRecordEntry entry{};
+  int targetSlot = -1;
+  const TeachMoveOutcome resolved = resolveTeachTarget(recordId, moveId, replaceSlot, entry, targetSlot);
+  if (resolved != TeachMoveOutcome::Learned) return resolved;
+
+  const ServiceStatus consumed = consumeBagItem(itemId);
+  if (consumed != ServiceStatus::Ok) return TeachMoveOutcome::Failed;
+
+  const MoveData* move = moveData(moveId);
+  entry.moves[targetSlot] = moveId;
+  entry.pp[targetSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[targetSlot]);
+  if (battleStore_.upsertEntry(entry)) return TeachMoveOutcome::Learned;
+
+  LOG_ERR("PokemonService", "Failed to teach move");
+  // The move was not actually learned, so give the TM/HM back rather than
+  // eating it - same reasoning as usePpUp()/useVitamin().
+  if (refundBagItem(itemId) != ServiceStatus::Ok) {
+    LOG_ERR("PokemonService", "Failed to refund TM/HM item %u after a failed teach", itemId);
+  }
+  return TeachMoveOutcome::Failed;
 }
 
 ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const uint8_t slot, const uint8_t moveId) {
@@ -582,7 +619,8 @@ ServiceStatus PokemonService::useVitamin(const uint32_t recordId, const uint8_t 
   return ServiceStatus::StorageError;
 }
 
-UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, const uint8_t itemId) {
+UseConsumableOutcome PokemonService::useConsumableImpl(const uint32_t recordId, const uint8_t itemId,
+                                                        const bool dryRun) {
   const ItemData* item = itemData(itemId);
   if (item == nullptr) return UseConsumableOutcome::Failed;
 
@@ -599,6 +637,7 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
     queueMoveLearnIfNeeded(state, record, level, nextLevel);
     bool evolutionQueued = false;
     if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return UseConsumableOutcome::Failed;
+    if (dryRun) return UseConsumableOutcome::Applied;
     const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
     if (!store_.commit(state, mutation)) {
       LOG_ERR("PokemonService", "Failed to use Rare Candy");
@@ -659,11 +698,34 @@ UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, cons
     }
   }
   if (!changed) return UseConsumableOutcome::NotApplicable;
+  if (dryRun) return UseConsumableOutcome::Applied;
   if (!battleStore_.upsertEntry(entry)) {
     LOG_ERR("PokemonService", "Failed to use consumable item");
     return UseConsumableOutcome::Failed;
   }
   return UseConsumableOutcome::Applied;
+}
+
+UseConsumableOutcome PokemonService::useConsumable(const uint32_t recordId, const uint8_t itemId) {
+  return useConsumableImpl(recordId, itemId, /*dryRun=*/false);
+}
+
+UseConsumableOutcome PokemonService::useConsumableAndConsumeItem(const uint32_t recordId, const uint8_t itemId) {
+  const UseConsumableOutcome eligible = useConsumableImpl(recordId, itemId, /*dryRun=*/true);
+  if (eligible != UseConsumableOutcome::Applied) return eligible;
+
+  const ServiceStatus consumed = consumeBagItem(itemId);
+  if (consumed != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
+
+  const UseConsumableOutcome applied = useConsumableImpl(recordId, itemId, /*dryRun=*/false);
+  if (applied == UseConsumableOutcome::Applied) return UseConsumableOutcome::Applied;
+
+  // The effect did not actually land, so give the item back rather than
+  // eating it - same reasoning as usePpUp()/useVitamin().
+  if (refundBagItem(itemId) != ServiceStatus::Ok) {
+    LOG_ERR("PokemonService", "Failed to refund item %u after a failed consumable apply", itemId);
+  }
+  return UseConsumableOutcome::Failed;
 }
 
 ServiceStatus PokemonService::setEvolutionPrompts(const uint32_t recordId, const bool enabled) {
@@ -728,6 +790,37 @@ ServiceStatus PokemonService::consumeBagItem(const uint8_t itemId) {
   }
   if (!store_.commit(state)) {
     LOG_ERR("PokemonService", "Failed to consume bag item");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::refundBagItem(const uint8_t itemId) {
+  if (itemId == 0 || itemId > POKEMON_ITEM_ID_MAX) return ServiceStatus::Invalid;
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+
+  // Mirrors consumeBagItem()'s own branching, incrementing instead of
+  // decrementing, capped at each counter's own max (matches
+  // PokemonGame.cpp's itemCountIsFull()) so a refund can never wrap around.
+  if (itemId <= EVOLUTION_ITEM_COUNT) {
+    const size_t index = itemId - 1U;
+    if (state.itemCounts[index] < std::numeric_limits<uint16_t>::max()) ++state.itemCounts[index];
+  } else if (itemId == PP_UP_ITEM_ID) {
+    if (state.ppUpCount < std::numeric_limits<uint8_t>::max()) ++state.ppUpCount;
+  } else if (itemId >= BATTLE_BOOST_ITEM_ID_FIRST && itemId <= BATTLE_BOOST_ITEM_ID_LAST) {
+    const size_t index = itemId - BATTLE_BOOST_ITEM_ID_FIRST;
+    if (state.battleBoostCounts[index] < std::numeric_limits<uint8_t>::max()) ++state.battleBoostCounts[index];
+  } else if (itemId >= VITAMIN_ITEM_ID_FIRST && itemId <= VITAMIN_ITEM_ID_LAST) {
+    const size_t index = itemId - VITAMIN_ITEM_ID_FIRST;
+    if (state.vitaminCounts[index] < std::numeric_limits<uint8_t>::max()) ++state.vitaminCounts[index];
+  } else {
+    const size_t index = itemId - EVOLUTION_ITEM_COUNT - 1U;
+    if (state.bagCounts[index] < std::numeric_limits<uint8_t>::max()) ++state.bagCounts[index];
+  }
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to refund bag item");
     return ServiceStatus::StorageError;
   }
   return ServiceStatus::Ok;
@@ -851,6 +944,38 @@ IvEvEntry PokemonService::ensureIvEv(const uint32_t recordId, const bool shiny) 
 IvEvEntry PokemonService::peekIvEv(const uint32_t recordId) const {
   if (const IvEvEntry* existing = ivEvStore_.findEntry(recordId); existing != nullptr) return *existing;
   return {};
+}
+
+ServiceStatus PokemonService::captureHallOfFame() {
+  if (hallOfFameStore_.hasEntry()) return ServiceStatus::NotApplicable;  // already captured, ever - never overwrite
+
+  PokemonState state{};
+  if (loadReadyState(state) != ServiceStatus::Ok) return ServiceStatus::StorageError;
+
+  HallOfFameState snapshot{};
+  snapshot.lifetimeMinutesAtClear = state.lifetimeMinutes;
+  size_t written = 0;
+  for (size_t slot = 0; slot < PARTY_SIZE && state.partyRecordIds[slot] != 0; ++slot) {
+    PokemonRecord record{};
+    if (!store_.readRecord(state.partyRecordIds[slot], record)) continue;  // best-effort, see doc comment
+    HallOfFameMember& member = snapshot.members[written];
+    member.speciesId = record.speciesId;
+    member.nickname = record.nickname;
+    member.level = levelForXp(record.totalXp);
+    member.gender = record.gender;
+    member.shiny = isRecordShiny(record);
+    ++written;
+  }
+  if (!hallOfFameStore_.captureOnce(snapshot)) {
+    LOG_ERR("PokemonService", "Failed to capture Hall of Fame");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+HallOfFameState PokemonService::peekHallOfFame() const {
+  const HallOfFameState* entry = hallOfFameStore_.entry();
+  return entry != nullptr ? *entry : HallOfFameState{};
 }
 
 ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
@@ -1090,6 +1215,11 @@ ServiceStatus PokemonService::reset() {
   if (!ivEvStore_.reset()) {
     LOG_ERR("PokemonService", "Failed to reset Pokemon IV/EV store");
   }
+  // Same best-effort spirit again - a fresh game should not read back a
+  // previous playthrough's Hall of Fame.
+  if (!hallOfFameStore_.reset()) {
+    LOG_ERR("PokemonService", "Failed to reset Pokemon Hall of Fame store");
+  }
   return ServiceStatus::Ok;
 }
 
@@ -1196,7 +1326,8 @@ PokemonService& devicePokemonService() {
   static PokemonStore store;
   static PokemonBattleStore battleStore;
   static PokemonIvEvStore ivEvStore;
-  static PokemonService service(store, battleStore, ivEvStore, {nullptr, deviceRandomBelow});
+  static PokemonHallOfFameStore hallOfFameStore;
+  static PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, deviceRandomBelow});
   return service;
 }
 #endif
