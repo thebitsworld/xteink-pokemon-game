@@ -518,6 +518,32 @@ void centered(const GfxRenderer& renderer, const int font, const int y, const ch
     centered(renderer, font, y + 28, newline + 1, style);
     return;
   }
+  // Word-wrap instead of running off both edges of the screen: prompts like
+  // "Release <nickname>? This cannot be undone." or "Evolve X into Y?" are
+  // built from a Pokemon's (up to 32-character) name.
+  const int maxWidth = renderer.getScreenWidth() - 32;
+  if (renderer.getTextWidth(font, text, style) > maxWidth) {
+    const char* split = nullptr;  // last space at which the head still fits
+    for (const char* space = strchr(text, ' '); space != nullptr; space = strchr(space + 1, ' ')) {
+      char head[128];
+      snprintf(head, sizeof(head), "%.*s", static_cast<int>(space - text), text);
+      if (renderer.getTextWidth(font, head, style) > maxWidth) break;
+      split = space;
+    }
+    if (split != nullptr && split != text) {
+      char head[128];
+      snprintf(head, sizeof(head), "%.*s", static_cast<int>(split - text), text);
+      renderer.drawText(font, (renderer.getScreenWidth() - renderer.getTextWidth(font, head, style)) / 2, y, head,
+                        true, style);
+      centered(renderer, font, y + renderer.getLineHeight(font) + 4, split + 1, style);
+      return;
+    }
+    // A single unbreakable word wider than the screen (a long nickname): ellipsize it.
+    const std::string clipped = renderer.truncatedText(font, text, maxWidth, style);
+    renderer.drawText(font, (renderer.getScreenWidth() - renderer.getTextWidth(font, clipped.c_str(), style)) / 2, y,
+                      clipped.c_str(), true, style);
+    return;
+  }
   renderer.drawText(font, (renderer.getScreenWidth() - renderer.getTextWidth(font, text, style)) / 2, y, text, true,
                     style);
 }
@@ -2722,6 +2748,25 @@ void PokemonActivity::buildRows() {
     rows_[local].value = value == nullptr ? nullptr : values_[local].data();
     rows_[local].actionValue = static_cast<int16_t>(start + local);
   };
+  // "<name>  × <count>" rows on artwork lists: the count rides on the name's
+  // line when both fit in the row's content width (artwork rows only get
+  // screenWidth - 16 - 2 * 112 of it, 240px on the X4 Pro), and drops to its
+  // own subtitle line otherwise (e.g. "Thunder Stone × 12", "Paralyze Heal
+  // × 255") instead of being ellipsis-truncated.
+  const auto rowWithCount = [this, &row](const int local, const char* name, const char* count) {
+    const int contentWidth = renderer.getScreenWidth() - 16 - 2 * 112;
+    constexpr int valueInset = 8;
+    constexpr int textGap = 10;
+    const int needed = renderer.getTextWidth(UI_12_FONT_ID, name) + renderer.getTextWidth(UI_12_FONT_ID, count) +
+                       valueInset + textGap;
+    if (needed <= contentWidth) {
+      row(local, name, count);
+      return;
+    }
+    row(local, name);
+    snprintf(subtitles_[local].data(), subtitles_[local].size(), "%s", count);
+    rows_[local].subtitle = subtitles_[local].data();
+  };
 
   for (int local = 0; local < rowCount_; ++local) {
     const int index = start + local;
@@ -2778,11 +2823,20 @@ void PokemonActivity::buildRows() {
           row(local, "");
           break;
         }
+        // Screen::Move: the name (with gender right after it) is the label and
+        // "Lv N" its own subtitle line - a same-line value cut longer names
+        // ("Charmander", "Kangaskhan") once the icon column took its share of
+        // the row.
         const auto& record = snapshot_.party[index];
-        char value[32];
-        snprintf(value, sizeof(value), "%s %u  %s%s", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp),
-                 genderText(record.gender), pokemon::isRecordShiny(record) ? " ★" : "");
-        row(local, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), value);
+        char genderSuffix[8];
+        genderShinySuffix(genderSuffix, sizeof(genderSuffix), record.gender, pokemon::isRecordShiny(record));
+        char label[48];
+        snprintf(label, sizeof(label), "%s %s",
+                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), genderSuffix);
+        row(local, label);
+        snprintf(subtitles_[local].data(), subtitles_[local].size(), "%s %u", tr(STR_POKEMON_LEVEL),
+                 pokemon::levelForXp(record.totalXp));
+        rows_[local].subtitle = subtitles_[local].data();
         break;
       }
       case Screen::Actions: {
@@ -2932,7 +2986,7 @@ void PokemonActivity::buildRows() {
         const auto item = static_cast<pokemon::EvolutionItem>(slot + 1);
         char count[16];
         snprintf(count, sizeof(count), "× %u", snapshot_.state.itemCounts[slot]);
-        row(local, itemName(item), count);
+        rowWithCount(local, itemName(item), count);
         break;
       }
       case Screen::BagBalls: {
@@ -2946,7 +3000,7 @@ void PokemonActivity::buildRows() {
             pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + slot));
         char count[16];
         snprintf(count, sizeof(count), "× %u", snapshot_.state.bagCounts[slot]);
-        row(local, item == nullptr ? "?" : item->name, count);
+        rowWithCount(local, item == nullptr ? "?" : item->name, count);
         break;
       }
       case Screen::BagMedicine: {
@@ -2961,7 +3015,7 @@ void PokemonActivity::buildRows() {
           const pokemon::ItemData* data = pokemon::itemData(itemId);
           char count[16];
           snprintf(count, sizeof(count), "× %u", extraItemCountFor(snapshot_.state, itemId));
-          row(local, data == nullptr ? "?" : data->name, count);
+          rowWithCount(local, data == nullptr ? "?" : data->name, count);
           break;
         }
         const uint8_t itemId = bagItemIdAt(static_cast<size_t>(index), snapshot_.state.bagCounts, isMedicineCategory);
@@ -2972,7 +3026,7 @@ void PokemonActivity::buildRows() {
                  bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
         char label[56];
         snprintf(label, sizeof(label), "%s", data == nullptr ? "?" : data->name);
-        row(local, label, count);
+        rowWithCount(local, label, count);
         break;
       }
       case Screen::BagMachine: {
@@ -3014,9 +3068,16 @@ void PokemonActivity::buildRows() {
         // width: the name-only label comfortably fits next to the value,
         // and the subtitle gets the full row content width.
         row(local, seen ? speciesName(speciesId) : "???");
-        snprintf(subtitles_[local].data(), subtitles_[local].size(), "No. %03u", speciesId);
+        // Caught/Seen used to be the same-line value, which cut names like
+        // "Charmander" on the narrower X4 Pro panel (240px of content width),
+        // so it now shares the subtitle line with the number.
+        const char* dexStatus = caught ? tr(STR_POKEMON_CAUGHT) : seen ? tr(STR_POKEMON_SEEN) : nullptr;
+        if (dexStatus != nullptr) {
+          snprintf(subtitles_[local].data(), subtitles_[local].size(), "No. %03u  -  %s", speciesId, dexStatus);
+        } else {
+          snprintf(subtitles_[local].data(), subtitles_[local].size(), "No. %03u", speciesId);
+        }
         rows_[local].subtitle = subtitles_[local].data();
-        rows_[local].value = caught ? tr(STR_POKEMON_CAUGHT) : seen ? tr(STR_POKEMON_SEEN) : nullptr;
         break;
       }
       case Screen::Event:
@@ -3081,19 +3142,12 @@ void PokemonActivity::buildRows() {
       case Screen::BattleSwitch: {
         const int slot = usablePartySlotAt(static_cast<size_t>(index));
         if (slot < 0) break;
-        const pokemon::PokemonRecord& record = snapshot_.party[slot];
-        // HP/status now show via the taller row's health strip
-        // (showsPartyHealthRows()) instead of a plain "HP %u" value text -
-        // the value slot shows Level instead, matching Party's row. Gender
-        // is appended onto the label instead, right after the name.
-        char genderSuffix[8];
-        genderShinySuffix(genderSuffix, sizeof(genderSuffix), record.gender, pokemon::isRecordShiny(record));
-        char label[48];
-        snprintf(label, sizeof(label), "%s %s",
-                 record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(), genderSuffix);
-        char value[16];
-        snprintf(value, sizeof(value), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
-        row(local, label, value);
+        // Name/level/gender and the HP strip are all drawn by
+        // renderPartyRowHealth() (same as Party), so every line shares one left
+        // edge and the name gets the row's full width instead of competing
+        // with a same-line "Lv N" value. Register the row (empty label) so
+        // touch/selection keep working.
+        row(local, "");
         break;
       }
       case Screen::BattleBag: {
@@ -3107,7 +3161,7 @@ void PokemonActivity::buildRows() {
           const pokemon::ItemData* item = pokemon::itemData(itemId);
           char value[16];
           snprintf(value, sizeof(value), "× %u", extraItemCountFor(snapshot_.state, itemId));
-          row(local, item == nullptr ? "?" : item->name, value);
+          rowWithCount(local, item == nullptr ? "?" : item->name, value);
           break;
         }
         const uint8_t itemId =
@@ -3117,7 +3171,7 @@ void PokemonActivity::buildRows() {
         char value[16];
         snprintf(value, sizeof(value), "× %u",
                  bagIndex < snapshot_.state.bagCounts.size() ? snapshot_.state.bagCounts[bagIndex] : 0);
-        row(local, item == nullptr ? "?" : item->name, value);
+        rowWithCount(local, item == nullptr ? "?" : item->name, value);
         break;
       }
       case Screen::BattleBalls: {
@@ -3128,7 +3182,7 @@ void PokemonActivity::buildRows() {
             pokemon::itemData(static_cast<uint8_t>(pokemon::EVOLUTION_ITEM_COUNT + 1 + slot));
         char value[16];
         snprintf(value, sizeof(value), "× %u", snapshot_.state.bagCounts[slot]);
-        row(local, item == nullptr ? "?" : item->name, value);
+        rowWithCount(local, item == nullptr ? "?" : item->name, value);
         break;
       }
       case Screen::GymList: {
@@ -4405,15 +4459,11 @@ void PokemonActivity::renderRowArt() {
     }
     if (showsPartyHealthRows()) {
       if ((screen_ == Screen::Party) && start + local < snapshot_.partyCount) {
-        renderPartyRowHealth(rowY, snapshot_.party[start + local], true);
+        renderPartyRowHealth(rowY, snapshot_.party[start + local]);
       } else if (screen_ == Screen::BattleSwitch && battleSwitchSlot >= 0) {
-        // BattleSwitch keeps its own name/level/gender text via the generic
-        // list widget (a different buildRows() case than Party/ItemTarget) -
-        // only the HP bar/status strip is custom-drawn here, so the name
-        // line must not be drawn a second time.
-        renderPartyRowHealth(rowY, snapshot_.party[battleSwitchSlot], false);
+        renderPartyRowHealth(rowY, snapshot_.party[battleSwitchSlot]);
       } else if (screen_ == Screen::ItemTarget && start + local < snapshot_.partyCount) {
-        renderPartyRowHealth(rowY, snapshot_.party[start + local], true);
+        renderPartyRowHealth(rowY, snapshot_.party[start + local]);
       }
     } else if (showsMachineCapabilityRows() && start + local < snapshot_.partyCount) {
       renderPartyRowMachineCapability(rowY, snapshot_.party[start + local]);
@@ -4435,8 +4485,7 @@ void PokemonActivity::renderRowArt() {
 // area is drawn here for it, exactly as before. peekBattleMoves() is
 // read-only (never creates or writes a battle-store entry), matching every
 // other read-only HP peek in this file (Summary, usablePartySlotAt()).
-void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record,
-                                           const bool drawNameLine) {
+void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record) {
   const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
   // ensureIvEv(), not peekIvEv() - the party list's max-HP figure should
@@ -4462,54 +4511,39 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   int statusY;
   int barX;
   int barW;
-  if (drawNameLine) {
-    // A bar that stretched to fill the whole remaining line read as too
-    // long/heavy for what is otherwise a compact two-line row - cap it at a
-    // reasonable width instead of always maximizing it, while still letting
-    // it shrink further on a narrower screen.
-    constexpr int maxBarW = 130;
-    constexpr int hpTextReserve = 56;
-    constexpr int statusReserve = 44;
-    barW = std::min(maxBarW, std::max(40, textRight - textX - hpTextReserve - statusReserve));
-    const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
-    const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
-    constexpr int lineGap = 8;
-    const int blockTop = rowY + pokemon::pokemonCenteredOffset(rowHeight_, lineHeight1 + lineGap + lineHeight2);
-    const int line2Top = blockTop + lineHeight1 + lineGap;
+  // A bar that stretched to fill the whole remaining line read as too
+  // long/heavy for what is otherwise a compact two-line row - cap it at a
+  // reasonable width instead of always maximizing it, while still letting
+  // it shrink further on a narrower screen.
+  constexpr int maxBarW = 130;
+  constexpr int hpTextReserve = 56;
+  constexpr int statusReserve = 44;
+  barW = std::min(maxBarW, std::max(40, textRight - textX - hpTextReserve - statusReserve));
+  const int lineHeight1 = renderer.getLineHeight(UI_12_FONT_ID);
+  const int lineHeight2 = renderer.getLineHeight(UI_10_FONT_ID);
+  constexpr int lineGap = 8;
+  const int blockTop = rowY + pokemon::pokemonCenteredOffset(rowHeight_, lineHeight1 + lineGap + lineHeight2);
+  const int line2Top = blockTop + lineHeight1 + lineGap;
 
-    char meta[16];
-    snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
-    const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
-    char gender[8];
-    genderShinySuffix(gender, sizeof(gender), record.gender, pokemon::isRecordShiny(record));
-    const int genderWidth = gender[0] == '\0' ? 0 : renderer.getTextWidth(UI_12_FONT_ID, gender) + 4;
-    const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - genderWidth - 10);
-    const std::string name = renderer.truncatedText(
-        UI_12_FONT_ID, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
-        nameMaxWidth, EpdFontFamily::BOLD);
-    const int nameWidth = renderer.getTextWidth(UI_12_FONT_ID, name.c_str(), EpdFontFamily::BOLD);
-    renderer.drawText(UI_12_FONT_ID, textX, blockTop, name.c_str(), true, EpdFontFamily::BOLD);
-    if (gender[0] != '\0') renderer.drawText(UI_12_FONT_ID, textX + nameWidth + 4, blockTop, gender);
-    renderer.drawText(UI_12_FONT_ID, textRight - metaWidth, blockTop, meta);
+  char meta[16];
+  snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
+  const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
+  char gender[8];
+  genderShinySuffix(gender, sizeof(gender), record.gender, pokemon::isRecordShiny(record));
+  const int genderWidth = gender[0] == '\0' ? 0 : renderer.getTextWidth(UI_12_FONT_ID, gender) + 4;
+  const int nameMaxWidth = std::max(0, textRight - textX - metaWidth - genderWidth - 10);
+  const std::string name = renderer.truncatedText(
+      UI_12_FONT_ID, record.nickname[0] == '\0' ? speciesName(record.speciesId) : record.nickname.data(),
+      nameMaxWidth, EpdFontFamily::BOLD);
+  const int nameWidth = renderer.getTextWidth(UI_12_FONT_ID, name.c_str(), EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, textX, blockTop, name.c_str(), true, EpdFontFamily::BOLD);
+  if (gender[0] != '\0') renderer.drawText(UI_12_FONT_ID, textX + nameWidth + 4, blockTop, gender);
+  renderer.drawText(UI_12_FONT_ID, textRight - metaWidth, blockTop, meta);
 
-    barX = textX;
-    barY = line2Top + std::max(0, (lineHeight2 - barH) / 2);
-    hpTextY = line2Top;
-    statusY = line2Top;
-  } else {
-    // BattleSwitch (the only caller with drawNameLine=false): the generic
-    // list widget already draws this row's own name/level/gender text
-    // starting at x=112 (pokemonListPresentation()'s artwork sidePadding),
-    // clearing the 80px-wide species icon at ROW_ICON_X - this HP bar/status
-    // strip sits on the row's second line, so it needs the same left edge,
-    // not the icon's. Reusing ROW_ICON_X here drew the bar directly over the
-    // icon's bottom edge.
-    barX = listBounds_.x + 112;
-    barY = rowY + rowHeight_ - 22;
-    hpTextY = barY - 3;
-    statusY = barY - 3;
-    barW = 96;
-  }
+  barX = textX;
+  barY = line2Top + std::max(0, (lineHeight2 - barH) / 2);
+  hpTextY = line2Top;
+  statusY = line2Top;
 
   renderer.drawRect(barX, barY, barW, barH, true);
   const int filled = maxHp == 0 ? 0 : (barW - 2) * std::min<uint16_t>(entry.currentHp, maxHp) / maxHp;
@@ -4521,8 +4555,7 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
 
   if (entry.status != pokemon::Ailment::None) {
     const char* status = statusAbbrev(entry.status);
-    const int statusRight = drawNameLine ? textRight : listBounds_.x + listBounds_.width - 8;
-    renderer.drawText(UI_10_FONT_ID, statusRight - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
+    renderer.drawText(UI_10_FONT_ID, textRight - renderer.getTextWidth(UI_10_FONT_ID, status, EpdFontFamily::BOLD),
                       statusY, status, true, EpdFontFamily::BOLD);
   }
 }

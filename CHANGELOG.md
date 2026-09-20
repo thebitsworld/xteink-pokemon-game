@@ -6,6 +6,10 @@
 
 - Evolve now: when a Pokémon has already reached the level it evolves at, Summary > Actions shows an "Evolve now" row (after asking for confirmation), so you no longer have to wait for the evolution prompt.
 
+### Fixed
+
+- Text cut off on several screens, mostly on the narrower X4 Pro panel: the Move-order screen and the battle Switch list now show full Pokémon names (level on its own line), the Pokédex shows Caught/Seen next to the number instead of squeezing the name, item lists move the "× count" to its own line when a long name leaves no room, and confirmation questions (Release, Evolve now) wrap onto a second line instead of running off the screen.
+
 ### Changed
 
 - The list of things waiting for you (wild encounters, items, evolutions, moves to learn) now holds 10 instead of 3, so it fills up far less often.

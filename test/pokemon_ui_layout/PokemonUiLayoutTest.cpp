@@ -218,3 +218,36 @@ TEST(PokemonUiLayoutTest, TrainerCardGridRefusesAnAreaTooShortForTheGrid) {
   EXPECT_EQ(pokemon::pokemonTrainerCardGrid(cells, 12, 480, 200, 780, 13, 2), 0);  // capacity too small
   EXPECT_EQ(pokemon::pokemonTrainerCardGrid(nullptr, 13, 480, 200, 780, 13, 2), 0);
 }
+
+// The X4 Pro portrait panel is 480 wide (listBounds_ 464), so artwork rows
+// there only get 464 - 2 * 112 = 240px of content width - narrower than the
+// X3 the tests above were written against. These pin the rows that used to be
+// ellipsis-truncated there against the real inter_12 metrics.
+TEST_F(RealFontWidths, ArtworkRowsFitTheNarrowerX4ProPanel) {
+  constexpr int X4PRO_CONTENT_WIDTH = 464 - 2 * 112;
+  const char* longestNames[] = {"Kangaskhan", "Charmander", "Bellsprout", "Tentacruel", "Farfetch\xE2\x80\x99" "d"};
+  const char* genderStar = " \xE2\x99\x82 \xE2\x98\x85";  // " ♂ ★"
+  char label[64];
+  for (const char* name : longestNames) {
+    // Party > Move / BattleSwitch label: full name + gender + shiny star on
+    // one line, with Lv N on the subtitle line instead of a same-line value.
+    snprintf(label, sizeof(label), "%s%s", name, genderStar);
+    EXPECT_LE(widthOf(label), X4PRO_CONTENT_WIDTH) << name;
+    EXPECT_LE(widthOf("Lv 100"), X4PRO_CONTENT_WIDTH);
+    // Pokedex: number + status share the subtitle, name is alone on its line.
+    EXPECT_LE(widthOf("No. 004  -  Caught"), X4PRO_CONTENT_WIDTH);
+    EXPECT_LE(widthOf(name), X4PRO_CONTENT_WIDTH) << name;
+  }
+  // The old same-line "Caught"/"Lv 100" values did not leave room for the
+  // longer names on this panel - the bug these rows were reworked for.
+  EXPECT_GT(widthOf("Charmander"), X4PRO_CONTENT_WIDTH - widthOf("Caught") - VALUE_INSET - TEXT_GAP);
+  EXPECT_GT(widthOf("Charmander"),
+            X4PRO_CONTENT_WIDTH - widthOf("Lv 100  \xE2\x99\x82 \xE2\x98\x85") - VALUE_INSET - TEXT_GAP);
+  // Item rows only keep the count on the name's line when both fit; the
+  // worst cases (a two-digit or three-digit count on a long name) do not.
+  const int paralyzeWithTripleDigits =
+      widthOf("Paralyze Heal") + widthOf("\xC3\x97 255") + VALUE_INSET + TEXT_GAP;
+  EXPECT_GT(paralyzeWithTripleDigits, X4PRO_CONTENT_WIDTH);
+  // ...and the count alone always fits on its own subtitle line.
+  EXPECT_LE(widthOf("\xC3\x97 65535"), X4PRO_CONTENT_WIDTH);
+}

@@ -200,7 +200,7 @@ class PokemonActivity final : public Activity {
   bool showsMachineCapabilityRows() const;
   int rowsPerPage() const;
   int pageStart() const;
-  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record, bool drawNameLine);
+  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record);
   void renderPartyRowMachineCapability(int rowY, const pokemon::PokemonRecord& record);
   bool isListScreen() const;
   uint32_t selectedRecordId() const;
