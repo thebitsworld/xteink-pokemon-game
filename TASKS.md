@@ -51,6 +51,40 @@ Hall of Fame store, codec save v7/v8/v9.
 
 ---
 
+## Round 10 (2026-09-20, sau merge round 9) — rà soát lại + fuzz, CHƯA FIX (chờ user triage)
+
+Lần này ngoài đọc code còn chạy **fuzz**: 40.000 trận ngẫu nhiên cho engine chiến đấu (bật
+ASAN/UBSAN, kiểm tra HP/stage/PP/kết quả) và 400 phiên x 250 thao tác ngẫu nhiên ở tầng service
+(thả/gửi/rút/dùng item/học move/tiến hóa/prompt/đọc sách...) kiểm tra save sau từng bước, cộng
+3.000 x 20 lần cộng thời gian đọc. **Không có lỗi bộ nhớ/UB, không có save hỏng, prompt mồ côi,
+entry mồ côi.** Mã fuzz (tạm, không nằm trong repo): `/tmp/claude-1000/fuzz/` (2 file .cpp).
+
+Bug còn tồn tại:
+1. **[Trung bình] Gửi Pokémon vào PC (Deposit) xoá luôn bộ chiêu và PP Up của nó.** `depositPokemon()`
+   xoá cả entry battle-store (chứa `moves[]` + `ppUp[]`), lần rút ra (`withdraw`) game dựng lại bộ chiêu
+   mặc định theo cấp → mất TM/HM đã dạy, chiêu tự chọn ở Moves, và PP Up đã tốn. Comment trong code chỉ
+   nhắc HP/status/PP bị reset. Kèm tác dụng phụ: Deposit + Withdraw = hồi đầy HP/PP miễn phí. Cách
+   fix: nâng sức chứa battle-store (hiện cố định 6 entry) để giữ entry Pokémon ở Box (đổi format → v3).
+2. **[Thấp-Trung bình] Prompt "học move" cũ có thể tạo bộ chiêu trùng lặp.** Nếu Pokémon học move X qua
+   Moves/TM khi prompt X còn đang chờ, trả lời prompt bằng "thay slot" sẽ ghi X lần nữa → 2 slot cùng move
+   (fuzz tái hiện; tương tự `learnMoveIntoSlot` không chặn trùng). Fix: `resolveMoveLearn` bỏ qua
+   ghi nếu đã biết move đó (chỉ pop prompt).
+3. **[Thấp] Hoà (cả hai cùng 0 HP) ở cuối lượt không gọi `faintCombatant()`** (`finishTurn`, nhánh
+   "simultaneous KO"): status/Toxic/bẫy không bị xoá, không có sự kiện Fainted. Fuzz thấy ~1/750 trận.
+   Hệ quả: Pokémon bị Poison/Burn khi hoà được Revive lên vẫn còn status.
+4. **[Thấp] Câu chỉ số trong trận (`STR_POKEMON_STAT_ROSE/FELL/WONT_RISE/WONT_FALL`) bị đảo thứ tự
+   ở ~20 ngôn ngữ** (Pháp, Ý, Tây Ban Nha, Đức, Hà Lan, Việt...): code truyền (Pokémon, chỉ số) nhưng bản
+   dịch viết "%s de %s" đọc thành "Charizard của Tấn công". Fix: viết lại dạng "%s: %s ..." như
+   đã làm với vitamin.
+5. **[Rất thấp] Battle-store chỉ có 6 chỗ và dọn entry kiểu best-effort**: nếu dọn lỗi khi Deposit/Release,
+   Pokémon thứ 7 có entry sẽ không lưu được (StorageError).
+
+Đã kiểm tra, không thấy vấn đề thêm: công thức sát thương (crit/screen/burn/Explosion), bắt/chạy trốn,
+`applyCreditedMinutes` (pity, queue 16 chỗ, XP), luồng save/reopen, chuỗi dịch (kiểm tra specifier printf:
+chỉ 1 lệch ở tiếng Nga của CrossInk gốc, vô hại).
+
+---
+
 ## Tối ưu flash — CHỈ LÀM KHI THIẾU BỘ NHỚ (ghi lại 2026-09-20, tại `v0.30.0`)
 
 **Hiện trạng đo thật** (`pio run -e pokemon-x3` ở tag `v0.30.0`): Flash 96,2%
