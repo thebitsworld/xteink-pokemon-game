@@ -793,16 +793,20 @@ bool resolveEvolution(PokemonState& state, PokemonRecord& record, const Evolutio
 }
 
 bool useEvolutionItem(PokemonState& state, PokemonRecord& record, const EvolutionItem item, RecordMutation& mutation) {
-  // Scoped to THIS record, mirroring resolveEvolution()'s own
-  // `front->recordId == record.recordId` check just below - an unrelated
-  // pending event (a MoveLearn/Evolution queued for some OTHER party
-  // member) must not block using an evolution stone/Link Cable on this one.
-  // Previously this rejected on ANY pending event at all, which meant a
-  // single queued event anywhere in the party could block evolving a
-  // completely unrelated Pokemon (docs/development/pokemon-gen1-audit-
-  // round7.md bug 1.1).
-  const PendingEvent* front = pendingEventFront(state);
-  if (!validateState(state) || !validateRecord(record) || (front != nullptr && front->recordId == record.recordId) ||
+  // Only a pending EVOLUTION prompt for THIS record conflicts with using a
+  // stone/Link Cable on it (two evolutions racing for one record). An
+  // unrelated event - for some other party member, or a MoveLearn prompt for
+  // this same record - must not block it. A MoveLearn is especially common
+  // here: evolving backfills every level-appropriate move the new species
+  // has, so a freshly evolved high-level Pokemon carries a queue of them, and
+  // used to be unable to take a further stone until each was resolved
+  // (docs/development/pokemon-gen1-audit-round7.md bug 1.1 fixed the
+  // other-record half of this).
+  bool evolutionPending = false;
+  for (const PendingEvent& event : state.pendingEvents) {
+    if (event.kind == PendingEventKind::Evolution && event.recordId == record.recordId) evolutionPending = true;
+  }
+  if (!validateState(state) || !validateRecord(record) || evolutionPending ||
       item < EvolutionItem::MoonStone || item > EvolutionItem::LinkCable || mutation.kind != RecordMutationKind::None) {
     return false;
   }

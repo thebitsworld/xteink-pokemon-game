@@ -1357,6 +1357,26 @@ void useEvolutionItemIsStillBlockedByAPendingEventForTheSameRecord() {
   CHECK(state.itemCounts[itemIndex] == 1);
 }
 
+void useEvolutionItemIgnoresAPendingMoveLearnForTheSameRecord() {
+  // Evolving backfills the new species' moves, so a just-evolved Pokemon
+  // carries queued MoveLearn prompts for itself; those must not stop a further
+  // stone from working (only a pending Evolution for the same record does).
+  pokemon::PokemonRecord record = leaderAtLevelFive();  // recordId 7, species 25
+  record.gender = validGenderForSpecies(record.speciesId);
+  pokemon::PokemonState state{};
+  state.pendingEvents[0].kind = pokemon::PendingEventKind::MoveLearn;
+  state.pendingEvents[0].recordId = record.recordId;  // same record
+  state.pendingEvents[0].speciesId = 33;              // moveId, stored in speciesId
+  state.pendingEvents[0].level = 1;
+  const size_t itemIndex = static_cast<size_t>(pokemon::EvolutionItem::ThunderStone) - 1U;
+  state.itemCounts[itemIndex] = 1;
+  pokemon::RecordMutation mutation{};
+
+  CHECK(pokemon::useEvolutionItem(state, record, pokemon::EvolutionItem::ThunderStone, mutation));
+  CHECK(record.speciesId == 26);
+  CHECK(state.itemCounts[itemIndex] == 0);
+}
+
 void rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate() {
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
@@ -1430,6 +1450,7 @@ int main() {
   everyItemEvolutionConsumesExactlyOneItem();
   useEvolutionItemIgnoresAnUnrelatedPendingEventForADifferentRecord();
   useEvolutionItemIsStillBlockedByAPendingEventForTheSameRecord();
+  useEvolutionItemIgnoresAPendingMoveLearnForTheSameRecord();
   rejectedInputsAndCancelledEvolutionDoNotPartiallyMutate();
   return failures == 0 ? 0 : 1;
 }

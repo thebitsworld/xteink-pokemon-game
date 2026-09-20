@@ -2,9 +2,14 @@
 
 ## [0.29.1] - 2026-09-20
 
+### Changed
+
+- Choosing who should use an evolution stone or Link Cable now shows each Pokémon's full name and what it would evolve into, like the TM/HM screen does.
+
 ### Fixed
 
 - A level 100 Pokémon that was already past its evolution level never got the evolution prompt after a battle. It now does.
+- An evolution stone or Link Cable said "has no effect" on a Pokémon that had just evolved and still had move-learning prompts waiting (for example a fresh Weepinbell with a Leaf Stone). Only a pending evolution prompt for that same Pokémon blocks it now.
 
 ## [0.29.0] - 2026-09-19
 
