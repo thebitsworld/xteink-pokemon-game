@@ -1582,6 +1582,33 @@ TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptOncePastTheLevelRule) {
   EXPECT_EQ(pending->speciesId, 44U);
 }
 
+TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptForLevel100Pokemon) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  seedStarter(store);
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonRecord record{};
+  ASSERT_TRUE(store.readRecord(1, record));
+  record.speciesId = 43;  // Oddish, evolves at 21
+  record.totalXp = pokemon::xpRequired(100);
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 43));
+  ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 43));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, record, pokemon::RecordMutationKind::Replace}));
+
+  ASSERT_EQ(service.awardBattleXp(1, 30, true, 4), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.loadState(state));
+  const pokemon::PendingEvent* pending = pokemon::pendingEventFront(state);
+  ASSERT_NE(pending, nullptr);
+  EXPECT_EQ(pending->kind, pokemon::PendingEventKind::Evolution);
+  EXPECT_EQ(pending->speciesId, 44U);
+}
+
 TEST(PokemonService, EnsureIvEvRollsOnceAndPersistsForSubsequentCalls) {
   Storage.clear();
   pokemon::PokemonStore store;

@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.29.1] - 2026-09-20
+
+### Fixed
+
+- A level 100 Pokémon that was already past its evolution level never got the evolution prompt after a battle. It now does.
+
 ## [0.29.0] - 2026-09-19
 
 ### Added

@@ -1172,10 +1172,14 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   }
 
   const uint8_t previousLevel = levelForXp(record.totalXp);
-  if (record.totalXp >= MAXIMUM_TOTAL_XP) return ServiceStatus::Ok;  // already level 100 - nothing to gain
-
-  const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
-  record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
+  // At level 100 there is no XP left to gain, but a Pokemon that is already
+  // past its evolution level still deserves its prompt, so that check below
+  // must not be skipped.
+  const bool atMaxXp = record.totalXp >= MAXIMUM_TOTAL_XP;
+  if (!atMaxXp) {
+    const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
+    record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
+  }
   const uint8_t currentLevel = levelForXp(record.totalXp);
 
   PokemonState state{};
@@ -1184,6 +1188,7 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   queueMoveLearnIfNeeded(state, record, previousLevel, currentLevel);
   bool evolutionQueued = false;
   if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return ServiceStatus::StorageError;
+  if (atMaxXp && !evolutionQueued) return ServiceStatus::Ok;  // nothing changed - skip the write
   const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to award battle XP");
