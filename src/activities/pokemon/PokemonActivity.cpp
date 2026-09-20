@@ -364,17 +364,16 @@ const char* statusAbbrev(const pokemon::Ailment status) {
   return "";
 }
 
-// Gen 1's six stat-stage names, in StatKind order. Not run through i18n,
-// matching how move/item names are already plain C strings (see
-// PokemonBattle.h's StatKind doc comment).
+// Gen 1's six stat-stage names, in StatKind order (translated - unlike move and
+// item names, which stay plain C strings).
 const char* statKindName(const pokemon::StatKind kind) {
   switch (kind) {
-    case pokemon::StatKind::Attack: return "Attack";
-    case pokemon::StatKind::Defense: return "Defense";
-    case pokemon::StatKind::Special: return "Special";
-    case pokemon::StatKind::Speed: return "Speed";
-    case pokemon::StatKind::Accuracy: return "Accuracy";
-    case pokemon::StatKind::Evasion: return "Evasion";
+    case pokemon::StatKind::Attack: return tr(STR_POKEMON_STAT_ATTACK);
+    case pokemon::StatKind::Defense: return tr(STR_POKEMON_STAT_DEFENSE);
+    case pokemon::StatKind::Special: return tr(STR_POKEMON_STAT_SPECIAL);
+    case pokemon::StatKind::Speed: return tr(STR_POKEMON_STAT_SPEED);
+    case pokemon::StatKind::Accuracy: return tr(STR_POKEMON_STAT_ACCURACY);
+    case pokemon::StatKind::Evasion: return tr(STR_POKEMON_STAT_EVASION);
   }
   return "?";
 }
@@ -1804,7 +1803,9 @@ void PokemonActivity::activate() {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), bagScreen);
           return;
         }
-        static constexpr const char* VITAMIN_STAT_NAMES[] = {"HP", "Attack", "Defense", "Special", "Speed"};
+        const char* const VITAMIN_STAT_NAMES[] = {tr(STR_POKEMON_STAT_HP), tr(STR_POKEMON_STAT_ATTACK),
+                                                  tr(STR_POKEMON_STAT_DEFENSE), tr(STR_POKEMON_STAT_SPECIAL),
+                                                  tr(STR_POKEMON_STAT_SPEED)};
         const pokemon::PokemonRecord target = selectedRecord();
         char line[96];
         snprintf(line, sizeof(line), tr(STR_POKEMON_VITAMIN_RAISED),
@@ -3073,9 +3074,9 @@ void PokemonActivity::buildRows() {
         // so it now shares the subtitle line with the number.
         const char* dexStatus = caught ? tr(STR_POKEMON_CAUGHT) : seen ? tr(STR_POKEMON_SEEN) : nullptr;
         if (dexStatus != nullptr) {
-          snprintf(subtitles_[local].data(), subtitles_[local].size(), "No. %03u  -  %s", speciesId, dexStatus);
+          snprintf(subtitles_[local].data(), subtitles_[local].size(), "%s %03u  -  %s", tr(STR_POKEMON_NUMBER_SHORT), speciesId, dexStatus);
         } else {
-          snprintf(subtitles_[local].data(), subtitles_[local].size(), "No. %03u", speciesId);
+          snprintf(subtitles_[local].data(), subtitles_[local].size(), "%s %03u", tr(STR_POKEMON_NUMBER_SHORT), speciesId);
         }
         rows_[local].subtitle = subtitles_[local].data();
         break;
@@ -3443,12 +3444,12 @@ void PokemonActivity::renderFocused() {
                                 ? 1
                                 : pokemon::battleMaxHp(baseStats->hp, pokemon::levelForXp(record.totalXp),
                                                        ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
-      renderer.drawText(UI_10_FONT_ID, textX, y, "HP", true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, textX, y, tr(STR_POKEMON_STAT_HP), true, EpdFontFamily::BOLD);
       char hpText[16];
       snprintf(hpText, sizeof(hpText), "%u/%u", entry.currentHp, maxHp);
       const int hpTextW = renderer.getTextWidth(UI_10_FONT_ID, hpText);
       renderer.drawText(UI_10_FONT_ID, valueRight - hpTextW, y, hpText);
-      const int barX = textX + renderer.getTextWidth(UI_10_FONT_ID, "HP", EpdFontFamily::BOLD) + 8;
+      const int barX = textX + renderer.getTextWidth(UI_10_FONT_ID, tr(STR_POKEMON_STAT_HP), EpdFontFamily::BOLD) + 8;
       const int barRight = valueRight - hpTextW - 10;
       constexpr int barH = 10;
       if (barRight > barX) {
@@ -4197,7 +4198,7 @@ void PokemonActivity::renderBattleHud() {
     // Vertically center the HP row in the space below the name line.
     const int nameRowBottom = nameY + 20;
     const int rowY = nameRowBottom + std::max(0, (panelY + panelHeight - 8 - nameRowBottom - barHeight) / 2);
-    const char* hpLabel = "HP";
+    const char* hpLabel = tr(STR_POKEMON_STAT_HP);
     renderer.drawText(UI_10_FONT_ID, panelX + 8, rowY - 1, hpLabel, true, EpdFontFamily::BOLD);
     const int barX = panelX + 8 + renderer.getTextWidth(UI_10_FONT_ID, hpLabel, EpdFontFamily::BOLD) + 6;
     const int barRight = panelX + panelWidth - 8 - (status == nullptr ? 0 : statusW + 8) - hpTextW - 6;
