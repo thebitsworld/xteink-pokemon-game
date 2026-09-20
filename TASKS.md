@@ -84,6 +84,24 @@ chỉ 1 lệch ở tiếng Nga của CrossInk gốc, vô hại).
 
 ---
 
+## Round 11 (2026-09-20, sau merge round 10) — rà soát lại, KHÔNG TÌM THÊM BUG
+
+Đọc lại toàn bộ luồng UI liên quan đến các fix round 10 (Deposit/Withdraw, Summary cho Pokémon
+trong Box, `healPartyOnRead` - không tạo entry mới nên không đụng cơ chế nhường chỗ), kiểm tra
+`message_[192]` đã áp dụng đúng cho cả 2 câu hỏi Release/Evolve, và soát các đường tạo entry
+battle-store khác (`upsertEntries` batch trong `healPartyOnRead` chỉ heal entry có sẵn, không
+tạo mới - không cần nhường chỗ).
+
+**Khoảng trống duy nhất tìm thấy: `evictBattleEntryNotIn()` (hàm mới ở round 10) chưa có test ở
+tầng codec**, chỉ được kiểm tra gián tiếp qua 1 test service-level và qua fuzz. Không phải bug,
+nhưng là rủi ro hồi quy thật (hàm lõi cho fix round 10, im lặng khi thất bại). Đã bổ sung 3 test
+trực tiếp ở `PokemonBattleStoreCodecTest.cpp`: nhường đúng 1 chỗ không thuộc danh sách giữ, trả về
+false khi mọi entry đều được giữ, trả về false trên state rỗng. 26/26 test vẫn xanh.
+
+Không phát hiện bug mới trong lượt này.
+
+---
+
 ## Tối ưu flash — CHỈ LÀM KHI THIẾU BỘ NHỚ (ghi lại 2026-09-20, tại `v0.30.0`)
 
 **Hiện trạng đo thật** (`pio run -e pokemon-x3` ở tag `v0.30.0`): Flash 96,2%

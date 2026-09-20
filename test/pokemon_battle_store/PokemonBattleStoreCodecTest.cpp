@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -129,6 +130,39 @@ void upsertFailsPastCapacityForAnUnseenRecordId() {
   replacement.currentHp = 9;
   CHECK(pokemon::upsertBattleEntry(state, replacement));
   CHECK(pokemon::findBattleEntry(state, 3)->currentHp == 9);
+}
+
+void evictEntryNotInFreesExactlyOneNonKeptSlotAtCapacity() {
+  BattleStoreState state{};
+  for (uint32_t id = 1; id <= pokemon::POKEMON_BATTLE_MAX_ENTRIES; ++id) {
+    CHECK(pokemon::upsertBattleEntry(state, makeEntry(id)));
+  }
+  // Ids 1 and 2 are "kept" (e.g. current party members); the rest are stale.
+  const std::array<uint32_t, 2> keep{1, 2};
+  CHECK(pokemon::evictBattleEntryNotIn(state, keep));
+  CHECK(pokemon::battleEntryCount(state) == pokemon::POKEMON_BATTLE_MAX_ENTRIES - 1);
+  CHECK(pokemon::findBattleEntry(state, 1) != nullptr);
+  CHECK(pokemon::findBattleEntry(state, 2) != nullptr);
+  // Exactly one non-kept entry is gone; freeing a slot lets a brand-new
+  // record now fit.
+  CHECK(pokemon::upsertBattleEntry(state, makeEntry(999)));
+  CHECK(pokemon::battleEntryCount(state) == pokemon::POKEMON_BATTLE_MAX_ENTRIES);
+}
+
+void evictEntryNotInFailsWhenEveryEntryIsKept() {
+  BattleStoreState state{};
+  CHECK(pokemon::upsertBattleEntry(state, makeEntry(1)));
+  CHECK(pokemon::upsertBattleEntry(state, makeEntry(2)));
+  const std::array<uint32_t, 2> keep{1, 2};
+  CHECK(!pokemon::evictBattleEntryNotIn(state, keep));
+  CHECK(pokemon::battleEntryCount(state) == 2);  // nothing removed
+}
+
+void evictEntryNotInOnAnEmptyStateFails() {
+  BattleStoreState state{};
+  const std::array<uint32_t, 1> keep{1};
+  CHECK(!pokemon::evictBattleEntryNotIn(state, keep));
+  CHECK(!pokemon::evictBattleEntryNotIn(state, std::span<const uint32_t>{}));
 }
 
 void fileRoundTripsCarriesSequenceAndDetectsCorruption() {
@@ -337,6 +371,9 @@ int main() {
   invalidStatusByteFailsToDecode();
   upsertKeepsAscendingOrderAndReplacesInPlace();
   upsertFailsPastCapacityForAnUnseenRecordId();
+  evictEntryNotInFreesExactlyOneNonKeptSlotAtCapacity();
+  evictEntryNotInFailsWhenEveryEntryIsKept();
+  evictEntryNotInOnAnEmptyStateFails();
   fileRoundTripsCarriesSequenceAndDetectsCorruption();
   emptyStateEncodesToJustTheHeaderAndCrc();
   legacyHeaderlessFileStillDecodesForMigration();
