@@ -21,12 +21,12 @@ workflow, re-upload the same two `-latest.bin` aliases to that release too -
 the stable per-device download links depend on every release consistently
 carrying them.
 
-This only automates the two firmware-only assets. It does **not** run the full
-release checklist below, and it does **not** build the full-install ZIP - that
-needs the Pokémon artwork pack, which is deliberately not committed to this
-repository (see "Full-install artwork and packaging" below). Build and upload
-the full ZIP to the same release by hand with
-`scripts/package_pokemon_v2_release.py` when needed, same as before.
+This only automates the two firmware assets. It does **not** run the full
+release checklist below, and it does **not** build the artwork archive - the
+Pokémon artwork pack is deliberately not committed to this repository (see
+"Artwork archive" below). Build and upload
+`xteink-pokemon-sd-card-assets.zip` to the same release by hand, same as
+before.
 
 Before pushing the tag:
 - `CHANGELOG.md` must already have a `## [<version>]` section (without a
@@ -54,7 +54,13 @@ Before pushing the tag:
 - [ ] Inherited funding links have been removed or explicitly approved by the
       named recipient.
 
-## Full-install artwork and packaging
+## Artwork archive
+
+Firmware and artwork ship as separate release assets - see
+[Artwork setup](artwork-setup.md#5-build-the-public-artwork-archive). The
+artwork archive (`xteink-pokemon-sd-card-assets.zip`) contains only the
+`pokemon/` folder, is identical for every device, and is never covered by
+`SHA256SUMS.txt` (that file only covers what CI publishes).
 
 - [ ] The source revisions match `docs/third-party-assets.md`.
 - [ ] `scripts/generate_pokemon_icon_art.py` completed locally.
@@ -62,26 +68,23 @@ Before pushing the tag:
 - [ ] The canonical local artwork directory contains all 850 required one-bit
       BMPs with the documented dimensions (614 species/item/Pokédex art + 151
       back sprites + 77 bag item icons + 8 badge icons).
-- [ ] `scripts/package_pokemon_v2_release.py` accepted the complete local pack
-      and included `RIGHTS_AND_ATTRIBUTION.md`.
-- [ ] The full archive contains `update.bin`, the visible `pokemon/` folder, the
-      artwork manifest, internal checksums, and the rights notice.
-- [ ] The full archive does not contain `pokemon-a.bin`, `pokemon-b.bin`,
-      legacy `pokemon-v2-*.bin` saves, books, sleep screens, settings, or cache
-      files.
-- [ ] The full archive contains no artwork under `.crosspoint/pokemon/`.
-- [ ] Extracting the full archive over temporary existing Pokémon saves leaves
-      both save hashes unchanged.
-- [ ] The firmware inside the full archive is byte-identical to the separately
-      published firmware-only asset.
-- [ ] The release-level `SHA256SUMS.txt` covers both public downloads.
+- [ ] The native artwork-generator/packager tests pass (`ctest -R
+      PokemonArtPack`), confirming the pack against `RIGHTS_AND_ATTRIBUTION.md`
+      and the manifest/checksum rules `scripts/package_pokemon_v2_release.py`
+      itself enforces.
+- [ ] `xteink-pokemon-sd-card-assets.zip` contains only the `pokemon/` folder
+      (sprites, heroes, items, badges, trainers, pokedex, `manifest.json`) -
+      no firmware, no save files, no books, no settings, no cache files.
+- [ ] Extracting `pokemon/` onto an SD card with an existing Pokémon save
+      leaves that save's hash unchanged.
+- [ ] The archive is uploaded as an additional asset on the same GitHub
+      Release the tag push created.
 
 ## Automated checks
 
 - [ ] Pokémon host tests pass.
-- [ ] Artwork generator and packager tests pass.
-- [ ] Full-archive layout, path-safety, manifest, checksum, and
-      save-preservation tests pass.
+- [ ] Artwork generator and packager tests pass (path-safety, manifest, and
+      checksum coverage for the artwork pack).
 - [ ] Portrait Pokémon simulator smoke route passes.
 - [ ] Landscape Pokémon simulator smoke route passes.
 - [ ] `pio run -e pokemon-x3` succeeds.
@@ -116,16 +119,21 @@ Automated checks do not approve a hardware release.
 
 - [ ] Review the final commit diff.
 - [ ] Review the exact GitHub Actions configuration on the release commit.
-- [ ] Confirm converted artwork is present only in the full-install Release
-      ZIP and is not committed to Git history.
-- [ ] Confirm the release includes the full ZIP, firmware-only binary, and
-      `SHA256SUMS.txt` with the approved public filenames.
+- [ ] Confirm converted artwork is present only in the
+      `xteink-pokemon-sd-card-assets.zip` release asset and is not committed
+      to Git history.
+- [ ] Confirm the release includes both firmware binaries (plus their
+      `-latest.bin` aliases), `xteink-pokemon-sd-card-assets.zip`, and
+      `SHA256SUMS.txt` (firmware only) with the approved public filenames.
 - [ ] Confirm release notes link to `RIGHTS_AND_ATTRIBUTION.md` and the Rights
       or Attribution issue form.
 - [ ] Put backup, installation, rollback, known limitations, test evidence, and
-      all public asset SHA-256 values in the release notes.
-- [ ] Download every published asset again, verify its SHA-256, open the full
-      ZIP, and rerun archive verification against the download.
-- [ ] Confirm the live GitHub Pages primary button downloads the full ZIP and
-      the secondary button downloads the firmware-only binary.
-- [ ] Publish v0.1.0 as a stable release only after the physical X3 report passes every required item.
+      the firmware assets' SHA-256 values in the release notes.
+- [ ] Download every published asset again, verify each firmware binary's
+      SHA-256 against `SHA256SUMS.txt`, and extract
+      `xteink-pokemon-sd-card-assets.zip` to confirm it only contains the
+      `pokemon/` folder.
+- [ ] Confirm the live GitHub Pages / [Installation](installation.md) links
+      point at the current per-device firmware downloads and at
+      `xteink-pokemon-sd-card-assets.zip` for the artwork.
+- [ ] Publish a new version as a stable release only after the physical X3 report passes every required item.

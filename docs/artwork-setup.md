@@ -1,11 +1,12 @@
 # Artwork setup
 
-The firmware reads Pokémon artwork from the SD card. Normal users should
-download the complete X3 installation ZIP from the project release page; it
-already contains the converted artwork in the correct folders.
+The firmware reads Pokémon artwork from the SD card. Normal users should follow
+[Installation](installation.md): download `xteink-pokemon-sd-card-assets.zip` from the
+project release page and copy its `pokemon` folder to the SD-card root - no conversion
+needed.
 
-The tools below are for maintainers rebuilding or validating that public
-package. Keep source and converted working files outside normal Git history.
+The tools below are for maintainers rebuilding or validating that public package. Keep
+source and converted working files outside normal Git history.
 
 ## Requirements
 
@@ -196,15 +197,21 @@ pokemon-art-output/pokedex/landscape/001.bmp–151.bmp   # 288×432
 All output is one-bit BMP data prepared on the computer so the X3 can stream it
 without allocating another framebuffer.
 
-## 5. Build and validate the public installation archive
+## 5. Build the public artwork archive
 
-Build the X3 firmware:
+Firmware and artwork are published as **separate** release assets (see
+[Installation](installation.md)): `.github/workflows/release.yml` builds and publishes the
+firmware automatically the moment a `v*.*.*` tag is pushed (see
+[Release checklist](release-checklist.md)); it does not touch artwork at all. The artwork
+side - `xteink-pokemon-sd-card-assets.zip` - is built and uploaded to that same release by
+hand, since the converted images are deliberately never committed to this repository (see
+[Release checklist](release-checklist.md)).
 
-```sh
-pio run -e pokemon-x3
-```
-
-Then package the exact firmware and local artwork:
+`scripts/package_pokemon_v2_release.py` can still validate a local pack end-to-end
+(rejects missing files, wrong dimensions, non-one-bit images, and manifest/checksum
+mismatches) and bundle it with a firmware binary into a self-contained
+`xteink-pokemon-<device>-full-v<version>.zip` for local testing or an alternate
+distribution channel:
 
 ```sh
 python scripts/package_pokemon_v2_release.py \
@@ -215,19 +222,21 @@ python scripts/package_pokemon_v2_release.py \
   --output dist
 ```
 
-The packager rejects missing files, incorrect dimensions, non-one-bit images,
-unsafe archive paths, firmware mismatches, and manifest/checksum mismatches. It
-produces:
+But the file that actually ships on the [releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases)
+is just the validated `pokemon/` folder, zipped on its own with no firmware inside (the
+same folder for both devices - artwork doesn't differ by chip):
 
-```text
-xteink-pokemon-x3-x4-full-v0.1.0.zip
-xteink-pokemon-x3-x4-firmware-v0.1.0.bin
-SHA256SUMS.txt
+```sh
+cd pokemon-art-output
+zip -r ../xteink-pokemon-sd-card-assets.zip pokemon
 ```
 
-The full ZIP contains `update.bin`, `pokemon/`,
-`RIGHTS_AND_ATTRIBUTION.md`, and internal checksums. Publish it as a GitHub
-Release asset, not as hundreds of tracked binary files.
+Before zipping, confirm the pack is complete and correctly shaped - run the native
+artwork-generator/packager tests (`ctest -R PokemonArtPack`), and spot-check a handful of
+BMP dimensions from "Convert species and item icons" / "Convert Pokédex cards" above.
+Upload the resulting `xteink-pokemon-sd-card-assets.zip` as an additional asset on the
+GitHub Release the tag push already created - it doesn't need `SHA256SUMS.txt` updated,
+since that file only covers the firmware CI itself publishes.
 
 ## SD-card paths
 
