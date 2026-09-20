@@ -14,6 +14,43 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
+## Round 9 (2026-09-20, tại `main` sau `v0.30.0` + save v9) — rà soát lại, CHƯA FIX (chờ user triage)
+
+Đã sửa ngay trong lượt rà soát (`a6d04a24`, merge `7c29a0a0`): `inspectSnapshot()` dùng mask 8-bit
+cho hàng đợi 10 chỗ nên bỏ sót chỗ 9-10 (tôi gây ra ở save v8). Danh sách bug CÒN TỒN TẠI:
+
+1. **[Trung bình-Cao] Thả (Release) một Pokémon đang có prompt "học move" chờ sẽ kẹt cứng
+   hàng đợi vĩnh viễn.** `releaseRecord()` chỉ xoá sự kiện Tiến hóa (`removePendingEvolutionsForRecord`),
+   không xoá `MoveLearn` của record đó. Sau đó `resolveMoveLearn()` không đọc được record →
+   trả `StorageError`, UI chỉ báo lỗi và sự kiện vẫn nằm ở đầu hàng, chặn mọi encounter/item
+   sau nó. Đã tái hiện bằng test (patch: `/tmp/claude-1000/repro-movelearn.patch`, gồm 1 test
+   `ReleasingAPokemonWithAQueuedMoveLearnDoesNotLeaveTheQueueStuck` hiện đang FAIL).
+   Cách fix đề xuất: xoá cả `MoveLearn` trong `releaseRecord()`, và `resolveMoveLearn()` gặp record
+   không tồn tại thì bỏ sự kiện (pop) thay vì trả lỗi.
+2. **[Thấp-Trung bình] Bấm Cancel tiến hóa thì sau MỖI trận thắng lại bị hỏi lại.** Do kiểm tra tiến
+   hóa bù (v0.28.1/0.29.1) trong `awardBattleXp()` chạy sau mọi trận thắng, kể cả khi không lên cấp.
+   Nay đã có nút "Evolve now" nên kiểm tra bù không còn cần thiết. Đề xuất: chỉ xếp prompt khi
+   trận đó làm cấp vượt ngưỡng tiến hóa (hoặc dùng Rare Candy).
+3. **[Thấp] 5 chỗ trong `PokemonService` gọi `ensureIvEv(recordId)` với `shiny=false` mặc định**
+   (`useVitamin`, `useConsumableImpl`, `loadBattleEntry`, `healPartyOnRead`, `awardBattleXp`). Shiny
+   mới bắt mà chưa từng mở Summary/Party, dùng vitamin ngay → nhận IV thường vĩnh viễn. Đề xuất:
+   cho `ensureIvEv` tự tra cờ shiny của record.
+4. **[Thấp] `message_[96]` có thể cắt câu hỏi Release/Evolve ở ngôn ngữ dài (Nga, Đức) khi tên
+   biệt danh dài** (cắt giữa ký tự UTF-8 → glyph lỗi).
+5. **[Rất thấp] Bản dịch Hà Lan `STR_POKEMON_VITAMIN_RAISED`** ("%s van %s is gestegen!") đảo thứ tự
+   (Pokémon, chỉ số) → đọc thành "Charizard van Aanval". Đổi thành "%s: %s is gestegen!".
+6. **[Rất thấp] Lăn xả Encounter + Evolution cùng một lần cộng thời gian đọc**: `generatedEvent`
+   bị ghi đè nên encounter đó không được roll shiny (chỉ xảy ra khi lên cấp đủ điều kiện tiến hóa
+   trùng đúng chunk 5-9 phút có encounter).
+7. **[Rất thấp] Release dọn `battleStore_`/`ivEvStore_` kiểu best-effort**; nếu ghi lỗi và record có ID
+   cao nhất bị thả thì Pokémon mới bắt sau đó tái dùng ID và thừa hưởng dữ liệu cũ.
+
+Đã kiểm tra, không thấy vấn đề: công thức bắt (Gen 1 hai lần roll), công thức chạy trốn, dữ liệu
+tiến hóa (level/đá khớp bản gốc), đội hình Gym/Elite Four/Champion (canon), tracker thời gian đọc,
+Hall of Fame store, codec save v7/v8/v9.
+
+---
+
 ## Tối ưu flash — CHỈ LÀM KHI THIẾU BỘ NHỚ (ghi lại 2026-09-20, tại `v0.30.0`)
 
 **Hiện trạng đo thật** (`pio run -e pokemon-x3` ở tag `v0.30.0`): Flash 96,2%
