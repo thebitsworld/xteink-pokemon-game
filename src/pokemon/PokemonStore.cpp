@@ -214,11 +214,17 @@ InspectionResult inspectSnapshot(const char* path, SnapshotHeader& outputHeader,
   crc = updateSnapshotCrc32(crc, stateBytes.data(), stateSize);
   uint32_t previousRecordId = 0;
   uint8_t foundPartySlots = 0;
-  uint8_t requiredPendingRecords = 0;
-  uint8_t foundPendingRecords = 0;
+  // 1 bit per pending-event slot. Was uint8_t, which silently truncated bits
+  // for slot indices 8/9 once PENDING_EVENT_CAPACITY grew from 3 to 10 (save
+  // v8) - 1u << 8 and 1u << 9 don't fit in 8 bits, so an Evolution event
+  // sitting in one of those two slots was never checked against the record
+  // list below, letting a save with a dangling reference there pass
+  // inspection as valid instead of being rejected as Corrupt.
+  uint16_t requiredPendingRecords = 0;
+  uint16_t foundPendingRecords = 0;
   for (size_t eventIndex = 0; eventIndex < state.pendingEvents.size(); ++eventIndex) {
     if (state.pendingEvents[eventIndex].kind == PendingEventKind::Evolution) {
-      requiredPendingRecords |= static_cast<uint8_t>(1U << eventIndex);
+      requiredPendingRecords |= static_cast<uint16_t>(1U << eventIndex);
     }
   }
   BatchedRecordReader reader(file, header.recordCount);
@@ -239,7 +245,7 @@ InspectionResult inspectSnapshot(const char* path, SnapshotHeader& outputHeader,
     for (size_t eventIndex = 0; eventIndex < state.pendingEvents.size(); ++eventIndex) {
       if (state.pendingEvents[eventIndex].kind == PendingEventKind::Evolution &&
           state.pendingEvents[eventIndex].recordId == record.recordId) {
-        foundPendingRecords |= static_cast<uint8_t>(1U << eventIndex);
+        foundPendingRecords |= static_cast<uint16_t>(1U << eventIndex);
       }
     }
   }

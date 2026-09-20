@@ -20,6 +20,10 @@ constexpr size_t EVOLUTION_ITEM_COUNT = 6;
 // saves keep decoding unchanged.
 constexpr size_t PENDING_EVENT_LEGACY_SLOTS = 3;
 constexpr size_t PENDING_EVENT_CAPACITY = 10;
+// PokemonStore.cpp's inspectSnapshot() packs one bit per slot into a
+// uint16_t bitmask when cross-checking pending Evolution events against the
+// record list - grow that mask's type too if this ever exceeds 16.
+static_assert(PENDING_EVENT_CAPACITY <= 16, "inspectSnapshot()'s pending-record bitmask is 16 bits wide");
 
 // Pinned copies of constants that really live in PokemonBattleTypes.h
 // (MOVE_COUNT, ITEM_COUNT, GYM_COUNT). PokemonTypes.h/.cpp is the core layer

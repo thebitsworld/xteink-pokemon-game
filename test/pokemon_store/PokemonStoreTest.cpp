@@ -897,6 +897,50 @@ void legacyFilenamesMigrateTheNewestValidSnapshot() {
   CHECK(Storage.exists("/.crosspoint/pokemon-v2-a.bin"));
 }
 
+// PokemonStore.cpp's inspectSnapshot() cross-checks every pending Evolution
+// event's recordId against the record list, to catch a corrupt save that
+// references a Pokemon that doesn't actually exist - commit() itself calls
+// it too, to verify what it just wrote before adopting it as the active
+// snapshot. It used to pack that check into a uint8_t bitmask, one bit per
+// pending-event slot - harmless while PENDING_EVENT_CAPACITY was 3, but once
+// save v8 grew the queue to 10 slots, 1u << 8 and 1u << 9 don't fit in 8
+// bits and got silently dropped, so a dangling Evolution reference in one of
+// the last two slots was never caught. This fills every slot up to slot 9
+// (Item filler in 0-8, so the queue stays compacted per validateState()'s own
+// rule) with the Evolution event - referencing a recordId no record actually
+// has - sitting last, and expects commit() to reject it outright instead of
+// writing and adopting a snapshot with an unresolved reference in it.
+void danglingEvolutionReferenceInTheLastPendingSlotIsRejected() {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  CHECK(store.begin() == pokemon::StoreBeginResult::Empty);
+  const pokemon::PokemonRecord pikachu = starterPikachu();
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = pikachu.recordId;
+  CHECK(pokemon::markSpecies(state.seenSpecies, pikachu.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, pikachu.speciesId));
+  for (size_t slot = 0; slot + 1 < pokemon::PENDING_EVENT_CAPACITY; ++slot) {
+    state.pendingEvents[slot] = {
+        0, 0, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::MoonStone, pokemon::PendingEventKind::Item};
+  }
+  constexpr uint32_t DANGLING_RECORD_ID = 999;  // never appended as an actual record below
+  state.pendingEvents[pokemon::PENDING_EVENT_CAPACITY - 1] = {DANGLING_RECORD_ID,
+                                                              pikachu.speciesId,
+                                                              0,
+                                                              pokemon::Gender::Unknown,
+                                                              pokemon::EvolutionItem::None,
+                                                              pokemon::PendingEventKind::Evolution};
+  const pokemon::RecordMutation starter{pikachu.recordId, pikachu, pokemon::RecordMutationKind::Append};
+  CHECK(!store.commit(state, starter));  // rejected by commit()'s own post-write inspectSnapshot() verification
+
+  // The raw bytes were written to disk before the post-write check rejected
+  // them (writeSnapshot() only cleans up on an earlier I/O failure, not on a
+  // verification failure), but a fresh store must not be fooled by them into
+  // treating the dangling reference as a real, ready-to-use snapshot.
+  pokemon::PokemonStore reopened;
+  CHECK(reopened.begin() != pokemon::StoreBeginResult::Ready);
+}
+
 void failedLegacyFilenameMigrationKeepsTheOriginalSave() {
   Storage.clear();
   const pokemon::PokemonRecord pikachu = starterPikachu();
@@ -912,6 +956,7 @@ void failedLegacyFilenameMigrationKeepsTheOriginalSave() {
   CHECK(store.begin() == pokemon::StoreBeginResult::Corrupt);
   CHECK(Storage.exists("/.crosspoint/pokemon-v2-a.bin"));
   CHECK(!Storage.exists("/.crosspoint/pokemon-a.bin"));
+  Storage.setFailRename(false);  // leaking this true past this test breaks every later commit() in the suite
 }
 
 }  // namespace
@@ -941,5 +986,6 @@ int main() {
   failedResetDoesNotBypassProtectedStoreGating();
   legacyFilenamesMigrateTheNewestValidSnapshot();
   failedLegacyFilenameMigrationKeepsTheOriginalSave();
+  danglingEvolutionReferenceInTheLastPendingSlotIsRejected();
   return failures == 0 ? 0 : 1;
 }
