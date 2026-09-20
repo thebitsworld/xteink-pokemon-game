@@ -6,6 +6,10 @@ Real page turns train your lead Pokémon, trigger wild encounters and item finds
 
 ## How it works
 
+For the full picture — Gym Leaders, evolution, the Pokédex, Trainer Card, Hall of Fame,
+shiny Pokémon, and an honest list of what's simplified from the original games — see
+[The Pokémon game](docs/pokemon-game.md). Short version:
+
 Put the Pokémon you want to train at the top of your Party. As you read, it gains experience and levels up, learning new moves along the way.
 
 While you read, wild Pokémon encounters and item finds happen on their own — a `!` on the dashboard tells you something is waiting in the Pokémon menu. Meeting a wild Pokémon starts a short turn-based battle: weaken it, then throw a Poké Ball to try to catch it. Balls, potions, status-curing items, and TMs/HMs are found the same way, just while reading.
@@ -45,29 +49,26 @@ These are current X3 simulator captures using the artwork included in the full i
 
 - [Download from GitHub Releases](https://github.com/thebitsworld/xteink-pokemon-game/releases)
 
-This build is confirmed working on physical hardware on **Xteink X3**, **Xteink X4**, and
-**Xteink X4 Pro** (X4 Pro has a touch-only UI, portrait orientation), including both locked
-and unlocked devices. **X3/X4 and X4 Pro firmware are not interchangeable** — they target
-different chips (ESP32-C3 vs. ESP32-S3) and a device will not boot the wrong one. Do not
-install on Sticky or another device. Back up the SD card before updating.
+Confirmed working on physical hardware on **Xteink X3**, **Xteink X4**, and **Xteink X4
+Pro** (X4 Pro has a touch-only UI, portrait orientation), including both locked and
+unlocked devices. **X3/X4 and X4 Pro firmware are not interchangeable** — they target
+different chips (ESP32-C3 vs. ESP32-S3), though the updater checks for this and refuses a
+mismatched file rather than bricking anything. Do not install on Sticky or another device.
 
-| Device | Full-install ZIP (first install) | Firmware-only (already installed once) |
-| --- | --- | --- |
-| X3 / X4 | matching version on the [releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases) — `xteink-pokemon-x3-x4-full-v<version>.zip` | [Download latest X3/X4 firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x3-x4-firmware-latest.bin) |
-| X4 Pro | matching version on the [releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases) — `xteink-pokemon-x4-pro-full-v<version>.zip` | [Download latest X4 Pro firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-pro-firmware-latest.bin) |
+| Your device | Download |
+| --- | --- |
+| Xteink X3 or Xteink X4 | [Latest X3/X4 firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x3-x4-firmware-latest.bin) |
+| Xteink X4 Pro | [Latest X4 Pro firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-pro-firmware-latest.bin) |
 
-The firmware-only links always fetch the newest release for that device. Use them only if `/pokemon/` artwork is already installed on the SD card (see step 1 below) — a first-time install still needs the full ZIP.
+Install it over Wi-Fi from **Settings → System → Updates → Check for Updates**, or copy
+the `.bin` to the SD card and use **Settings → System → SD Card Firmware Update**. Either
+way, also grab that release's `xteink-pokemon-sd-card-assets.zip` and copy its `pokemon`
+folder to the SD card root — that's the Pokémon sprites, item icons, badges, and Pokédex
+cards, shipped separately from the firmware. Full walkthrough, including what to do if
+something doesn't match: [Installation](docs/installation.md).
 
-1. Download the full-install ZIP to a computer, matching your device (`xteink-pokemon-x3-x4-full-v<version>.zip` for X3/X4, or `xteink-pokemon-x4-pro-full-v<version>.zip` for X4 Pro).
-2. Extract the ZIP. Do not copy the ZIP itself to the SD card.
-3. Back up any `/.crosspoint/pokemon*.bin` files if they already exist. Earlier `pokemon-v2-a.bin` and `pokemon-v2-b.bin` saves migrate automatically.
-4. Copy `update.bin` to the SD-card root and merge the extracted `pokemon` folder into the root.
-5. **Do not format the SD card. Do not delete any existing folder. Do not replace any existing folder.** Keep your books, sleep covers, settings, reading progress, and Pokémon saves in place.
-6. Confirm both `update.bin` and the visible `pokemon` folder are directly at the SD-card root.
-7. Safely eject the card and return it to your device.
-8. Open **Settings → System → SD Card Firmware Update**, select `update.bin`, and confirm.
-
-The full-install ZIP contains the firmware and all required artwork. It does not contain or replace Pokémon saves, books, or reading data. The first release that moves artwork to `/pokemon` must be installed from the full ZIP; later releases can use the firmware-only download (`xteink-pokemon-x3-x4-firmware-v<version>.bin` or `xteink-pokemon-x4-pro-firmware-v<version>.bin`) over the device's Wi-Fi file transfer. Artwork is shared between X3 and X4 Pro (same files, same paths) — only the firmware binary differs per device.
+Your books, reading data, and Pokémon save are never touched by an update — see
+[The Pokémon game](docs/pokemon-game.md#your-save-is-separate-from-your-books).
 
 Building from source? See [Getting Started](docs/development/getting-started.md).
 

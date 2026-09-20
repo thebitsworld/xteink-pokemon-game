@@ -1,3 +1,12 @@
+## [1.0.0] - 2026-09-20
+
+First stable release. No gameplay or save-format changes from 0.31.0 - documentation only.
+
+### Added
+
+- [The Pokémon game](docs/pokemon-game.md): a full, plain-language guide to every feature (catching, battling, Gyms, evolution, the Pokédex, Trainer Card, Hall of Fame, shiny Pokémon), an honest section on how this compares to the original games, and an FAQ.
+- Rewritten [Installation](docs/installation.md) guide matching the actual release assets: which firmware file to download for your device (with a note that the updater refuses a mismatched file rather than bricking anything), both the Wi-Fi and SD-card install paths, and how to add the `xteink-pokemon-sd-card-assets.zip` artwork pack to your SD card.
+
 ## [0.31.0] - 2026-09-20
 
 ### Changed
