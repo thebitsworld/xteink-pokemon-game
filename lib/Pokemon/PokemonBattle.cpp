@@ -1720,7 +1720,14 @@ void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnRe
   if (opponentDotEvent != BattleLogEvent::None) result.opponent.event = opponentDotEvent;
 
   if (player.currentHp == 0 && opponent.currentHp == 0) {
-    result.outcome = BattleOutcome::OpponentWon;  // simultaneous KO: wild Pokemon is still standing in spirit
+    // Simultaneous KO from a shared end-of-turn tick (both sides burned/poisoned down to 0 the same turn,
+    // or Leech Seed on top of one) - both sides still need the same faint cleanup a one-sided KO gets
+    // (status/toxic counter/trap release), or a Pokemon revived after a draw like this keeps its old
+    // status forever (round 10 audit bug 3). Ruled a win for the opponent, same as stepBattle()'s own
+    // mutual-KO-from-an-action case: "wild Pokemon is still standing in spirit."
+    faintCombatant(player, opponent, result.player.event);
+    faintCombatant(opponent, player, result.opponent.event);
+    result.outcome = BattleOutcome::OpponentWon;
   } else if (player.currentHp == 0) {
     faintCombatant(player, opponent, result.player.event);
     result.outcome = BattleOutcome::OpponentWon;
@@ -1937,6 +1944,19 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
       return result;
     }
     result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
+    // Same simultaneous-KO check as the first action above, but for the
+    // opponent's own second action this turn (its own Explosion/Self-
+    // Destruct/recoil can faint it at the same time its hit faints the
+    // player) - round 10 audit bug 3's real root cause: this spot only ever
+    // checked the player's HP, so a simultaneous KO here returned having
+    // faintCombatant()'d the player but left the opponent sitting at 0 HP
+    // with its status/toxic counter/trap never cleared.
+    if (player.currentHp == 0 && opponent.currentHp == 0) {
+      faintCombatant(player, opponent, result.player.event);
+      faintCombatant(opponent, player, result.opponent.event);
+      result.outcome = BattleOutcome::OpponentWon;
+      return result;
+    }
     if (player.currentHp == 0) {
       faintCombatant(player, opponent, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
@@ -1961,6 +1981,15 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
       return result;
     }
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
+    // Mirrors the playerFirst branch's own second-action check just above:
+    // the player's own second action this turn can also recoil/Explode
+    // itself down to 0 at the same moment it faints the opponent.
+    if (opponent.currentHp == 0 && player.currentHp == 0) {
+      faintCombatant(opponent, player, result.opponent.event);
+      faintCombatant(player, opponent, result.player.event);
+      result.outcome = BattleOutcome::PlayerWon;
+      return result;
+    }
     if (opponent.currentHp == 0) {
       faintCombatant(opponent, player, result.opponent.event);
       result.outcome = BattleOutcome::PlayerWon;

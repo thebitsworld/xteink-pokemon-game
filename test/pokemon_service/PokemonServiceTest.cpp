@@ -282,7 +282,7 @@ TEST(PokemonService, ProtectsTheLastPartyMemberAndSupportsDepositWithdraw) {
   EXPECT_EQ(snapshot.state.partyRecordIds[1], 1U);
 }
 
-TEST(PokemonService, DepositingAPokemonFreesItsBattleStoreSlot) {
+TEST(PokemonService, DepositingAPokemonKeepsItsBattleStoreEntry) {
   Storage.clear();
   pokemon::PokemonStore store;
   pokemon::PokemonBattleStore battleStore;
@@ -292,19 +292,51 @@ TEST(PokemonService, DepositingAPokemonFreesItsBattleStoreSlot) {
   pokemon::PokemonHallOfFameStore hallOfFameStore;
   pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
 
-  // Give recordId 1 a real battle-store entry, matching a Pokemon that's
-  // actually fought at least once (loadBattleEntry synthesizes and persists
-  // one on first lookup).
+  // Teach recordId 1 a move and spend a PP Up on it, matching a Pokemon
+  // that's actually been played with, not just fought once.
+  ASSERT_EQ(service.teachMove(1, 85, 0), pokemon::TeachMoveOutcome::Learned);  // Thunderbolt into slot 0
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.ppUpCount = 1;
+  ASSERT_TRUE(store.commit(state));
+  ASSERT_EQ(service.applyPpUp(1, 0), pokemon::ServiceStatus::Ok);
+  const pokemon::BattleRecordEntry* before = battleStore.findEntry(1);
+  ASSERT_NE(before, nullptr);
+  const pokemon::BattleRecordEntry beforeCopy = *before;
+
+  // Deposit-then-withdraw must not reset the moveset, PP Up, or heal it for
+  // free (round 10 audit bug 1) - the entry survives exactly as it was.
+  ASSERT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(*battleStore.findEntry(1), beforeCopy);
+  ASSERT_EQ(service.withdrawPokemon(1), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(*battleStore.findEntry(1), beforeCopy);
+}
+
+TEST(PokemonService, LoadBattleEntryEvictsANonPartyEntryWhenTheStoreIsFull) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  // recordId 1 is the party's only member. Fill every one of the store's
+  // POKEMON_BATTLE_MAX_ENTRIES (6) slots with entries for OTHER (non-party)
+  // record ids, simulating Pokemon that fought long ago, were deposited or
+  // released, and now no longer need a live entry.
+  for (uint32_t id = 100; id < 100 + pokemon::POKEMON_BATTLE_MAX_ENTRIES; ++id) {
+    pokemon::BattleRecordEntry stale{};
+    stale.recordId = id;
+    ASSERT_TRUE(battleStore.upsertEntry(stale));
+  }
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  // recordId 1 has no entry yet and the store is completely full of
+  // non-party entries - loadBattleEntry() must still succeed for a real
+  // party member by evicting one of them, not fail with StorageError.
   pokemon::BattleRecordEntry entry{};
   ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
-  ASSERT_NE(battleStore.findEntry(1), nullptr);
-
-  // Without freeing this slot, POKEMON_BATTLE_MAX_ENTRIES (6) worth of
-  // distinct Pokemon that have EVER fought would permanently exhaust the
-  // side file's fixed capacity, hard-blocking withdrawPokemon() for a 7th
-  // distinct fighter with StorageError - depositing must free it instead.
-  ASSERT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::Ok);
-  EXPECT_EQ(battleStore.findEntry(1), nullptr);
+  EXPECT_EQ(entry.recordId, 1U);
+  EXPECT_NE(battleStore.findEntry(1), nullptr);
 }
 
 TEST(PokemonService, ReleasePokemonRemovesTheRecordAndFreesItsSideStoreSlots) {

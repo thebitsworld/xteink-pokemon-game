@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- Depositing a Pokémon into the PC no longer resets its moveset, PP Ups, or heals it for free the next time it's withdrawn - all of that now survives a trip to the Box, matching every mainline game.
+- Answering an old "learn this move?" prompt for a move the Pokémon already picked up another way (Moves screen, a TM/HM) no longer duplicates that move into a second slot.
+- A Pokémon that fainted from its own recoil or an Explosion/Self-Destruct at the exact moment it also fainted its target no longer keeps its old status (Poison, Burn, ...) forever afterward.
+- Battle messages about a stat rising, falling, or being unable to change further ("Attack rose!") read in the right order in every language.
 - Releasing a Pokémon that still had a "learn this move?" prompt waiting could freeze the whole list of waiting events for good (encounters and items stopped arriving). Such prompts are now cleared when the Pokémon is released, and a leftover one is simply dropped.
 - After cancelling an evolution, the game asked again after every battle win. It now only asks when a win actually levels the Pokémon up; use Summary > Actions > Evolve now for one that is already past its evolution level.
 - A shiny Pokémon that was first used with a vitamin, medicine or battle before its Summary was opened could get ordinary hidden stats instead of a shiny's; a wild encounter that arrived in the same reading update as an evolution prompt could miss its shiny chance; and a Pokémon caught after a release could inherit leftover data from the old one.

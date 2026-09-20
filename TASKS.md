@@ -51,7 +51,7 @@ Hall of Fame store, codec save v7/v8/v9.
 
 ---
 
-## Round 10 (2026-09-20, sau merge round 9) — rà soát lại + fuzz, CHƯA FIX (chờ user triage)
+## Round 10 (2026-09-20, sau merge round 9) — 5/5 ĐÃ FIX (branch `fix/round10-bugs`)
 
 Lần này ngoài đọc code còn chạy **fuzz**: 40.000 trận ngẫu nhiên cho engine chiến đấu (bật
 ASAN/UBSAN, kiểm tra HP/stage/PP/kết quả) và 400 phiên x 250 thao tác ngẫu nhiên ở tầng service
@@ -59,25 +59,24 @@ ASAN/UBSAN, kiểm tra HP/stage/PP/kết quả) và 400 phiên x 250 thao tác n
 3.000 x 20 lần cộng thời gian đọc. **Không có lỗi bộ nhớ/UB, không có save hỏng, prompt mồ côi,
 entry mồ côi.** Mã fuzz (tạm, không nằm trong repo): `/tmp/claude-1000/fuzz/` (2 file .cpp).
 
-Bug còn tồn tại:
-1. **[Trung bình] Gửi Pokémon vào PC (Deposit) xoá luôn bộ chiêu và PP Up của nó.** `depositPokemon()`
-   xoá cả entry battle-store (chứa `moves[]` + `ppUp[]`), lần rút ra (`withdraw`) game dựng lại bộ chiêu
-   mặc định theo cấp → mất TM/HM đã dạy, chiêu tự chọn ở Moves, và PP Up đã tốn. Comment trong code chỉ
-   nhắc HP/status/PP bị reset. Kèm tác dụng phụ: Deposit + Withdraw = hồi đầy HP/PP miễn phí. Cách
-   fix: nâng sức chứa battle-store (hiện cố định 6 entry) để giữ entry Pokémon ở Box (đổi format → v3).
-2. **[Thấp-Trung bình] Prompt "học move" cũ có thể tạo bộ chiêu trùng lặp.** Nếu Pokémon học move X qua
-   Moves/TM khi prompt X còn đang chờ, trả lời prompt bằng "thay slot" sẽ ghi X lần nữa → 2 slot cùng move
-   (fuzz tái hiện; tương tự `learnMoveIntoSlot` không chặn trùng). Fix: `resolveMoveLearn` bỏ qua
-   ghi nếu đã biết move đó (chỉ pop prompt).
-3. **[Thấp] Hoà (cả hai cùng 0 HP) ở cuối lượt không gọi `faintCombatant()`** (`finishTurn`, nhánh
-   "simultaneous KO"): status/Toxic/bẫy không bị xoá, không có sự kiện Fainted. Fuzz thấy ~1/750 trận.
-   Hệ quả: Pokémon bị Poison/Burn khi hoà được Revive lên vẫn còn status.
-4. **[Thấp] Câu chỉ số trong trận (`STR_POKEMON_STAT_ROSE/FELL/WONT_RISE/WONT_FALL`) bị đảo thứ tự
-   ở ~20 ngôn ngữ** (Pháp, Ý, Tây Ban Nha, Đức, Hà Lan, Việt...): code truyền (Pokémon, chỉ số) nhưng bản
-   dịch viết "%s de %s" đọc thành "Charizard của Tấn công". Fix: viết lại dạng "%s: %s ..." như
-   đã làm với vitamin.
-5. **[Rất thấp] Battle-store chỉ có 6 chỗ và dọn entry kiểu best-effort**: nếu dọn lỗi khi Deposit/Release,
-   Pokémon thứ 7 có entry sẽ không lưu được (StorageError).
+Bug (tất cả đã sửa, xem CHANGELOG [Unreleased]):
+1. **[Trung bình] Gửi Pokémon vào PC (Deposit) xoá luôn bộ chiêu và PP Up của nó.** Đã sửa: Deposit
+   không còn xoá entry battle-store nữa; sức chứa 6-entry cố định giờ được "nhường chỗ theo nhu cầu"
+   (`PokemonBattleStore::evictEntryNotIn`) — chỉ dọn 1 entry KHÔNG thuộc đội hình hiện tại, đúng lúc một
+   thành viên đội thật sự cần entry mới mà kho đã đầy. Không cần đổi format save.
+2. **[Thấp-Trung bình] Prompt "học move" cũ có thể tạo bộ chiêu trùng lặp.** Đã sửa: `resolveMoveLearn`
+   bỏ qua việc ghi nếu Pokémon đã biết move đó qua đường khác (chỉ pop prompt).
+3. **[Thấp] Hoà (cả hai cùng 0 HP) không gọi `faintCombatant()` cho cả hai bên.** Nguyên nhân thật (fuzz
+   giúp tìm ra, khác với đoán ban đầu): không phải ở `finishTurn`, mà ở bước hành động THỨ HAI trong lượt
+   (`stepBattle`) — chỉ kiểm tra bên bị đánh gục, không kiểm tra bên tự gây recoil/nổ gục cùng lúc. Đã
+   thêm kiểm tra "cả hai cùng 0 HP" ở cả hai nhánh (player đi trước/đi sau). Xác nhận bằng fuzz 80.000 trận,
+   0 vi phạm sau fix (trước fix ~1/2.000 trận dính).
+4. **[Thấp] Câu chỉ số trong trận bị đảo thứ tự ở cả 26 ngôn ngữ khác tiếng Anh.** Đã sửa cả 4 khoá
+   (ROSE/FELL/WONT_RISE/WONT_FALL) sang dạng "%s: %s ..." như vitamin, đã soát lại specifier printf khớp
+   bản gốc cho từng ngôn ngữ.
+5. **[Rất thấp] Battle-store chỉ có 6 chỗ, dọn entry kiểu best-effort ở Release.** Giải quyết gián tiếp
+   qua mục 1: nếu `removeEntry()` ở Release lỗi, entry mồ côi đó giờ có thể bị "nhường chỗ" tự động lần
+   sau cần, thay vì kẹt vĩnh viễn.
 
 Đã kiểm tra, không thấy vấn đề thêm: công thức sát thương (crit/screen/burn/Explosion), bắt/chạy trốn,
 `applyCreditedMinutes` (pity, queue 16 chỗ, XP), luồng save/reopen, chuỗi dịch (kiểm tra specifier printf:

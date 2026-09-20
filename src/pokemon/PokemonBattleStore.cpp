@@ -192,6 +192,13 @@ bool PokemonBattleStore::removeEntry(const uint32_t recordId) {
   return writeState(candidate);
 }
 
+bool PokemonBattleStore::evictEntryNotIn(const std::span<const uint32_t> keepIds) {
+  if (!loaded_) load();
+  BattleStoreState candidate = state_;
+  if (!pokemon::evictBattleEntryNotIn(candidate, keepIds)) return false;
+  return writeState(candidate);
+}
+
 bool PokemonBattleStore::reset() {
   if (!loaded_) load();
   return writeState(BattleStoreState{});

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "PokemonBattle.h"
 #include "PokemonBattleTypes.h"
@@ -107,9 +108,19 @@ const BattleRecordEntry* findBattleEntry(const BattleStoreState& state, uint32_t
 // validateBattleRecordEntry, or the state is already at capacity and
 // recordId is not already present.
 bool upsertBattleEntry(BattleStoreState& state, const BattleRecordEntry& entry);
-// Removes an entry (e.g. a Party member was deposited to the PC) without
-// leaving a gap. Returns false if recordId was not present.
+// Removes an entry (e.g. a Pokemon was released) without leaving a gap.
+// Returns false if recordId was not present.
 bool removeBattleEntry(BattleStoreState& state, uint32_t recordId);
+// Frees up one slot by removing the first entry whose recordId is not in
+// `keepIds`, without leaving a gap - used when the store is at capacity and
+// a current party member needs a fresh entry (see PokemonService::
+// loadBattleEntry()'s doc comment: deposited/released Pokemon keep their
+// entry instead of it being freed proactively, so this is how a slot is
+// reclaimed on actual demand instead). Returns false if every entry's
+// recordId is in `keepIds` (nothing safe to evict - never happens in
+// practice, since `keepIds` is always PARTY_SIZE long and the store only
+// ever has POKEMON_BATTLE_MAX_ENTRIES == PARTY_SIZE slots).
+bool evictBattleEntryNotIn(BattleStoreState& state, std::span<const uint32_t> keepIds);
 
 bool validateBattleRecordEntry(const BattleRecordEntry& entry);
 bool validateBattleStoreState(const BattleStoreState& state);
