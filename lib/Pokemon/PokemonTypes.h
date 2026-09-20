@@ -14,7 +14,12 @@ constexpr uint32_t MAXIMUM_TOTAL_XP = 8340;
 constexpr size_t POKEDEX_BYTES = 19;
 constexpr size_t PARTY_SIZE = 6;
 constexpr size_t EVOLUTION_ITEM_COUNT = 6;
-constexpr size_t PENDING_EVENT_CAPACITY = 3;
+// The pending-event queue used to hold 3; save v8 grew it to 10. The first
+// PENDING_EVENT_LEGACY_SLOTS live at their original byte offsets and the rest
+// are appended at the end of the state (see PokemonStoreCodec.h), so older
+// saves keep decoding unchanged.
+constexpr size_t PENDING_EVENT_LEGACY_SLOTS = 3;
+constexpr size_t PENDING_EVENT_CAPACITY = 10;
 
 // Pinned copies of constants that really live in PokemonBattleTypes.h
 // (MOVE_COUNT, ITEM_COUNT, GYM_COUNT). PokemonTypes.h/.cpp is the core layer

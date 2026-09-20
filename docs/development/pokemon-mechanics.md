@@ -76,7 +76,7 @@ Processes **one minute at a time** (never batched) so every random event lands o
 
 ## 4. Pending event queue
 
-`PokemonState.pendingEvents`: a FIFO capped at `PENDING_EVENT_CAPACITY = 3`. Once full, new encounters/items are dropped, but the pity counters (`encounterMisses`/`itemMisses`) still keep incrementing. `DashboardNotice` shows a `!` icon while an event is waiting.
+`PokemonState.pendingEvents`: a FIFO capped at `PENDING_EVENT_CAPACITY = 10` (was 3 before save v8). Once full, new encounters/items are dropped, but the pity counters (`encounterMisses`/`itemMisses`) still keep incrementing. `DashboardNotice` shows a `!` icon while an event is waiting.
 
 ## 5. Storage — double-buffer + CRC
 

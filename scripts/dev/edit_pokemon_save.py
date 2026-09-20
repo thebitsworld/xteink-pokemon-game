@@ -7,7 +7,7 @@ set up scenarios (queue a wild encounter, wipe HP/PP/status back to full,
 clear gym progress, hand a Pokemon some items) without waiting on real
 gameplay/RNG. See docs/file-formats.md for the on-disk layout this assumes;
 this tool only understands the CURRENT save format used by this branch
-(main save version 7, 210-byte state; battle-store version 2, 20-byte
+(main save version 8, 280-byte state; battle-store version 2, 20-byte
 entries) and refuses to touch anything else rather than risk corrupting an
 unfamiliar layout.
 
@@ -54,10 +54,12 @@ HEADER_BYTES = 24
 OFF_HEADER_RECORD_COUNT = 16  # u32
 OFF_HEADER_PAYLOAD_BYTES = 20  # u32: stateBytes + recordCount * RECORD_BYTES - see decodeSnapshotHeader()
 STATE_BYTES_V7 = 210
+STATE_BYTES_V8 = 280  # v8 appends the pending-event slots past the original 3 (7 x 10 bytes)
 RECORD_BYTES = 48
 POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
 PENDING_EVENT_BYTES = 10
-PENDING_EVENT_COUNT = 3
+PENDING_EVENT_COUNT = 10
+PENDING_EVENT_LEGACY_SLOTS = 3
 EVOLUTION_ITEM_COUNT = 6
 BAG_SLOT_COUNT = 77
 PP_UP_ITEM_ID = 84  # tracked in ppUpCount, not bagCounts - see PP_UP_ITEM_ID in lib/Pokemon/PokemonBattleTypes.h
@@ -357,9 +359,21 @@ def load_save(path: Path) -> SaveFile:
     state_size, record_size = struct.unpack_from("<HH", data, 12)
     if header_size != HEADER_BYTES:
         raise ToolError(f"{path}: unexpected header size {header_size} (expected {HEADER_BYTES})")
-    if state_size != STATE_BYTES_V7:
+    if state_size == STATE_BYTES_V7:
+        # A v7 save differs from v8 only by the appended (empty) extra pending-event slots - upgrade it in
+        # memory; the file on disk is only rewritten when a command actually writes.
+        extra = STATE_BYTES_V8 - STATE_BYTES_V7
+        data[HEADER_BYTES + STATE_BYTES_V7 : HEADER_BYTES + STATE_BYTES_V7] = bytes(extra)
+        struct.pack_into("<H", data, 4, 8)
+        struct.pack_into("<H", data, 12, STATE_BYTES_V8)
+        payload, = struct.unpack_from("<I", data, 20)
+        struct.pack_into("<I", data, 20, payload + extra)
+        state_size = STATE_BYTES_V8
+        save = SaveFile(path, data, sequence)
+        recompute_crc(save)
+    if state_size != STATE_BYTES_V8:
         raise ToolError(
-            f"{path}: this tool only understands version-7 saves (210-byte state), got {state_size} bytes "
+            f"{path}: this tool only understands version-7/8 saves (210/280-byte state), got {state_size} bytes "
             f"(version {version}) - refusing to touch an unfamiliar layout. A version-6 save (205 bytes) "
             f"is upgraded the next time the game writes it - run the game once first."
         )
@@ -386,7 +400,7 @@ def set_header_record_count(save: SaveFile, new_count: int) -> None:
     load - writing recordCount alone leaves a stale payload size and the
     device rejects the whole file as corrupt on next boot."""
     struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
-    payload_bytes = STATE_BYTES_V7 + new_count * RECORD_BYTES
+    payload_bytes = STATE_BYTES_V8 + new_count * RECORD_BYTES
     struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
@@ -518,8 +532,14 @@ def write_battle_store(save_dir: Path, entries: list[BattleEntry], sequence: int
 # --------------------------------------------------------------------------
 
 
+def pending_event_offset(slot: int) -> int:
+    if slot < PENDING_EVENT_LEGACY_SLOTS:
+        return OFF_PENDING_EVENTS + slot * PENDING_EVENT_BYTES
+    return STATE_BYTES_V7 + (slot - PENDING_EVENT_LEGACY_SLOTS) * PENDING_EVENT_BYTES
+
+
 def read_pending_event(save: SaveFile, slot: int) -> tuple[int, int, int, int, int, int, bool]:
-    offset = OFF_PENDING_EVENTS + slot * PENDING_EVENT_BYTES
+    offset = pending_event_offset(slot)
     record_id, species_id, level, gender_byte, item, kind = struct.unpack_from(
         "<IHBBBB", state_bytes(save, offset, PENDING_EVENT_BYTES)
     )
@@ -539,7 +559,7 @@ def write_pending_event(
     kind: int,
     is_shiny: bool = False,
 ) -> None:
-    offset = OFF_PENDING_EVENTS + slot * PENDING_EVENT_BYTES
+    offset = pending_event_offset(slot)
     gender_byte = gender | (PENDING_EVENT_SHINY_BIT if is_shiny else 0)
     packed = struct.pack("<IHBBBB", record_id, species_id, level, gender_byte, item, kind)
     set_state_bytes(save, offset, packed)
@@ -572,7 +592,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     print("\nparty record ids:", [rid for rid in party_ids if rid != 0])
 
     header_record_count, = struct.unpack_from("<I", active.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V7
+    records_offset = HEADER_BYTES + STATE_BYTES_V8
     print(f"\nrecords ({header_record_count}):")
     for i in range(header_record_count):
         offset = records_offset + i * RECORD_BYTES
@@ -699,7 +719,7 @@ def _dex_bits(count: int) -> bytes:
 
 def _owned_species(save: SaveFile) -> list[int]:
     record_count, = struct.unpack_from("<I", save.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V7
+    records_offset = HEADER_BYTES + STATE_BYTES_V8
     return [
         struct.unpack_from("<H", save.data, records_offset + i * RECORD_BYTES + 8)[0] for i in range(record_count)
     ]
@@ -848,7 +868,7 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         raise ToolError("--xp must be >= 0")
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, 16)
-        records_offset = HEADER_BYTES + STATE_BYTES_V7
+        records_offset = HEADER_BYTES + STATE_BYTES_V8
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES
@@ -881,7 +901,7 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
     nickname_bytes = nickname_text + b"\x00" * (POKEMON_NICKNAME_BYTES - len(nickname_text))
 
     saves = load_saves(args.save_dir)
-    records_offset = HEADER_BYTES + STATE_BYTES_V7
+    records_offset = HEADER_BYTES + STATE_BYTES_V8
 
     # pokemon-a.bin and pokemon-b.bin can legitimately hold different
     # generations of state (that is the whole point of the double buffer),
@@ -948,12 +968,49 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
         write_saves(saves, backup=not args.no_backup)
 
 
+def cmd_set_species(args: argparse.Namespace) -> None:
+    species = find_species(load_species(), args.species)
+    gender = GENDER_NAMES_REVERSE.get(args.gender) if args.gender else default_gender_for(species)
+    if gender is None:
+        raise ToolError(f"--gender must be one of: {', '.join(GENDER_NAMES_REVERSE)}")
+    validate_gender(species, gender)
+    saves = load_saves(args.save_dir)
+    for save in saves:
+        record_count, = struct.unpack_from("<I", save.data, OFF_HEADER_RECORD_COUNT)
+        records_offset = HEADER_BYTES + STATE_BYTES_V8
+        found = False
+        for i in range(record_count):
+            offset = records_offset + i * RECORD_BYTES
+            record_id, = struct.unpack_from("<I", save.data, offset)
+            if record_id != args.record_id:
+                continue
+            # Record layout: id(4) xp(4) species(2) caughtLevel(1) gender(1) origin(1) flags(1) ...
+            struct.pack_into("<H", save.data, offset + 8, species.id)
+            struct.pack_into("<B", save.data, offset + 11, gender)
+            found = True
+            break
+        if not found:
+            raise ToolError(f"{save.path.name}: no record with id {args.record_id}")
+        # Owned species must be seen+caught (validateState()).
+        seen = bytearray(state_bytes(save, OFF_SEEN_BITS, 19))
+        caught = bytearray(state_bytes(save, OFF_CAUGHT_BITS, 19))
+        zero_based = species.id - 1
+        seen[zero_based // 8] |= 1 << (zero_based % 8)
+        caught[zero_based // 8] |= 1 << (zero_based % 8)
+        set_state_bytes(save, OFF_SEEN_BITS, bytes(seen))
+        set_state_bytes(save, OFF_CAUGHT_BITS, bytes(caught))
+        recompute_crc(save)
+        print(f"{save.path.name}: record #{args.record_id} is now {species.name} (species {species.id})")
+    if not args.dry_run:
+        write_saves(saves, backup=not args.no_backup)
+
+
 def cmd_set_moves(args: argparse.Namespace) -> None:
     move_map = load_moves()
     saves = load_saves(args.save_dir)
     active = max(saves, key=lambda s: s.sequence)
     record_count, = struct.unpack_from("<I", active.data, OFF_HEADER_RECORD_COUNT)
-    records_offset = HEADER_BYTES + STATE_BYTES_V7
+    records_offset = HEADER_BYTES + STATE_BYTES_V8
     species_id = None
     total_xp = None
     for i in range(record_count):
@@ -1066,6 +1123,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_member.add_argument("--nickname", help="default: none")
     add_member.add_argument("--shiny", action="store_true", help="set RecordFlag::Shiny on the new record")
     add_member.set_defaults(func=cmd_add_party_member)
+
+    set_species = subparsers.add_parser(
+        "set-species", help="change an existing record's species (keeps level/XP; re-picks a valid gender)"
+    )
+    set_species.add_argument("--record-id", type=int, required=True)
+    set_species.add_argument("--species", required=True, help="species id or name")
+    set_species.add_argument("--gender", choices=sorted(GENDER_NAMES_REVERSE), help="default: auto-picked")
+    set_species.set_defaults(func=cmd_set_species)
 
     moves = subparsers.add_parser(
         "set-moves", help="set a record's 4 battle move slots (auto-picked from its real learnset if --moves is omitted)"

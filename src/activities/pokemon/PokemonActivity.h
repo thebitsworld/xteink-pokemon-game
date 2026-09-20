@@ -41,6 +41,7 @@ class PokemonActivity final : public Activity {
     Pc,
     PcOrder,
     PcReleaseConfirm,
+    EvolveConfirm,
     Bag,
     BagEvolution,
     BagMedicine,
@@ -194,11 +195,12 @@ class PokemonActivity final : public Activity {
   int logicalCount() const;
   int listTop() const;
   int rowHeightForScreen() const;
+  bool canEvolveFocused() const;
   bool showsPartyHealthRows() const;
   bool showsMachineCapabilityRows() const;
   int rowsPerPage() const;
   int pageStart() const;
-  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record, bool drawNameLine);
+  void renderPartyRowHealth(int rowY, const pokemon::PokemonRecord& record);
   void renderPartyRowMachineCapability(int rowY, const pokemon::PokemonRecord& record);
   bool isListScreen() const;
   uint32_t selectedRecordId() const;

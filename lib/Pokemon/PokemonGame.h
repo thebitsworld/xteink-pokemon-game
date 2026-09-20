@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 
+#include "PokemonSpecies.h"
 #include "PokemonTypes.h"
 
 namespace pokemon {
@@ -66,13 +67,15 @@ enum class CollectionAction : uint8_t {
   Withdraw = 4,
   Rename = 5,
   EvolutionPrompts = 6,
+  // Manual level evolution (Party > Actions), only offered when one is available.
+  Evolve = 8,
   // Box context only (collectionActions()'s !party branch) - permanently
   // deletes the Pokemon, see releaseRecord().
   Release = 7,
 };
 
 struct CollectionActionSet {
-  std::array<CollectionAction, 6> items{};
+  std::array<CollectionAction, 8> items{};
   uint8_t count = 0;
 };
 
@@ -124,8 +127,14 @@ bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, Encounte
 // Pokedex forever, matching every mainline game.
 bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutation& mutation);
 bool resolveEvolution(PokemonState& state, PokemonRecord& record, EvolutionChoice choice, RecordMutation& mutation);
+// The Level-trigger rule this Pokemon already meets (level >= minimumLevel),
+// or nullptr. Drives the manual "Evolve" action.
+const EvolutionRule* levelEvolutionAvailable(const PokemonRecord& record);
+// Evolves `record` right now via its available Level rule, without waiting for
+// a queued prompt (and dropping any prompt already queued for it).
+bool evolveByLevelNow(PokemonState& state, PokemonRecord& record, RecordMutation& mutation);
 bool useEvolutionItem(PokemonState& state, PokemonRecord& record, EvolutionItem item, RecordMutation& mutation);
-CollectionActionSet collectionActions(bool party, uint8_t partyCount);
+CollectionActionSet collectionActions(bool party, uint8_t partyCount, bool canEvolve = false);
 
 // Rolls a gender for a species by its real gender ratio, the same rule a
 // wild encounter uses (chooseGender(), file-local to PokemonGame.cpp) -

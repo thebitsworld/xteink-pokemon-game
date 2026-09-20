@@ -211,7 +211,7 @@ void SlideshowActivity::renderCurrentImage() {
   if (FsHelpers::hasPngExtension(filePath)) {
     ImageDimensions dims;
     if (!PngToFramebufferConverter::getDimensionsStatic(filePath, dims)) {
-      drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
+      drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
       return;
     }
 
@@ -277,20 +277,20 @@ void SlideshowActivity::renderCurrentImage() {
     }
     if (!success) {
       renderer.setRenderMode(GfxRenderer::BW);
-      drawSlideshowMessage(renderer, mappedInput, "Invalid PNG File");
+      drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
     }
     return;
   }
 
   HalFile file;
   if (!Storage.openFileForRead("SLDSHW", filePath, file)) {
-    drawSlideshowMessage(renderer, mappedInput, "Could not open file");
+    drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
     return;
   }
 
   Bitmap bitmap(file, true, renderer.supportsAbsoluteGrayscale());
   if (bitmap.parseHeaders() != BmpReaderError::Ok) {
-    drawSlideshowMessage(renderer, mappedInput, "Invalid BMP File");
+    drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
     file.close();
     return;
   }

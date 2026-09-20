@@ -1,5 +1,36 @@
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-20
+
+### Added
+
+- Evolve now: when a Pokémon has already reached the level it evolves at, Summary > Actions shows an "Evolve now" row (after asking for confirmation), so you no longer have to wait for the evolution prompt.
+
+### Fixed
+
+- Text cut off on several screens, mostly on the narrower X4 Pro panel: the Move-order screen and the battle Switch list now show full Pokémon names (level on its own line), the Pokédex shows Caught/Seen next to the number instead of squeezing the name, item lists move the "× count" to its own line when a long name leaves no room, and confirmation questions (Release, Evolve now) wrap onto a second line instead of running off the screen.
+
+### Fixed (translations)
+
+- The Trainer Card, Hall of Fame, vitamin, "Evolve now" and Photo Slideshow folder texts were only available in English; they are now translated into all 27 other languages. The Slideshow's image error message (previously always English) is now translated too.
+
+### Changed
+
+- The list of things waiting for you (wild encounters, items, evolutions, moves to learn) now holds 10 instead of 3, so it fills up far less often.
+- Evolving no longer queues one "learn this move?" prompt per move the new form could know. Moves go straight into any empty move slot, and any others can be learned from Party > Actions > Moves at any time.
+- Saves are upgraded to a new format the first time the game writes one. Older saves load as normal with everything intact; after the upgrade, an older version of the firmware will no longer read that save.
+
+## [0.29.1] - 2026-09-20
+
+### Changed
+
+- Choosing who should use an evolution stone or Link Cable now shows each Pokémon's full name and what it would evolve into, like the TM/HM screen does.
+
+### Fixed
+
+- A level 100 Pokémon that was already past its evolution level never got the evolution prompt after a battle. It now does.
+- An evolution stone or Link Cable said "has no effect" on a Pokémon that had just evolved and still had move-learning prompts waiting (for example a fresh Weepinbell with a Leaf Stone). Only a pending evolution prompt for that same Pokémon blocks it now.
+
 ## [0.29.0] - 2026-09-19
 
 ### Added

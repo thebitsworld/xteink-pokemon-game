@@ -363,7 +363,7 @@ ServiceStatus PokemonService::resolveEvolution(const EvolutionChoice choice) {
   // has been walked through yet - queueMoveLearnIfNeeded() already knows
   // how to silently fill an empty slot or queue a replace-prompt if the
   // moveset is full, so no separate handling is needed for either case.
-  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp));
+  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp), false);
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to resolve evolution");
     return ServiceStatus::StorageError;
@@ -453,6 +453,24 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
     return TeachMoveOutcome::Failed;
   }
   return TeachMoveOutcome::Learned;
+}
+
+ServiceStatus PokemonService::evolveNow(const uint32_t recordId) {
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  PokemonRecord record{};
+  if (!store_.readRecord(recordId, record)) return ServiceStatus::NotFound;
+  RecordMutation mutation{};
+  if (!pokemon::evolveByLevelNow(state, record, mutation)) return ServiceStatus::NotApplicable;
+  // Only fills empty slots - anything past that is left to the Moves screen
+  // instead of queueing a prompt per move.
+  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp), false);
+  if (!store_.commit(state, mutation)) {
+    LOG_ERR("PokemonService", "Failed to evolve now");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
 }
 
 TeachMoveOutcome PokemonService::teachMoveAndConsumeItem(const uint32_t recordId, const uint8_t moveId,
@@ -754,7 +772,7 @@ ServiceStatus PokemonService::useEvolutionItem(const uint32_t recordId, const Ev
   // Same reasoning as resolveEvolution()'s own call: a stone/Link-Cable-item
   // evolution needs its own species' level-appropriate moves backfilled
   // too, since it's an entirely different learnset from the pre-evolution.
-  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp));
+  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp), false);
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to use evolution item");
     return ServiceStatus::StorageError;
@@ -1069,7 +1087,8 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
 }
 
 void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader,
-                                            const uint8_t previousLevel, const uint8_t currentLevel) {
+                                            const uint8_t previousLevel, const uint8_t currentLevel,
+                                            const bool queuePrompts) {
   if (currentLevel <= previousLevel) return;
   const BattleRecordEntry* existing = battleStore_.findEntry(leader.recordId);
   if (existing == nullptr) return;
@@ -1101,10 +1120,10 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
       placed = true;
       break;
     }
-    if (!placed) {
+    if (!placed && queuePrompts) {
       const PendingEvent event{leader.recordId, learn.moveId,        learn.level,
                                Gender::Unknown, EvolutionItem::None, PendingEventKind::MoveLearn};
-      enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one
+      enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one (the Moves screen still offers it)
     }
   }
   if (changed) battleStore_.upsertEntry(entry);
@@ -1172,10 +1191,14 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   }
 
   const uint8_t previousLevel = levelForXp(record.totalXp);
-  if (record.totalXp >= MAXIMUM_TOTAL_XP) return ServiceStatus::Ok;  // already level 100 - nothing to gain
-
-  const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
-  record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
+  // At level 100 there is no XP left to gain, but a Pokemon that is already
+  // past its evolution level still deserves its prompt, so that check below
+  // must not be skipped.
+  const bool atMaxXp = record.totalXp >= MAXIMUM_TOTAL_XP;
+  if (!atMaxXp) {
+    const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
+    record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
+  }
   const uint8_t currentLevel = levelForXp(record.totalXp);
 
   PokemonState state{};
@@ -1184,6 +1207,7 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   queueMoveLearnIfNeeded(state, record, previousLevel, currentLevel);
   bool evolutionQueued = false;
   if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return ServiceStatus::StorageError;
+  if (atMaxXp && !evolutionQueued) return ServiceStatus::Ok;  // nothing changed - skip the write
   const RecordMutation mutation{record.recordId, record, RecordMutationKind::Replace};
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to award battle XP");
