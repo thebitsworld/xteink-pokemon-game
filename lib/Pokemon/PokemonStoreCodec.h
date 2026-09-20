@@ -15,7 +15,8 @@ constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V4 = 4;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V5 = 5;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V6 = 6;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V7 = 7;
-constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 8;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V8 = 8;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 9;
 constexpr size_t POKEMON_STATE_V1_BYTES = 96;
 constexpr size_t POKEMON_STATE_V2_BYTES = 116;
 // v3 appends bagCounts[POKEMON_BAG_SLOT_COUNT] and battleProgress (uint16_t)
@@ -34,12 +35,16 @@ constexpr size_t POKEMON_STATE_V6_BYTES = POKEMON_STATE_V5_BYTES + POKEMON_BATTL
 // see PokemonState in PokemonTypes.h.
 constexpr size_t POKEMON_STATE_V7_BYTES = POKEMON_STATE_V6_BYTES + POKEMON_VITAMIN_ITEM_COUNT;
 // v8 (bigger pending-event queue) appends the pending-event slots past the
-// original 3 (PENDING_EVENT_CAPACITY - PENDING_EVENT_LEGACY_SLOTS of them,
+// original 3 (PENDING_EVENT_V8_CAPACITY - PENDING_EVENT_LEGACY_SLOTS of them,
 // PENDING_EVENT_BYTES each) after the v7 layout. The first 3 stay where they
 // always were, so growing the queue never shifts any other field.
 constexpr size_t POKEMON_PENDING_EVENT_BYTES = 10;
+constexpr size_t POKEMON_STATE_V8_BYTES =
+    POKEMON_STATE_V7_BYTES + (PENDING_EVENT_V8_CAPACITY - PENDING_EVENT_LEGACY_SLOTS) * POKEMON_PENDING_EVENT_BYTES;
+// v9 (bigger pending-event queue, again) appends the further slots past v8's
+// own fixed 10, same append-only pattern - v8's own region never shifts.
 constexpr size_t POKEMON_STATE_BYTES =
-    POKEMON_STATE_V7_BYTES + (PENDING_EVENT_CAPACITY - PENDING_EVENT_LEGACY_SLOTS) * POKEMON_PENDING_EVENT_BYTES;
+    POKEMON_STATE_V8_BYTES + (PENDING_EVENT_CAPACITY - PENDING_EVENT_V8_CAPACITY) * POKEMON_PENDING_EVENT_BYTES;
 using StateBytes = std::array<uint8_t, POKEMON_STATE_BYTES>;
 
 constexpr size_t POKEMON_SNAPSHOT_HEADER_BYTES = 24;
