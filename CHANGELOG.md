@@ -10,6 +10,10 @@
 
 - Text cut off on several screens, mostly on the narrower X4 Pro panel: the Move-order screen and the battle Switch list now show full Pokémon names (level on its own line), the Pokédex shows Caught/Seen next to the number instead of squeezing the name, item lists move the "× count" to its own line when a long name leaves no room, and confirmation questions (Release, Evolve now) wrap onto a second line instead of running off the screen.
 
+### Fixed (translations)
+
+- The Trainer Card, Hall of Fame, vitamin, "Evolve now" and Photo Slideshow folder texts were only available in English; they are now translated into all 27 other languages. The Slideshow's image error message (previously always English) is now translated too.
+
 ### Changed
 
 - The list of things waiting for you (wild encounters, items, evolutions, moves to learn) now holds 10 instead of 3, so it fills up far less often.
