@@ -178,6 +178,17 @@ bool removeBattleEntry(BattleStoreState& state, const uint32_t recordId) {
   return false;
 }
 
+bool evictBattleEntryNotIn(BattleStoreState& state, const std::span<const uint32_t> keepIds) {
+  const size_t count = battleEntryCount(state);
+  for (size_t index = 0; index < count; ++index) {
+    const uint32_t recordId = state.entries[index].recordId;
+    bool keep = false;
+    for (const uint32_t keepId : keepIds) keep = keep || keepId == recordId;
+    if (!keep) return removeBattleEntry(state, recordId);
+  }
+  return false;
+}
+
 bool validateBattleStoreState(const BattleStoreState& state) {
   uint32_t previousRecordId = 0;
   bool sawEmptySlot = false;

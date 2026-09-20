@@ -45,6 +45,9 @@ class PokemonBattleStore {
   // false (nothing written) only if NOT ONE entry could be applied.
   bool upsertEntries(std::span<const BattleRecordEntry> entries);
   bool removeEntry(uint32_t recordId);
+  // Frees one slot for a Pokemon that needs a fresh entry - see
+  // PokemonBattleStoreCodec.h's evictBattleEntryNotIn() doc comment.
+  bool evictEntryNotIn(std::span<const uint32_t> keepIds);
   // Writes an empty state (same double-buffer commit as upsertEntry/
   // removeEntry - lands on the currently-inactive slot, verified, then flips
   // active). Used by PokemonService::reset() so a fresh game doesn't read

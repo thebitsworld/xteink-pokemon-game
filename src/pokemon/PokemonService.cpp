@@ -190,21 +190,16 @@ ServiceStatus PokemonService::depositPokemon(const uint32_t recordId) {
     LOG_ERR("PokemonService", "Failed to deposit Pokemon");
     return ServiceStatus::StorageError;
   }
-  // Frees this recordId's slot in the battle-store side file - without
-  // this, the file's small fixed capacity (POKEMON_BATTLE_MAX_ENTRIES, 6 -
-  // matching the party's own size, since only the active party ever needs
-  // live battle state at all) fills up with every DISTINCT Pokemon that's
-  // ever fought, forever, across the save's whole lifetime; a 7th distinct
-  // fighter would then hard-fail withdrawPokemon() with StorageError. A
-  // small, deliberate simplification vs. the real games: this Pokemon's
-  // exact HP/status/PP get reset to full/no-status/max the next time it's
-  // withdrawn and fights (loadBattleEntry() synthesizes a fresh entry from
-  // its species/level, same as if it had never fought before), rather than
-  // being preserved exactly through PC storage the way the real games do -
-  // judged a reasonable trade for fixing a hard capacity bug. Best-effort:
-  // a rare SD write failure here shouldn't block the deposit itself, which
-  // already succeeded above.
-  battleStore_.removeEntry(recordId);
+  // The battle-store entry (moveset, PP, PP Up, HP, status) is deliberately
+  // left alone - a Pokemon that has fought before keeps all of that exactly
+  // as it was through a trip to the Box, the same as the real games (round
+  // 10 audit bug 1; this used to call battleStore_.removeEntry() here,
+  // which discarded a TM/HM-taught move or a spent PP Up the moment a
+  // Pokemon was deposited, and let a Deposit+Withdraw round trip fully heal
+  // it for free as a side effect). The store's fixed capacity
+  // (POKEMON_BATTLE_MAX_ENTRIES, one per party slot) is instead reclaimed
+  // on actual demand: loadBattleEntry() evicts a non-party entry only when
+  // a current party member genuinely needs a new one and the store is full.
   return ServiceStatus::Ok;
 }
 
@@ -396,16 +391,24 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
   if (replaceSlot >= 0 && replaceSlot < static_cast<int>(BATTLE_MOVE_SLOTS)) {
     BattleRecordEntry entry{};
     if (loadBattleEntry(event.recordId, entry) != ServiceStatus::Ok) return ServiceStatus::StorageError;
-    const MoveData* move = moveData(event.speciesId);
-    entry.moves[replaceSlot] = event.speciesId;
-    // maxPpFor(), not the move's raw base PP - PP Up is tied to the slot, not
-    // the move identity, so a slot that's already been PP-Up'd keeps that
-    // bonus for whatever move ends up there (entry.ppUp[replaceSlot] itself
-    // is left untouched).
-    entry.pp[replaceSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[replaceSlot]);
-    if (!battleStore_.upsertEntry(entry)) {
-      LOG_ERR("PokemonService", "Failed to save learned move");
-      return ServiceStatus::StorageError;
+    // This move can have been learned some other way (Moves screen, a TM/HM)
+    // while this prompt was still sitting in the queue - writing it again
+    // into replaceSlot would leave it duplicated in two slots at once
+    // (round 10 audit bug 2). Just drop the now-moot prompt instead.
+    bool alreadyKnown = false;
+    for (const uint8_t known : entry.moves) alreadyKnown = alreadyKnown || known == event.speciesId;
+    if (!alreadyKnown) {
+      const MoveData* move = moveData(event.speciesId);
+      entry.moves[replaceSlot] = event.speciesId;
+      // maxPpFor(), not the move's raw base PP - PP Up is tied to the slot, not
+      // the move identity, so a slot that's already been PP-Up'd keeps that
+      // bonus for whatever move ends up there (entry.ppUp[replaceSlot] itself
+      // is left untouched).
+      entry.pp[replaceSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[replaceSlot]);
+      if (!battleStore_.upsertEntry(entry)) {
+        LOG_ERR("PokemonService", "Failed to save learned move");
+        return ServiceStatus::StorageError;
+      }
     }
   }
 
@@ -907,8 +910,23 @@ ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRec
 
   const BattleRecordEntry synthesized = synthesizeBattleEntry(record, ensureIvEv(recordId));
   if (!battleStore_.upsertEntry(synthesized)) {
-    LOG_ERR("PokemonService", "Failed to persist synthesized battle entry");
-    return ServiceStatus::StorageError;
+    // Only reachable when every one of the store's POKEMON_BATTLE_MAX_ENTRIES
+    // slots is already taken - since deposit/release no longer proactively
+    // free a slot (round 10 audit bug 1), a long-played save can fill all of
+    // them with Pokemon that are no longer even in the party. This function
+    // is only ever called for a genuine current party member (see its
+    // callers), so it's always safe to evict any entry that ISN'T one - and
+    // since the party holds at most PARTY_SIZE == POKEMON_BATTLE_MAX_ENTRIES
+    // members and this one doesn't have an entry yet, at least one such
+    // entry is always present to reclaim.
+    PokemonState state{};
+    if (loadReadyState(state) == ServiceStatus::Ok) {
+      battleStore_.evictEntryNotIn(std::span<const uint32_t>(state.partyRecordIds.data(), PARTY_SIZE));
+    }
+    if (!battleStore_.upsertEntry(synthesized)) {
+      LOG_ERR("PokemonService", "Failed to persist synthesized battle entry");
+      return ServiceStatus::StorageError;
+    }
   }
   output = synthesized;
   return ServiceStatus::Ok;
