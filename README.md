@@ -34,6 +34,14 @@ These are current X3 simulator captures using the artwork from `xteink-pokemon-s
 | --- | --- |
 | ![Pokédex list](docs/screenshots/pokedex.png) | ![Bulbasaur Pokédex entry](docs/screenshots/pokedex-detail.png) |
 
+| Battle | Bag |
+| --- | --- |
+| ![Wild Pidgeotto battle](docs/screenshots/battle.png) | ![Bag Medicine items](docs/screenshots/bag.png) |
+
+| Trainer Card |
+| --- |
+| ![Trainer Card with badges](docs/screenshots/trainer-card.png) |
+
 ## How to play
 
 1. Choose Bulbasaur, Charmander, Squirtle, or Pikachu as your first partner. Choose its gender and give it a nickname if you want one.
