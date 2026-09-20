@@ -20,7 +20,7 @@ Only active reading counts — leaving a book open without turning pages does no
 
 ## Screenshots
 
-These are current X3 simulator captures using the artwork included in the full install.
+These are current X3 simulator captures using the artwork from `xteink-pokemon-sd-card-assets.zip`.
 
 | Starter selection | Pokémon menu |
 | --- | --- |
@@ -32,7 +32,7 @@ These are current X3 simulator captures using the artwork included in the full i
 
 | Pokédex | Pokédex entry |
 | --- | --- |
-| ![Pokédex list](docs/screenshots/pokedex.png) | ![Charmander Pokédex entry](docs/screenshots/pokedex-detail.png) |
+| ![Pokédex list](docs/screenshots/pokedex.png) | ![Bulbasaur Pokédex entry](docs/screenshots/pokedex-detail.png) |
 
 ## How to play
 
