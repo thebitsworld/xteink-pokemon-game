@@ -14,6 +14,48 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
+## Tối ưu flash — CHỈ LÀM KHI THIẾU BỘ NHỚ (ghi lại 2026-09-20, tại `v0.30.0`)
+
+**Hiện trạng đo thật** (`pio run -e pokemon-x3` ở tag `v0.30.0`): Flash 96,2%
+(6.304.211 / 6.553.600 B), ảnh OTA còn trống **235.264 B**; RAM 22,5%. X4 Pro
+thường còn dư hơn X3 khoảng 40-50 KB. Chưa cần cắt gì; xử lý khi còn trống quá ít.
+
+**Phân bổ (từ `nm -S` trên `.pio/build/pokemon-x3/firmware.elf`):** font tích hợp
+1,47 MB (bitmap + bảng glyph; 39 file font Bitter/Lexend Deca/Inter), chuỗi giao
+diện 529 KB (28 ngôn ngữ, mỗi ngôn ngữ 17-31 KB), bảng ngắt từ 350 KB (Đức 206 KB,
+Nga 33, Anh 27, Thụy Điển 24, Ukraina 21, Ba Lan 16), trang web tải lên 168 KB
+(FilesPageHtml 63 KB, jszip 28 KB), dữ liệu Pokémon 132 KB (đã nhỏ, không đụng).
+Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-IDF).
+
+**Các cách cắt giảm, theo thứ tự nên thử (mức tiết kiệm là ước lượng, cần build đo lại):**
+1. **Bảng ngắt từ tiếng Đức (~200 KB):** bỏ hoặc chuyển sang thẻ SD; ảnh hưởng
+   người dùng Việt gần như không có. (Mã CrossInk gốc → lệch nhánh gốc.) Nga /
+   Thụy Điển / Ukraina / Ba Lan cũng tương tự, 16-33 KB mỗi cái.
+2. **Log gỡ lỗi (~50-150 KB, chưa đo):** `ENABLE_SERIAL_LOG` đang bật cả ở bản phát
+   hành, 2.084 chỗ ghi log. Tắt hoặc hạ `LOG_LEVEL` ở bản phát hành; đổi lại khó
+   chẩn đoán lỗi trên máy thật.
+3. **Font tích hợp (200-500 KB):** bỏ các biến thể ít dùng (đậm-nghiêng, cỡ 14/16)
+   hoặc cả một họ font. Người dùng vẫn tải được font SD. Cần chọn họ font giữ lại.
+4. **Trang web tải lên (60-90 KB):** nén sẵn hoặc chuyển ra thẻ SD (mã gốc).
+5. **Tuỳ chọn biên dịch (vài %):** thử LTO / kiểm tra `-Os`; làm trên branch riêng,
+   rủi ro lỗi khó gỡ trên ESP32.
+6. **Gỡ bớt ngôn ngữ giao diện (17-25 KB mỗi ngôn ngữ, xếp cuối):** chữ Cyrillic,
+   Hebrew, Ả Rập tốn nhất (2 byte mỗi ký tự). Đã từng thử gỡ Nga/Ukraina/Belarus/
+   Kazakh/Do Thái/Ả Rập: tiết kiệm chưa đáng kể so với công sức nên user quyết định
+   không giữ thay đổi đó.
+
+**Giới hạn cần nhớ khi thêm bản dịch:** `scripts/gen_i18n.py` giới hạn mỗi ngôn ngữ
+**32.767 byte** dữ liệu chữ. Tiếng Nga/Ukraina/Belarus/Kazakh đã sát giới hạn
+(~32,3 KB), tiếng Ả Rập ~31,6 KB. Muốn dịch đầy đủ các ngôn ngữ đó phải đổi định
+dạng offset của bộ tạo chuỗi (thêm ~14 KB flash).
+
+**Công việc dịch đã làm nhưng chưa dùng:** branch `backup/i18n-26-languages` (local,
+chưa push) giữ bản dịch ~5.800 chuỗi CrossInk còn thiếu cho 26 ngôn ngữ ngoài tiếng
+Việt (tiếng Việt đã có trong `v0.30.0`). Dùng nó thì flash tăng ~150 KB (X3 ~98,4%,
+còn ~92 KB) nên chỉ lấy khi đã cắt giảm được bộ nhớ ở các mục trên.
+
+---
+
 ## Round 8 (2026-09-19, tại `v0.28.0`) — rà soát toàn code, user đã triage
 
 **Đã fix (`v0.28.2`, trên branch, chưa merge vào `main`):**
