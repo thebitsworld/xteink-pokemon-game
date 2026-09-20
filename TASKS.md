@@ -49,10 +49,10 @@ Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-
 (~32,3 KB), tiếng Ả Rập ~31,6 KB. Muốn dịch đầy đủ các ngôn ngữ đó phải đổi định
 dạng offset của bộ tạo chuỗi (thêm ~14 KB flash).
 
-**Công việc dịch đã làm nhưng chưa dùng:** branch `backup/i18n-26-languages` (local,
-chưa push) giữ bản dịch ~5.800 chuỗi CrossInk còn thiếu cho 26 ngôn ngữ ngoài tiếng
-Việt (tiếng Việt đã có trong `v0.30.0`). Dùng nó thì flash tăng ~150 KB (X3 ~98,4%,
-còn ~92 KB) nên chỉ lấy khi đã cắt giảm được bộ nhớ ở các mục trên.
+**Bản dịch 26 ngôn ngữ đã bị bỏ (2026-09-20):** từng dịch ~5.800 chuỗi CrossInk còn thiếu
+cho 26 ngôn ngữ ngoài tiếng Việt (tăng ~150 KB flash, X3 lên ~98,4%), nhưng user quyết
+định không giữ; branch đã xoá. Các chuỗi đó vẫn hiện tiếng Anh ở ngôn ngữ ngoài tiếng
+Việt và Pokémon/Slideshow. Nếu cần dịch lại sau này, phải cắt giảm bộ nhớ trước.
 
 ---
 
