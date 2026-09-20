@@ -23,8 +23,8 @@ cho hàng đợi 10 chỗ nên bỏ sót chỗ 9-10 (tôi gây ra ở save v8). 
    hàng đợi vĩnh viễn.** `releaseRecord()` chỉ xoá sự kiện Tiến hóa (`removePendingEvolutionsForRecord`),
    không xoá `MoveLearn` của record đó. Sau đó `resolveMoveLearn()` không đọc được record →
    trả `StorageError`, UI chỉ báo lỗi và sự kiện vẫn nằm ở đầu hàng, chặn mọi encounter/item
-   sau nó. Đã tái hiện bằng test (patch: `/tmp/claude-1000/repro-movelearn.patch`, gồm 1 test
-   `ReleasingAPokemonWithAQueuedMoveLearnDoesNotLeaveTheQueueStuck` hiện đang FAIL).
+   sau nó. Đã tái hiện bằng test tạm (không giữ lại trong repo): tạo party 2 con, xếp `MoveLearn` cho con thứ 2,
+   `depositPokemon(2)` rồi `releasePokemon(2)` → sự kiện vẫn ở đầu hàng.
    Cách fix đề xuất: xoá cả `MoveLearn` trong `releaseRecord()`, và `resolveMoveLearn()` gặp record
    không tồn tại thì bỏ sự kiện (pop) thay vì trả lỗi.
 2. **[Thấp-Trung bình] Bấm Cancel tiến hóa thì sau MỖI trận thắng lại bị hỏi lại.** Do kiểm tra tiến
