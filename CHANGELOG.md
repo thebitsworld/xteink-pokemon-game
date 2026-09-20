@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- The stat names shown in the Pokémon Summary, in battle messages ("Attack rose!") and after using a vitamin (HP, Attack, Defense, Special, Speed, Accuracy, Evasion), and the Pokédex "No." label, were always English; they are now translated in every language. Move, item and species names stay in English.
+
 ## [0.30.0] - 2026-09-20
 
 ### Added
