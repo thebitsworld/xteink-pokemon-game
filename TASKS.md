@@ -102,6 +102,25 @@ Không phát hiện bug mới trong lượt này.
 
 ---
 
+## Ý tưởng tính năng mới, đợt 2 (2026-09-21, tại `v1.0.0`) — CHƯA QUYẾT ĐỊNH LÀM
+
+Từ lượt rà soát so với các bản Pokémon khác (không tìm thêm bug mới). Ràng buộc: core loop
+dựa trên thời gian đọc sách, flash X3 còn ~235 KB. Game hiện chưa có: nature, trứng,
+friendship, chuỗi ngày đọc, achievement.
+
+Ưu tiên (mình đề xuất 1, 5, 2 - thưởng thói quen đọc, không đụng engine chiến đấu):
+1. **Chuỗi ngày đọc (streak)** - đọc liên tiếp N ngày nhận bonus (tăng tỉ lệ encounter / Rare Candy). Chi phí thấp: 2 trường save (ngày cuối, số ngày liên tiếp), cần ngày từ RTC.
+2. **Trứng (Egg)** - thay encounter, nở sau N phút đọc. Trung bình: record/cờ mới + màn hình.
+3. **Nature** (25 tính cách, +-10% một chỉ số) - trung bình: 1 byte record hoặc side-file, ảnh hưởng `battleWorkingStat`.
+4. **Friendship/happiness** - tăng khi dẫn đầu đội lúc đọc, mở tiến hóa Eevee/Golbat/Chansey. Trung bình: side-file mới.
+5. **Achievement/huy hiệu đọc sách** (số sách/giờ/trang) - thấp: mở rộng Trainer Card.
+6. **Safari Zone** - cao: cần cơ chế battle riêng.
+7. **Pokédex theo vùng / lọc theo hệ** - thấp: chỉ UI.
+
+Việc còn nợ: click-test UI Hall of Fame và Release trên simulator/máy thật (không nằm trong native test).
+
+---
+
 ## Tối ưu flash — CHỈ LÀM KHI THIẾU BỘ NHỚ (ghi lại 2026-09-20, tại `v0.30.0`)
 
 **Hiện trạng đo thật** (`pio run -e pokemon-x3` ở tag `v0.30.0`): Flash 96,2%
