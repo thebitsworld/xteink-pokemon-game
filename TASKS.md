@@ -307,9 +307,14 @@ user thấy Slideshow "cải thiện đáng kể" dù chưa sửa gì trong
 BMP) dùng đúng pattern của `SleepActivity.cpp` (`direct = absolute &&
 supportsDirectGrayscale()`) để tận dụng nốt — trước đó code này chỉ check
 `supportsAbsoluteGrayscale()` (đúng hướng "làm giống X4 Pro" từ lần fix cũ,
-nhưng chưa đủ vì thiếu bước nâng cấp lên Direct). Việc còn lại (chưa làm):
-`BmpViewerActivity.cpp` (màn xem ảnh trong File Browser) có khả năng cùng
-vấn đề, chưa kiểm tra/cập nhật.
+nhưng chưa đủ vì thiếu bước nâng cấp lên Direct). **Đã kiểm tra và sửa luôn
+`BmpViewerActivity.cpp`** (màn xem ảnh trong File Browser, commit `10fbf9c6`)
+— nhánh BMP có đúng lỗ hổng tương tự, đã fix cùng cách. Nhánh PNG của file
+này (`renderPngImage()`) thì khác kiến trúc hẳn — chưa từng làm nhiều lớp
+grayscale (chỉ decode 1 lần + `FAST_REFRESH`, không có LSB/MSB) nên không có
+gì để nâng lên Direct — muốn PNG trong File Browser cũng đẹp như PNG trong
+Slideshow thì phải làm thêm tính năng mới (thêm luồng multi-pass), không phải
+sửa nhỏ như lần này — để đó, chưa làm.
 
 ---
 
