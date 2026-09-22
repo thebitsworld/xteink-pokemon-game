@@ -297,10 +297,11 @@ void SettingsActivity::rebuildSettingsLists() {
 
   // Pick up any fonts uploaded/deleted over the web server since the last
   // reader activity ran — otherwise the font-family picker shows stale list.
-  sdFontSystem.refreshIfDirty();
+  const bool needsFonts = activeSubmenu == SettingAction::ReaderFontOptions;
+  if (needsFonts) sdFontSystem.refreshIfDirty();
 
   dictionaryRegistry.refreshIfDirty();
-  const auto allSettings = getSettingsList(&sdFontSystem.registry(), &dictionaryRegistry);
+  const auto allSettings = getSettingsList(needsFonts ? &sdFontSystem.registry() : nullptr, &dictionaryRegistry);
   displaySettings = buildGroupedDisplaySettingsList(allSettings);
 #ifndef SIMULATOR
   if (BoardConfig::isX4Pro() || CROSSINK_APP_DEVICE_X4CLASSIC) {
@@ -326,6 +327,8 @@ void SettingsActivity::rebuildSettingsLists() {
   controlsHomeButtonSettings = buildControlsHomeButtonSettingsList(allSettings);
   controlsTapsGesturesSettings = buildControlsTapsGesturesSettingsList(allSettings);
   controlsTwoFingerSwipeSettings = buildControlsTwoFingerSwipeSettingsList(allSettings);
+  const size_t expectedSideButtonCount =
+      controlsSideButtonBaseCount + (hasSideButtonChordSetting(allSettings) ? 1u : 0u);
 #if CROSSINK_APP_CAP_TOUCH
   if (!gpio.hasTouch()) {
     controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
@@ -339,7 +342,6 @@ void SettingsActivity::rebuildSettingsLists() {
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   const size_t expectedFrontButtonCount = hasTouch ? 0u : controlsFrontButtonCount;
-  const size_t expectedSideButtonCount = controlsSideButtonBaseCount + (hasTouch ? 1u : 0u);
 #else
   controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
   controlsSideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
@@ -349,7 +351,6 @@ void SettingsActivity::rebuildSettingsLists() {
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   constexpr size_t expectedFrontButtonCount = controlsFrontButtonCount;
-  constexpr size_t expectedSideButtonCount = controlsSideButtonBaseCount;
 #endif
   if (controlsSettings.size() != expectedControlsCount ||
       (gpio.hasHomeKey() && controlsHomeButtonSettings.size() != controlsHomeButtonCount) ||
@@ -496,6 +497,7 @@ StrId SettingsActivity::activeSubmenuTitleId() const {
 void SettingsActivity::openSubmenu(SettingAction action) {
   parentSubmenu = activeSubmenu;
   activeSubmenu = action;
+  if (action == SettingAction::ReaderFontOptions) rebuildSettingsLists();
   setCurrentSettingsForCategory();
   selectedSettingIndex = 1;
   showSettingSelection = true;
@@ -611,7 +613,7 @@ void SettingsActivity::openWordSpacingPicker() {
 }
 
 void SettingsActivity::openLanguagePicker() {
-  const int languageCount = static_cast<int>(getLanguageCount());
+  const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
 
   std::vector<std::string> options;
   options.reserve(languageCount);
@@ -626,7 +628,7 @@ void SettingsActivity::openLanguagePicker() {
   int currentIndex = (it != end) ? static_cast<int>(std::distance(begin, it)) : 0;
 
   optionPopup.show(StrId::STR_LANGUAGE, options, currentIndex, [this](int selectedIndex) {
-    const int languageCount = static_cast<int>(getLanguageCount());
+    const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
     if (selectedIndex < 0 || selectedIndex >= languageCount) {
       requestUpdate();
       return;

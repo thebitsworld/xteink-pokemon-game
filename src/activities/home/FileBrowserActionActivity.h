@@ -29,6 +29,7 @@ enum class FileBrowserAction : int {
   UnpinBootFavorite = 17,
   SetSlideshowFolder = 18,
   ClearSlideshowFolder = 19,
+  Rename = 20,
 };
 
 class FileBrowserActionActivity final : public Activity {
