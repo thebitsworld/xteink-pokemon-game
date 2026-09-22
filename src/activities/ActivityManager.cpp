@@ -830,6 +830,10 @@ void ActivityManager::popActivity() {
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
 
+bool ActivityManager::needsFullPowerWhilePreventingSleep() const {
+  return !currentActivity || currentActivity->needsFullPowerWhilePreventingSleep();
+}
+
 bool ActivityManager::requiresExclusiveStorageLoop() const {
   return currentActivity && currentActivity->requiresExclusiveStorageLoop();
 }

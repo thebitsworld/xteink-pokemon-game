@@ -573,10 +573,10 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     add(buildSleepScreenSetting());
     add(SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
                           {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY));
-    add(SettingInfo::Value(
-        StrId::STR_SLIDESHOW_INTERVAL, &CrossPointSettings::slideshowIntervalMinutes,
-        {CrossPointSettings::MIN_SLIDESHOW_INTERVAL_MINUTES, CrossPointSettings::MAX_SLIDESHOW_INTERVAL_MINUTES, 1},
-        "slideshowIntervalMinutes", StrId::STR_CAT_DISPLAY));
+    add(SettingInfo::Value16(
+        StrId::STR_SLIDESHOW_INTERVAL, &CrossPointSettings::slideshowIntervalSeconds,
+        {CrossPointSettings::MIN_SLIDESHOW_INTERVAL_SECONDS, CrossPointSettings::MAX_SLIDESHOW_INTERVAL_SECONDS, 10},
+        "slideshowIntervalSeconds", StrId::STR_CAT_DISPLAY));
     add(SettingInfo::Enum(StrId::STR_SLIDESHOW_DISPLAY_MODE, &CrossPointSettings::slideshowScaleMode,
                           {StrId::STR_FIT, StrId::STR_CROP}, "slideshowScaleMode", StrId::STR_CAT_DISPLAY));
     add(SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,

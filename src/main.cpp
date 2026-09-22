@@ -1607,9 +1607,15 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (userInputReceived || activityManager.preventAutoSleep()) {
+  if (userInputReceived) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
+  } else if (activityManager.preventAutoSleep()) {
+    // Blocking sleep alone doesn't reset the inactivity timer (some activities,
+    // e.g. a running slideshow, deliberately stay non-idle for a long time
+    // without any real user input) - but most preventAutoSleep() users are
+    // doing active network/IO work and still need full CPU speed throughout.
+    if (activityManager.needsFullPowerWhilePreventingSleep()) powerManager.setPowerSaving(false);
   }
   if (userInputReceived) {
     activityManager.notifyUserInput();
@@ -1715,7 +1721,7 @@ void loop() {
   }
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
-  if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
+  if (sleepTimeoutMs > 0 && !activityManager.preventAutoSleep() && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start

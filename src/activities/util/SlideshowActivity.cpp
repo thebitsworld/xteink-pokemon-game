@@ -33,8 +33,12 @@ void drawSlideshowMessage(GfxRenderer& renderer, const MappedInputManager& mappe
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
-// Minutes between auto-advances, converted to milliseconds for millis() comparisons.
-unsigned long intervalMs() { return static_cast<unsigned long>(SETTINGS.slideshowIntervalMinutes) * 60UL * 1000UL; }
+// Seconds between auto-advances, converted to milliseconds for millis() comparisons.
+unsigned long intervalMs() { return static_cast<unsigned long>(SETTINGS.slideshowIntervalSeconds) * 1000UL; }
+
+// Left running unattended (no real button/touch/swipe input, only timer-driven
+// auto-advances) for this long, the slideshow exits back to Home on its own.
+constexpr unsigned long AUTO_EXIT_IDLE_MS = 60UL * 60UL * 1000UL;
 
 }  // namespace
 
@@ -64,7 +68,7 @@ void SlideshowActivity::refreshMenuPopup() {
       (APP_STATE.slideshowFolderPath.empty() ? tr(STR_SLIDESHOW_FOLDER_NOT_SET) : APP_STATE.slideshowFolderPath);
 
   char intervalText[32];
-  snprintf(intervalText, sizeof(intervalText), tr(STR_SLEEP_TIMER_VALUE_FORMAT), SETTINGS.slideshowIntervalMinutes);
+  snprintf(intervalText, sizeof(intervalText), tr(STR_SECONDS_VALUE_FORMAT), SETTINGS.slideshowIntervalSeconds);
   const std::string intervalLabel = std::string(tr(STR_SLIDESHOW_INTERVAL)) + ": " + intervalText;
 
   const bool isCrop = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
@@ -120,15 +124,15 @@ void SlideshowActivity::openIntervalPicker() {
   startActivityForResult(
       std::make_unique<IntervalSelectionActivity>(
           renderer, mappedInput, "SlideshowMenuIntervalInterval", StrId::STR_SLIDESHOW_INTERVAL,
-          SETTINGS.slideshowIntervalMinutes, CrossPointSettings::MIN_SLIDESHOW_INTERVAL_MINUTES,
-          CrossPointSettings::MAX_SLIDESHOW_INTERVAL_MINUTES, 1, 5, StrId::STR_SLEEP_TIMER_VALUE_FORMAT,
+          SETTINGS.slideshowIntervalSeconds, CrossPointSettings::MIN_SLIDESHOW_INTERVAL_SECONDS,
+          CrossPointSettings::MAX_SLIDESHOW_INTERVAL_SECONDS, 10, 30, StrId::STR_SECONDS_VALUE_FORMAT,
           /*readerActivity=*/false, /*allowPowerAsConfirm=*/false, /*ignoreInitialConfirmRelease=*/true,
           /*showPercentValue=*/false, StrId::STR_NONE_OPT, /*overrideDisabledReaderTouchscreen=*/false,
           /*showTouchHeaderBackButton=*/true, /*valueFormatter=*/nullptr, /*tapStep=*/0,
           /*useReaderSlider=*/true),
       [this](const ActivityResult& result) {
         if (!result.isCancelled) {
-          SETTINGS.slideshowIntervalMinutes = static_cast<uint8_t>(std::get<IntervalResult>(result.data).value);
+          SETTINGS.slideshowIntervalSeconds = static_cast<uint16_t>(std::get<IntervalResult>(result.data).value);
           SETTINGS.saveToFile();
         }
         refreshMenuPopup();
@@ -192,6 +196,7 @@ void SlideshowActivity::startPlayback() {
   }
   screen = Screen::Playing;
   lastAdvanceMs = millis();
+  lastInteractionMs = millis();
   renderCurrentImage();
 }
 
@@ -414,12 +419,22 @@ void SlideshowActivity::loop() {
   if (swipe == MappedInputManager::SwipeDir::Left ||
       mappedInput.wasReleased(MappedInputManager::Button::Right) ||
       mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+    lastInteractionMs = millis();
     advanceImage(1);
     return;
   }
   if (swipe == MappedInputManager::SwipeDir::Right || mappedInput.wasReleased(MappedInputManager::Button::Left) ||
       mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+    lastInteractionMs = millis();
     advanceImage(-1);
+    return;
+  }
+
+  // Left running unattended - not the same as the normal auto-sleep timeout,
+  // which this activity deliberately blocks while Playing (see
+  // preventAutoSleep()) so the display keeps auto-advancing on its own.
+  if (millis() - lastInteractionMs >= AUTO_EXIT_IDLE_MS) {
+    activityManager.goHome();
     return;
   }
 

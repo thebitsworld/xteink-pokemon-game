@@ -1,3 +1,10 @@
+## [Unreleased]
+
+### Changed
+
+- Photo Slideshow now only forces full CPU speed while you're actually navigating it (manual next/previous, opening its menu) - between automatic image changes it lets the CPU idle down like everywhere else, saving battery over a long unattended slideshow. The image-change interval can now be set anywhere from 10 seconds to 10 minutes (was 1 to 60 minutes); if you had a custom interval set, it resets to the 5-minute default once after updating.
+- Photo Slideshow now exits back to Home on its own after 60 minutes with no button/touch/swipe input, so an unattended slideshow doesn't keep the screen awake (and the battery draining) indefinitely.
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

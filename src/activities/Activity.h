@@ -55,6 +55,12 @@ class Activity {
 
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  // Only consulted while preventAutoSleep() is true. Most preventAutoSleep()
+  // users are doing active network/IO work and need full CPU speed for the
+  // duration; an activity that's merely blocking deep-sleep while otherwise
+  // idle (e.g. a slideshow between auto-advances) can override this to false
+  // so the main loop still downclocks it after the normal idle timeout.
+  virtual bool needsFullPowerWhilePreventingSleep() { return true; }
   // While true, main-loop global controls and activity replacement are
   // suspended so an exclusive storage owner cannot race the filesystem.
   virtual bool requiresExclusiveStorageLoop() const { return false; }
