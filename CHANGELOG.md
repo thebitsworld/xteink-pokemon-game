@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- Photo Slideshow can now shuffle its images into random order instead of always showing them alphabetically (Slideshow's own menu, or Settings > Display > Random Order).
+
 ### Changed
 
 - Photo Slideshow now only forces full CPU speed while you're actually navigating it (manual next/previous, opening its menu) - between automatic image changes it lets the CPU idle down like everywhere else, saving battery over a long unattended slideshow. The image-change interval can now be set anywhere from 10 seconds to 10 minutes (was 1 to 60 minutes); if you had a custom interval set, it resets to the 5-minute default once after updating.

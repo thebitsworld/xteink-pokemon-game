@@ -579,6 +579,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         "slideshowIntervalSeconds", StrId::STR_CAT_DISPLAY));
     add(SettingInfo::Enum(StrId::STR_SLIDESHOW_DISPLAY_MODE, &CrossPointSettings::slideshowScaleMode,
                           {StrId::STR_FIT, StrId::STR_CROP}, "slideshowScaleMode", StrId::STR_CAT_DISPLAY));
+    add(SettingInfo::Toggle(StrId::STR_SLIDESHOW_RANDOM_ORDER, &CrossPointSettings::slideshowRandomOrder,
+                            "slideshowRandomOrder", StrId::STR_CAT_DISPLAY));
     add(SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
                           {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
                           "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY));

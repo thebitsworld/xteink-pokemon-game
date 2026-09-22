@@ -531,9 +531,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
-  // Photo slideshow: seconds between images, and Fit/Crop display mode.
+  // Photo slideshow: seconds between images, Fit/Crop display mode, and
+  // whether to shuffle the image order instead of showing it sorted.
   uint16_t slideshowIntervalSeconds = 300;
   uint8_t slideshowScaleMode = SLIDESHOW_FIT;
+  uint8_t slideshowRandomOrder = 0;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

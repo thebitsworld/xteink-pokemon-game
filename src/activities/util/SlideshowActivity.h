@@ -30,6 +30,7 @@ class SlideshowActivity final : public Activity {
   void openChooseFolder();
   void openIntervalPicker();
   void toggleScaleMode();
+  void toggleRandomOrder();
 
   // Screen::Playing / Screen::Empty
   void startPlayback();

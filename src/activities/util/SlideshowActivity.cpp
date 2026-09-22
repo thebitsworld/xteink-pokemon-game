@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <utility>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -75,11 +76,14 @@ void SlideshowActivity::refreshMenuPopup() {
   const std::string displayModeLabel =
       std::string(tr(STR_SLIDESHOW_DISPLAY_MODE)) + ": " + (isCrop ? tr(STR_CROP) : tr(STR_FIT));
 
+  const std::string randomOrderLabel =
+      std::string(tr(STR_SLIDESHOW_RANDOM_ORDER)) + ": " + (SETTINGS.slideshowRandomOrder ? tr(STR_ON) : tr(STR_OFF));
+
   const std::string startLabel = tr(STR_SLIDESHOW_START);
 
-  std::vector<std::string> options{folderLabel, intervalLabel, displayModeLabel, startLabel};
+  std::vector<std::string> options{folderLabel, intervalLabel, displayModeLabel, randomOrderLabel, startLabel};
   optionPopup.show(tr(STR_SLIDESHOW), options, 0, [this](const int index) { onMenuOptionSelected(index); });
-  optionPopup.setDisabledOptions({false, false, false, APP_STATE.slideshowFolderPath.empty()});
+  optionPopup.setDisabledOptions({false, false, false, false, APP_STATE.slideshowFolderPath.empty()});
   optionPopup.setCancelCallback([this] { activityManager.goHome(); });
 }
 
@@ -95,6 +99,9 @@ void SlideshowActivity::onMenuOptionSelected(const int index) {
       toggleScaleMode();
       return;
     case 3:
+      toggleRandomOrder();
+      return;
+    case 4:
       if (!APP_STATE.slideshowFolderPath.empty()) {
         screen = Screen::Playing;
         startPlayback();
@@ -149,6 +156,13 @@ void SlideshowActivity::toggleScaleMode() {
   requestUpdate();
 }
 
+void SlideshowActivity::toggleRandomOrder() {
+  SETTINGS.slideshowRandomOrder = SETTINGS.slideshowRandomOrder ? 0 : 1;
+  SETTINGS.saveToFile();
+  refreshMenuPopup();
+  requestUpdate();
+}
+
 void SlideshowActivity::render(RenderLock&&) {
   if (screen != Screen::Menu) return;
   renderer.clearScreen();
@@ -184,6 +198,15 @@ void SlideshowActivity::loadImageList() {
   dir.close();
 
   FsHelpers::sortFileList(images);
+  if (SETTINGS.slideshowRandomOrder && images.size() > 1) {
+    // Fisher-Yates: shuffle once per playback session rather than picking a
+    // fresh random image on every advance, so Prev/Next still move
+    // predictably back and forth through a stable (if shuffled) order.
+    for (size_t i = images.size() - 1; i > 0; --i) {
+      const size_t j = static_cast<size_t>(random(static_cast<long>(i + 1)));
+      std::swap(images[i], images[j]);
+    }
+  }
   if (!images.empty()) currentIndex = 0;
 }
 
