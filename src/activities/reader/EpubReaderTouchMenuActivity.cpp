@@ -403,9 +403,13 @@ void EpubReaderTouchMenuActivity::discoverFonts() {
   fontSettingIndexes.reserve(CrossPointSettings::BUILTIN_FONT_COUNT + families.size());
   constexpr FontFamilyPointSizeRange builtinRange{10, 16};
   fontLabels.push_back(fontFamilyLabel(tr(STR_LEXEND_DECA), builtinRange));
-  fontLabels.push_back(fontFamilyLabel(tr(STR_BITTER), builtinRange));
   fontSettingIndexes.push_back(0);
-  fontSettingIndexes.push_back(1);
+  // Bitter's own row was removed - its font files were dropped to save flash
+  // (see TASKS.md's "Font tích hợp đọc sách" note). A save with
+  // fontFamily == BITTER from before this change simply won't match any
+  // entry in fontSettingIndexes below (see its std::find() use further down
+  // in this file) and falls back to this list's own default highlight,
+  // consistent with FontSelectionActivity's own findCurrentFontIndex() fix.
   for (size_t i = 0; i < families.size(); ++i) {
     fontLabels.push_back(fontFamilyLabel(families[i].name, fontFamilyPointSizeRange(families[i])));
     fontSettingIndexes.push_back(static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i));
@@ -1078,6 +1082,11 @@ void EpubReaderTouchMenuActivity::buildFontFamilyPane(UiApp::ScreenType& screen)
       const auto selected = std::find(fontSettingIndexes.begin(), fontSettingIndexes.end(), draft.fontFamily);
       if (selected != fontSettingIndexes.end()) {
         selectedFontIndex = static_cast<int>(std::distance(fontSettingIndexes.begin(), selected));
+      } else if (draft.fontFamily == CrossPointSettings::BITTER) {
+        // Bitter's own row was removed (see the comment in discoverFonts())
+        // - highlight LexendDeca's row (index 0) instead of leaving no row
+        // marked selected at all.
+        selectedFontIndex = 0;
       }
     }
   }

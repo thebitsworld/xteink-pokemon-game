@@ -128,8 +128,12 @@ CrossPointSettings::FONT_SIZE firstAvailableReaderFontSize() {
 
 int getFallbackReaderFontIdForFamily(const CrossPointSettings::FONT_FAMILY family) {
   switch (family) {
+    // Bitter's builtin font files were dropped to save flash (see TASKS.md's
+    // "Font tích hợp đọc sách" note) - redirect to LexendDeca instead of the
+    // no-longer-compiled BITTER_*_FONT_ID macros. The BITTER enum value itself
+    // stays (a save with fontFamily == BITTER from before this change must
+    // still load without error), it just no longer has its own glyph data.
     case CrossPointSettings::BITTER:
-      return BITTER_10_FONT_ID;
     case CrossPointSettings::LEXENDDECA:
     default:
       return LEXENDDECA_10_FONT_ID;
@@ -1175,6 +1179,13 @@ int CrossPointSettings::getBuiltInReaderFontId() const {
   const FONT_SIZE effectiveSize = getEffectiveReaderFontSize();
 
   switch (fontFamily) {
+    // Bitter's builtin font files were dropped to save flash (see TASKS.md's
+    // "Font tích hợp đọc sách" note) - a save with fontFamily == BITTER from
+    // before this change redirects to LexendDeca instead of the no-longer-
+    // compiled BITTER_*_FONT_ID macros. Falls into the same case as
+    // LEXENDDECA below rather than a separate no-op case, so there is only
+    // one place that ever needs updating if LexendDeca's own sizes change.
+    case BITTER:
     case LEXENDDECA:
     default:
       switch (effectiveSize) {
@@ -1189,19 +1200,6 @@ int CrossPointSettings::getBuiltInReaderFontId() const {
           return LEXENDDECA_16_FONT_ID;
       }
       return getFallbackReaderFontIdForFamily(LEXENDDECA);
-    case BITTER:
-      switch (effectiveSize) {
-        case TINY:
-          return BITTER_10_FONT_ID;
-        case SMALL:
-          return BITTER_12_FONT_ID;
-        case MEDIUM:
-        default:
-          return BITTER_14_FONT_ID;
-        case LARGE:
-          return BITTER_16_FONT_ID;
-      }
-      return getFallbackReaderFontIdForFamily(BITTER);
   }
   return getFallbackReaderFontIdForFamily(static_cast<FONT_FAMILY>(fontFamily));
 }

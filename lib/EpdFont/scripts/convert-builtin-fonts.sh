@@ -162,7 +162,12 @@ generate_family() {
 generate_reading_fonts() {
   echo "Generating built-in reading fonts..."
   generate_family lexenddeca LexendDeca LexendDeca yes
-  generate_family bitter Bitter Bitter yes
+  # Bitter was dropped from the firmware to save flash (see TASKS.md's "Font
+  # tích hợp đọc sách" note) - LexendDeca is the sole built-in reading font
+  # now. Not calling generate_family for it here anymore so a routine re-run
+  # of this script does not silently resurrect the 16 files that were
+  # deliberately removed from builtinFonts/ and all.h. The source TTFs under
+  # builtinFonts/source/Bitter/ are left in place if this is ever revisited.
   echo ""
   echo "Built-in reading fonts complete."
   echo ""

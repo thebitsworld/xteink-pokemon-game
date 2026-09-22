@@ -76,6 +76,16 @@ int findCurrentFontIndex(const SdCardFontRegistry* registry, const char* sdFontF
     }
   }
 
+  // Bitter's builtin row below was removed (its font files were dropped to
+  // save flash - see TASKS.md's "Font tích hợp đọc sách" note); it now
+  // renders via LexendDeca's glyph data (CrossPointSettings::
+  // getBuiltInReaderFontId() redirects BITTER there too), so a save with
+  // fontFamily == BITTER from before this change highlights the LexendDeca
+  // row (array index 0) instead of an index that no longer belongs to it -
+  // CrossPointSettings::BUILTIN_FONT_COUNT itself stays unchanged (still
+  // matches FONT_FAMILY_COUNT, for the enum's own save-format reasons), only
+  // one builtin row is actually pushed into fonts_ now.
+  if (fontFamily == CrossPointSettings::BITTER) return 0;
   return fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? fontFamily : 0;
 }
 }  // namespace
@@ -107,7 +117,12 @@ void FontSelectionActivity::onEnter() {
 
   constexpr FontFamilyPointSizeRange builtinRange{10, 16};
   fonts_.push_back({fontFamilyLabel(I18N.get(StrId::STR_LEXEND_DECA), builtinRange), true, 0});
-  fonts_.push_back({fontFamilyLabel(I18N.get(StrId::STR_BITTER), builtinRange), true, 1});
+  // Bitter's own row was removed - its font files were dropped to save flash
+  // (see TASKS.md's "Font tích hợp đọc sách" note). Its FONT_FAMILY enum
+  // value (1) stays reserved so an existing save's fontFamily == BITTER
+  // still loads without error; findCurrentFontIndex() and
+  // CrossPointSettings::getBuiltInReaderFontId() both redirect it to
+  // LexendDeca instead.
 
   if (registry_) {
     const auto& families = registry_->getFamilies();

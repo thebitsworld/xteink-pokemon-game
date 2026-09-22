@@ -200,26 +200,10 @@ EpdFont lexenddeca16ItalicFont(&lexenddeca_16_italic);
 EpdFont lexenddeca16BoldItalicFont(&lexenddeca_16_bolditalic);
 EpdFontFamily lexenddeca16FontFamily(&lexenddeca16RegularFont, &lexenddeca16BoldFont, &lexenddeca16ItalicFont,
                                      &lexenddeca16BoldItalicFont);
-EpdFont bitter10RegularFont(&bitter_10_regular);
-EpdFont bitter10BoldFont(&bitter_10_bold);
-EpdFont bitter10ItalicFont(&bitter_10_italic);
-EpdFont bitter10BoldItalicFont(&bitter_10_bolditalic);
-EpdFontFamily bitter10FontFamily(&bitter10RegularFont, &bitter10BoldFont, &bitter10ItalicFont, &bitter10BoldItalicFont);
-EpdFont bitter12RegularFont(&bitter_12_regular);
-EpdFont bitter12BoldFont(&bitter_12_bold);
-EpdFont bitter12ItalicFont(&bitter_12_italic);
-EpdFont bitter12BoldItalicFont(&bitter_12_bolditalic);
-EpdFontFamily bitter12FontFamily(&bitter12RegularFont, &bitter12BoldFont, &bitter12ItalicFont, &bitter12BoldItalicFont);
-EpdFont bitter14RegularFont(&bitter_14_regular);
-EpdFont bitter14BoldFont(&bitter_14_bold);
-EpdFont bitter14ItalicFont(&bitter_14_italic);
-EpdFont bitter14BoldItalicFont(&bitter_14_bolditalic);
-EpdFontFamily bitter14FontFamily(&bitter14RegularFont, &bitter14BoldFont, &bitter14ItalicFont, &bitter14BoldItalicFont);
-EpdFont bitter16RegularFont(&bitter_16_regular);
-EpdFont bitter16BoldFont(&bitter_16_bold);
-EpdFont bitter16ItalicFont(&bitter_16_italic);
-EpdFont bitter16BoldItalicFont(&bitter_16_bolditalic);
-EpdFontFamily bitter16FontFamily(&bitter16RegularFont, &bitter16BoldFont, &bitter16ItalicFont, &bitter16BoldItalicFont);
+// Bitter's own EpdFont/EpdFontFamily objects were removed along with its
+// builtinFonts/*.h files (dropped to save flash - see TASKS.md's "Font tích
+// hợp đọc sách" note). CrossPointSettings.cpp redirects any font ID lookup
+// for FONT_FAMILY::BITTER to LexendDeca's font family instead.
 
 EpdFont smallFont(&inter_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
@@ -1148,10 +1132,6 @@ void setupDisplayAndFonts(const bool seamless, const bool loadReaderResources, c
   renderer.insertFont(LEXENDDECA_12_FONT_ID, lexenddeca12FontFamily);
   renderer.insertFont(LEXENDDECA_14_FONT_ID, lexenddeca14FontFamily);
   renderer.insertFont(LEXENDDECA_16_FONT_ID, lexenddeca16FontFamily);
-  renderer.insertFont(BITTER_10_FONT_ID, bitter10FontFamily);
-  renderer.insertFont(BITTER_12_FONT_ID, bitter12FontFamily);
-  renderer.insertFont(BITTER_14_FONT_ID, bitter14FontFamily);
-  renderer.insertFont(BITTER_16_FONT_ID, bitter16FontFamily);
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);

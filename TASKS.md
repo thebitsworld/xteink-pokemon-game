@@ -179,8 +179,16 @@ Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-
 2. **Log gỡ lỗi (~50-150 KB, chưa đo):** `ENABLE_SERIAL_LOG` đang bật cả ở bản phát
    hành, 2.084 chỗ ghi log. Tắt hoặc hạ `LOG_LEVEL` ở bản phát hành; đổi lại khó
    chẩn đoán lỗi trên máy thật.
-3. **Font tích hợp đọc sách — ĐÃ CHỐT PHƯƠNG ÁN (2026-09-22), CHƯA LÀM: giữ LexendDeca, bỏ
-   Bitter, ước ~600 KB.** 39 file builtin chia 2 loại: Inter+`ui_symbols_10` (5 file, UI hệ
+3. **Font tích hợp đọc sách — ĐÃ LÀM XONG (2026-09-22, nhánh `chore/drop-bitter-font`):
+   giữ LexendDeca, bỏ Bitter.** Kết quả đo thật **vượt xa ước tính ~600 KB**: X3 Flash
+   97,3% → 83,0% (177.952 B → 1.098.352 B trống, ~+899 KB), X4 Pro 96,5% → 82,5%. Native
+   test 638/638, simulator boot ổn định. Đã xóa 16 file `bitter_*.h`, sửa
+   `CrossPointSettings.cpp` (redirect `BITTER` → LexendDeca, giữ enum để save cũ không lỗi),
+   sửa 2 màn hình chọn font (Settings + touch quick-switcher trong Reader) bỏ hàng Bitter,
+   sửa 2 script sinh font để không tự hồi sinh lại Bitter. Cố tình CHƯA đụng: dropdown font
+   trên web settings (`CrossPointWebServer.cpp`, đường ghi ngược chưa lần hết, không ảnh
+   hưởng flash) và label hiển thị "Bitter" cho save cũ trong Reader touch menu (chỉ hiển
+   thị, coi như lịch sử). 39 file builtin chia 2 loại: Inter+`ui_symbols_10` (5 file, UI hệ
    thống - `UI_10/12_FONT_ID`/`SMALL_FONT_ID`, PHẢI giữ vì UI cần chạy kể cả khi SD thiếu/lỗi)
    và Bitter+LexendDeca (32 file, CHỈ dùng đọc sách, đã có hệ thống SD-card font tương đương
    đang chạy thật - `docs/sd-card-fonts.md`). Bỏ CẢ HAI (không giữ font đọc nào) bị loại vì
