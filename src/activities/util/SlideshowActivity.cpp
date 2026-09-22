@@ -255,9 +255,16 @@ void SlideshowActivity::renderCurrentImage() {
     renderer.clearScreen();
     bool success = drawFrame();
     if (success) {
+      // Prefer the Direct waveform where the panel implements it (see the
+      // matching comment in SleepActivity::renderBitmapSleepScreen()): it
+      // folds the B/W base into the grayscale pass instead of pushing a
+      // separate base refresh first. `absolute` alone still gates the plane
+      // fill value below and Bitmap's own dither/level mode elsewhere -
+      // Direct is only ever an upgrade on top of it, never a substitute.
       const bool absolute = renderer.supportsAbsoluteGrayscale();
+      const bool direct = absolute && renderer.supportsDirectGrayscale();
       if (absolute) {
-        success = renderer.displayAbsoluteGrayscaleBase();
+        success = direct ? renderer.displayDirectGrayscaleBase() : renderer.displayAbsoluteGrayscaleBase();
       } else {
         renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
       }
@@ -339,9 +346,16 @@ void SlideshowActivity::renderCurrentImage() {
   renderer.clearScreen();
   bool success = drawFrame();
   if (success && bitmap.hasGreyscale()) {
+    // Prefer the Direct waveform where the panel implements it (see the
+    // matching comment in SleepActivity::renderBitmapSleepScreen()): it folds
+    // the B/W base into the grayscale pass instead of pushing a separate base
+    // refresh first. `absolute` alone still gates the plane fill value below
+    // and the Bitmap constructor's own dither/level mode above - Direct is
+    // only ever an upgrade on top of it, never a substitute.
     const bool absolute = renderer.supportsAbsoluteGrayscale();
+    const bool direct = absolute && renderer.supportsDirectGrayscale();
     if (absolute) {
-      success = renderer.displayAbsoluteGrayscaleBase();
+      success = direct ? renderer.displayDirectGrayscaleBase() : renderer.displayAbsoluteGrayscaleBase();
     } else {
       renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
     }
