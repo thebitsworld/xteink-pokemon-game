@@ -145,8 +145,24 @@ Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-
 2. **Log gỡ lỗi (~50-150 KB, chưa đo):** `ENABLE_SERIAL_LOG` đang bật cả ở bản phát
    hành, 2.084 chỗ ghi log. Tắt hoặc hạ `LOG_LEVEL` ở bản phát hành; đổi lại khó
    chẩn đoán lỗi trên máy thật.
-3. **Font tích hợp (200-500 KB):** bỏ các biến thể ít dùng (đậm-nghiêng, cỡ 14/16)
-   hoặc cả một họ font. Người dùng vẫn tải được font SD. Cần chọn họ font giữ lại.
+3. **Font tích hợp đọc sách — ĐÃ CHỐT PHƯƠNG ÁN (2026-09-22), CHƯA LÀM: giữ LexendDeca, bỏ
+   Bitter, ước ~600 KB.** 39 file builtin chia 2 loại: Inter+`ui_symbols_10` (5 file, UI hệ
+   thống - `UI_10/12_FONT_ID`/`SMALL_FONT_ID`, PHẢI giữ vì UI cần chạy kể cả khi SD thiếu/lỗi)
+   và Bitter+LexendDeca (32 file, CHỈ dùng đọc sách, đã có hệ thống SD-card font tương đương
+   đang chạy thật - `docs/sd-card-fonts.md`). Bỏ CẢ HAI (không giữ font đọc nào) bị loại vì
+   `CrossPointSettings::getBuiltInReaderFontId()` hiện là lưới an toàn bắt buộc ("Fall through
+   to built-in if SD font not found") - bỏ hết cần viết lại fallback + máy mới đọc bằng font
+   UI hoặc chặn đọc tới khi người dùng tự tải, dù có gói sẵn font vào ZIP asset hay không (gói
+   sẵn không tốn thêm flash thiết bị, cùng bước bắt buộc "Step 2.5" cài sprite đã có sẵn - nếu
+   làm hướng "giữ 0 font" thì nên gói sẵn, đừng để trắng). Cuối cùng chọn **giữ 1 font** (rẻ hơn
+   bỏ cả 2 X2, không cần fallback mới, trải nghiệm máy mới không đổi) - LexendDeca vì đang là
+   default (`CrossPointSettings.h:510`, không cần đổi default).
+   Việc cần làm: xoá 16 file `bitter_*.h` (`lib/EpdFont/builtinFonts/`) + include trong `all.h`;
+   `getBuiltInReaderFontId()`/`getFallbackReaderFontIdForFamily()` nhánh `case BITTER:` redirect
+   sang `LEXENDDECA_*_FONT_ID` tương ứng cỡ chữ (giữ enum `BITTER` để save cũ không lỗi); ẩn/gộp
+   lựa chọn "Bitter" khỏi màn Settings Font Family (chưa xác định chính xác file UI). Số liệu
+   1,47 MB tổng font ở trên đo bằng build thật cũ, tỉ lệ 32/39 file áp dụng ước lượng bằng dung
+   lượng file nguồn (`.h`), CẦN build đo lại số byte thật trước khi chốt, không chỉ ước lượng.
 4. **Trang web tải lên (60-90 KB):** nén sẵn hoặc chuyển ra thẻ SD (mã gốc).
 5. **Tuỳ chọn biên dịch (vài %):** thử LTO / kiểm tra `-Os`; làm trên branch riêng,
    rủi ro lỗi khó gỡ trên ESP32.
@@ -164,6 +180,25 @@ dạng offset của bộ tạo chuỗi (thêm ~14 KB flash).
 cho 26 ngôn ngữ ngoài tiếng Việt (tăng ~150 KB flash, X3 lên ~98,4%), nhưng user quyết
 định không giữ; branch đã xoá. Các chuỗi đó vẫn hiện tiếng Anh ở ngôn ngữ ngoài tiếng
 Việt và Pokémon/Slideshow. Nếu cần dịch lại sau này, phải cắt giảm bộ nhớ trước.
+
+**Đã điều tra và LOẠI BỎ (2026-09-22): đổi bảng partition để lấy lại 3,375 MB từ `spiffs`
+không dùng.** `partitions.csv` có 1 dòng `spiffs @ 0xc90000, size 0x360000` chưa từng được
+mount (`grep` toàn repo không có `SPIFFS.begin()`/`LittleFS`/`esp_partition_find`) - xác nhận
+bằng tài liệu upstream CrossPoint Reader gốc (`AGENTS.md` mục 8: *"SD Persistence Throttling:
+... SPIFFS is not mounted"* - quyết định kiến trúc có chủ đích, mọi thứ đi qua SD). Về lý
+thuyết bỏ dòng `spiffs`, chia đều cho `app0`/`app1` (mỗi bên +1,6875 MB, `0x7F0000` mỗi
+partition, chia hết `0x10000`, không lệch alignment) sẽ đưa flash trống từ 235 KB lên ~1,9 MB -
+đủ cho cả ước lượng dữ liệu Gen 8 (~500 KB). **Nhưng không triển khai được cho người dùng thật:**
+`docs/installation.md` xác nhận có máy Xteink **khóa eFuse, không flash được qua USB**
+("Confirmed working... including both locked and unlocked devices"), và X3 nói chung
+"has no user-accessible USB data port" (`docs/development/pokemon-x3-build-and-flash.md`).
+2 đường cập nhật chính thức duy nhất (OTA Wi-Fi, "SD Card Firmware Update") đều dùng
+`esp_ota_get_next_update_partition()` (`src/activities/settings/SdFirmwareUpdateActivity.cpp:82`)
+- chỉ ghi được vào đúng kích thước app slot hiện có theo bảng partition đang chạy trên máy,
+không bao giờ đụng tới sector partition table (`0x8000`). Tức là **không có đường nào đưa bảng
+partition mới tới máy đã bán ra** - chỉ dùng được cho máy build+flash lần đầu qua esptool tại
+bàn dev, không áp dụng được cho người dùng thực tế. Không đề xuất lại trừ khi phát hiện đường
+cập nhật mới có thể ghi vào sector partition table.
 
 ---
 
