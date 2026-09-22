@@ -1,3 +1,13 @@
+## [1.1.0-rc] - 2026-09-22
+
+### Added
+
+- The underlying CrossInk engine is now based on upstream release v1.6.0, bringing file renaming from the File Browser action menu, a numeric keypad for Go to %/Go to Stable Page, decimal book-progress-percentage display options, a per-build UI-language selection flag to reduce firmware size, and a large batch of reliability fixes across EPUB rendering, fonts, and touch input - see the `[v1.6.0] - 2026-09-21` section further down in this file for CrossInk's own full changelog for that release.
+
+### Fixed
+
+- A crash in this fork's own native test suite for CrossInk's new ordered-list-numbering feature (test-only; never affected real devices).
+
 ## [1.0.0] - 2026-09-20
 
 First stable release. No gameplay or save-format changes from 0.31.0 - documentation only.
