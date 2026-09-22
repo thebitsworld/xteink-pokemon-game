@@ -138,7 +138,16 @@ friendship, chuỗi ngày đọc, achievement.
 1. ~~**Chuỗi ngày đọc (streak)**~~ - **User BÁC BỎ (2026-09-22): X4 không có RTC (`FREEINK_CAP_RTC` tắt trên board đó,
    `Rtc::now()` không đọc được), và ngay cả trên board có RTC, người dùng có thể chỉnh giờ máy để cheat streak dễ
    dàng. Không triển khai, không đề xuất lại trừ khi có cách xác định "ngày" đáng tin cậy không phụ thuộc RTC.**
-2. **Trứng (Egg)** - thay encounter, nở sau N phút đọc. Trung bình: record/cờ mới + màn hình.
+2. **Trứng (Egg)** - **User TẠM DỪNG (2026-09-22), chưa thấy thuyết phục, không triển khai.**
+   Đã bàn 2 phương án: (a) "trứng bí ẩn" ngẫu nhiên từ đọc sách, roll loài lúc nở - user chê
+   hời hợt, không cho người chơi quyền chọn; (b) phối giống thật (chọn 2 cha/mẹ cùng loài
+   hoặc +Ditto làm đối tác vạn năng - Ditto vốn vô tính, `gender_rate=255` trong data - ra
+   trứng cùng loài vì Gen 1 không có dạng con non, nên giá trị chính là roll lại IV/shiny theo
+   ý muốn chứ không phải mở khóa loài mới; dùng side-file nhỏ kiểu Hall of Fame chứa cặp cha mẹ
+   + tiến độ, tái dùng guard "record đang bị tham chiếu thì không Release được" từ Round 9 để
+   khóa cha mẹ tạm thời, không cần placeholder "trứng chưa nở" trong Party/PC nên đỡ tốn UI hơn
+   phương án (a)) - **user vẫn chưa thấy ok với ý tưởng chung, dừng lại, không đề xuất tiếp
+   trừ khi có góc nhìn mới.**
 3. **Nature** (25 tính cách, +-10% một chỉ số) - trung bình: 1 byte record hoặc side-file, ảnh hưởng `battleWorkingStat`.
 4. **Friendship/happiness** - tăng khi dẫn đầu đội lúc đọc, mở tiến hóa Eevee/Golbat/Chansey. Trung bình: side-file mới.
 5. ~~**Achievement/huy hiệu đọc sách** (số sách/giờ/trang)~~ - **User BÁC BỎ (2026-09-22): trùng vai trò với
