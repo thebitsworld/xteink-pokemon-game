@@ -32,8 +32,14 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
   CssParser cssParser{"/tmp"};
   ChapterHtmlSlimParser parser{epub,  filepath, renderer, 0,  1.0f, false, false, 0, 480, 800,     false,
                                false, false,    0,        {}, true, "",    "",    0, {},  nullptr, &cssParser};
-  std::array<ChapterHtmlSlimParser::StyleStackEntry, 4> inlineStyles{};
-  std::array<BlockStyle, 4> blockStyles{};
+  // Sized to match ChapterHtmlSlimParser's own MAX_INLINE_STYLE_DEPTH/MAX_BLOCK_STYLE_DEPTH
+  // (the real code's bounds checks are written against those constants, not against this
+  // fixture's buffer size) - a smaller fixed size here previously let a deeply-nested test
+  // (4+ nested block elements, e.g. NumbersOrderedListsAndRestartsNestedCounters's nested
+  // <ol>/<li>) silently overflow past this fixture object's own memory (ASan: heap-buffer-
+  // overflow at ChapterHtmlSlimParser.cpp:2751, 0 bytes after the gtest-allocated fixture).
+  std::array<ChapterHtmlSlimParser::StyleStackEntry, ChapterHtmlSlimParser::MAX_INLINE_STYLE_DEPTH> inlineStyles{};
+  std::array<BlockStyle, ChapterHtmlSlimParser::MAX_BLOCK_STYLE_DEPTH> blockStyles{};
 
   void SetUp() override {
     parser.currentTextBlock = std::make_unique<ParsedText>(false);

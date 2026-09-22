@@ -2,6 +2,7 @@ add_executable(ChapterHtmlSlimParserTest
   ChapterHtmlSlimParserTest.cpp
   ParserLinkStubs.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageDimsProbe.cpp
   ${REPO_ROOT}/lib/Epub/Epub/css/CssParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/ParsedText.cpp
   ${REPO_ROOT}/lib/Epub/Epub/htmlEntities.cpp
