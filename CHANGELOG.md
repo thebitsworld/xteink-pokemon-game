@@ -1,8 +1,13 @@
-## [1.1.0-rc] - 2026-09-22
+## [1.1.0] - 2026-09-22
 
 ### Added
 
 - The underlying CrossInk engine is now based on upstream release v1.6.0, bringing file renaming from the File Browser action menu, a numeric keypad for Go to %/Go to Stable Page, decimal book-progress-percentage display options, a per-build UI-language selection flag to reduce firmware size, and a large batch of reliability fixes across EPUB rendering, fonts, and touch input - see the `[v1.6.0] - 2026-09-21` section further down in this file for CrossInk's own full changelog for that release.
+
+### Changed
+
+- Photo Slideshow and the File Browser's image viewer now use the panel's direct grayscale waveform on devices that support it, matching the sharper detail Sleep Cover already had.
+- Removed the Bitter reader font to reduce firmware size; LexendDeca remains as the built-in reader font, and any book previously set to Bitter now reads in LexendDeca instead. SD-card fonts are unaffected and remain the way to add more reader font choices.
 
 ### Fixed
 
