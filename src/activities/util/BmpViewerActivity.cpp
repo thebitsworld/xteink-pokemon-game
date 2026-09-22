@@ -200,8 +200,15 @@ void BmpViewerActivity::onEnter() {
       };
       renderer.clearScreen();
       bool success = drawFrame();
-      if (success && bitmap.hasGreyscale() && renderer.supportsAbsoluteGrayscale()) {
-        success = renderer.displayAbsoluteGrayscaleBase();
+      const bool absolute = renderer.supportsAbsoluteGrayscale();
+      if (success && bitmap.hasGreyscale() && absolute) {
+        // Prefer the Direct waveform where the panel implements it (see the
+        // matching comment in SleepActivity::renderBitmapSleepScreen()): it
+        // folds the B/W base into the grayscale pass instead of pushing a
+        // separate base refresh first. Direct is only ever an upgrade on top
+        // of Absolute, never a substitute.
+        const bool direct = renderer.supportsDirectGrayscale();
+        success = direct ? renderer.displayDirectGrayscaleBase() : renderer.displayAbsoluteGrayscaleBase();
         for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
           if (!success) break;
           success = bitmap.rewindToData() == BmpReaderError::Ok;
