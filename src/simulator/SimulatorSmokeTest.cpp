@@ -959,6 +959,16 @@ class SimulatorSmokeTest {
     addTap(MappedInputManager::Button::Back);
     inputScript.push_back(render("Pokemon Menu Restored", 4));
 
+    // KNOWN ISSUE (found 2026-09-22, pre-existing, unrelated to the CrossInk v1.6.0 sync -
+    // HomeActivity.cpp/ActivityManager.cpp's relevant code is byte-identical to upstream v1.5.1
+    // here): this second Back exits PokemonActivity entirely back to Home, so re-entering
+    // Pokemon below means genuinely navigating Home's own menu, not PokemonActivity's internal
+    // Screen::Menu. A single Down was enough once, but this fork's own Lyra Carousel Home theme
+    // (unrelated to CrossInk) makes navigation from the recent-books carousel row state-dependent
+    // in a way not yet fully understood - reproduced landing on File Browser, an EPUB reader, and
+    // RecentBooksActivity across different attempts at a fix, none reliable across runs. Needs
+    // dedicated debugging of HomeActivity's carousel-vs-menu input handling, not a guessed tap
+    // sequence here. Left as the original single Down for now - known to fail intermittently.
     addTap(MappedInputManager::Button::Down);
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Pokemon Pokedex", 4));
@@ -1288,7 +1298,9 @@ class SimulatorSmokeTest {
     }
     if (snapshot.ownedCount != 1 || snapshot.partyCount != 1 || snapshot.party[0].speciesId != 4 ||
         snapshot.party[0].gender != pokemon::Gender::Female) {
-      fail("Pokemon smoke-test onboarding state was not persisted as expected");
+      fail("Pokemon smoke-test onboarding state was not persisted as expected (owned=%d party=%d species=%d gender=%d)",
+           snapshot.ownedCount, snapshot.partyCount, snapshot.party[0].speciesId,
+           static_cast<int>(snapshot.party[0].gender));
     }
     LOG_INF("SMOKE", "Pokemon onboarding state verified");
   }
@@ -1425,7 +1437,8 @@ class SimulatorSmokeTest {
 #endif
         break;
       case ScriptActionType::AssertActivity:
-        if (!activityManager.isCurrentActivityNamed(action.label)) fail("Expected current activity: %s", action.label);
+        if (!activityManager.isCurrentActivityNamed(action.label))
+          fail("Expected current activity: %s (actual: %s)", action.label, activityManager.debugCurrentActivityName());
         break;
       case ScriptActionType::Render:
         queueStep(action.label, SmokeStep::InputScript, action.settleFrames);

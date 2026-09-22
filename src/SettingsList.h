@@ -555,7 +555,11 @@ inline SettingInfo buildHomeButtonActionSetting(const StrId nameId, uint8_t Cros
 // #1636) so the per-entry SettingInfo cost is paid once. Read-only consumers
 // can use it directly; mutable device UI lists use getSettingsList(), which
 // returns an owned copy and can add SD-card font and dictionary options.
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 102;  // 100 regular entries plus two optional tilt entries.
+// 100 upstream CrossInk regular entries plus two optional tilt entries (102), plus this fork's
+// own additions on top: 2 unconditional Slideshow entries and 1 entry gated behind
+// CROSSINK_ENABLE_POKEMON - reserved for the max case (Pokemon build + tilt entries present) so
+// SimulatorSmokeTest.cpp's verifyReaderControlsSettings() never trips on a real device/build.
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 105;
 
 inline const std::vector<SettingInfo>& getBaseSettingsList() {
   static const std::vector<SettingInfo> baseList = [] {
