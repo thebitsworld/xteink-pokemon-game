@@ -291,6 +291,26 @@ cập nhật mới có thể ghi vào sector partition table.
 - **E.** Mất phần lẻ dưới 1 phút khi checkpoint và thời gian trước lần lật
   trang đầu tiên — bỏ qua.
 
+**Vấn đề "X3 hiển thị ảnh grayscale kém hơn X4 Pro/Sleep Cover" (điều tra rất
+nhiều vòng trước đây, luôn bế tắc) — ĐÃ TÌM RA GỐC RỄ THẬT, fix `v1.1.0-rc`
+(2026-09-22):** gốc rễ nằm ở tầng driver (`freeink-sdk`), ngoài tầm với của
+code app — không phải lỗi trong `SlideshowActivity.cpp` như mọi giả thuyết cũ.
+CrossInk v1.6.0 (merge `4e960f3f`) bump `freeink-sdk` lên bản có thêm hẳn
+`GrayscaleMode::Direct` cho đúng chip UC8253 của X3 (`Uc8253X3Driver`), kèm 1
+bảng waveform LUT thật mới (`kUltraChipDirectGray`) đẩy nền đen/trắng +4 mức
+xám trong CÙNG 1 lần, thay vì phải đẩy nền rồi mới đẩy lớp xám riêng như
+`Overlay` (cách duy nhất X3 có trước đây). Lộ API mới lên `GfxRenderer::
+supportsDirectGrayscale()`/`displayDirectGrayscaleBase()`. `SleepActivity.cpp`
+(code CrossInk gốc, tự merge sạch) đã tự động dùng ngay — đây chính là lý do
+user thấy Slideshow "cải thiện đáng kể" dù chưa sửa gì trong
+`SlideshowActivity.cpp`. Đã cập nhật `SlideshowActivity.cpp` (nhánh PNG lẫn
+BMP) dùng đúng pattern của `SleepActivity.cpp` (`direct = absolute &&
+supportsDirectGrayscale()`) để tận dụng nốt — trước đó code này chỉ check
+`supportsAbsoluteGrayscale()` (đúng hướng "làm giống X4 Pro" từ lần fix cũ,
+nhưng chưa đủ vì thiếu bước nâng cấp lên Direct). Việc còn lại (chưa làm):
+`BmpViewerActivity.cpp` (màn xem ảnh trong File Browser) có khả năng cùng
+vấn đề, chưa kiểm tra/cập nhật.
+
 ---
 
 ## Ý tưởng cải tiến/tính năng mới (2026-09-18) — mục 1, 2, 4 ĐÃ LÀM, mục 3 ĐÃ CODE XONG (`v0.29.0`, chưa merge)
