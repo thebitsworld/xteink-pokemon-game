@@ -14,6 +14,32 @@ nào đã xử lý xong (kèm version/commit khi merge).
 
 ---
 
+## Smoke test: điều hướng Home->Pokemon qua theme Lyra Carousel chưa ổn định (2026-09-22)
+
+Phát hiện khi chạy `pokemon-simulator-X3` kiểm tra sau merge CrossInk v1.6.0 (**xác nhận
+KHÔNG liên quan gì đến v1.6.0** - đã diff `HomeActivity.cpp`/`ActivityManager.cpp` giữa
+v1.5.1/v1.6.0, phần liên quan giống hệt nhau). Bug có sẵn từ khi theme "Lyra Carousel" (việc
+riêng của fork này) trở thành mặc định.
+
+`buildPokemonInputScript()` trong `src/simulator/SimulatorSmokeTest.cpp` có bước: thoát
+PokemonActivity về Home (2 lần Back từ Party), rồi `Down; Confirm` để mở lại Pokemon từ menu
+Home. Với theme Lyra Carousel (có 1 sách trong carousel), bước "Down" này **không ổn định**
+— thử qua nhiều lần chạy, `Confirm` sau đó từng mở nhầm: File Browser (index 0), một EpubReader
+(mở luôn cuốn sách trong carousel), và RecentBooksActivity — chưa lần nào ổn định lặp lại đúng
+kết quả. Không tìm ra quy luật rõ ràng dù đã thử: `Down` rồi `3x Right` (dựa theo cách
+`buildHomeNavigationInputScript()`'s `homeNavigationUsesCarouselInteraction()` dùng để tới
+Settings), chạy lại nhiều lần với cùng 1 sách — kết quả khác nhau giữa các lần chạy.
+
+Đã thêm `ActivityManager::debugCurrentActivityName()` (chỉ SIMULATOR) để in tên activity thật
+khi assertion thất bại — dùng công cụ này để điều tra tiếp lần sau, đọc kỹ
+`HomeActivity.cpp`'s xử lý `inCarouselRow`/`moveRight()`/`Down` (khu vực dòng ~2000-2035) thay
+vì đoán tổ hợp phím. Hiện `buildPokemonInputScript()` vẫn giữ nguyên `Down` đơn (biết là có
+thể fail ngẫu nhiên), có comment tại chỗ. Không chặn gì khác — toàn bộ luồng chính (chọn
+starter, gender, nickname, menu, party, actions, summary, Pokedex, phân trang) đã xác nhận
+chạy đúng qua simulator.
+
+---
+
 ## Round 9 (2026-09-20, tại `main` sau `v0.30.0` + save v9) — 7/7 ĐÃ FIX (branch `fix/round9-bugs`)
 
 Đã sửa ngay trong lượt rà soát (`a6d04a24`, merge `7c29a0a0`): `inspectSnapshot()` dùng mask 8-bit
