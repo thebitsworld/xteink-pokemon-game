@@ -5,8 +5,8 @@
 #define LEXENDDECA_12_FONT_ID (-1834705648)
 #define LEXENDDECA_14_FONT_ID (-1806001351)
 #define LEXENDDECA_16_FONT_ID (-2000304501)
-#define UI_10_FONT_ID (-1313900173)
-#define UI_12_FONT_ID (1544960787)
+#define UI_10_FONT_ID (1943523391)
+#define UI_12_FONT_ID (507417055)
 #define SMALL_FONT_ID (1406075677)
 
 // Font ID 0 is reserved as the "not found" sentinel.
