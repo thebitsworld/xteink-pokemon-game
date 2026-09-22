@@ -27,6 +27,12 @@ TextBlock::TextBlock(const std::vector<std::string>&, const std::vector<int16_t>
 bool TextBlock::hasRuby() const { return false; }
 
 bool ImageDecoderFactory::isFormatSupported(const std::string& path) { return path.ends_with(".jpg"); }
+// v1.6.0 added an <img> fallback path in ChapterHtmlSlimParser.cpp that calls getDecoder() when
+// Epub::extractItemToFile() succeeds - stubs/Epub.h's extractItemToFile() always returns false, so
+// this is never actually reached at runtime, but the symbol still needs a definition to link. A real
+// decoder here would pull in the PNGdec/JPEGDEC libraries this suite otherwise has no need for; the
+// caller already tolerates a null decoder (see the `decoder &&` guard before `decoder->getDimensions()`).
+ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string&) { return nullptr; }
 
 ImageBlock::ImageBlock(std::string imagePath, std::string sourcePath, const int16_t width, const int16_t height)
     : imagePath(std::move(imagePath)), sourcePath(std::move(sourcePath)), width(width), height(height) {}
