@@ -163,6 +163,14 @@ Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-
    lựa chọn "Bitter" khỏi màn Settings Font Family (chưa xác định chính xác file UI). Số liệu
    1,47 MB tổng font ở trên đo bằng build thật cũ, tỉ lệ 32/39 file áp dụng ước lượng bằng dung
    lượng file nguồn (`.h`), CẦN build đo lại số byte thật trước khi chốt, không chỉ ước lượng.
+
+   **User CHỐT (2026-09-22): làm đúng phương án này, KHÔNG dùng hướng ghi font vào partition
+   `spiffs` chưa dùng** (từng đề xuất giữ được cả 2 font bằng cách gieo dữ liệu vào `spiffs` lúc
+   chạy) - bị bác vì thiết kế "1 bản release di cư rồi các bản sau mới nhẹ" ép người dùng phải đi
+   qua đúng bản đó mới có font, nhảy thẳng từ bản cũ lên bản mới nhất (kiểu update bình thường)
+   sẽ bỏ lỡ bước gieo dữ liệu và mất font hẳn - không thoả đáng. Có đề xuất bản sửa (mọi bản đều
+   tự kiểm tra & gieo lại từ Wi-Fi/SD nếu thiếu, không gắn vào 1 bản cụ thể) nhưng user không chọn
+   hướng này, chốt luôn phương án đơn giản hơn: giữ 1 font trong firmware như trên.
 4. **Trang web tải lên (60-90 KB):** nén sẵn hoặc chuyển ra thẻ SD (mã gốc).
 5. **Tuỳ chọn biên dịch (vài %):** thử LTO / kiểm tra `-Os`; làm trên branch riêng,
    rủi ro lỗi khó gỡ trên ESP32.
