@@ -139,9 +139,17 @@ Nga 33, Anh 27, Thụy Điển 24, Ukraina 21, Ba Lan 16), trang web tải lên 
 Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-IDF).
 
 **Các cách cắt giảm, theo thứ tự nên thử (mức tiết kiệm là ước lượng, cần build đo lại):**
-1. **Bảng ngắt từ tiếng Đức (~200 KB):** bỏ hoặc chuyển sang thẻ SD; ảnh hưởng
-   người dùng Việt gần như không có. (Mã CrossInk gốc → lệch nhánh gốc.) Nga /
-   Thụy Điển / Ukraina / Ba Lan cũng tương tự, 16-33 KB mỗi cái.
+1. **Bảng ngắt từ tiếng Đức (~200 KB):** bỏ, ảnh hưởng người dùng Việt gần như không có.
+   Nga / Thụy Điển / Ukraina / Ba Lan cũng tương tự, 16-33 KB mỗi cái. **Từ upstream v1.6.0
+   (đã merge) có sẵn cờ build chính thức để làm việc này, không cần sửa code CrossInk gốc/
+   lệch nhánh nữa**: `custom_i18n_builtin_langs` (đọc bởi `scripts/gen_i18n.py`, mặc định
+   `"all"`) - đặt ví dụ `custom_i18n_builtin_langs = en,vi` trong `platformio.ini` (mục
+   `[env:pokemon-x3]`/`[env:pokemon-x4-pro]`) thì chỉ những ngôn ngữ liệt kê mới được sinh
+   bảng chuỗi/bảng ngắt từ thật, ngôn ngữ khác không hề nhúng vào flash - tiếng Anh luôn bị ép
+   có mặt (script tự thêm), và chỉ ngôn ngữ có bảng chuỗi mới hiện trong màn chọn ngôn ngữ nên
+   không có tình huống chọn nhầm phải ngôn ngữ thiếu chữ. Việc còn lại: build đo số byte thật
+   giảm được, và cân nhắc build riêng 1 bản "đủ ngôn ngữ" song song bản rút gọn nếu vẫn muốn
+   giữ trải nghiệm đa ngôn ngữ đầy đủ cho ai cần.
 2. **Log gỡ lỗi (~50-150 KB, chưa đo):** `ENABLE_SERIAL_LOG` đang bật cả ở bản phát
    hành, 2.084 chỗ ghi log. Tắt hoặc hạ `LOG_LEVEL` ở bản phát hành; đổi lại khó
    chẩn đoán lỗi trên máy thật.
@@ -176,8 +184,10 @@ Phần còn lại ~3,6 MB là mã và thư viện nền (mạng, TLS, EPUB, ESP-
    rủi ro lỗi khó gỡ trên ESP32.
 6. **Gỡ bớt ngôn ngữ giao diện (17-25 KB mỗi ngôn ngữ, xếp cuối):** chữ Cyrillic,
    Hebrew, Ả Rập tốn nhất (2 byte mỗi ký tự). Đã từng thử gỡ Nga/Ukraina/Belarus/
-   Kazakh/Do Thái/Ả Rập: tiết kiệm chưa đáng kể so với công sức nên user quyết định
-   không giữ thay đổi đó.
+   Kazakh/Do Thái/Ả Rập bằng cách sửa tay code gốc: tiết kiệm chưa đáng kể so với công
+   sức nên user quyết định không giữ thay đổi đó. **Giờ có `custom_i18n_builtin_langs`
+   (mục 1 ở trên) làm việc này bằng 1 dòng config** thay vì sửa code tay - nếu cân nhắc
+   lại, dùng cờ này thay vì lặp lại cách cũ.
 
 **Giới hạn cần nhớ khi thêm bản dịch:** `scripts/gen_i18n.py` giới hạn mỗi ngôn ngữ
 **32.767 byte** dữ liệu chữ. Tiếng Nga/Ukraina/Belarus/Kazakh đã sát giới hạn
