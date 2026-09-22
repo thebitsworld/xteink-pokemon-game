@@ -115,7 +115,9 @@ friendship, chuỗi ngày đọc, achievement.
 2. **Trứng (Egg)** - thay encounter, nở sau N phút đọc. Trung bình: record/cờ mới + màn hình.
 3. **Nature** (25 tính cách, +-10% một chỉ số) - trung bình: 1 byte record hoặc side-file, ảnh hưởng `battleWorkingStat`.
 4. **Friendship/happiness** - tăng khi dẫn đầu đội lúc đọc, mở tiến hóa Eevee/Golbat/Chansey. Trung bình: side-file mới.
-5. **Achievement/huy hiệu đọc sách** (số sách/giờ/trang) - thấp: mở rộng Trainer Card.
+5. ~~**Achievement/huy hiệu đọc sách** (số sách/giờ/trang)~~ - **User BÁC BỎ (2026-09-22): trùng vai trò với
+   thưởng theo thời gian đọc (item/encounter) đã có sẵn - phần "hiển thị thành tích" cũng đã có (lifetimeMinutes,
+   dấu ★ Pokédex trên Trainer Card), thêm counter trang/sách mới không đáng công. Không triển khai.**
 6. **Safari Zone** - cao: cần cơ chế battle riêng.
 7. **Pokédex theo vùng / lọc theo hệ** - thấp: chỉ UI.
 
