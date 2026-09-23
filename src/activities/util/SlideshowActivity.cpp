@@ -4,6 +4,7 @@
 #include <Bitmap.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 
@@ -227,6 +228,18 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
+
+  // needsFullPowerWhilePreventingSleep() lets the CPU downclock during the
+  // idle wait between auto-advances, but the decode + multi-pass grayscale
+  // SPI writes below must not run at that reduced frequency: on the X3
+  // (ESP32-C3, no PSRAM) the low-power floor is 10 MHz, and below 80 MHz the
+  // C3's APB clock tracks the CPU clock instead of staying pinned at 80 MHz -
+  // which throws off the e-ink panel's SPI timing and made this block run so
+  // long that button input during it was never sampled (loop() only polls
+  // GPIO once per iteration), i.e. an apparent freeze with no way to exit.
+  // This call site runs on the main loop task, not the render task, so it
+  // isn't already covered by ActivityManager::renderTaskLoop()'s own Lock.
+  HalPowerManager::Lock powerLock;
 
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";

@@ -1,3 +1,9 @@
+## [1.2.1] - 2026-09-22
+
+### Fixed
+
+- Photo Slideshow on the Xteink X3 could freeze partway into an unattended run (visible with a short image-change interval, and even a longer one only ever showed the freed image change but then couldn't be exited) - v1.2.0's new idle-downclocking between auto-advances let the X3's CPU drop to 10 MHz, at which point its APB clock (tied to CPU clock below 80 MHz on this chip) throws off the e-ink panel's SPI timing during the actual image decode/redraw, both slowing that work drastically and swallowing any button press that arrived while it ran. The X4 Pro was unaffected since its low-power floor is 80 MHz, which doesn't hit this. Fixed by forcing full CPU speed specifically for the decode/redraw itself, still letting the CPU idle down during the wait between images as v1.2.0 intended.
+
 ## [1.2.0] - 2026-09-22
 
 ### Added
