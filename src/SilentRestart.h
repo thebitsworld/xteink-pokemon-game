@@ -42,9 +42,10 @@ static_assert(isNetworkBootTargetValue(static_cast<uint32_t>(NetworkBootTarget::
 // needs the larger reader-sized render-task stack on S3 devices instead of
 // the tighter generic network one - see main.cpp's useReaderRenderStack.
 // A switch with no default (rather than an OR-chain of ==) means adding a
-// 7th NetworkBootTarget without deciding this here fails to compile instead
-// of silently landing on the smaller stack, the exact way OTA and
-// KOREADER_AUTH were once missed and overflowed that stack on X4 Pro.
+// 7th NetworkBootTarget without deciding this here warns (-Wswitch, enabled
+// project-wide in platformio.ini) instead of silently landing on the smaller
+// stack with no signal at all, the exact way OTA and KOREADER_AUTH were once
+// missed and overflowed that stack on X4 Pro.
 constexpr bool keepsReaderRenderStackOnS3(const NetworkBootTarget target) {
   switch (target) {
     case NetworkBootTarget::OTA:
