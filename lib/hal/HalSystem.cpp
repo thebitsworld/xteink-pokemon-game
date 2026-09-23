@@ -271,10 +271,10 @@ std::string getPanicInfo(bool full) {
     if (panicXtensaRegisters.captured == PANIC_CAPTURE_MAGIC) {
       info += "\n\nXtensa exception registers:\n";
       info += "PC (faulting instruction): 0x" + toHex(panicXtensaRegisters.pc);
-      info += "A0 (return address): 0x" + toHex(panicXtensaRegisters.a0);
-      info += "A1 (stack pointer): 0x" + toHex(panicXtensaRegisters.a1);
-      info += "PS (processor state): 0x" + toHex(panicXtensaRegisters.ps);
-      info += "EXCCAUSE: 0x" + toHex(panicXtensaRegisters.exccause);
+      info += "\nA0 (return address): 0x" + toHex(panicXtensaRegisters.a0);
+      info += "\nA1 (stack pointer): 0x" + toHex(panicXtensaRegisters.a1);
+      info += "\nPS (processor state): 0x" + toHex(panicXtensaRegisters.ps);
+      info += "\nEXCCAUSE: 0x" + toHex(panicXtensaRegisters.exccause);
       info += "\nEXCVADDR (fault address): 0x" + toHex(panicXtensaRegisters.excvaddr);
     }
 #endif
