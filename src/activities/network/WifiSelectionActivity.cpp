@@ -8,7 +8,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #ifndef SIMULATOR
+#include <esp_heap_caps.h>
 #include <esp_mac.h>
+#include <esp_system.h>
 #endif
 
 #include <algorithm>
@@ -107,6 +109,30 @@ void ensureWifiEventLoggingRegistered() {
 }
 #else
 void ensureWifiEventLoggingRegistered() {}
+#endif
+
+// Investigating a user-reported crash while connecting to WiFi: the captured
+// panic registers symbolicated into FreeRTOS's own vTaskSwitchContext, i.e.
+// memory corruption elsewhere that only surfaced later at a context switch,
+// with no descriptive panic reason (a raw exception never reaches
+// __wrap_panic_abort). Enabling FreeRTOS's hardware stack watchpoint would
+// catch this precisely, but that requires a custom_sdkconfig entry, which
+// forces X4 Pro away from pioarduino's prebuilt component graph (risking its
+// USB-OTG/tinyusb setup) - not worth that trade for a still-unconfirmed
+// theory. This is the same diagnostic value with no sdkconfig/framework
+// change: heap_caps_check_integrity is a plain runtime API. Scoped to
+// MALLOC_CAP_INTERNAL (where task stacks/TCBs live, unlike the PSRAM-backed
+// framebuffer heap) to keep each check fast. A real hit calls
+// esp_system_abort() so the crash report finally gets a descriptive reason
+// instead of a bare register dump.
+#ifndef SIMULATOR
+void assertHeapIntegrity(const char* where) {
+  if (!heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true)) {
+    esp_system_abort(where);
+  }
+}
+#else
+void assertHeapIntegrity(const char*) {}
 #endif
 
 const char* wifiStatusName(const wl_status_t status) {
@@ -700,6 +726,7 @@ void WifiSelectionActivity::attemptConnection() {
   String hostname = "CrossPoint-Reader-" + mac;
   WiFi.setHostname(hostname.c_str());
 
+  assertHeapIntegrity("heap corrupt before WiFi.begin");
   wl_status_t beginStatus = WL_IDLE_STATUS;
   if (selectedRequiresPassword && !enteredPassword.empty()) {
     beginStatus = WiFi.begin(selectedSSID.c_str(), enteredPassword.c_str());
@@ -721,6 +748,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
       now - lastConnectionStatusLogTime >= CONNECTION_STATUS_LOG_INTERVAL_MS) {
     LOG_INF("WIFI", "Connection poll: elapsed=%lums status=%d/%s rssi=%d", now - connectionStartTime,
             static_cast<int>(status), wifiStatusName(status), status == WL_CONNECTED ? WiFi.RSSI() : 0);
+    assertHeapIntegrity("heap corrupt during WiFi connect poll");
     lastLoggedWifiStatus = static_cast<int>(status);
     lastConnectionStatusLogTime = now;
   }
