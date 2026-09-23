@@ -1,3 +1,9 @@
+## [1.2.2] - 2026-09-23
+
+### Fixed
+
+- On the X4 Pro, opening Wi-Fi "Check for Update" or KOReader account sign-in could crash the device partway through connecting (a stack overflow in an internal render task, not specific to any one network). This is a long-standing bug inherited from upstream CrossInk (previously reported and partially addressed there for a few other Wi-Fi screens, but Check for Update and KOReader sign-in were missed) - both are now covered the same way the other Wi-Fi screens already were. **If you're on a firmware version affected by this and can't reach the Wi-Fi update screen without crashing**, update from an SD card instead - see [Option B in the installation guide](installation.md#option-b--from-an-sd-card-works-without-wi-fi); it works without any working Wi-Fi connection at all.
+
 ## [1.2.1] - 2026-09-22
 
 ### Fixed
