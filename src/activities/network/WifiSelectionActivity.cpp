@@ -715,16 +715,9 @@ void WifiSelectionActivity::attemptConnection() {
   sConnectionAttemptLoggingActive = true;
 #endif
 
-  // TEMPORARY DIAGNOSTIC (X4 Pro WiFi-connect crash investigation): switched
-  // from WIFI_ALL_CHANNEL_SCAN back to the framework's default WIFI_FAST_SCAN
-  // to test whether the heavier full-channel scan's larger scan-result set and
-  // longer duration is what pushes some fixed-size internal WiFi/driver task
-  // stack past its limit - 3 reproductions so far all crashed inside
-  // FreeRTOS's own vTaskSwitchContext right after this scan/connect sequence,
-  // consistent with stack overflow corrupting an adjacent task's saved
-  // context. If this stops the crash, the multi-AP "strongest BSSID" benefit
-  // below is the trade being made; if it doesn't, revert and keep looking.
-  // WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  // Scan all channels so networks with multiple APs use the strongest matching
+  // BSSID instead of the first match found by the framework's default fast scan.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
   // Set hostname so routers show "CrossPoint-Reader-AABBCCDDEEFF" instead of "esp32-XXXXXXXXXXXX"

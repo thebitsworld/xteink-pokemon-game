@@ -1195,14 +1195,21 @@ void setup() {
   const bool cleanImageBaseOnEntry =
       snapshotTarget == SILENT_REBOOT_TARGET_READER && (snapshotPayload & SILENT_REBOOT_READER_CLEAN_IMAGE_BASE) != 0;
   const bool isNetworkResume = snapshotTarget >= static_cast<uint32_t>(NetworkBootTarget::OTA);
-  // KOReader Sync, OPDS, File Transfer, and Manage Fonts can render their
-  // parent screens while a deferred Wi-Fi child is completing. On S3 devices,
-  // keep the reader-sized render stack without loading the rest of the reader
-  // resources. C3 devices retain the smaller network stack to preserve their
-  // tighter internal-RAM budget.
+  // OTA, KOReader Auth, KOReader Sync, OPDS, File Transfer, and Manage Fonts
+  // can render their parent screens while a deferred Wi-Fi child is
+  // completing. On S3 devices, keep the reader-sized render stack without
+  // loading the rest of the reader resources. C3 devices retain the smaller
+  // network stack to preserve their tighter internal-RAM budget.
+  // OTA and KOReader Auth were missing from this list (only found via a real
+  // X4 Pro crash investigation: WifiSelectionActivity's connect/scan flow -
+  // shared by every one of these six targets - overflowed the 8192-byte
+  // network render-task stack on S3, landing as an unrelated-looking
+  // FreeRTOS scheduler crash rather than a named stack-overflow panic).
   const bool useReaderRenderStack =
       !isNetworkResume ||
-      (FREEINK_MCU_S3 && (snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::KOREADER_SYNC) ||
+      (FREEINK_MCU_S3 && (snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::OTA) ||
+                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::KOREADER_AUTH) ||
+                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::KOREADER_SYNC) ||
                           snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::OPDS) ||
                           snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::FILE_TRANSFER) ||
                           snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::MANAGE_FONTS)));
