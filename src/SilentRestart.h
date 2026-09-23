@@ -37,6 +37,27 @@ static_assert(isNetworkBootTargetValue(static_cast<uint32_t>(NetworkBootTarget::
                   isNetworkBootTargetValue(static_cast<uint32_t>(NetworkBootTarget::MANAGE_FONTS)),
               "Every network boot target must pass RTC target validation");
 
+// Whether this target's parent screen keeps rendering while its deferred
+// Wi-Fi child activity (always a WifiSelectionActivity connect/scan) runs, so
+// needs the larger reader-sized render-task stack on S3 devices instead of
+// the tighter generic network one - see main.cpp's useReaderRenderStack.
+// A switch with no default (rather than an OR-chain of ==) means adding a
+// 7th NetworkBootTarget without deciding this here fails to compile instead
+// of silently landing on the smaller stack, the exact way OTA and
+// KOREADER_AUTH were once missed and overflowed that stack on X4 Pro.
+constexpr bool keepsReaderRenderStackOnS3(const NetworkBootTarget target) {
+  switch (target) {
+    case NetworkBootTarget::OTA:
+    case NetworkBootTarget::OPDS:
+    case NetworkBootTarget::KOREADER_SYNC:
+    case NetworkBootTarget::KOREADER_AUTH:
+    case NetworkBootTarget::FILE_TRANSFER:
+    case NetworkBootTarget::MANAGE_FONTS:
+      return true;
+  }
+  return false;
+}
+
 void silentRestart();                                            // home screen
 void silentRestartToReader(bool cleanImageBaseOnEntry = false);  // currently-open EPUB (APP_STATE.openEpubPath)
 // Reboots immediately after an activity releases exclusive raw storage.

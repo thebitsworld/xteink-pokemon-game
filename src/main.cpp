@@ -1207,12 +1207,7 @@ void setup() {
   // FreeRTOS scheduler crash rather than a named stack-overflow panic).
   const bool useReaderRenderStack =
       !isNetworkResume ||
-      (FREEINK_MCU_S3 && (snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::OTA) ||
-                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::KOREADER_AUTH) ||
-                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::KOREADER_SYNC) ||
-                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::OPDS) ||
-                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::FILE_TRANSFER) ||
-                          snapshotTarget == static_cast<uint32_t>(NetworkBootTarget::MANAGE_FONTS)));
+      (FREEINK_MCU_S3 && keepsReaderRenderStackOnS3(static_cast<NetworkBootTarget>(snapshotTarget)));
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   silentRebootPayload = 0;
