@@ -1495,6 +1495,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     if (attacker.transformed || defenderSpecies == nullptr) {
       result.event = BattleLogEvent::MoveFailed;
     } else {
+      attacker.transformedFromSpeciesId = attacker.speciesId;
       attacker.speciesId = defender.speciesId;
       attacker.attackStage = defender.attackStage;
       attacker.defenseStage = defender.defenseStage;
@@ -1540,6 +1541,10 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       result.event = BattleLogEvent::MoveNoEffect;
     } else {
       result.redirectedMoveId = pickedMoveId;
+      // resolveAction() only zeroes the user's HP for the move it was handed
+      // (Metronome itself); a redirect to Self-Destruct/Explosion must faint
+      // the user too, or it just deals the damage and survives.
+      if (isSelfDestructMove(pickedMoveId)) attacker.currentHp = 0;
       resolveGenericMoveEffect(attacker, defender, pickedMoveId, pickedMove, random,
                                /*allowMultiTurnLock=*/false, moveSlotOfMimicUser, result);
     }
@@ -1554,6 +1559,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       result.event = BattleLogEvent::MoveFailed;
     } else {
       result.redirectedMoveId = mirroredMoveId;
+      if (isSelfDestructMove(mirroredMoveId)) attacker.currentHp = 0;  // see the Metronome branch above
       resolveGenericMoveEffect(attacker, defender, mirroredMoveId, mirroredMove, random,
                                /*allowMultiTurnLock=*/false, moveSlotOfMimicUser, result);
     }
@@ -1702,6 +1708,15 @@ void faintCombatant(BattleCombatant& combatant, BattleCombatant& other, BattleLo
   if (combatant.forcedMoveId != 0 && isTrapMove(combatant.forcedMoveId)) {
     other.trappedTurnsRemaining = 0;
   }
+  // The reverse: if the fainting Pokemon was the one being held (by a poison
+  // tick, recoil, ...) the trapper's lock ends with it. Only the continuation
+  // turn that kills the target used to release it, so a target lost any other
+  // way left the trapper auto-repeating the move - accuracy-free, no trap
+  // applied - against whatever came in next.
+  if (other.forcedMoveId != 0 && isTrapMove(other.forcedMoveId)) {
+    other.forcedMoveId = 0;
+    other.forcedTurnsRemaining = 0;
+  }
 }
 
 void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnResult& result) {
@@ -1716,8 +1731,19 @@ void finishTurn(BattleCombatant& player, BattleCombatant& opponent, BattleTurnRe
   applyEndOfTurnStatusDamage(opponent, opponentDotEvent);
   applyLeechSeedDamage(player, opponent, playerDotEvent);
   applyLeechSeedDamage(opponent, player, opponentDotEvent);
-  if (playerDotEvent != BattleLogEvent::None) result.player.event = playerDotEvent;
-  if (opponentDotEvent != BattleLogEvent::None) result.opponent.event = opponentDotEvent;
+  // Teleported/ForcedSwitch are not just log lines: PokemonActivity.cpp acts on
+  // them (ends a wild fight / forces a switch). A poison/burn/Leech Seed tick
+  // that lands the same turn must not overwrite them, or the escape or forced
+  // switch silently never happens (while the move's PP is still spent).
+  const auto isControlFlowEvent = [](const BattleLogEvent event) {
+    return event == BattleLogEvent::Teleported || event == BattleLogEvent::ForcedSwitch;
+  };
+  if (playerDotEvent != BattleLogEvent::None && !isControlFlowEvent(result.player.event)) {
+    result.player.event = playerDotEvent;
+  }
+  if (opponentDotEvent != BattleLogEvent::None && !isControlFlowEvent(result.opponent.event)) {
+    result.opponent.event = opponentDotEvent;
+  }
 
   if (player.currentHp == 0 && opponent.currentHp == 0) {
     // Simultaneous KO from a shared end-of-turn tick (both sides burned/poisoned down to 0 the same turn,
@@ -2022,6 +2048,11 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
   result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
   if (player.currentHp == 0) {
     faintCombatant(player, opponent, result.player.event);
+    // The acting side's own Explosion/recoil can take it down in the same
+    // action; it needs the same faint cleanup or a later Revive brings it back
+    // still poisoned/toxic. The attacker's action caused the KO, so it wins,
+    // matching stepBattle()'s mutual-KO ruling.
+    if (opponent.currentHp == 0) faintCombatant(opponent, player, result.opponent.event);
     result.outcome = BattleOutcome::OpponentWon;
     return result;
   }
@@ -2051,6 +2082,7 @@ BattleTurnResult stepPlayerOnlyTurn(BattleCombatant& player, BattleCombatant& op
   result.player = resolveAction(player, opponent, playerMoveSlot, random);
   if (opponent.currentHp == 0) {
     faintCombatant(opponent, player, result.opponent.event);
+    if (player.currentHp == 0) faintCombatant(player, opponent, result.player.event);  // see stepOpponentOnlyTurn()
     result.outcome = BattleOutcome::PlayerWon;
     return result;
   }
@@ -2063,7 +2095,7 @@ bool attemptCatch(const BattleCombatant& wild, const BallKind ball, const Random
   if (ball == BallKind::Master) return true;
   if (wild.currentHp == 0 || wild.maxHp == 0) return false;
 
-  const SpeciesData* species = speciesData(wild.speciesId);
+  const SpeciesData* species = speciesData(wild.realSpeciesId());
   if (species == nullptr) return false;
 
   // Real Gen 1 catch algorithm (two rolls, not one) - a previous version of

@@ -1372,7 +1372,7 @@ void PokemonActivity::finishBattleAfterWildFainted() {
   // reach here with the just-defeated opponent's level still valid.
   if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
     service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level,
-                           gymChallengeIndex_ != 0, battleOpponent_.speciesId);
+                           gymChallengeIndex_ != 0, battleOpponent_.realSpeciesId());
   }
   // The winning move can also have fainted the player's own active Pokemon
   // at the same time (Self-Destruct/Explosion, or a KO+recoil hit - see
@@ -2295,9 +2295,9 @@ void PokemonActivity::activate() {
       // out above, so this path is never a trainer battle).
       if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
         service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level, false,
-                               battleOpponent_.speciesId);
+                               battleOpponent_.realSpeciesId());
       }
-      const uint16_t caughtSpecies = battleOpponent_.speciesId;
+      const uint16_t caughtSpecies = battleOpponent_.realSpeciesId();
       uint32_t caughtRecordId = 0;
       const pokemon::ServiceStatus caughtStatus = service_.resolveEncounter(pokemon::EncounterChoice::Catch, caughtRecordId);
       if (caughtStatus == pokemon::ServiceStatus::BoxFull) {

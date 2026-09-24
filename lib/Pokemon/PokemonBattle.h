@@ -263,6 +263,14 @@ struct BattleCombatant {
   // until this combatant switches out or the battle ends, same as every
   // other transient field above.
   bool transformed = false;
+  // Set by Transform to the species this combatant REALLY is, before speciesId
+  // is overwritten with the copied one. speciesId stays what's displayed and
+  // fought as; anything about the creature itself - catch rate, EV yield,
+  // what the Pokedex/nickname prompt call it - must use realSpeciesId(), or a
+  // wild Ditto that transformed is caught at Mewtwo's rate and yields Mewtwo's
+  // EVs.
+  uint16_t transformedFromSpeciesId = 0;
+  uint16_t realSpeciesId() const { return transformed && transformedFromSpeciesId != 0 ? transformedFromSpeciesId : speciesId; }
   // Conversion: overrides this combatant's own type (for STAB and
   // incoming/outgoing type-effectiveness purposes only - display, the
   // Pokedex, and every other type reference are unaffected) with whatever

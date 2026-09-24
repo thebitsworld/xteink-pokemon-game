@@ -1570,6 +1570,108 @@ void metronomeSelectedTrapMoveDoesNotLockTheAttackerIn() {
   CHECK(metronomeUser.forcedMoveId == 0);
 }
 
+// An end-of-turn poison/burn/Leech Seed tick used to overwrite the action's
+// event unconditionally, but Teleported/ForcedSwitch are what
+// PokemonActivity.cpp acts on: a poisoned Pokemon's Teleport (or Whirlwind)
+// silently did nothing while still spending its PP.
+void endOfTurnStatusTickDoesNotOverwriteTeleportOrForcedSwitch() {
+  BattleCombatant teleporter = makeCombatant(4, 30, {100});  // Teleport
+  teleporter.status = Ailment::Poison;
+  BattleCombatant target = makeCombatant(7, 30, {45});
+  const pokemon::BattleTurnResult teleported = pokemon::stepPlayerOnlyTurn(teleporter, target, 0, ZERO_RANDOM);
+  CHECK(teleported.player.event == BattleLogEvent::Teleported);
+
+  BattleCombatant roarer = makeCombatant(4, 30, {18});  // Whirlwind
+  roarer.status = Ailment::Poison;
+  BattleCombatant victim = makeCombatant(7, 30, {45});
+  const pokemon::BattleTurnResult forced = pokemon::stepPlayerOnlyTurn(roarer, victim, 0, ZERO_RANDOM);
+  CHECK(forced.player.event == BattleLogEvent::ForcedSwitch);
+
+  // A plain tick with nothing to preserve is still reported.
+  BattleCombatant plain = makeCombatant(4, 30, {45});  // Growl
+  plain.status = Ailment::Poison;
+  BattleCombatant other = makeCombatant(7, 30, {45});
+  CHECK(pokemon::stepPlayerOnlyTurn(plain, other, 0, ZERO_RANDOM).player.event == BattleLogEvent::StatusDamage);
+}
+
+// resolveAction() zeroes the user's HP for Self-Destruct/Explosion itself, but
+// a Metronome that redirected to one skipped that and left the user standing.
+void metronomeRedirectedToExplosionFaintsTheUser() {
+  uint32_t seed = 152;  // -> move id 153 (Explosion)
+  const RandomSource seeded{&seed, fixedRoll};
+  BattleCombatant metronomeUser = makeCombatant(4, 30, {118});
+  BattleCombatant target = makeCombatant(7, 30, {45});
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(target, metronomeUser, seeded);
+  CHECK(result.opponent.redirectedMoveId == 153);
+  CHECK(metronomeUser.currentHp == 0);
+}
+
+// stepBattle() already gave both sides the faint cleanup on a mutual KO; the
+// single-actor steps (the other side skipped its action for an item / AI heal
+// / switch) only cleaned up the side they checked, so the exploding side kept
+// its status and Toxic counter and a later Revive brought it back poisoned.
+void mutualKoFromTheSingleActorStepsCleansUpBothSides() {
+  BattleCombatant exploder = makeCombatant(4, 30, {120});  // Self-Destruct
+  exploder.status = Ailment::Poison;
+  BattleCombatant weak = makeCombatant(7, 5, {45});
+  weak.currentHp = 1;
+  const pokemon::BattleTurnResult opponentActs = pokemon::stepOpponentOnlyTurn(weak, exploder, ZERO_RANDOM);
+  CHECK(opponentActs.outcome == pokemon::BattleOutcome::OpponentWon);  // the attacker's action caused it
+  CHECK(weak.currentHp == 0 && exploder.currentHp == 0);
+  CHECK(exploder.status == Ailment::None);
+  CHECK(exploder.toxicCounter == 0);
+  CHECK(opponentActs.opponent.event == BattleLogEvent::Fainted);
+
+  BattleCombatant playerExploder = makeCombatant(4, 30, {120});
+  playerExploder.status = Ailment::Poison;
+  BattleCombatant weakOpponent = makeCombatant(7, 5, {45});
+  weakOpponent.currentHp = 1;
+  const pokemon::BattleTurnResult playerActs = pokemon::stepPlayerOnlyTurn(playerExploder, weakOpponent, 0, ZERO_RANDOM);
+  CHECK(playerActs.outcome == pokemon::BattleOutcome::PlayerWon);
+  CHECK(playerExploder.currentHp == 0 && weakOpponent.currentHp == 0);
+  CHECK(playerExploder.status == Ailment::None);
+  CHECK(playerActs.player.event == BattleLogEvent::Fainted);
+}
+
+// Transform overwrites speciesId with the copied form, so a wild Ditto that
+// transformed used to be caught at (and yield EVs of) the COPIED species.
+void transformedWildCombatantIsCaughtAtItsRealSpeciesRate() {
+  BattleCombatant ditto = makeCombatant(16, 20, {144});  // Pidgey (catch rate 255) using Transform
+  BattleCombatant mewtwo = makeCombatant(150, 20, {45});  // catch rate 3
+  pokemon::stepOpponentOnlyTurn(mewtwo, ditto, ZERO_RANDOM);
+  CHECK(ditto.transformed);
+  CHECK(ditto.speciesId == 150);
+  CHECK(ditto.realSpeciesId() == 16);
+
+  ditto.currentHp = 1;  // near-dead: the HP factor is maxed, so only the species rate decides
+  uint32_t roll = 100;
+  const RandomSource fixed{&roll, fixedRoll};
+  CHECK(pokemon::attemptCatch(ditto, pokemon::BallKind::Poke, fixed));  // 255 clears a 100 threshold; Mewtwo's 3 would not
+
+  BattleCombatant realMewtwo = makeCombatant(150, 20, {45});
+  realMewtwo.currentHp = 1;
+  CHECK(!pokemon::attemptCatch(realMewtwo, pokemon::BallKind::Poke, fixed));  // an untransformed Mewtwo still fails
+  CHECK(realMewtwo.realSpeciesId() == 150);
+}
+
+// Only the continuation turn that kills a trapped target used to release the
+// trapper's lock; losing the target any other way (a poison tick here) left it
+// auto-repeating the trap move against whatever came in next.
+void trapperIsReleasedWhenTheTrappedTargetFaintsFromAStatusTick() {
+  BattleCombatant trapper = makeCombatant(4, 30, {20});  // Wrap
+  trapper.forcedMoveId = 20;
+  trapper.forcedTurnsRemaining = 3;
+  BattleCombatant target = makeCombatant(7, 30, {45});
+  target.trappedTurnsRemaining = 4;
+  target.status = Ailment::Poison;
+  target.currentHp = 1;
+  const pokemon::BattleTurnResult result = pokemon::stepOpponentOnlyTurn(trapper, target, ZERO_RANDOM);
+  CHECK(result.outcome == pokemon::BattleOutcome::PlayerWon);  // the poison tick finished the target
+  CHECK(target.currentHp == 0);
+  CHECK(trapper.forcedMoveId == 0);
+  CHECK(trapper.forcedTurnsRemaining == 0);
+}
+
 // --- Round-2 Gen 1 authenticity fixes: Burn halving Attack, Dream Eater's
 // sleep requirement, Hyper Beam's recharge turn, Rage, Thrash/Petal Dance,
 // and Wrap/Bind/Fire Spin/Clamp trapping the TARGET too (not just locking
@@ -2275,6 +2377,11 @@ int main() {
   mirrorMoveFailsWithNothingRecordedYet();
   metronomeExecutesADifferentMovesEffectInsteadOfItsOwn();
   metronomeSelectedTrapMoveDoesNotLockTheAttackerIn();
+  endOfTurnStatusTickDoesNotOverwriteTeleportOrForcedSwitch();
+  metronomeRedirectedToExplosionFaintsTheUser();
+  mutualKoFromTheSingleActorStepsCleansUpBothSides();
+  transformedWildCombatantIsCaughtAtItsRealSpeciesRate();
+  trapperIsReleasedWhenTheTrappedTargetFaintsFromAStatusTick();
   burnHalvesAttackerAttackForPhysicalMoves();
   burnDoesNotAffectSpecialMoveDamage();
   dreamEaterFailsUnlessTargetIsAsleep();
