@@ -132,6 +132,29 @@ void aFailedValidationLeavesTheStoreUntouched() {
 
 }  // namespace
 
+// A read that fails outright must not look like "no saved movesets" - the next
+// write would then replace the real file (and every boxed Pokemon's TM moves).
+void aTransientReadFailureNeverOverwritesTheRealFile() {
+  Storage.clear();
+  {
+    pokemon::PokemonMovesetStore writer;
+    CHECK(writer.upsertEntry(makeEntry(7, 84)));
+  }
+  pokemon::PokemonMovesetStore store;
+  Storage.setFailRead(true);
+  CHECK(store.findEntry(7) == nullptr);
+  CHECK(!store.upsertEntry(makeEntry(9, 33)));
+  CHECK(!store.removeEntry(7));
+  CHECK(!store.reset());
+  Storage.setFailRead(false);
+
+  CHECK(store.findEntry(7) != nullptr);
+  CHECK(store.upsertEntry(makeEntry(9, 33)));
+  pokemon::PokemonMovesetStore reader;
+  CHECK(reader.findEntry(7) != nullptr);
+  CHECK(reader.findEntry(9) != nullptr);
+}
+
 int main() {
   missingFilesLeaveAnEmptyStore();
   upsertPersistsAndAFreshInstanceReadsItBack();
@@ -140,6 +163,7 @@ int main() {
   removeAndResetPersist();
   upsertEntriesBatchesOneWriteAndSkipsInvalidEntries();
   aFailedValidationLeavesTheStoreUntouched();
+  aTransientReadFailureNeverOverwritesTheRealFile();
   if (failures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

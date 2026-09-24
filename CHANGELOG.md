@@ -18,6 +18,7 @@
 - Reading progress: when the SD card fails a checkpoint write, the game now waits 30 seconds before retrying instead of retrying (and stalling) on every loop; leaving the book still retries immediately.
 - Battle engine: end-of-turn status damage no longer overwrites a Teleport/forced switch; Metronome/Mirror Move picking Explosion/Self-Destruct now faints the user; a mutual KO from a single-side step (item use / switch) is now recorded for both Pokémon; a trapping move no longer keeps the victim locked after the trapper faints; a transformed wild Pokémon is caught/rewarded as its real species.
 - Level label on the Summary screen was cut off in languages with wider digits (e.g. Arabic).
+- A momentary SD-card read failure (or low memory) while the game loaded its IV/EV, battle or Hall of Fame data was treated as "no data saved yet" for the rest of the session, and the next write then replaced the real file: every Pokémon's IVs could be re-rolled, or a recorded Hall of Fame overwritten. A failed read is now retried on the next access and nothing is written over the existing file in the meantime.
 
 ## [1.2.2] - 2026-09-23
 

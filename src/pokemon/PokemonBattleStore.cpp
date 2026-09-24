@@ -28,12 +28,17 @@ bool sequenceIsNewer(const uint32_t candidate, const uint32_t current) {
 
 // Reads and decodes one alternating-format slot. Returns false for a
 // missing, oversized, short, or failed-validation file - all treated
-// identically by the caller (this slot just isn't a candidate).
-bool inspectSlot(const char* path, BattleStoreState& outputState, uint32_t& outputSequence) {
+// identically by the caller (this slot just isn't a candidate). The exception
+// is `transientFailure`, set when the slot could not be READ at all (open
+// failed, short read): that says nothing about the file's contents, so load()
+// must not mistake it for "no battle data" and let the next write replace a
+// perfectly good file.
+bool inspectSlot(const char* path, BattleStoreState& outputState, uint32_t& outputSequence, bool& transientFailure) {
   if (!Storage.exists(path)) return false;
   FsFile file = Storage.open(path, O_RDONLY);
   if (!file) {
     LOG_ERR("PokemonBattleStore", "Failed to open %s", path);
+    transientFailure = true;
     return false;
   }
   const uint64_t fileSize = file.fileSize64();
@@ -46,7 +51,8 @@ bool inspectSlot(const char* path, BattleStoreState& outputState, uint32_t& outp
   const bool readOk = readExact(file, bytes.data(), static_cast<size_t>(fileSize));
   file.close();
   if (!readOk) {
-    LOG_ERR("PokemonBattleStore", "Short read on %s, discarding", path);
+    LOG_ERR("PokemonBattleStore", "Short read on %s", path);
+    transientFailure = true;
     return false;
   }
   return decodeBattleStoreFile(bytes.data(), static_cast<size_t>(fileSize), outputState, outputSequence);
@@ -90,8 +96,13 @@ void PokemonBattleStore::load() const {
   BattleStoreState stateB{};
   uint32_t sequenceA = 0;
   uint32_t sequenceB = 0;
-  const bool readyA = inspectSlot(STORE_PATH_A, stateA, sequenceA);
-  const bool readyB = inspectSlot(STORE_PATH_B, stateB, sequenceB);
+  bool transientFailure = false;
+  const bool readyA = inspectSlot(STORE_PATH_A, stateA, sequenceA, transientFailure);
+  const bool readyB = inspectSlot(STORE_PATH_B, stateB, sequenceB, transientFailure);
+  if (transientFailure) {
+    loaded_ = false;  // reads see an empty store for now, writes are refused, the next call retries
+    return;
+  }
   if (readyA || readyB) {
     activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
     state_ = activeIsA_ ? stateA : stateB;
@@ -154,7 +165,8 @@ bool PokemonBattleStore::writeState(const BattleStoreState& state) const {
 
   BattleStoreState verified{};
   uint32_t verifiedSequence = 0;
-  if (!inspectSlot(destinationPath, verified, verifiedSequence) || verifiedSequence != nextSequence ||
+  bool verifyReadFailed = false;
+  if (!inspectSlot(destinationPath, verified, verifiedSequence, verifyReadFailed) || verifiedSequence != nextSequence ||
       !(verified == state)) {
     LOG_ERR("PokemonBattleStore", "Inactive battle store slot verification failed");
     return false;
@@ -169,6 +181,7 @@ bool PokemonBattleStore::writeState(const BattleStoreState& state) const {
 
 bool PokemonBattleStore::upsertEntry(const BattleRecordEntry& entry) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   BattleStoreState candidate = state_;
   if (!pokemon::upsertBattleEntry(candidate, entry)) return false;
   return writeState(candidate);
@@ -176,6 +189,7 @@ bool PokemonBattleStore::upsertEntry(const BattleRecordEntry& entry) {
 
 bool PokemonBattleStore::upsertEntries(const std::span<const BattleRecordEntry> entries) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   BattleStoreState candidate = state_;
   // Skip past (rather than abort on) any single entry that fails validation
   // - one corrupt/invalid entry must not discard every other, otherwise-good
@@ -197,6 +211,7 @@ bool PokemonBattleStore::isFull() const {
 
 bool PokemonBattleStore::removeEntry(const uint32_t recordId) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   BattleStoreState candidate = state_;
   if (!pokemon::removeBattleEntry(candidate, recordId)) return false;
   return writeState(candidate);
@@ -204,6 +219,7 @@ bool PokemonBattleStore::removeEntry(const uint32_t recordId) {
 
 bool PokemonBattleStore::evictEntryNotIn(const std::span<const uint32_t> keepIds) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   BattleStoreState candidate = state_;
   if (!pokemon::evictBattleEntryNotIn(candidate, keepIds)) return false;
   return writeState(candidate);
@@ -211,6 +227,7 @@ bool PokemonBattleStore::evictEntryNotIn(const std::span<const uint32_t> keepIds
 
 bool PokemonBattleStore::reset() {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   return writeState(BattleStoreState{});
 }
 

@@ -247,6 +247,31 @@ void upsertEntriesFailsWhenEveryEntryIsInvalid() {
 
 }  // namespace
 
+// See PokemonIvEvStoreTest.cpp's matching test: a failed read must not be
+// mistaken for an empty store that the next write then replaces.
+void aTransientReadFailureNeverOverwritesTheRealFile() {
+  Storage.clear();
+  {
+    pokemon::PokemonBattleStore writer;
+    CHECK(writer.upsertEntry(makeEntry(7, 20)));
+  }
+  pokemon::PokemonBattleStore store;
+  Storage.setFailRead(true);
+  CHECK(store.findEntry(7) == nullptr);
+  CHECK(!store.upsertEntry(makeEntry(9, 15)));
+  CHECK(!store.removeEntry(7));
+  CHECK(!store.reset());
+  Storage.setFailRead(false);
+
+  const pokemon::BattleRecordEntry* recovered = store.findEntry(7);
+  CHECK(recovered != nullptr);
+  if (recovered != nullptr) CHECK(recovered->currentHp == 20);
+  CHECK(store.upsertEntry(makeEntry(9, 15)));
+  pokemon::PokemonBattleStore reader;
+  CHECK(reader.findEntry(7) != nullptr);
+  CHECK(reader.findEntry(9) != nullptr);
+}
+
 int main() {
   missingFilesLeaveAnEmptyStore();
   upsertPersistsAndAFreshInstanceReadsItBack();
@@ -260,5 +285,6 @@ int main() {
   preExistingLegacySingleFileIsMigratedOnFirstLoad();
   upsertEntriesAppliesValidEntriesAndSkipsAnInvalidOne();
   upsertEntriesFailsWhenEveryEntryIsInvalid();
+  aTransientReadFailureNeverOverwritesTheRealFile();
   return failures == 0 ? 0 : 1;
 }

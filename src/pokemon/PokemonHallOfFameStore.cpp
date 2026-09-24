@@ -26,12 +26,16 @@ bool sequenceIsNewer(const uint32_t candidate, const uint32_t current) {
 
 // Reads and decodes one alternating-format slot. Returns false for a
 // missing, wrong-sized, or failed-validation file - all treated identically
-// by the caller (this slot just isn't a candidate).
-bool inspectSlot(const char* path, HallOfFameState& outputState, uint32_t& outputSequence) {
+// by the caller (this slot just isn't a candidate). `transientFailure` is set
+// when the slot could not be READ at all (open failed, short read): that says
+// nothing about its contents, and mistaking it for "no Hall of Fame yet" would
+// let captureOnce() overwrite an already-recorded one.
+bool inspectSlot(const char* path, HallOfFameState& outputState, uint32_t& outputSequence, bool& transientFailure) {
   if (!Storage.exists(path)) return false;
   FsFile file = Storage.open(path, O_RDONLY);
   if (!file) {
     LOG_ERR("PokemonHallOfFameStore", "Failed to open %s", path);
+    transientFailure = true;
     return false;
   }
   const uint64_t fileSize = file.fileSize64();
@@ -43,7 +47,8 @@ bool inspectSlot(const char* path, HallOfFameState& outputState, uint32_t& outpu
   const bool readOk = readExact(file, bytes.data(), bytes.size());
   file.close();
   if (!readOk) {
-    LOG_ERR("PokemonHallOfFameStore", "Short read on %s, discarding", path);
+    LOG_ERR("PokemonHallOfFameStore", "Short read on %s", path);
+    transientFailure = true;
     return false;
   }
   return decodeHallOfFameFile(bytes.data(), bytes.size(), outputState, outputSequence);
@@ -62,8 +67,13 @@ void PokemonHallOfFameStore::load() const {
   HallOfFameState stateB{};
   uint32_t sequenceA = 0;
   uint32_t sequenceB = 0;
-  const bool readyA = inspectSlot(STORE_PATH_A, stateA, sequenceA);
-  const bool readyB = inspectSlot(STORE_PATH_B, stateB, sequenceB);
+  bool transientFailure = false;
+  const bool readyA = inspectSlot(STORE_PATH_A, stateA, sequenceA, transientFailure);
+  const bool readyB = inspectSlot(STORE_PATH_B, stateB, sequenceB, transientFailure);
+  if (transientFailure) {
+    loaded_ = false;  // reads see "no Hall of Fame" for now, writes are refused, the next call retries
+    return;
+  }
   if (!readyA && !readyB) return;  // fresh install, or both slots lost - stay empty, not an error
   activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
   state_ = activeIsA_ ? stateA : stateB;
@@ -104,7 +114,8 @@ bool PokemonHallOfFameStore::writeState(const HallOfFameState& state) const {
 
   HallOfFameState verified{};
   uint32_t verifiedSequence = 0;
-  if (!inspectSlot(destinationPath, verified, verifiedSequence) || verifiedSequence != nextSequence ||
+  bool verifyReadFailed = false;
+  if (!inspectSlot(destinationPath, verified, verifiedSequence, verifyReadFailed) || verifiedSequence != nextSequence ||
       !(verified == state)) {
     LOG_ERR("PokemonHallOfFameStore", "Inactive Hall of Fame store slot verification failed");
     return false;
@@ -119,6 +130,7 @@ bool PokemonHallOfFameStore::writeState(const HallOfFameState& state) const {
 
 bool PokemonHallOfFameStore::captureOnce(const HallOfFameState& state) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   if (ready_ && state_.cleared) return false;  // already captured - never overwrite
   HallOfFameState candidate = state;
   candidate.cleared = true;
@@ -127,6 +139,7 @@ bool PokemonHallOfFameStore::captureOnce(const HallOfFameState& state) {
 
 bool PokemonHallOfFameStore::reset() {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   return writeState(HallOfFameState{});
 }
 

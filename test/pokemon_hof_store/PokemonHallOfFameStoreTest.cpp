@@ -116,6 +116,29 @@ void aWriteFailureLeavesTheStoreUnchanged() {
 
 }  // namespace
 
+// A failed read must not look like "no Hall of Fame yet", or captureOnce()'s
+// never-overwrite guarantee is void.
+void aTransientReadFailureNeverOverwritesTheRecordedHallOfFame() {
+  Storage.clear();
+  {
+    pokemon::PokemonHallOfFameStore writer;
+    CHECK(writer.captureOnce(makeState(600, 6)));
+  }
+  pokemon::PokemonHallOfFameStore store;
+  Storage.setFailRead(true);
+  CHECK(!store.hasEntry());
+  CHECK(!store.captureOnce(makeState(999, 25)));
+  CHECK(!store.reset());
+  Storage.setFailRead(false);
+
+  CHECK(store.hasEntry());
+  const pokemon::HallOfFameState* entry = store.entry();
+  CHECK(entry != nullptr);
+  if (entry != nullptr) CHECK(entry->lifetimeMinutesAtClear == 600);
+  pokemon::PokemonHallOfFameStore reader;
+  CHECK(reader.hasEntry());
+}
+
 int main() {
   missingFilesLeaveNoEntry();
   captureOncePersistsAndAFreshInstanceReadsItBack();
@@ -123,5 +146,6 @@ int main() {
   resetThenCaptureOnceAlternatesFilesAndPersistsTheNewSnapshot();
   bothFilesCorruptStillLeavesNoEntryNeverAnError();
   aWriteFailureLeavesTheStoreUnchanged();
+  aTransientReadFailureNeverOverwritesTheRecordedHallOfFame();
   return failures == 0 ? 0 : 1;
 }

@@ -30,12 +30,17 @@ bool sequenceIsNewer(const uint32_t candidate, const uint32_t current) {
 
 // Reads and decodes one alternating-format slot. Returns false for a
 // missing, oversized, short, or failed-validation file - all treated
-// identically by the caller (this slot just isn't a candidate).
-bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& outputSequence) {
+// identically by the caller (this slot just isn't a candidate). The exception
+// is `transientFailure`, set when the slot could not be READ at all (open
+// failed, out of memory, short read): that says nothing about the file's
+// contents, so load() must not mistake it for "no saved IVs" - the next
+// ensureIvEv() would roll fresh ones and the write would replace the real file.
+bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& outputSequence, bool& transientFailure) {
   if (!Storage.exists(path)) return false;
   FsFile file = Storage.open(path, O_RDONLY);
   if (!file) {
     LOG_ERR("PokemonIvEvStore", "Failed to open %s", path);
+    transientFailure = true;
     return false;
   }
   const uint64_t fileSize = file.fileSize64();
@@ -65,12 +70,14 @@ bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& output
   if (!bytes) {
     LOG_ERR("PokemonIvEvStore", "Out of memory reading %s", path);
     file.close();
+    transientFailure = true;
     return false;
   }
   const bool readOk = readExact(file, bytes->data(), static_cast<size_t>(fileSize));
   file.close();
   if (!readOk) {
-    LOG_ERR("PokemonIvEvStore", "Short read on %s, discarding", path);
+    LOG_ERR("PokemonIvEvStore", "Short read on %s", path);
+    transientFailure = true;
     return false;
   }
   return decodeIvEvStoreFile(bytes->data(), static_cast<size_t>(fileSize), outputState, outputSequence);
@@ -97,13 +104,19 @@ void PokemonIvEvStore::load() const {
   std::unique_ptr<IvEvStoreState> stateA(new (std::nothrow) IvEvStoreState());
   std::unique_ptr<IvEvStoreState> stateB(new (std::nothrow) IvEvStoreState());
   if (!stateA || !stateB) {
-    LOG_ERR("PokemonIvEvStore", "Out of memory loading IV/EV store, staying empty");
+    LOG_ERR("PokemonIvEvStore", "Out of memory loading IV/EV store, will retry");
+    loaded_ = false;  // reads see an empty store for now, writes are refused, the next call retries
     return;
   }
   uint32_t sequenceA = 0;
   uint32_t sequenceB = 0;
-  const bool readyA = inspectSlot(STORE_PATH_A, *stateA, sequenceA);
-  const bool readyB = inspectSlot(STORE_PATH_B, *stateB, sequenceB);
+  bool transientFailure = false;
+  const bool readyA = inspectSlot(STORE_PATH_A, *stateA, sequenceA, transientFailure);
+  const bool readyB = inspectSlot(STORE_PATH_B, *stateB, sequenceB, transientFailure);
+  if (transientFailure) {
+    loaded_ = false;  // retry on the next call rather than trust a partial read
+    return;
+  }
   if (!readyA && !readyB) return;  // fresh install, or both slots lost - stay empty, not an error
   activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
   state_ = activeIsA_ ? *stateA : *stateB;
@@ -189,6 +202,7 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
 
 bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   // Heap-allocated, not a stack local copy of state_ - see load()'s
   // matching comment. This one was missed in the first pass at this fix
   // (found via a second real-device crash report, symbolized back to
@@ -212,6 +226,7 @@ bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
 
 bool PokemonIvEvStore::removeEntry(const uint32_t recordId) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   // Heap-allocated, not a stack local copy of state_ - see upsertEntry()'s
   // matching comment (and load()'s, for the original field-crash context).
   std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(state_));
@@ -225,6 +240,7 @@ bool PokemonIvEvStore::removeEntry(const uint32_t recordId) {
 
 bool PokemonIvEvStore::reset() {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   std::unique_ptr<IvEvStoreState> empty(new (std::nothrow) IvEvStoreState());
   if (!empty) {
     LOG_ERR("PokemonIvEvStore", "Out of memory resetting IV/EV store");

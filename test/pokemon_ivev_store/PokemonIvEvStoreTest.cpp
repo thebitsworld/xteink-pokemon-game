@@ -180,6 +180,33 @@ void resetClearsBothTheStoreAndAFreshReader() {
 
 }  // namespace
 
+// A read that fails outright (SD hiccup, out of memory) says nothing about the
+// file's contents. It used to look like "no saved IVs", after which the next
+// write started a fresh sequence over slot A and every Pokemon's IVs were lost.
+void aTransientReadFailureNeverOverwritesTheRealFile() {
+  Storage.clear();
+  {
+    pokemon::PokemonIvEvStore writer;
+    CHECK(writer.upsertEntry(makeEntry(7, 20)));
+  }
+  pokemon::PokemonIvEvStore store;
+  Storage.setFailRead(true);
+  CHECK(store.findEntry(7) == nullptr);              // can't read it right now
+  CHECK(!store.upsertEntry(makeEntry(9, 1)));        // ...so nothing may be written over it
+  CHECK(!store.removeEntry(7));
+  CHECK(!store.reset());
+  Storage.setFailRead(false);
+
+  // The same instance recovers on its next call and still has the original data.
+  const pokemon::IvEvEntry* recovered = store.findEntry(7);
+  CHECK(recovered != nullptr);
+  if (recovered != nullptr) CHECK(recovered->ev[0] == 20);
+  CHECK(store.upsertEntry(makeEntry(9, 1)));
+  pokemon::PokemonIvEvStore reader;
+  CHECK(reader.findEntry(7) != nullptr);
+  CHECK(reader.findEntry(9) != nullptr);
+}
+
 int main() {
   missingFilesLeaveAnEmptyStore();
   upsertPersistsAndAFreshInstanceReadsItBack();
@@ -191,5 +218,6 @@ int main() {
   aWriteFailureLeavesTheActiveFileAndInMemoryStateUnchanged();
   aCorruptedWriteIsDetectedAndDoesNotBecomeActive();
   resetClearsBothTheStoreAndAFreshReader();
+  aTransientReadFailureNeverOverwritesTheRealFile();
   return failures == 0 ? 0 : 1;
 }
