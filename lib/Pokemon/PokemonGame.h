@@ -105,6 +105,9 @@ bool acknowledgeItem(PokemonState& state, const PokemonRecord& leader);
 // (PokemonService), out of reach of this pure, storage-agnostic layer, so
 // this only ever pops the queue entry.
 bool acknowledgeMoveLearn(PokemonState& state, const PokemonRecord& record);
+// Recomputes state.dashboardNotice from the front pending event. Every mutation in PokemonGame.cpp already does this;
+// PokemonService calls it after queueing a MoveLearn prompt itself, or the Home accessory never shows its "!".
+void syncDashboardNotice(PokemonState& state);
 // Queues a level-evolution prompt if `record` is at/above a Level rule's minimum
 // level (no-op when prompts are disabled, one is already pending, or the queue
 // is full). Safe to call after any level gain (reading, battle XP, Rare Candy)

@@ -88,8 +88,26 @@ bool PokemonTracker::commitWholeMinutes(const uint16_t minimumMinutes) {
 }
 
 void PokemonTracker::checkpointIfDue(const uint32_t nowMs) {
-  tick(nowMs / 1000U);
-  commitWholeMinutes(CHECKPOINT_MINUTES);
+  const uint32_t nowSeconds = nowMs / 1000U;
+  tick(nowSeconds);
+  // The reader calls this every main-loop iteration. A failing commit (card
+  // removed, busy or full) rewrites and re-verifies the whole save each time,
+  // so retrying on every iteration hammered the SD card and stalled page
+  // turns until it recovered - wait between attempts instead. Exit and session
+  // start still retry immediately (flushOnExit/beginSession don't go through
+  // here). A clock that went backwards (millis wrap) just lifts the gate.
+  if (checkpointRetryNotBeforeSeconds_ != 0) {
+    if (nowSeconds < checkpointRetryNotBeforeSeconds_ - CHECKPOINT_RETRY_SECONDS) {
+      checkpointRetryNotBeforeSeconds_ = 0;
+    } else if (nowSeconds < checkpointRetryNotBeforeSeconds_) {
+      return;
+    }
+  }
+  if (commitWholeMinutes(CHECKPOINT_MINUTES)) {
+    checkpointRetryNotBeforeSeconds_ = 0;
+  } else {
+    checkpointRetryNotBeforeSeconds_ = nowSeconds + CHECKPOINT_RETRY_SECONDS;
+  }
 }
 
 bool PokemonTracker::flushOnExit(const uint32_t nowMs) {

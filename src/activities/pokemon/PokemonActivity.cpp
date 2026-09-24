@@ -796,6 +796,10 @@ uint32_t PokemonActivity::selectedRecordId() const {
     return selected_ < snapshot_.partyCount ? snapshot_.party[selected_].recordId : 0;
   }
   if (screen_ == Screen::Pc) {
+    // pcPage_/pcCount_ are only refilled while rows are being built, which an
+    // empty Box never does - so after the last Pokemon is released/withdrawn
+    // the cache still names it. Trust the cache only if the list is non-empty.
+    if (selected_ >= logicalCount()) return 0;
     const int local = selected_ - pageStart();
     return local >= 0 && local < static_cast<int>(pcCount_) ? pcPage_[local].recordId : 0;
   }
@@ -812,6 +816,7 @@ pokemon::PokemonRecord PokemonActivity::selectedRecord() const {
     return selected_ < snapshot_.partyCount ? snapshot_.party[selected_] : pokemon::PokemonRecord{};
   }
   if (screen_ == Screen::Pc) {
+    if (selected_ >= logicalCount()) return pokemon::PokemonRecord{};  // see selectedRecordId()
     const int local = selected_ - pageStart();
     return local >= 0 && local < static_cast<int>(pcCount_) ? pcPage_[local] : pokemon::PokemonRecord{};
   }
@@ -1270,6 +1275,47 @@ bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
   return true;
 }
 
+// awardBattleXp() writes straight to the save (new level/EVs) and to the
+// persisted battle entry (a learnset move dropped into an empty slot); none of
+// it reaches the live in-RAM battlePlayer_ or the cached party snapshot. Pull
+// the parts that matter for the rest of the fight back in. Not needed for a
+// wild fight - it ends right after the award.
+bool PokemonActivity::syncBattlePlayerAfterXpAward() {
+  if (battlePartySlot_ < 0 || battlePartySlot_ >= snapshot_.partyCount) return true;
+  if (!refreshSnapshot()) return false;
+  if (battlePartySlot_ >= snapshot_.partyCount) return true;
+  const pokemon::PokemonRecord& fighter = snapshot_.party[battlePartySlot_];
+
+  const pokemon::IvEvEntry ivEv = service_.ensureIvEv(fighter.recordId, battlePlayer_.isShiny);
+  battlePlayer_.ev = ivEv.ev;
+  const uint8_t newLevel = pokemon::levelForXp(fighter.totalXp);
+  const pokemon::BaseStats* stats = pokemon::baseStatsFor(fighter.speciesId);
+  constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
+  if (stats != nullptr) {
+    const uint16_t newMaxHp = pokemon::battleMaxHp(stats->hp, newLevel, battlePlayer_.iv[hpIndex], battlePlayer_.ev[hpIndex]);
+    // Real Gen 1: the max-HP gain from a level-up is added to current HP too
+    // (a fainted Pokemon stays fainted).
+    if (battlePlayer_.currentHp > 0 && newMaxHp > battlePlayer_.maxHp) {
+      battlePlayer_.currentHp = std::min<uint16_t>(newMaxHp, battlePlayer_.currentHp + (newMaxHp - battlePlayer_.maxHp));
+    }
+    battlePlayer_.maxHp = newMaxHp;
+  }
+  battlePlayer_.level = newLevel;
+
+  // A move learned into a previously EMPTY slot. A transformed combatant's live
+  // slots are borrowed, so the persisted (real) moveset is left to itself.
+  if (!battlePlayer_.transformed) {
+    const pokemon::BattleRecordEntry stored = service_.peekBattleMoves(fighter);
+    for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+      if (battlePlayer_.moves[i].moveId == 0 && stored.moves[i] != 0) {
+        battlePlayer_.moves[i] = pokemon::BattleMoveSlot{stored.moves[i], stored.pp[i]};
+        battlePlayer_.ppUp[i] = stored.ppUp[i];
+      }
+    }
+  }
+  return true;
+}
+
 void PokemonActivity::savePlayerBattleEntry() {
   if (battlePartySlot_ < 0 || battlePartySlot_ >= snapshot_.partyCount) return;
   pokemon::BattleRecordEntry entry{};
@@ -1353,6 +1399,19 @@ void PokemonActivity::finishItemUseMidBattle(const char* usedLine) {
   } else {
     snprintf(battleLog_, sizeof(battleLog_), "%s", usedLine);
   }
+  if (routeAfterOpponentOnlyTurn(result)) return;
+  setScreen(Screen::Battle);
+}
+
+// The opponent acted alone this turn (the player used an item, threw a ball,
+// failed to run, or switched in) - see stepOpponentOnlyTurn(). Every way that
+// can end or redirect the fight is handled here, exactly as after a normal
+// move turn. Returns true if it changed the screen. The parts that used to be
+// missing: the OPPONENT can lose too (its own recoil/Struggle/confusion, or a
+// poison/burn/Leech Seed tick, finishes it) - dropping that left the battle
+// menu up against a 0-HP opponent, with the next ball wasted and a successful
+// Run forfeiting the XP/EV - and its Whirlwind/Roar must still force a switch.
+bool PokemonActivity::routeAfterOpponentOnlyTurn(const pokemon::BattleTurnResult& result) {
   if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
     if (usablePartySlotCount() > 0) {
       forcedBattleSwitch_ = true;
@@ -1360,9 +1419,18 @@ void PokemonActivity::finishItemUseMidBattle(const char* usedLine) {
     } else {
       finishBattleAfterPlayerFainted();
     }
-    return;
+    return true;
   }
-  setScreen(Screen::Battle);
+  if (result.outcome == pokemon::BattleOutcome::PlayerWon) {
+    finishBattleAfterWildFainted();
+    return true;
+  }
+  if (result.opponent.event == pokemon::BattleLogEvent::ForcedSwitch && usablePartySlotCount() > 0) {
+    forcedBattleSwitch_ = true;
+    setScreen(Screen::BattleSwitch);
+    return true;
+  }
+  return false;
 }
 
 void PokemonActivity::finishBattleAfterWildFainted() {
@@ -1373,6 +1441,11 @@ void PokemonActivity::finishBattleAfterWildFainted() {
   if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
     service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level,
                            gymChallengeIndex_ != 0, battleOpponent_.realSpeciesId());
+    // A gym fight goes on with the same live combatant; without this it keeps
+    // its pre-XP level/max HP/EVs, and the next savePlayerBattleEntry() rebuilds
+    // the persisted entry from its stale moveset, silently undoing a move it
+    // just learned on the level-up.
+    if (gymChallengeIndex_ != 0 && !syncBattlePlayerAfterXpAward()) return;  // refreshSnapshot() already showed the error
   }
   // The winning move can also have fainted the player's own active Pokemon
   // at the same time (Self-Destruct/Explosion, or a KO+recoil hit - see
@@ -1863,7 +1936,13 @@ void PokemonActivity::activate() {
           // including going back to 0 here if the item just cured the
           // Poison outright.
           battlePlayer_.toxicCounter = entry.toxicCounter;
-          for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battlePlayer_.moves[i].currentPp = entry.pp[i];
+          // Only slots still holding their real move: after Mimic or
+          // Transform a live slot carries a borrowed move whose PP has nothing
+          // to do with the persisted entry's (Mimic's own PP, or the real
+          // moveset's), and copying it over silently refilled or drained it.
+          for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+            if (battlePlayer_.moves[i].moveId == entry.moves[i]) battlePlayer_.moves[i].currentPp = entry.pp[i];
+          }
         }
         if (!refreshSnapshot()) return;
         const pokemon::ItemData* item = pokemon::itemData(selectedMedicineItemId_);
@@ -2188,15 +2267,7 @@ void PokemonActivity::activate() {
       } else {
         snprintf(battleLog_, sizeof(battleLog_), "%s", goLine);
       }
-      if (result.outcome == pokemon::BattleOutcome::OpponentWon) {
-        if (usablePartySlotCount() > 0) {
-          forcedBattleSwitch_ = true;
-          setScreen(Screen::BattleSwitch);
-        } else {
-          finishBattleAfterPlayerFainted();
-        }
-        return;
-      }
+      if (routeAfterOpponentOnlyTurn(result)) return;
       setScreen(Screen::Battle);
       return;
     }
@@ -4206,7 +4277,7 @@ void PokemonActivity::renderBattleHud() {
   const auto drawPanel = [&](const pokemon::BattleCombatant& combatant, const char* nameText, const int panelX,
                              const int panelY) {
     renderer.drawRoundedRect(panelX, panelY, panelWidth, panelHeight, 2, 6, true);
-    char levelLine[16];
+    char levelLine[32];  // the Arabic label alone is 14 bytes; 16 cut the digits off
     snprintf(levelLine, sizeof(levelLine), "%s%u", tr(STR_POKEMON_LEVEL), combatant.level);
     const int levelW = renderer.getTextWidth(UI_10_FONT_ID, levelLine, EpdFontFamily::REGULAR);
 
@@ -4560,7 +4631,7 @@ void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::Pokemo
   const int blockTop = rowY + pokemon::pokemonCenteredOffset(rowHeight_, lineHeight1 + lineGap + lineHeight2);
   const int line2Top = blockTop + lineHeight1 + lineGap;
 
-  char meta[16];
+  char meta[32];  // the Arabic label alone is 14 bytes; 16 cut the digits off
   snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
   const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
   char gender[8];
@@ -4614,7 +4685,7 @@ void PokemonActivity::renderPartyRowMachineCapability(const int rowY, const poke
   const int blockTop = rowY + pokemon::pokemonCenteredOffset(rowHeight_, lineHeight1 + lineGap + lineHeight2);
   const int line2Top = blockTop + lineHeight1 + lineGap;
 
-  char meta[16];
+  char meta[32];  // the Arabic label alone is 14 bytes; 16 cut the digits off
   snprintf(meta, sizeof(meta), "%s %u", tr(STR_POKEMON_LEVEL), pokemon::levelForXp(record.totalXp));
   const int metaWidth = renderer.getTextWidth(UI_12_FONT_ID, meta);
   char gender[8];

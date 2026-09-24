@@ -35,6 +35,8 @@ class PokemonTracker {
  public:
   static constexpr uint16_t ACTIVE_WINDOW_SECONDS = 300;
   static constexpr uint16_t CHECKPOINT_MINUTES = 5;
+  // After a failed checkpoint commit, wait this long before trying again.
+  static constexpr uint16_t CHECKPOINT_RETRY_SECONDS = 30;
 
   PokemonTracker(CreditMinutesFn creditMinutes, void* context) : creditMinutes_(creditMinutes), context_(context) {}
 
@@ -57,6 +59,7 @@ class PokemonTracker {
   uint32_t creditedSeconds_ = 0;
   uint32_t committedSeconds_ = 0;
   uint8_t bookProgressPercent_ = 0;
+  uint32_t checkpointRetryNotBeforeSeconds_ = 0;
   bool started_ = false;
   bool sawPageTurn_ = false;
 };

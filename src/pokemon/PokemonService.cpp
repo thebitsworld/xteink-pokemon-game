@@ -1269,7 +1269,8 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
     if (!placed && queuePrompts) {
       const PendingEvent event{leader.recordId, learn.moveId,        learn.level,
                                Gender::Unknown, EvolutionItem::None, PendingEventKind::MoveLearn};
-      enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one (the Moves screen still offers it)
+      // best-effort: a full queue just skips this one (the Moves screen still offers it)
+      if (enqueuePendingEvent(state, event)) syncDashboardNotice(state);
     }
   }
   if (changed && persistMoves) {

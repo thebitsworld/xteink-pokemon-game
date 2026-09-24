@@ -10,6 +10,14 @@
 - In battle, the BAG option refused to open when you had only X Attack / X Defense / Guard Spec. / Dire Hit items left and no medicine.
 - Battle messages for stat-changing moves reached through Metronome or Mirror Move named the wrong Pokémon and stat.
 - A newly caught Pokémon could show a partly-empty HP bar the first time its Party row was drawn.
+- Battle: using an item or switching Pokémon could leave the battle in the wrong state when the turn ended the fight (opponent fainting, your Pokémon fainting, or the opponent being blown away by Roar/Whirlwind). These outcomes are now resolved properly.
+- Gym battles: a move learned by levelling up during the fight was lost if your Pokémon's move list was refreshed afterwards, and the new level/HP/EVs weren't reflected on the battle screen right after the XP award.
+- Medicine used on the active battler could leave its displayed PP out of sync with the saved PP.
+- PC Box: the Actions screen could reference an empty row past the end of the list; and depositing into a Box that is already at its cap now shows a "Box full" message instead of a generic error.
+- A move-learn prompt raised while reading now correctly lights the "What's this?" dashboard notice.
+- Reading progress: when the SD card fails a checkpoint write, the game now waits 30 seconds before retrying instead of retrying (and stalling) on every loop; leaving the book still retries immediately.
+- Battle engine: end-of-turn status damage no longer overwrites a Teleport/forced switch; Metronome/Mirror Move picking Explosion/Self-Destruct now faints the user; a mutual KO from a single-side step (item use / switch) is now recorded for both Pokémon; a trapping move no longer keeps the victim locked after the trapper faints; a transformed wild Pokémon is caught/rewarded as its real species.
+- Level label on the Summary screen was cut off in languages with wider digits (e.g. Arabic).
 
 ## [1.2.2] - 2026-09-23
 

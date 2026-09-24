@@ -140,6 +140,8 @@ class PokemonActivity final : public Activity {
   void savePlayerBattleEntry();
   void resolveBattleAsPass();
   void finishItemUseMidBattle(const char* usedLine);
+  bool routeAfterOpponentOnlyTurn(const pokemon::BattleTurnResult& result);
+  bool syncBattlePlayerAfterXpAward();
   void finishBattleAfterWildFainted();
   void finishBattleAfterPlayerFainted();
   // playerAlsoFainted: the exchange that produced this win also left the

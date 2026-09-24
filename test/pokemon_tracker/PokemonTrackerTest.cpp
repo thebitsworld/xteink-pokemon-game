@@ -15,11 +15,13 @@ struct CreditLog {
 
   std::array<Entry, 4> entries{};
   size_t count = 0;
+  size_t attempts = 0;  // every call, failed ones included
   bool succeed = true;
 };
 
 bool recordCredit(void* context, const uint16_t minutes, const uint8_t progress) {
   auto& log = *static_cast<CreditLog*>(context);
+  ++log.attempts;
   if (!log.succeed || log.count >= log.entries.size()) return false;
   log.entries[log.count++] = {minutes, progress};
   return true;
@@ -153,6 +155,47 @@ TEST(PokemonTracker, FailedCommitRemainsPendingForExitRetry) {
   log.succeed = true;
   tracker.flushOnExit(301000);
 
+  ASSERT_EQ(log.count, 1U);
+  EXPECT_EQ(log.entries[0].minutes, 5U);
+}
+
+// checkpointIfDue() runs every main-loop iteration; a failing commit used to
+// be retried on every one of them.
+TEST(PokemonTracker, FailedCheckpointBacksOffInsteadOfRetryingEveryLoop) {
+  CreditLog log;
+  log.succeed = false;
+  pokemon::PokemonTracker tracker(recordCredit, &log);
+  tracker.beginSession();
+  tracker.onSuccessfulPageTurn(0);
+
+  tracker.checkpointIfDue(300000);  // five minutes credited: the first attempt fails
+  EXPECT_EQ(log.attempts, 1U);
+  for (uint32_t ms = 300010; ms < 330000; ms += 10) tracker.checkpointIfDue(ms);  // ~3000 loop iterations
+  EXPECT_EQ(log.attempts, 1U);
+
+  tracker.checkpointIfDue(330000);  // the backoff (30 s) has elapsed: one more attempt, failing again
+  EXPECT_EQ(log.attempts, 2U);
+  tracker.checkpointIfDue(331000);
+  EXPECT_EQ(log.attempts, 2U);
+
+  log.succeed = true;
+  tracker.checkpointIfDue(360000);  // recovered: the pending five minutes go through
+  ASSERT_EQ(log.count, 1U);
+  EXPECT_EQ(log.entries[0].minutes, 5U);
+
+  tracker.checkpointIfDue(361000);  // and the gate is lifted again, nothing more to send
+  EXPECT_EQ(log.count, 1U);
+}
+
+TEST(PokemonTracker, ExitStillRetriesImmediatelyDuringABackoff) {
+  CreditLog log;
+  log.succeed = false;
+  pokemon::PokemonTracker tracker(recordCredit, &log);
+  tracker.beginSession();
+  tracker.onSuccessfulPageTurn(0);
+  tracker.checkpointIfDue(300000);  // fails, backing off
+  log.succeed = true;
+  EXPECT_TRUE(tracker.flushOnExit(301000));  // exit doesn't wait for the backoff
   ASSERT_EQ(log.count, 1U);
   EXPECT_EQ(log.entries[0].minutes, 5U);
 }

@@ -1223,6 +1223,8 @@ TEST(PokemonService, CreditingMinutesQueuesAMoveLearnEventWhenTheMovesetIsFull) 
   EXPECT_EQ(pending->recordId, 1U);
   EXPECT_EQ(pending->speciesId, 129U);  // move id Pikachu learns at level 26 (reused field - see PendingEventKind)
   EXPECT_EQ(pending->level, 26U);
+  // The Home accessory reads only state.dashboardNotice, so queueing the prompt must set it.
+  EXPECT_EQ(state.dashboardNotice, pokemon::DashboardNotice::WhatsThis);
 
   const pokemon::BattleRecordEntry* unchanged = battleStore.findEntry(1);
   ASSERT_NE(unchanged, nullptr);

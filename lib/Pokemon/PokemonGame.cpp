@@ -575,6 +575,8 @@ bool processHourlyItem(PokemonState& state, const RandomSource& random, const Ow
 
 }  // namespace
 
+void syncDashboardNotice(PokemonState& state) { refreshDashboardNotice(state); }
+
 bool queueEvolutionIfEligible(PokemonState& state, const PokemonRecord& record, bool& queued) {
   return queueEvolutionAfterLevelGain(state, record, queued);
 }
