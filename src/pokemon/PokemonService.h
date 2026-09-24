@@ -387,6 +387,10 @@ class PokemonService {
   // moves/PP Ups differ. A failure to sync the moveset store is logged but
   // not returned: the battle store, which the UI reads first, has the data.
   bool persistBattleEntry(const BattleRecordEntry& entry, bool movesetChanged);
+  // A level-up adds its max-HP gain to current HP as well (real Gen 1). Only touches
+  // an existing battle entry of a Pokemon that is still standing; one without an entry
+  // synthesizes at full HP anyway. Best-effort like the other battle-store writes here.
+  void raiseCurrentHpByMaxHpGain(uint32_t recordId, uint16_t oldMaxHp, uint16_t newMaxHp);
   // Entries written before the moveset store existed may hold customised
   // movesets with no copy there yet; copies them across. Called right before a
   // battle-store eviction, the only place such an entry can otherwise be lost.

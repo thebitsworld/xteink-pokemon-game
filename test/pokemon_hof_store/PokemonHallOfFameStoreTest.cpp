@@ -128,7 +128,6 @@ void aTransientReadFailureNeverOverwritesTheRecordedHallOfFame() {
   Storage.setFailRead(true);
   CHECK(!store.hasEntry());
   CHECK(!store.captureOnce(makeState(999, 25)));
-  CHECK(!store.reset());
   Storage.setFailRead(false);
 
   CHECK(store.hasEntry());
@@ -139,6 +138,23 @@ void aTransientReadFailureNeverOverwritesTheRecordedHallOfFame() {
   CHECK(reader.hasEntry());
 }
 
+// Reset is a deliberate wipe even when the old Hall of Fame cannot be read.
+void resetStillWipesAStoreThatCannotBeRead() {
+  Storage.clear();
+  {
+    pokemon::PokemonHallOfFameStore writer;
+    CHECK(writer.captureOnce(makeState(600, 6)));
+  }
+  pokemon::PokemonHallOfFameStore store;
+  Storage.setFailRead(true);
+  CHECK(store.reset());
+  Storage.setFailRead(false);
+
+  pokemon::PokemonHallOfFameStore reader;
+  CHECK(!reader.hasEntry());
+  CHECK(store.captureOnce(makeState(700, 25)));  // a new run can be recorded again
+}
+
 int main() {
   missingFilesLeaveNoEntry();
   captureOncePersistsAndAFreshInstanceReadsItBack();
@@ -147,5 +163,6 @@ int main() {
   bothFilesCorruptStillLeavesNoEntryNeverAnError();
   aWriteFailureLeavesTheStoreUnchanged();
   aTransientReadFailureNeverOverwritesTheRecordedHallOfFame();
+  resetStillWipesAStoreThatCannotBeRead();
   return failures == 0 ? 0 : 1;
 }

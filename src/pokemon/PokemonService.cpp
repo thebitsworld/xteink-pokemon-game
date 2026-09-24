@@ -132,6 +132,9 @@ ServiceStatus PokemonService::createStarter(const uint16_t speciesId, const Gend
   if (movesetStore_.findEntry(starter.recordId) != nullptr) movesetStore_.removeEntry(starter.recordId);
   if (ivEvStore_.findEntry(starter.recordId) != nullptr) ivEvStore_.removeEntry(starter.recordId);
   clearPendingIvEvRoll(starter.recordId);
+  // Roll now rather than at the first fight: until an entry exists, every screen derives this
+  // Pokemon's stats with IV 0 and the numbers would jump once the real roll lands.
+  ensureIvEv(starter.recordId);
   return ServiceStatus::Ok;
 }
 
@@ -346,6 +349,8 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
     if (movesetStore_.findEntry(caughtRecordId) != nullptr) movesetStore_.removeEntry(caughtRecordId);
     if (ivEvStore_.findEntry(caughtRecordId) != nullptr) ivEvStore_.removeEntry(caughtRecordId);
     clearPendingIvEvRoll(caughtRecordId);
+    // Same reasoning as createStarter(): roll at catch time so the new Pokemon never shows IV-0 stats.
+    ensureIvEv(caughtRecordId);
   }
   return ServiceStatus::Ok;
 }
@@ -706,6 +711,14 @@ UseConsumableOutcome PokemonService::useConsumableImpl(const uint32_t recordId, 
     PokemonState state{};
     if (loadReadyState(state) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
     const uint8_t nextLevel = static_cast<uint8_t>(level + 1U);
+    const BaseStats* candyStats = baseStatsFor(record.speciesId);
+    const IvEvEntry candyIvEv = dryRun ? peekIvEv(recordId) : ensureIvEv(recordId);
+    constexpr size_t candyHpIndex = static_cast<size_t>(StatIndex::Hp);
+    const uint16_t oldMaxHp =
+        candyStats == nullptr ? 0 : battleMaxHp(candyStats->hp, level, candyIvEv.iv[candyHpIndex], candyIvEv.ev[candyHpIndex]);
+    const uint16_t newMaxHp = candyStats == nullptr ? 0
+                                                    : battleMaxHp(candyStats->hp, nextLevel, candyIvEv.iv[candyHpIndex],
+                                                                  candyIvEv.ev[candyHpIndex]);
     record.totalXp = xpRequired(nextLevel);
     queueMoveLearnIfNeeded(state, record, level, nextLevel, true, /*persistMoves=*/!dryRun);
     bool evolutionQueued = false;
@@ -716,6 +729,7 @@ UseConsumableOutcome PokemonService::useConsumableImpl(const uint32_t recordId, 
       LOG_ERR("PokemonService", "Failed to use Rare Candy");
       return UseConsumableOutcome::Failed;
     }
+    raiseCurrentHpByMaxHpGain(recordId, oldMaxHp, newMaxHp);
     return UseConsumableOutcome::Applied;
   }
 
@@ -1136,6 +1150,17 @@ void PokemonService::backfillMovesetStoreFromBattleStore() {
   }
 }
 
+void PokemonService::raiseCurrentHpByMaxHpGain(const uint32_t recordId, const uint16_t oldMaxHp,
+                                                const uint16_t newMaxHp) {
+  if (newMaxHp <= oldMaxHp) return;
+  const BattleRecordEntry* existing = battleStore_.findEntry(recordId);
+  if (existing == nullptr || existing->currentHp == 0) return;
+  BattleRecordEntry raised = *existing;
+  const uint32_t gained = static_cast<uint32_t>(raised.currentHp) + (newMaxHp - oldMaxHp);
+  raised.currentHp = static_cast<uint16_t>(std::min<uint32_t>(newMaxHp, gained));
+  if (!battleStore_.upsertEntry(raised)) LOG_ERR("PokemonService", "Failed to add level-up HP for record %u", recordId);
+}
+
 ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
   if (!persistBattleEntry(entry, /*movesetChanged=*/false)) {
     LOG_ERR("PokemonService", "Failed to save battle entry");
@@ -1327,6 +1352,14 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   const ServiceStatus readStatus = readRecord(recordId, record);
   if (readStatus != ServiceStatus::Ok) return readStatus;
 
+  const BaseStats* ownStats = baseStatsFor(record.speciesId);
+  constexpr size_t ownHpIndex = static_cast<size_t>(StatIndex::Hp);
+  const IvEvEntry ivEvBefore = ensureIvEv(recordId);
+  const uint16_t oldMaxHp =
+      ownStats == nullptr
+          ? 0
+          : battleMaxHp(ownStats->hp, levelForXp(record.totalXp), ivEvBefore.iv[ownHpIndex], ivEvBefore.ev[ownHpIndex]);
+
   // EVs accumulate independently of the XP/level cap below - unlike XP,
   // real Gen 1 EVs keep accruing even once a Pokemon is at its maximum
   // level, so this runs first and unconditionally.
@@ -1365,6 +1398,11 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to award battle XP");
     return ServiceStatus::StorageError;
+  }
+  if (currentLevel > previousLevel && ownStats != nullptr) {
+    const IvEvEntry ivEvAfter = ensureIvEv(recordId);
+    raiseCurrentHpByMaxHpGain(recordId, oldMaxHp,
+                              battleMaxHp(ownStats->hp, currentLevel, ivEvAfter.iv[ownHpIndex], ivEvAfter.ev[ownHpIndex]));
   }
   return ServiceStatus::Ok;
 }

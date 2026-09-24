@@ -13,6 +13,16 @@ constexpr const char* STORE_PATH_A = "/.crosspoint/pokemon-battle-a.bin";
 constexpr const char* STORE_PATH_B = "/.crosspoint/pokemon-battle-b.bin";
 constexpr const char* LEGACY_STORE_PATH = "/.crosspoint/pokemon-battle.bin";
 
+// Deletes the slot files outright. Used only by reset() when the store could not be
+// read: a deliberate wipe must not be skipped just because the old contents are
+// unreadable, but it also must not write over files it cannot inspect.
+bool discardSlotFiles() {
+  for (const char* path : {STORE_PATH_A, STORE_PATH_B, LEGACY_STORE_PATH}) {
+    if (Storage.exists(path) && !Storage.remove(path)) return false;
+  }
+  return true;
+}
+
 bool readExact(FsFile& file, void* output, const size_t size) {
   return file.read(output, size) == static_cast<int>(size);
 }
@@ -227,7 +237,15 @@ bool PokemonBattleStore::evictEntryNotIn(const std::span<const uint32_t> keepIds
 
 bool PokemonBattleStore::reset() {
   if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
+  if (!loaded_) {
+    if (!discardSlotFiles()) return false;
+    state_ = BattleStoreState{};
+    ready_ = false;
+    activeIsA_ = false;
+    sequence_ = 0;
+    loaded_ = true;
+    return true;
+  }
   return writeState(BattleStoreState{});
 }
 

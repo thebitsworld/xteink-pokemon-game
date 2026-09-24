@@ -16,6 +16,16 @@ constexpr const char* STORE_DIRECTORY = "/.crosspoint";
 constexpr const char* STORE_PATH_A = "/.crosspoint/pokemon-moves-a.bin";
 constexpr const char* STORE_PATH_B = "/.crosspoint/pokemon-moves-b.bin";
 
+// Deletes the slot files outright. Used only by reset() when the store could not be
+// read: a deliberate wipe must not be skipped just because the old contents are
+// unreadable, but it also must not write over files it cannot inspect.
+bool discardSlotFiles() {
+  for (const char* path : {STORE_PATH_A, STORE_PATH_B}) {
+    if (Storage.exists(path) && !Storage.remove(path)) return false;
+  }
+  return true;
+}
+
 bool readExact(FsFile& file, void* output, const size_t size) {
   return file.read(output, size) == static_cast<int>(size);
 }
@@ -199,7 +209,15 @@ bool PokemonMovesetStore::removeEntry(const uint32_t recordId) {
 
 bool PokemonMovesetStore::reset() {
   if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
+  if (!loaded_) {
+    if (!discardSlotFiles()) return false;
+    state_ = MovesetStoreState{};
+    ready_ = false;
+    activeIsA_ = false;
+    sequence_ = 0;
+    loaded_ = true;
+    return true;
+  }
   std::unique_ptr<MovesetStoreState> empty(new (std::nothrow) MovesetStoreState());
   if (!empty) {
     LOG_ERR("PokemonMovesetStore", "Out of memory resetting moveset store");

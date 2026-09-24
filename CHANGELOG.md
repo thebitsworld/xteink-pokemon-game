@@ -19,6 +19,9 @@
 - Battle engine: end-of-turn status damage no longer overwrites a Teleport/forced switch; Metronome/Mirror Move picking Explosion/Self-Destruct now faints the user; a mutual KO from a single-side step (item use / switch) is now recorded for both Pokémon; a trapping move no longer keeps the victim locked after the trapper faints; a transformed wild Pokémon is caught/rewarded as its real species.
 - Level label on the Summary screen was cut off in languages with wider digits (e.g. Arabic).
 - A momentary SD-card read failure (or low memory) while the game loaded its IV/EV, battle or Hall of Fame data was treated as "no data saved yet" for the rest of the session, and the next write then replaced the real file: every Pokémon's IVs could be re-rolled, or a recorded Hall of Fame overwritten. A failed read is now retried on the next access and nothing is written over the existing file in the meantime.
+- Reset Game now still wipes the IV/EV, battle, moveset and Hall of Fame data when the SD card cannot read those files at that moment; they are deleted instead of being skipped and left behind for the new game.
+- A new starter or a newly caught Pokémon now gets its IVs rolled immediately, so its HP and stats no longer change the first time it fights.
+- Levelling up (Rare Candy or a battle win) now adds the max-HP gain to current HP, as in the original games: a Pokémon at full health stays at full health. A fainted Pokémon stays fainted.
 
 ## [1.2.2] - 2026-09-23
 

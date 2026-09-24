@@ -260,7 +260,6 @@ void aTransientReadFailureNeverOverwritesTheRealFile() {
   CHECK(store.findEntry(7) == nullptr);
   CHECK(!store.upsertEntry(makeEntry(9, 15)));
   CHECK(!store.removeEntry(7));
-  CHECK(!store.reset());
   Storage.setFailRead(false);
 
   const pokemon::BattleRecordEntry* recovered = store.findEntry(7);
@@ -270,6 +269,30 @@ void aTransientReadFailureNeverOverwritesTheRealFile() {
   pokemon::PokemonBattleStore reader;
   CHECK(reader.findEntry(7) != nullptr);
   CHECK(reader.findEntry(9) != nullptr);
+}
+
+// Reset is a deliberate wipe: an unreadable store must not leave the old game's
+// data behind, and the files are deleted rather than written over blind.
+void resetStillWipesAStoreThatCannotBeRead() {
+  Storage.clear();
+  {
+    pokemon::PokemonBattleStore writer;
+    CHECK(writer.upsertEntry(makeEntry(7, 20)));
+    CHECK(writer.upsertEntry(makeEntry(9, 15)));  // second write -> both slots exist
+  }
+  CHECK(Storage.exists("/.crosspoint/pokemon-battle-a.bin"));
+  CHECK(Storage.exists("/.crosspoint/pokemon-battle-b.bin"));
+  pokemon::PokemonBattleStore store;
+  Storage.setFailRead(true);
+  CHECK(store.reset());
+  Storage.setFailRead(false);
+  CHECK(!Storage.exists("/.crosspoint/pokemon-battle-a.bin"));
+  CHECK(!Storage.exists("/.crosspoint/pokemon-battle-b.bin"));
+
+  pokemon::PokemonBattleStore reader;
+  CHECK(reader.findEntry(7) == nullptr);
+  CHECK(reader.findEntry(9) == nullptr);
+  CHECK(store.upsertEntry(makeEntry(7, 20)));  // usable again straight after the wipe
 }
 
 int main() {
@@ -286,5 +309,6 @@ int main() {
   upsertEntriesAppliesValidEntriesAndSkipsAnInvalidOne();
   upsertEntriesFailsWhenEveryEntryIsInvalid();
   aTransientReadFailureNeverOverwritesTheRealFile();
+  resetStillWipesAStoreThatCannotBeRead();
   return failures == 0 ? 0 : 1;
 }

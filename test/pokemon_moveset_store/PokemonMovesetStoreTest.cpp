@@ -145,7 +145,6 @@ void aTransientReadFailureNeverOverwritesTheRealFile() {
   CHECK(store.findEntry(7) == nullptr);
   CHECK(!store.upsertEntry(makeEntry(9, 33)));
   CHECK(!store.removeEntry(7));
-  CHECK(!store.reset());
   Storage.setFailRead(false);
 
   CHECK(store.findEntry(7) != nullptr);
@@ -153,6 +152,30 @@ void aTransientReadFailureNeverOverwritesTheRealFile() {
   pokemon::PokemonMovesetStore reader;
   CHECK(reader.findEntry(7) != nullptr);
   CHECK(reader.findEntry(9) != nullptr);
+}
+
+// Reset is a deliberate wipe: an unreadable store must not leave the old game's
+// data behind, and the files are deleted rather than written over blind.
+void resetStillWipesAStoreThatCannotBeRead() {
+  Storage.clear();
+  {
+    pokemon::PokemonMovesetStore writer;
+    CHECK(writer.upsertEntry(makeEntry(7, 84)));
+    CHECK(writer.upsertEntry(makeEntry(9, 33)));  // second write -> both slots exist
+  }
+  CHECK(Storage.exists("/.crosspoint/pokemon-moves-a.bin"));
+  CHECK(Storage.exists("/.crosspoint/pokemon-moves-b.bin"));
+  pokemon::PokemonMovesetStore store;
+  Storage.setFailRead(true);
+  CHECK(store.reset());
+  Storage.setFailRead(false);
+  CHECK(!Storage.exists("/.crosspoint/pokemon-moves-a.bin"));
+  CHECK(!Storage.exists("/.crosspoint/pokemon-moves-b.bin"));
+
+  pokemon::PokemonMovesetStore reader;
+  CHECK(reader.findEntry(7) == nullptr);
+  CHECK(reader.findEntry(9) == nullptr);
+  CHECK(store.upsertEntry(makeEntry(7, 84)));  // usable again straight after the wipe
 }
 
 int main() {
@@ -164,6 +187,7 @@ int main() {
   upsertEntriesBatchesOneWriteAndSkipsInvalidEntries();
   aFailedValidationLeavesTheStoreUntouched();
   aTransientReadFailureNeverOverwritesTheRealFile();
+  resetStillWipesAStoreThatCannotBeRead();
   if (failures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;
