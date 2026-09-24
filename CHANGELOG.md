@@ -5,7 +5,7 @@
 - PC Box: with more Pokémon than fit on one screen, extra rows could spill under the footer, and on touch devices tapping one of them could act on the wrong Pokémon (Release/Evolve...). The list now only loads as many rows as fit.
 - Using a Rare Candy could teach a new move for free: the pre-check that runs before spending the candy saved the move even when the candy then wasn't spent.
 - A momentary SD-card write hiccup while a party member's battle data was being created could wipe a different, boxed Pokémon's saved moveset/PP Ups. Old data is now only replaced when the store is genuinely full.
-- Your starter Pokémon can no longer be released - the Champion's final Pokémon is picked to counter it, and releasing it made him silently field the wrong one.
+- Releasing your starter Pokémon no longer changes which Pokémon the Champion fields last: your starter's species is now recorded in the save when you choose it (the Champion's final Pokémon is picked to counter it). Saves are upgraded to a new format the first time the game writes one; older saves load as normal, but after the upgrade an older version of the firmware will no longer read that save. A save whose starter was already released before this update can't be recovered and keeps the default Champion team.
 - In battle, the BAG option refused to open when you had only X Attack / X Defense / Guard Spec. / Dire Hit items left and no medicine.
 - Battle messages for stat-changing moves reached through Metronome or Mirror Move named the wrong Pokémon and stat.
 - A newly caught Pokémon could show a partly-empty HP bar the first time its Party row was drawn.

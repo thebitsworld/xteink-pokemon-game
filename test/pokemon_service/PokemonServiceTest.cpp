@@ -167,6 +167,7 @@ TEST(PokemonService, CreatesOneDurableStarterWithChosenIdentity) {
   EXPECT_TRUE(pokemon::isSpeciesMarked(snapshot.state.caughtSpecies, 25));
   EXPECT_EQ(snapshot.state.bagCounts[0], 10U);  // starting gift: 10 Poke Balls (item id 7)
   EXPECT_EQ(snapshot.state.bagCounts[4], 1U);   // starting gift: 1 Potion (item id 11)
+  EXPECT_EQ(snapshot.state.starterSpeciesId, 25U);  // recorded once, for the Champion's counter slot
 
   pokemon::PokemonStore reopened;
   ASSERT_EQ(reopened.begin(), pokemon::StoreBeginResult::Ready);
@@ -1661,6 +1662,30 @@ TEST(PokemonService, ReleasingAPokemonWithAQueuedMoveLearnDoesNotLeaveTheQueueSt
   ASSERT_TRUE(store.loadState(state));
   const pokemon::PendingEvent* front = pokemon::pendingEventFront(state);
   EXPECT_TRUE(front == nullptr || front->recordId != 2U);
+}
+
+// The Champion's final slot is picked from the starter's species. That must
+// survive the starter being deposited and released like any other Pokemon,
+// so it is recorded in the save when the starter is created instead of being
+// looked up from record 1 later.
+TEST(PokemonService, ReleasingTheStarterKeepsTheRecordedStarterSpecies) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+  ASSERT_EQ(service.createStarter(4, pokemon::Gender::Male, "Char"), pokemon::ServiceStatus::Ok);
+  appendOwnedPokemon(store, caughtPokemon(2, 16), true);  // a second party member so the starter can be deposited
+
+  ASSERT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.releasePokemon(1), pokemon::ServiceStatus::Ok);
+
+  pokemon::PokemonRecord gone{};
+  EXPECT_FALSE(store.readRecord(1, gone));  // the starter record really is gone
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.starterSpeciesId, 4U);  // ...but its species is not
 }
 
 TEST(PokemonService, ResolveMoveLearnDropsAPromptWhoseRecordIsGone) {

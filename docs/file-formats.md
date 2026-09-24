@@ -89,7 +89,7 @@ written. The file is:
 | 4 | 2 | Format version (`1` through `7`; a build always writes the newest it knows) |
 | 6 | 2 | Header size (`24`) |
 | 8 | 4 | Non-zero snapshot sequence |
-| 12 | 2 | State size (`116` for version 2 up to `340` for version 9 — see the version table below) |
+| 12 | 2 | State size (`116` for version 2 up to `341` for version 10 — see the version table below) |
 | 14 | 2 | Record size (`48`) |
 | 16 | 4 | Record count |
 | 20 | 4 | Payload size (`116 + recordCount * 48`) |
@@ -133,6 +133,7 @@ size) and treats the fields a file predates as zero; it always writes the newest
 | 7 | 210 | 205-209: EV vitamin counts (HP Up, Protein, Iron, Calcium, Carbos; ids 91-95) |
 | 8 | 280 | 210-279: pending-event slots 4-10 (`10` bytes each, same compacted queue as the first three) |
 | 9 | 340 | 280-339: pending-event slots 11-16 (`10` bytes each, same compacted queue) |
+| 10 | 341 | 340: starter species id (`u8`, 0 = not recorded; set at starter creation, picks the Champion's counter Pokémon) |
 
 ### Legacy version 1
 

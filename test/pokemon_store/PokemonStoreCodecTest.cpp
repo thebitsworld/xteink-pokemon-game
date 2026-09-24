@@ -48,7 +48,7 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonicalV9Layout() {
+void stateCodecUsesTheCanonicalV10Layout() {
   static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
   static_assert(pokemon::POKEMON_STATE_V3_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
   static_assert(pokemon::POKEMON_STATE_V4_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
@@ -61,8 +61,10 @@ void stateCodecUsesTheCanonicalV9Layout() {
   static_assert(pokemon::POKEMON_STATE_V8_BYTES == pokemon::POKEMON_STATE_V7_BYTES + 7 * 10);
   static_assert(pokemon::POKEMON_STATE_V8_BYTES == 280);
   static_assert(pokemon::PENDING_EVENT_V8_CAPACITY == 10);
-  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V8_BYTES + 6 * 10);
-  static_assert(pokemon::POKEMON_STATE_BYTES == 340);
+  static_assert(pokemon::POKEMON_STATE_V9_BYTES == pokemon::POKEMON_STATE_V8_BYTES + 6 * 10);
+  static_assert(pokemon::POKEMON_STATE_V9_BYTES == 340);
+  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V9_BYTES + 1);
+  static_assert(pokemon::POKEMON_STATE_BYTES == 341);
   static_assert(pokemon::PENDING_EVENT_CAPACITY == 16);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
@@ -92,6 +94,7 @@ void stateCodecUsesTheCanonicalV9Layout() {
   state.ppUpCount = 4;
   state.battleBoostCounts = {1, 2, 3, 4, 5, 6};
   state.vitaminCounts = {7, 8, 9, 10, 11};
+  state.starterSpeciesId = 25;
   for (size_t slot = 3; slot < 15; ++slot) {  // the queue must stay compacted, so fill every slot up to the last
     state.pendingEvents[slot] = {
         0, 0, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::MoonStone, pokemon::PendingEventKind::Item};
@@ -137,9 +140,40 @@ void stateCodecUsesTheCanonicalV9Layout() {
   CHECK(bytes[pokemon::POKEMON_STATE_V8_BYTES + 5 * 10 + 9] ==
         static_cast<uint8_t>(pokemon::PendingEventKind::Encounter));
 
+  CHECK(bytes[pokemon::POKEMON_STATE_V9_BYTES] == 25);
+
   pokemon::PokemonState decoded{};
   CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION, decoded));
   CHECK(decoded == state);
+}
+
+void v9StateDecodesWithStarterNotRecorded() {
+  pokemon::PokemonState v9State{};
+  v9State.partyRecordIds[0] = 3;
+  v9State.vitaminCounts = {1, 2, 3, 4, 5};
+  v9State.starterSpeciesId = 7;
+  pokemon::StateBytes v10Bytes{};
+  CHECK(pokemon::encodeState(v9State, v10Bytes));
+
+  // A v9 file is exactly the v10 bytes minus the appended starter species.
+  std::array<uint8_t, pokemon::POKEMON_STATE_V9_BYTES> bytes{};
+  for (size_t index = 0; index < bytes.size(); ++index) bytes[index] = v10Bytes[index];
+
+  pokemon::PokemonState decoded{};
+  decoded.starterSpeciesId = 99;  // must be reset, not left stale
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V9, decoded));
+  CHECK(decoded.partyRecordIds[0] == 3);
+  CHECK(decoded.vitaminCounts == v9State.vitaminCounts);
+  CHECK(decoded.starterSpeciesId == 0);  // "not recorded" - releaseRecord() backfills it
+}
+
+void starterSpeciesBeyondKantoIsRejected() {
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = 1;
+  state.starterSpeciesId = pokemon::KANTO_SPECIES_COUNT;
+  CHECK(pokemon::validateState(state));
+  state.starterSpeciesId = pokemon::KANTO_SPECIES_COUNT + 1;
+  CHECK(!pokemon::validateState(state));
 }
 
 void v8StateDecodesWithEmptyExtraPendingSlots() {
@@ -384,6 +418,7 @@ void snapshotHeaderUsesCanonical24ByteLayout() {
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V6) == pokemon::POKEMON_STATE_V6_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V7) == pokemon::POKEMON_STATE_V7_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V8) == pokemon::POKEMON_STATE_V8_BYTES);
+  CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION_V9) == pokemon::POKEMON_STATE_V9_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION) == pokemon::POKEMON_STATE_BYTES);
   CHECK(pokemon::snapshotStateBytes(pokemon::POKEMON_SNAPSHOT_VERSION + 1U) == 0);
 
@@ -448,12 +483,14 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonicalV9Layout();
+  stateCodecUsesTheCanonicalV10Layout();
   v3StateDecodesWithZeroedMissCounters();
   v4StateDecodesWithZeroedPpUpCount();
   v5StateDecodesWithZeroedBattleBoostCounts();
   v6StateDecodesWithZeroedVitaminCounts();
   v7StateDecodesWithEmptyExtraPendingSlots();
+  v9StateDecodesWithStarterNotRecorded();
+  starterSpeciesBeyondKantoIsRejected();
   v8StateDecodesWithEmptyExtraPendingSlots();
   v2StateDecodesWithZeroedBagAndBattleProgress();
   battleProgressReservedBitsAreRejected();

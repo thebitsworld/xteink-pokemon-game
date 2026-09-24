@@ -106,6 +106,7 @@ ServiceStatus PokemonService::createStarter(const uint16_t speciesId, const Gend
 
   PokemonState state{};
   state.partyRecordIds[0] = starter.recordId;
+  state.starterSpeciesId = static_cast<uint8_t>(speciesId);
   if (!markSpecies(state.seenSpecies, speciesId) || !markSpecies(state.caughtSpecies, speciesId)) {
     return ServiceStatus::Invalid;
   }

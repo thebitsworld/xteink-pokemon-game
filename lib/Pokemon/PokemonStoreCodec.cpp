@@ -67,6 +67,7 @@ size_t snapshotStateBytes(const uint16_t version) {
   if (version == POKEMON_SNAPSHOT_VERSION_V6) return POKEMON_STATE_V6_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION_V7) return POKEMON_STATE_V7_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION_V8) return POKEMON_STATE_V8_BYTES;
+  if (version == POKEMON_SNAPSHOT_VERSION_V9) return POKEMON_STATE_V9_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION) return POKEMON_STATE_BYTES;
   return 0;
 }
@@ -161,6 +162,7 @@ bool encodeState(const PokemonState& state, StateBytes& output) {
   std::memcpy(candidate.data() + POKEMON_STATE_V5_BYTES, state.battleBoostCounts.data(),
               state.battleBoostCounts.size());
   std::memcpy(candidate.data() + POKEMON_STATE_V6_BYTES, state.vitaminCounts.data(), state.vitaminCounts.size());
+  candidate[POKEMON_STATE_V9_BYTES] = state.starterSpeciesId;
   output = candidate;
   return true;
 }
@@ -229,11 +231,14 @@ bool decodeState(const uint8_t* bytes, const size_t size, const uint16_t version
             bytes + POKEMON_STATE_V7_BYTES + (index - PENDING_EVENT_LEGACY_SLOTS) * PENDING_EVENT_BYTES);
       }
     }
-    if (version >= POKEMON_SNAPSHOT_VERSION) {
+    if (version >= POKEMON_SNAPSHOT_VERSION_V9) {
       for (size_t index = PENDING_EVENT_V8_CAPACITY; index < PENDING_EVENT_CAPACITY; ++index) {
         candidate.pendingEvents[index] = decodePendingEvent(
             bytes + POKEMON_STATE_V8_BYTES + (index - PENDING_EVENT_V8_CAPACITY) * PENDING_EVENT_BYTES);
       }
+    }
+    if (version >= POKEMON_SNAPSHOT_VERSION) {
+      candidate.starterSpeciesId = bytes[POKEMON_STATE_V9_BYTES];
     }
   }
   if (!validateState(candidate)) return false;

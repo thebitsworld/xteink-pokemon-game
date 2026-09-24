@@ -189,6 +189,13 @@ struct PokemonState {
   // matching VITAMIN_ITEM_ID_FIRST.. in ItemCategory::Vitamin order) - same
   // reason as ppUpCount/battleBoostCounts above.
   std::array<uint8_t, POKEMON_VITAMIN_ITEM_COUNT> vitaminCounts{};
+  // v10: appended after the v9 layout (PokemonStoreCodec.cpp's byte 340). The
+  // species the player picked as their starter, recorded once at creation so
+  // the Champion's final slot (championFinalSlotFor()) never depends on the
+  // starter record still existing - it can be deposited, evolved or released
+  // like any other Pokemon. 0 = not recorded (a pre-v10 save): the record is
+  // then still around, and releaseRecord() records it just before it goes.
+  uint8_t starterSpeciesId = 0;
 
   bool operator==(const PokemonState&) const = default;
 };

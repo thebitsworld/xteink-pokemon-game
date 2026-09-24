@@ -1115,7 +1115,6 @@ void releaseRecordRemovesAPcRecordButKeepsItInThePokedex() {
   pokemon::PokemonRecord boxed = leaderAtLevelFive();
   boxed.recordId = 12;
   boxed.speciesId = 1;
-  boxed.origin = pokemon::Origin::Caught;  // a starter can't be released
   CHECK(pokemon::markSpecies(state.seenSpecies, boxed.speciesId));
   CHECK(pokemon::markSpecies(state.caughtSpecies, boxed.speciesId));
   // Not in state.partyRecordIds - this is what makes it a "Box" record.
@@ -1150,7 +1149,6 @@ void releaseRecordDropsAnyPendingEvolutionForThatRecord() {
   pokemon::PokemonRecord boxed = leaderAtLevelFive();
   boxed.recordId = 12;
   boxed.speciesId = 1;
-  boxed.origin = pokemon::Origin::Caught;  // a starter can't be released
   CHECK(pokemon::markSpecies(state.seenSpecies, boxed.speciesId));
   CHECK(pokemon::markSpecies(state.caughtSpecies, boxed.speciesId));
   state.pendingEvents[0].kind = pokemon::PendingEventKind::Evolution;
@@ -1164,21 +1162,64 @@ void releaseRecordDropsAnyPendingEvolutionForThatRecord() {
   CHECK(state.pendingEvents[0].kind == pokemon::PendingEventKind::None);
 }
 
-void releaseRecordRejectsTheStarterEvenFromTheBox() {
+void releaseRecordBackfillsAnUnrecordedStarterSpecies() {
   pokemon::PokemonRecord leader = leaderAtLevelFive();
   pokemon::PokemonState state = stateWithLeader(leader);
   CHECK(pokemon::markSpecies(state.seenSpecies, leader.speciesId));
   CHECK(pokemon::markSpecies(state.caughtSpecies, leader.speciesId));
 
-  // Not in the party (deposited), but still the starter - the Champion's
-  // final slot is chosen from its species, so it must stay releasable-proof.
+  // A deposited starter of a pre-v10 save: starterSpeciesId was never
+  // recorded (0), so releasing it must record it in the same commit - the
+  // Champion's counter slot is chosen from it long after the record is gone.
   pokemon::PokemonRecord boxedStarter = leaderAtLevelFive();
   boxedStarter.recordId = 12;
+  boxedStarter.speciesId = 5;  // Charmeleon: an evolved stage of the line
   boxedStarter.origin = pokemon::Origin::Starter;
+  CHECK(pokemon::markSpecies(state.seenSpecies, boxedStarter.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, boxedStarter.speciesId));
+  CHECK(state.starterSpeciesId == 0);
 
   pokemon::RecordMutation mutation{};
-  CHECK(!pokemon::releaseRecord(state, boxedStarter, mutation));
-  CHECK(mutation.kind == pokemon::RecordMutationKind::None);
+  CHECK(pokemon::releaseRecord(state, boxedStarter, mutation));
+  CHECK(mutation.kind == pokemon::RecordMutationKind::Remove);
+  CHECK(state.starterSpeciesId == 5);
+}
+
+void releaseRecordKeepsAnAlreadyRecordedStarterSpecies() {
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  CHECK(pokemon::markSpecies(state.seenSpecies, leader.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, leader.speciesId));
+
+  pokemon::PokemonRecord boxedStarter = leaderAtLevelFive();
+  boxedStarter.recordId = 12;
+  boxedStarter.speciesId = 6;  // fully evolved by now
+  boxedStarter.origin = pokemon::Origin::Starter;
+  CHECK(pokemon::markSpecies(state.seenSpecies, boxedStarter.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, boxedStarter.speciesId));
+  state.starterSpeciesId = 4;  // what the player originally picked
+
+  pokemon::RecordMutation mutation{};
+  CHECK(pokemon::releaseRecord(state, boxedStarter, mutation));
+  CHECK(state.starterSpeciesId == 4);  // the original pick wins over the current stage
+}
+
+void releaseRecordOfANonStarterLeavesTheStarterSpeciesAlone() {
+  pokemon::PokemonRecord leader = leaderAtLevelFive();
+  pokemon::PokemonState state = stateWithLeader(leader);
+  CHECK(pokemon::markSpecies(state.seenSpecies, leader.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, leader.speciesId));
+
+  pokemon::PokemonRecord boxed = leaderAtLevelFive();
+  boxed.recordId = 12;
+  boxed.speciesId = 1;
+  boxed.origin = pokemon::Origin::Caught;
+  CHECK(pokemon::markSpecies(state.seenSpecies, boxed.speciesId));
+  CHECK(pokemon::markSpecies(state.caughtSpecies, boxed.speciesId));
+
+  pokemon::RecordMutation mutation{};
+  CHECK(pokemon::releaseRecord(state, boxed, mutation));
+  CHECK(state.starterSpeciesId == 0);
 }
 
 void levelHundredDoesNotCatchUpOrChainLevelEvolutions() {
@@ -1496,7 +1537,9 @@ int main() {
   releaseRecordRemovesAPcRecordButKeepsItInThePokedex();
   releaseRecordRejectsAPartyMember();
   releaseRecordDropsAnyPendingEvolutionForThatRecord();
-  releaseRecordRejectsTheStarterEvenFromTheBox();
+  releaseRecordBackfillsAnUnrecordedStarterSpecies();
+  releaseRecordKeepsAnAlreadyRecordedStarterSpecies();
+  releaseRecordOfANonStarterLeavesTheStarterSpeciesAlone();
   levelHundredDoesNotCatchUpOrChainLevelEvolutions();
   promptTogglePreservesAnUnrelatedPendingEvent();
   disablingPromptsRemovesOnlyMatchingQueuedEvolutions();

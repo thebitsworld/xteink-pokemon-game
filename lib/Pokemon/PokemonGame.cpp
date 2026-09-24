@@ -753,15 +753,20 @@ bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutat
   if (!validateState(state) || !validateRecord(record) || mutation.kind != RecordMutationKind::None) {
     return false;
   }
-  // The Champion's final team slot is chosen from the starter's species (see
-  // championFinalSlotFor()), looked up from the starter's own record - a
-  // released starter would silently make him field the wrong counter.
-  if (record.origin == Origin::Starter) return false;
   for (const uint32_t partyRecordId : state.partyRecordIds) {
     if (partyRecordId == record.recordId) return false;  // withdraw to the Box first
   }
 
   PokemonState stateCandidate = state;
+  // The starter's species is recorded at creation (PokemonState::
+  // starterSpeciesId) so the Champion's counter slot never needs its record.
+  // A save from before that field existed has 0 there - record it now, in the
+  // same commit that removes the record, while the species is still readable
+  // (any evolution stage of the line maps to the same counter).
+  if (record.origin == Origin::Starter && stateCandidate.starterSpeciesId == 0 &&
+      record.speciesId <= KANTO_SPECIES_COUNT) {
+    stateCandidate.starterSpeciesId = static_cast<uint8_t>(record.speciesId);
+  }
   // Evolution AND MoveLearn prompts: a MoveLearn left pointing at a released
   // record can never be resolved and would stay at the front of the queue,
   // blocking every later event.

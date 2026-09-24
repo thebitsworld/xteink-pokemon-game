@@ -1430,13 +1430,19 @@ void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
     if (gymChallengeIndex_ == pokemon::CHAMPION_GYM_INDEX && gymChallengeTeamProgress_ == team.size() - 1) {
       // The Champion's final slot sends out the evolution that counters
       // the player's own starter in the real games - see
-      // championFinalSlotFor(). recordId 1 is always the starter
-      // (createStarter() hardcodes it), so this is a plain lookup rather
-      // than tracking a separate "starter species" field.
-      pokemon::PokemonRecord starterRecord{};
-      if (service_.readRecord(1, starterRecord) == pokemon::ServiceStatus::Ok) {
-        next = pokemon::championFinalSlotFor(starterRecord.speciesId);
+      // championFinalSlotFor(). The starter's species is recorded once at
+      // creation (PokemonState::starterSpeciesId), so this holds however the
+      // starter has since evolved or even been released. Only a save from
+      // before that field existed reads 0 and still has its starter record
+      // around (recordId 1 - createStarter() hardcodes it) to look up.
+      uint16_t starterSpecies = snapshot_.state.starterSpeciesId;
+      if (starterSpecies == 0) {
+        pokemon::PokemonRecord starterRecord{};
+        if (service_.readRecord(1, starterRecord) == pokemon::ServiceStatus::Ok) {
+          starterSpecies = starterRecord.speciesId;
+        }
       }
+      if (starterSpecies != 0) next = pokemon::championFinalSlotFor(starterSpecies);
     }
     // Same ongoing gym battle, the trainer's next team member sent out after
     // the previous one fainted - the trainer's own side-wide Reflect/Light
@@ -2362,8 +2368,8 @@ void PokemonActivity::activate() {
         return;
       }
       if (const auto released = service_.releasePokemon(focusedRecordId_); released != pokemon::ServiceStatus::Ok) {
-        // NotApplicable = a rule refused it (e.g. the starter can't be
-        // released), not a storage failure.
+        // NotApplicable = a rule refused it (e.g. it's back in the party),
+        // not a storage failure.
         showMessage(released == pokemon::ServiceStatus::NotApplicable ? tr(STR_POKEMON_NOT_APPLICABLE)
                                                                        : tr(STR_POKEMON_SAVE_ERROR),
                     Screen::Pc);

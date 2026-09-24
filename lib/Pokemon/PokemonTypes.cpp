@@ -315,6 +315,7 @@ bool validateState(const PokemonState& state) {
   for (size_t index = 0; index < POKEDEX_BYTES; ++index) {
     if ((state.caughtSpecies[index] & static_cast<uint8_t>(~state.seenSpecies[index])) != 0) return false;
   }
+  if (state.starterSpeciesId > KANTO_SPECIES_COUNT) return false;
   if (state.readingMinuteRemainder >= 60 || state.encounterMisses > 5 || state.itemMisses > 19 ||
       state.dashboardNotice > DashboardNotice::WhatsThis) {
     return false;
