@@ -1308,8 +1308,8 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
 }
 
 BattleTurnResult PokemonService::resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent,
-                                                   const uint8_t playerMoveSlot) {
-  return stepBattle(player, opponent, playerMoveSlot, random_);
+                                                   const uint8_t playerMoveSlot, const bool wildEncounter) {
+  return stepBattle(player, opponent, playerMoveSlot, random_, wildEncounter);
 }
 
 BattleTurnResult PokemonService::resolveOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& opponent) {

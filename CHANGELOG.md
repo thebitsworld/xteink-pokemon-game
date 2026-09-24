@@ -22,6 +22,8 @@
 - Reset Game now still wipes the IV/EV, battle, moveset and Hall of Fame data when the SD card cannot read those files at that moment; they are deleted instead of being skipped and left behind for the new game.
 - A new starter or a newly caught Pokémon now gets its IVs rolled immediately, so its HP and stats no longer change the first time it fights.
 - Levelling up (Rare Candy or a battle win) now adds the max-HP gain to current HP, as in the original games: a Pokémon at full health stays at full health. A fainted Pokémon stays fainted.
+- Wild battles: when your Pokémon used Teleport or Roar/Whirlwind and moved first, the wild Pokémon still got an attack in the same turn and could defeat you after you had already left. The encounter now ends immediately.
+- Recoil (Take Down, Double-Edge, Struggle...), draining moves (Absorb, Mega Drain...) and Counter/Bide are now based on the damage actually dealt, which cannot exceed the HP the target had left. Finishing off a nearly-fainted Pokémon with a strong hit no longer costs the user a huge recoil or heals it by the full uncapped amount.
 
 ## [1.2.2] - 2026-09-23
 

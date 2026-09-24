@@ -1012,7 +1012,7 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
       snprintf(battleLog_, sizeof(battleLog_), "%s", trainerActionLine);
     }
   } else {
-    result = service_.resolveBattleTurn(battlePlayer_, battleOpponent_, moveSlot);
+    result = service_.resolveBattleTurn(battlePlayer_, battleOpponent_, moveSlot, /*wildEncounter=*/gymChallengeIndex_ == 0);
     if (gymChallengeIndex_ != 0 && result.player.event == pokemon::BattleLogEvent::Teleported) {
       result.player.event = pokemon::BattleLogEvent::MoveFailed;
     }

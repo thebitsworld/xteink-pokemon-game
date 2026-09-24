@@ -2275,6 +2275,60 @@ void speedTieIsBrokenByACoinFlipInsteadOfAlwaysFavoringThePlayer() {
 
 }  // namespace
 
+// A wild encounter is over the moment the player Teleports away or blows the
+// opponent out with Roar/Whirlwind: the opponent must not still get an attack in
+// afterwards (it could otherwise defeat a player who had already left). A gym
+// fight keeps the normal two-sided turn.
+void wildTeleportOrRoarEndsTheEncounterBeforeTheOpponentActs() {
+  for (const uint8_t leavingMove : {static_cast<uint8_t>(100), static_cast<uint8_t>(18)}) {  // Teleport, Whirlwind
+    BattleCombatant player = makeCombatant(4, 40, {leavingMove});
+    BattleCombatant wild = makeCombatant(7, 5, {33});  // slower, would hit back with Tackle
+    const uint16_t playerHpBefore = player.currentHp;
+    const pokemon::BattleTurnResult wildResult = pokemon::stepBattle(player, wild, 0, ZERO_RANDOM, true);
+    CHECK(!wildResult.opponent.acted);
+    CHECK(player.currentHp == playerHpBefore);
+    CHECK(wildResult.outcome == BattleOutcome::InProgress);
+    CHECK(wildResult.player.event == BattleLogEvent::Teleported || wildResult.player.event == BattleLogEvent::ForcedSwitch);
+
+    BattleCombatant gymPlayer = makeCombatant(4, 40, {leavingMove});
+    BattleCombatant trainer = makeCombatant(7, 5, {33});
+    const pokemon::BattleTurnResult gymResult = pokemon::stepBattle(gymPlayer, trainer, 0, ZERO_RANDOM, false);
+    CHECK(gymResult.opponent.acted);
+  }
+}
+
+// Recoil, draining and Counter/Bide work from the damage actually dealt, which
+// cannot exceed the HP the target had left.
+void recoilAndDrainAreCappedByTheTargetsRemainingHp() {
+  uint32_t context = 70;
+  const RandomSource fixedRandom{&context, fixedRoll};
+
+  BattleCombatant attacker = makeCombatant(4, 20, {36});  // Take Down: recoil 1/4
+  BattleCombatant target = makeCombatant(1, 20, {33});
+  target.maxHp = 200;
+  target.currentHp = 8;
+  target.status = Ailment::Sleep;
+  target.statusTurns = 5;
+  const uint16_t attackerHpBefore = attacker.currentHp;
+  const pokemon::BattleTurnResult recoilResult = pokemon::stepBattle(attacker, target, 0, fixedRandom);
+  CHECK(target.currentHp == 0);
+  CHECK(recoilResult.player.recoilApplied);
+  CHECK(attackerHpBefore - attacker.currentHp == 2);  // 8 HP dealt / 4, not a quarter of the uncapped hit
+
+  BattleCombatant drainer = makeCombatant(1, 30, {72});  // Mega Drain (Grass) vs a Water type
+  drainer.currentHp = static_cast<uint16_t>(drainer.maxHp - 30);
+  BattleCombatant prey = makeCombatant(7, 5, {33});
+  prey.maxHp = 200;
+  prey.currentHp = 4;
+  prey.status = Ailment::Sleep;
+  prey.statusTurns = 5;
+  const uint16_t drainerHpBefore = drainer.currentHp;
+  const pokemon::BattleTurnResult drainResult = pokemon::stepBattle(drainer, prey, 0, fixedRandom);
+  CHECK(prey.currentHp == 0);
+  CHECK(drainResult.player.drainApplied);
+  CHECK(drainer.currentHp - drainerHpBefore == 2);  // half of the 4 HP actually taken
+}
+
 int main() {
   statFormulasScaleWithLevel();
   damagingMoveReducesDefenderHpAndReportsSuperEffective();
@@ -2378,6 +2432,8 @@ int main() {
   metronomeExecutesADifferentMovesEffectInsteadOfItsOwn();
   metronomeSelectedTrapMoveDoesNotLockTheAttackerIn();
   endOfTurnStatusTickDoesNotOverwriteTeleportOrForcedSwitch();
+  wildTeleportOrRoarEndsTheEncounterBeforeTheOpponentActs();
+  recoilAndDrainAreCappedByTheTargetsRemainingHp();
   metronomeRedirectedToExplosionFaintsTheUser();
   mutualKoFromTheSingleActorStepsCleansUpBothSides();
   transformedWildCombatantIsCaughtAtItsRealSpeciesRate();

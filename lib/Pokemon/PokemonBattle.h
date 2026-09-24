@@ -553,8 +553,13 @@ void defaultMovesetForLevel(uint16_t speciesId, uint8_t level, std::array<uint8_
 // *unless* it's STRUGGLE_MOVE_ID's sentinel (any value >= BATTLE_MOVE_SLOTS),
 // which forces a real Struggle turn instead (matching Gen 1: once every
 // learned move is out of PP, a Pokemon Struggles rather than doing nothing).
+// `wildEncounter` is true for a fight against a wild Pokemon, where the player's
+// Teleport or Roar/Whirlwind ends the encounter on the spot: an opponent that would
+// have acted after it does not get that action (it could otherwise defeat the player
+// after they had already left). In a gym/Elite Four/Champion fight those moves fail or
+// only swap the trainer's Pokemon, so the turn continues as usual.
 BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, uint8_t playerMoveSlot,
-                            const RandomSource& random);
+                            const RandomSource& random, bool wildEncounter = false);
 
 // Resolves a turn where the player spent their whole turn on something other
 // than a move - switching Pokemon, or using an item mid-battle. Matches

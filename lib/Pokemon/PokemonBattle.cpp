@@ -538,12 +538,17 @@ bool typeIsImmuneToAilment(const EffectiveTypes& types, const Ailment ailment) {
 // bideDamageStored (Counter/Bide read from those at their own call sites
 // below) exactly as if it had landed on the real Pokemon - this matches a
 // real, documented Gen 1 quirk, not a shortcut this project introduced.
-void applyDamageRespectingSubstitute(BattleCombatant& defender, const uint16_t damage) {
+// Returns the damage actually dealt: capped at what the Substitute (or, without one, the
+// Pokemon) had left, so recoil, draining, Counter and Bide never scale off overkill.
+uint16_t applyDamageRespectingSubstitute(BattleCombatant& defender, const uint16_t damage) {
   if (defender.substituteHp > 0) {
-    defender.substituteHp = defender.substituteHp > damage ? static_cast<uint16_t>(defender.substituteHp - damage) : 0;
-    return;
+    const uint16_t dealt = std::min(damage, defender.substituteHp);
+    defender.substituteHp = static_cast<uint16_t>(defender.substituteHp - dealt);
+    return dealt;
   }
-  defender.currentHp = defender.currentHp > damage ? static_cast<uint16_t>(defender.currentHp - damage) : 0;
+  const uint16_t dealt = std::min(damage, defender.currentHp);
+  defender.currentHp = static_cast<uint16_t>(defender.currentHp - dealt);
+  return dealt;
 }
 
 // Rage (move 99): raises the attacked combatant's own Attack stage by 1
@@ -1121,11 +1126,10 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
         }
       }
       if (noEffect && result.event != BattleLogEvent::MoveFailed) result.event = BattleLogEvent::MoveNoEffect;
-      const uint16_t clampedDamage = clampToUint16(damage);
-      applyDamageRespectingSubstitute(defender, clampedDamage);
-      raiseAttackIfEnraged(defender, clampedDamage);
-      if (move->category == MoveCategory::Physical && clampedDamage > 0) {
-        defender.lastPhysicalDamageTaken = clampedDamage;
+      const uint16_t dealtDamage = applyDamageRespectingSubstitute(defender, clampToUint16(damage));
+      raiseAttackIfEnraged(defender, dealtDamage);
+      if (move->category == MoveCategory::Physical && dealtDamage > 0) {
+        defender.lastPhysicalDamageTaken = dealtDamage;
       }
     } else {
       const uint8_t effectivePower = moveId == LOW_KICK_MOVE_ID ? LOW_KICK_SIMPLIFIED_POWER : move->power;
@@ -1167,8 +1171,8 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
         const bool critical =
             attackerStats != nullptr &&
             rollCriticalHit(attackerStats->speed, isHighCritRatioMove(moveId) || attacker.direHitActive, random);
-        const uint16_t damage = computeDamage(attacker, defender, effectiveMove, moveId, random, critical);
-        applyDamageRespectingSubstitute(defender, damage);
+        const uint16_t rolledDamage = computeDamage(attacker, defender, effectiveMove, moveId, random, critical);
+        const uint16_t damage = applyDamageRespectingSubstitute(defender, rolledDamage);
         raiseAttackIfEnraged(defender, damage);
         totalDamage += damage;
         // Bide (move 117) accumulates whatever damage its user takes while
@@ -1898,7 +1902,7 @@ void defaultMovesetForLevel(const uint16_t speciesId, const uint8_t level,
 }
 
 BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, const uint8_t playerMoveSlot,
-                            const RandomSource& random) {
+                            const RandomSource& random, const bool wildEncounter) {
   BattleTurnResult result{};
   if (player.currentHp == 0 || opponent.currentHp == 0) {
     result.outcome = player.currentHp == 0 ? BattleOutcome::OpponentWon : BattleOutcome::PlayerWon;
@@ -1968,6 +1972,10 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
       faintCombatant(player, opponent, result.player.event);
       result.outcome = BattleOutcome::OpponentWon;
       return result;
+    }
+    if (wildEncounter && (result.player.event == BattleLogEvent::Teleported ||
+                          result.player.event == BattleLogEvent::ForcedSwitch)) {
+      return result;  // the encounter is over - see stepBattle()'s declaration
     }
     result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
     // Same simultaneous-KO check as the first action above, but for the
