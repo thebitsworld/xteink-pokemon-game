@@ -123,6 +123,11 @@ const BattleRecordEntry* PokemonBattleStore::findEntry(const uint32_t recordId) 
   return pokemon::findBattleEntry(state_, recordId);
 }
 
+std::span<const BattleRecordEntry> PokemonBattleStore::entries() const {
+  if (!loaded_) load();
+  return std::span<const BattleRecordEntry>(state_.entries.data(), pokemon::battleEntryCount(state_));
+}
+
 bool PokemonBattleStore::writeState(const BattleStoreState& state) const {
   if (!Storage.ensureDirectoryExists(STORE_DIRECTORY)) {
     LOG_ERR("PokemonBattleStore", "Failed to prepare data directory");

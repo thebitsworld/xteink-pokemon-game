@@ -22,7 +22,9 @@ namespace pokemon {
 constexpr size_t POKEMON_BATTLE_ENTRY_BYTES_V1 = 16;
 constexpr size_t POKEMON_BATTLE_ENTRY_BYTES_V2 = 20;
 constexpr size_t POKEMON_BATTLE_ENTRY_BYTES = 21;
-constexpr size_t POKEMON_BATTLE_MAX_ENTRIES = 6;  // one per Party slot; PC-boxed Pokemon carry no live battle state
+// One per Party slot. A boxed Pokemon may still hold an entry (kept on deposit) until the room is needed, but
+// nothing here has to last: its moveset/PP Ups also live in pokemon-moves-{a,b}.bin (PokemonMovesetStoreCodec.h).
+constexpr size_t POKEMON_BATTLE_MAX_ENTRIES = 6;
 constexpr size_t POKEMON_BATTLE_FILE_CRC_BYTES = 4;
 // Header: magic "PKBT" (4) + version (1) + entryCount (1) + sequence (4). A
 // Pokemon's actual moveset can now diverge from what defaultMovesetForLevel()

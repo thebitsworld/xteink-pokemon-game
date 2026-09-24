@@ -161,11 +161,41 @@ is already present. Back up both files before updates or resets. Choosing
 starter selection; it does not alter books, reading positions, or CrossInk
 reading statistics.
 
+## `/.crosspoint/pokemon-moves-{a,b}.bin`
+
+The permanent part of a Pokémon's battle data - which moves it knows and how
+many PP Ups each slot has had - for **every** Pokémon, Party and PC Box alike.
+`pokemon-battle-{a,b}.bin` below only has room for the current Party (6
+entries), so on its own it could not keep a boxed Pokémon's TM/HM moves or PP
+Ups once its entry was reclaimed; this file has no such limit. A Pokémon that
+never customised its moves has no entry and simply gets the level-derived
+moveset. When a Pokémon has no battle entry (or gets a new one), a saved
+moveset overrides the level-derived one, at full PP for its PP Ups.
+
+Double-buffered exactly like the other side files (`pokemon-moves-a.bin` /
+`pokemon-moves-b.bin`, write to the inactive one, read back, flip). All
+integers are little-endian.
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Magic `PKMV` |
+| 4 | 1 | Format version (`1`) |
+| 5 | 2 | Entry count (max `518` = PC Box cap `512` + Party `6`) |
+| 7 | 4 | Non-zero sequence number |
+| 11 | 12 × count | Entries, ascending by record ID, no gaps |
+| 11 + 12 × count | 4 | CRC-32 (same variant as the other stores) of everything before it |
+
+Each 12-byte entry: record ID (`u32`), `moves[4]` (`u8` each, packed at the
+front, `0` = empty), `ppUp[4]` (`u8` each, `0-3`, `0` on an empty slot).
+A missing or corrupt file just leaves the store empty.
+
 ## `/.crosspoint/pokemon-battle-{a,b}.bin`
 
 Holds each Party member's *live* battle state: which of its up-to-4 moves it
 currently knows, each move's remaining PP, its current HP, and any status
-ailment. Introduced alongside save format version 3 above.
+ailment. Introduced alongside save format version 3 above. Its moves and PP
+Ups are also mirrored into `pokemon-moves-{a,b}.bin` (above), which is what
+keeps them when this file's limited room forces an entry out.
 
 ### Version 2 (double-buffered)
 

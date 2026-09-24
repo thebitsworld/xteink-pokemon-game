@@ -44,7 +44,7 @@ python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --leve
 - `--slot` — pending-event slot 0-2, defaults to the first empty slot (a clear error if all 3 slots are full)
 
 ### `reset-battle-store`
-Deletes the auxiliary file holding battle HP/PP/moveset/status (`pokemon-battle-{a,b}.bin` plus the older single file if it still exists) — each Pokémon's next battle will rebuild full HP/PP with no status ailment.
+Deletes the auxiliary file holding battle HP/PP/moveset/status (`pokemon-battle-{a,b}.bin` plus the older single file if it still exists, and `pokemon-moves-{a,b}.bin` - the saved movesets/PP Ups) — each Pokémon's next battle will rebuild full HP/PP with no status ailment.
 
 ```sh
 python3 scripts/dev/edit_pokemon_save.py reset-battle-store

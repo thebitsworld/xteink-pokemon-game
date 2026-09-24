@@ -201,6 +201,9 @@ ServiceStatus PokemonService::depositPokemon(const uint32_t recordId) {
   // (POKEMON_BATTLE_MAX_ENTRIES, one per party slot) is instead reclaimed
   // on actual demand: loadBattleEntry() evicts a non-party entry only when
   // a current party member genuinely needs a new one and the store is full.
+  // What can't be recomputed - its moveset and PP Ups - is also kept in the
+  // moveset store (no per-Party limit), so an eviction only ever costs the
+  // transient HP/PP/status, never a TM move or a spent PP Up.
   return ServiceStatus::Ok;
 }
 
@@ -255,6 +258,7 @@ ServiceStatus PokemonService::releasePokemon(const uint32_t recordId) {
   // just the battle-store one - otherwise Release would only solve half of
   // the capacity problem it exists for (see PC_BOX_MAX_RECORDS's comment).
   battleStore_.removeEntry(recordId);
+  movesetStore_.removeEntry(recordId);
   ivEvStore_.removeEntry(recordId);
   return ServiceStatus::Ok;
 }
@@ -322,6 +326,7 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
     // A released record's ids can be handed out again; if its best-effort side-store cleanup ever failed, drop the
     // stale battle/IV entries now so the new Pokemon doesn't inherit them.
     if (battleStore_.findEntry(caughtRecordId) != nullptr) battleStore_.removeEntry(caughtRecordId);
+    if (movesetStore_.findEntry(caughtRecordId) != nullptr) movesetStore_.removeEntry(caughtRecordId);
     if (ivEvStore_.findEntry(caughtRecordId) != nullptr) ivEvStore_.removeEntry(caughtRecordId);
     clearPendingIvEvRoll(caughtRecordId);
   }
@@ -406,7 +411,7 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
       // bonus for whatever move ends up there (entry.ppUp[replaceSlot] itself
       // is left untouched).
       entry.pp[replaceSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[replaceSlot]);
-      if (!battleStore_.upsertEntry(entry)) {
+      if (!persistBattleEntry(entry, /*movesetChanged=*/true)) {
         LOG_ERR("PokemonService", "Failed to save learned move");
         return ServiceStatus::StorageError;
       }
@@ -464,7 +469,7 @@ TeachMoveOutcome PokemonService::teachMove(const uint32_t recordId, const uint8_
   // maxPpFor(), not the move's raw base PP - see resolveMoveLearn()'s same
   // comment: PP Up is tied to the slot, not the move identity.
   entry.pp[targetSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[targetSlot]);
-  if (!battleStore_.upsertEntry(entry)) {
+  if (!persistBattleEntry(entry, /*movesetChanged=*/true)) {
     LOG_ERR("PokemonService", "Failed to teach move");
     return TeachMoveOutcome::Failed;
   }
@@ -502,7 +507,7 @@ TeachMoveOutcome PokemonService::teachMoveAndConsumeItem(const uint32_t recordId
   const MoveData* move = moveData(moveId);
   entry.moves[targetSlot] = moveId;
   entry.pp[targetSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[targetSlot]);
-  if (battleStore_.upsertEntry(entry)) return TeachMoveOutcome::Learned;
+  if (persistBattleEntry(entry, /*movesetChanged=*/true)) return TeachMoveOutcome::Learned;
 
   LOG_ERR("PokemonService", "Failed to teach move");
   // The move was not actually learned, so give the TM/HM back rather than
@@ -543,7 +548,7 @@ ServiceStatus PokemonService::learnMoveIntoSlot(const uint32_t recordId, const u
   // maxPpFor(), not the move's raw base PP - see teachMove()'s same comment:
   // PP Up is tied to the slot, not the move identity.
   entry.pp[targetSlot] = maxPpFor(move->pp, entry.ppUp[targetSlot]);
-  if (!battleStore_.upsertEntry(entry)) {
+  if (!persistBattleEntry(entry, /*movesetChanged=*/true)) {
     LOG_ERR("PokemonService", "Failed to update moveset");
     return ServiceStatus::StorageError;
   }
@@ -575,7 +580,7 @@ ServiceStatus PokemonService::forgetMove(const uint32_t recordId, const uint8_t 
   entry.pp[BATTLE_MOVE_SLOTS - 1] = 0;
   entry.ppUp[BATTLE_MOVE_SLOTS - 1] = 0;
 
-  if (!battleStore_.upsertEntry(entry)) {
+  if (!persistBattleEntry(entry, /*movesetChanged=*/true)) {
     LOG_ERR("PokemonService", "Failed to forget move");
     return ServiceStatus::StorageError;
   }
@@ -597,7 +602,7 @@ ServiceStatus PokemonService::applyPpUp(const uint32_t recordId, const uint8_t s
   const uint8_t newMaxPp = maxPpFor(move->pp, entry.ppUp[slot]);
   if (entry.pp[slot] >= oldMaxPp) entry.pp[slot] = newMaxPp;  // was already full - stays full
 
-  if (!battleStore_.upsertEntry(entry)) {
+  if (!persistBattleEntry(entry, /*movesetChanged=*/true)) {
     LOG_ERR("PokemonService", "Failed to use PP Up");
     return ServiceStatus::StorageError;
   }
@@ -733,7 +738,7 @@ UseConsumableOutcome PokemonService::useConsumableImpl(const uint32_t recordId, 
   }
   if (!changed) return UseConsumableOutcome::NotApplicable;
   if (dryRun) return UseConsumableOutcome::Applied;
-  if (!battleStore_.upsertEntry(entry)) {
+  if (!persistBattleEntry(entry, /*movesetChanged=*/false)) {
     LOG_ERR("PokemonService", "Failed to use consumable item");
     return UseConsumableOutcome::Failed;
   }
@@ -887,6 +892,17 @@ BattleRecordEntry PokemonService::synthesizeBattleEntry(const PokemonRecord& rec
   constexpr size_t hpIndex = static_cast<size_t>(StatIndex::Hp);
   entry.currentHp = stats == nullptr ? 1 : battleMaxHp(stats->hp, level, ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
   defaultMovesetForLevel(record.speciesId, level, entry.moves, entry.pp);
+  // A customised moveset outlives its battle-store entry (see
+  // persistBattleEntry()): if this Pokemon has one saved, it replaces the
+  // level-derived default, at full PP for whatever PP Ups each slot has.
+  if (const MovesetEntry* saved = movesetStore_.findEntry(record.recordId); saved != nullptr) {
+    entry.moves = saved->moves;
+    entry.ppUp = saved->ppUp;
+    for (size_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+      const MoveData* move = moveData(entry.moves[slot]);
+      entry.pp[slot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[slot]);
+    }
+  }
   entry.status = Ailment::None;
   entry.statusTurns = 0;
   return entry;
@@ -929,6 +945,9 @@ ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRec
     // since the party holds at most PARTY_SIZE == POKEMON_BATTLE_MAX_ENTRIES
     // members and this one doesn't have an entry yet, at least one such
     // entry is always present to reclaim.
+    // The entry about to be dropped may be a legacy one whose customised
+    // moveset has no moveset-store copy yet - save those first.
+    backfillMovesetStoreFromBattleStore();
     PokemonState state{};
     if (loadReadyState(state) == ServiceStatus::Ok) {
       battleStore_.evictEntryNotIn(std::span<const uint32_t>(state.partyRecordIds.data(), PARTY_SIZE));
@@ -1041,8 +1060,31 @@ HallOfFameState PokemonService::peekHallOfFame() const {
   return entry != nullptr ? *entry : HallOfFameState{};
 }
 
+bool PokemonService::persistBattleEntry(const BattleRecordEntry& entry, const bool movesetChanged) {
+  if (!battleStore_.upsertEntry(entry)) return false;
+  const MovesetEntry wanted{entry.recordId, entry.moves, entry.ppUp};
+  const MovesetEntry* stored = movesetStore_.findEntry(entry.recordId);
+  const bool needsWrite = stored == nullptr ? movesetChanged : !(*stored == wanted);
+  if (needsWrite && !movesetStore_.upsertEntry(wanted)) {
+    LOG_ERR("PokemonService", "Failed to save moveset for record %u", static_cast<unsigned>(entry.recordId));
+  }
+  return true;
+}
+
+void PokemonService::backfillMovesetStoreFromBattleStore() {
+  std::array<MovesetEntry, POKEMON_BATTLE_MAX_ENTRIES> missing{};
+  size_t missingCount = 0;
+  for (const BattleRecordEntry& entry : battleStore_.entries()) {
+    if (movesetStore_.findEntry(entry.recordId) != nullptr || missingCount >= missing.size()) continue;
+    missing[missingCount++] = MovesetEntry{entry.recordId, entry.moves, entry.ppUp};
+  }
+  if (missingCount > 0 && !movesetStore_.upsertEntries(std::span<const MovesetEntry>(missing.data(), missingCount))) {
+    LOG_ERR("PokemonService", "Failed to back up movesets before evicting a battle entry");
+  }
+}
+
 ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
-  if (!battleStore_.upsertEntry(entry)) {
+  if (!persistBattleEntry(entry, /*movesetChanged=*/false)) {
     LOG_ERR("PokemonService", "Failed to save battle entry");
     return ServiceStatus::StorageError;
   }
@@ -1136,9 +1178,15 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
                                             const bool queuePrompts, const bool persistMoves) {
   if (currentLevel <= previousLevel) return;
   const BattleRecordEntry* existing = battleStore_.findEntry(leader.recordId);
-  if (existing == nullptr) return;
+  // A Pokemon whose battle entry was evicted but whose customised moveset is
+  // still saved is caught up too - otherwise leveling up before its next
+  // battle would skip the new moves. One with neither has nothing to catch
+  // up: its first battle synthesizes a level-appropriate moveset anyway.
+  const bool hasSavedMovesetOnly = existing == nullptr && movesetStore_.findEntry(leader.recordId) != nullptr;
+  if (existing == nullptr && !hasSavedMovesetOnly) return;
 
-  BattleRecordEntry entry = *existing;
+  BattleRecordEntry entry =
+      existing != nullptr ? *existing : synthesizeBattleEntry(leader, peekIvEv(leader.recordId));
   bool changed = false;
   for (const LearnsetEntry& learn : learnsetFor(leader.speciesId)) {
     if (learn.level <= previousLevel || learn.level > currentLevel) continue;
@@ -1171,7 +1219,13 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
       enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one (the Moves screen still offers it)
     }
   }
-  if (changed && persistMoves) battleStore_.upsertEntry(entry);
+  if (changed && persistMoves) {
+    if (existing != nullptr) {
+      persistBattleEntry(entry, /*movesetChanged=*/true);
+    } else if (!movesetStore_.upsertEntry(MovesetEntry{entry.recordId, entry.moves, entry.ppUp})) {
+      LOG_ERR("PokemonService", "Failed to save learned move for record %u", static_cast<unsigned>(entry.recordId));
+    }
+  }
 }
 
 BattleTurnResult PokemonService::resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent,
@@ -1283,6 +1337,9 @@ ServiceStatus PokemonService::reset() {
   // moment ensureIvEv() runs for that id again.
   if (!ivEvStore_.reset()) {
     LOG_ERR("PokemonService", "Failed to reset Pokemon IV/EV store");
+  }
+  if (!movesetStore_.reset()) {
+    LOG_ERR("PokemonService", "Failed to reset Pokemon moveset store");
   }
   // Same best-effort spirit again - a fresh game should not read back a
   // previous playthrough's Hall of Fame.

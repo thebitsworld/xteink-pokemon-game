@@ -9,6 +9,7 @@
 #include "PokemonBattleStore.h"
 #include "PokemonHallOfFameStore.h"
 #include "PokemonIvEvStore.h"
+#include "PokemonMovesetStore.h"
 #include "PokemonStore.h"
 
 namespace pokemon {
@@ -378,6 +379,18 @@ class PokemonService {
   // which must not have side effects).
   void queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader, uint8_t previousLevel,
                               uint8_t currentLevel, bool queuePrompts = true, bool persistMoves = true);
+  // Every write of a BattleRecordEntry goes through here. The battle store
+  // (party-sized, HP/PP/status) is always written; the moveset store (moves +
+  // PP Ups, PC Box included) is kept in step with it, but is only CREATED for
+  // a Pokemon once its moveset is actually customised (movesetChanged), never
+  // for a default one - and once an entry exists it is updated whenever
+  // moves/PP Ups differ. A failure to sync the moveset store is logged but
+  // not returned: the battle store, which the UI reads first, has the data.
+  bool persistBattleEntry(const BattleRecordEntry& entry, bool movesetChanged);
+  // Entries written before the moveset store existed may hold customised
+  // movesets with no copy there yet; copies them across. Called right before a
+  // battle-store eviction, the only place such an entry can otherwise be lost.
+  void backfillMovesetStoreFromBattleStore();
   static bool creditFromTracker(void* context, uint16_t minutes, uint8_t bookProgressPercent);
   IvEvEntry* findPendingIvEvRoll(uint32_t recordId);
   void cachePendingIvEvRoll(const IvEvEntry& entry);
@@ -387,6 +400,9 @@ class PokemonService {
   PokemonBattleStore& battleStore_;
   PokemonIvEvStore& ivEvStore_;
   PokemonHallOfFameStore& hallOfFameStore_;
+  // Owned here rather than injected: the service is its only user, and a
+  // per-service instance keeps every test's store state independent.
+  PokemonMovesetStore movesetStore_;
   RandomSource random_{};
   PokemonTracker tracker_;
   bool readingSessionActive_ = false;

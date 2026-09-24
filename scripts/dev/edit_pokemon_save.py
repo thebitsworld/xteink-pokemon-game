@@ -143,7 +143,15 @@ RECORD_FLAG_SHINY = 1 << 1
 PENDING_EVENT_SHINY_BIT = 0x80
 
 SAVE_NAMES = ("pokemon-a.bin", "pokemon-b.bin")
-BATTLE_STORE_NAMES = ("pokemon-battle-a.bin", "pokemon-battle-b.bin", "pokemon-battle.bin")
+# pokemon-moves-{a,b}.bin (moveset + PP Ups, the part of battle data that outlives a battle entry) is
+# deleted too, or a stale entry would silently override the rebuilt default moveset.
+BATTLE_STORE_NAMES = (
+    "pokemon-battle-a.bin",
+    "pokemon-battle-b.bin",
+    "pokemon-battle.bin",
+    "pokemon-moves-a.bin",
+    "pokemon-moves-b.bin",
+)
 
 
 class ToolError(RuntimeError):

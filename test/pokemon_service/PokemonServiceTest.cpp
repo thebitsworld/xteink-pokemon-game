@@ -1317,6 +1317,183 @@ TEST(PokemonService, TeachMoveChecksCompatibilityThenFreeSlotThenAllowsAReplaceS
   EXPECT_EQ(afterReplace->moves[1], 25U);
 }
 
+// A customised moveset (TM/HM, learn/forget, PP Up) lives in its own
+// per-record moveset store, so it survives the party-sized battle store
+// dropping that Pokemon's entry - the entry only carries transient HP/PP/
+// status on top of it.
+TEST(PokemonService, CustomisedMovesetSurvivesLosingItsBattleEntry) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // Pikachu, level 5, moves [84, 45, 0, 0]
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // TM Mega Punch into slot 2
+  ASSERT_TRUE(battleStore.removeEntry(1));                                   // e.g. evicted to make room
+
+  pokemon::PokemonRecord record{};
+  ASSERT_TRUE(store.readRecord(1, record));
+  const pokemon::BattleRecordEntry peeked = service.peekBattleMoves(record);
+  EXPECT_EQ(peeked.moves[2], 5U);  // not reverted to the level-derived default
+  EXPECT_GT(peeked.pp[2], 0U);
+
+  pokemon::BattleRecordEntry reloaded{};
+  ASSERT_EQ(service.loadBattleEntry(1, reloaded), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(reloaded.moves[2], 5U);
+  EXPECT_NE(battleStore.findEntry(1), nullptr);  // and a fresh entry was recreated from it
+}
+
+// The exact reported problem: boxed Pokemon hold battle-store slots, so a
+// party member needing one makes the store evict a boxed Pokemon's entry.
+// That used to throw away its TM move and PP Ups; now only its HP/PP/status
+// (which reset to full) go.
+TEST(PokemonService, EvictingABoxedPokemonsBattleEntryKeepsItsCustomMoveset) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // record 1: the party's only member, no battle entry yet
+  for (uint32_t id = 2; id <= 7; ++id) appendOwnedPokemon(store, caughtPokemon(id, 25), false);  // six boxed Pikachu
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.teachMove(2, 5), pokemon::TeachMoveOutcome::Learned);  // the lowest boxed record id: evicted first
+  pokemon::BattleRecordEntry scratch{};
+  for (uint32_t id = 3; id <= 7; ++id) ASSERT_EQ(service.loadBattleEntry(id, scratch), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(battleStore.isFull());
+
+  ASSERT_EQ(service.loadBattleEntry(1, scratch), pokemon::ServiceStatus::Ok);  // the party member needs a slot
+  EXPECT_EQ(battleStore.findEntry(2), nullptr);                                // record 2's entry was evicted
+  EXPECT_NE(battleStore.findEntry(1), nullptr);
+
+  pokemon::PokemonRecord boxed{};
+  ASSERT_TRUE(store.readRecord(2, boxed));
+  EXPECT_EQ(service.peekBattleMoves(boxed).moves[2], 5U);  // ...but its TM move is still there
+}
+
+// Battle-store entries written before the moveset store existed have no copy
+// there; the ones about to be evicted must be backed up first or a legacy
+// customised moveset would still be lost exactly as before.
+TEST(PokemonService, EvictionBacksUpALegacyEntrysMovesetFirst) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  for (uint32_t id = 2; id <= 7; ++id) appendOwnedPokemon(store, caughtPokemon(id, 25), false);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry legacy{};
+  legacy.recordId = 2;
+  legacy.moves = {84, 45, 5, 0};
+  legacy.pp = {30, 40, 20, 0};
+  legacy.ppUp = {3, 0, 0, 0};
+  legacy.currentHp = 18;
+  ASSERT_TRUE(battleStore.upsertEntry(legacy));  // straight into the battle store, as an older build would have
+  pokemon::BattleRecordEntry scratch{};
+  for (uint32_t id = 3; id <= 7; ++id) ASSERT_EQ(service.loadBattleEntry(id, scratch), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(battleStore.isFull());
+
+  ASSERT_EQ(service.loadBattleEntry(1, scratch), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(battleStore.findEntry(2), nullptr);
+
+  pokemon::PokemonRecord boxed{};
+  ASSERT_TRUE(store.readRecord(2, boxed));
+  const pokemon::BattleRecordEntry restored = service.peekBattleMoves(boxed);
+  EXPECT_EQ(restored.moves[2], 5U);
+  EXPECT_EQ(restored.ppUp[0], 3U);  // the spent PP Up too
+}
+
+// A released record's moveset must not be inherited by whichever Pokemon is
+// later handed the same record id.
+TEST(PokemonService, ReleasingAPokemonDropsItsSavedMoveset) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 25), false);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  ASSERT_EQ(service.teachMove(2, 5), pokemon::TeachMoveOutcome::Learned);
+  ASSERT_EQ(service.releasePokemon(2), pokemon::ServiceStatus::Ok);
+  appendOwnedPokemon(store, caughtPokemon(2, 25), false);  // the id is handed out again
+
+  pokemon::PokemonRecord reused{};
+  ASSERT_TRUE(store.readRecord(2, reused));
+  const pokemon::BattleRecordEntry fresh = service.peekBattleMoves(reused);
+  EXPECT_EQ(fresh.moves[2], 0U);  // default level-5 Pikachu: [84, 45, 0, 0]
+}
+
+TEST(PokemonService, ResetClearsSavedMovesets) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+  ASSERT_EQ(service.createStarter(25, pokemon::Gender::Male, "Pika"), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);
+
+  ASSERT_EQ(service.reset(), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.createStarter(25, pokemon::Gender::Male, "Pika"), pokemon::ServiceStatus::Ok);  // record id 1 again
+
+  pokemon::PokemonRecord record{};
+  ASSERT_TRUE(store.readRecord(1, record));
+  EXPECT_EQ(service.peekBattleMoves(record).moves[2], 0U);
+}
+
+// Leveling up while only the moveset (not the battle entry) is saved still
+// picks up the new learnset move instead of silently skipping it.
+TEST(PokemonService, RareCandyLevelUpLearnsIntoASavedMovesetWithoutABattleEntry) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  uint8_t learnLevel = 0;
+  uint8_t learnMove = 0;
+  for (const pokemon::LearnsetEntry& learn : pokemon::learnsetFor(25)) {
+    if (learn.level > 5 && learn.moveId != 84 && learn.moveId != 45) {
+      learnLevel = learn.level;
+      learnMove = learn.moveId;
+      break;
+    }
+  }
+  ASSERT_GT(learnLevel, 5U);
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  leader.totalXp = pokemon::xpRequired(static_cast<uint8_t>(learnLevel - 1));
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.bagCounts[24 - 7] = 1;  // one Rare Candy
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+
+  ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // customise -> moveset store entry
+  ASSERT_TRUE(battleStore.removeEntry(1));                                   // battle entry gone, moveset saved
+
+  ASSERT_EQ(service.useConsumableAndConsumeItem(1, 24), pokemon::UseConsumableOutcome::Applied);
+  EXPECT_EQ(battleStore.findEntry(1), nullptr);  // no battle entry was invented for it
+
+  ASSERT_TRUE(store.readRecord(1, leader));
+  const pokemon::BattleRecordEntry moves = service.peekBattleMoves(leader);
+  bool hasTm = false;
+  bool hasLearned = false;
+  for (const uint8_t move : moves.moves) {
+    hasTm = hasTm || move == 5;
+    hasLearned = hasLearned || move == learnMove;
+  }
+  EXPECT_TRUE(hasTm);
+  EXPECT_TRUE(hasLearned);
+}
+
 // Round 8 audit item C: teachMove() then a separate consumeBagItem() call
 // (the old PokemonActivity.cpp flow) could learn the move and then, if the
 // second write failed, keep it without ever charging the TM/HM.

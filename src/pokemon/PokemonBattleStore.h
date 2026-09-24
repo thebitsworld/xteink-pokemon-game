@@ -29,6 +29,8 @@ class PokemonBattleStore {
   // needed to force a re-read).
   void load() const;
   const BattleRecordEntry* findEntry(uint32_t recordId) const;
+  // Every stored entry (the non-empty, packed-at-the-front ones), ascending by recordId.
+  std::span<const BattleRecordEntry> entries() const;
   // Inserts/replaces/removes an entry and rewrites the whole (inactive) file,
   // then flips the active pointer only after a read-back verifies it.
   // Returns false only for a validation failure (see upsertBattleEntry) or a
