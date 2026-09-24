@@ -1337,7 +1337,23 @@ void recoverHealsHalfMaxHpAndFailsAtFullHealth() {
   BattleCombatant bulbasaurFull = makeCombatant(1, 30, {105});
   BattleCombatant dummy2 = makeCombatant(4, 5, {45});
   const pokemon::BattleTurnResult fullResult = pokemon::stepBattle(bulbasaurFull, dummy2, 0, ZERO_RANDOM);
-  CHECK(fullResult.player.event == BattleLogEvent::MoveNoEffect);
+  CHECK(fullResult.player.event == BattleLogEvent::MoveFailed);
+  CHECK(bulbasaurFull.moves[0].currentPp == pokemon::moveData(105)->pp - 1);  // the turn (and PP) is still spent
+}
+
+// Rest, Recover and Soft-Boiled all report "But it failed!" at full health;
+// Rest must not put a healthy Pokemon to sleep for nothing.
+void restAndSoftBoiledFailAtFullHealthWithoutSleeping() {
+  BattleCombatant restUser = makeCombatant(1, 30, {156});  // Rest
+  BattleCombatant dummy = makeCombatant(4, 5, {45});
+  const pokemon::BattleTurnResult restResult = pokemon::stepBattle(restUser, dummy, 0, ZERO_RANDOM);
+  CHECK(restResult.player.event == BattleLogEvent::MoveFailed);
+  CHECK(restUser.status == Ailment::None);
+  CHECK(restUser.moves[0].currentPp == pokemon::moveData(156)->pp - 1);
+
+  BattleCombatant softBoiled = makeCombatant(1, 30, {135});  // Soft-Boiled
+  BattleCombatant dummy2 = makeCombatant(4, 5, {45});
+  CHECK(pokemon::stepBattle(softBoiled, dummy2, 0, ZERO_RANDOM).player.event == BattleLogEvent::MoveFailed);
 }
 
 void restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns() {
@@ -2412,6 +2428,7 @@ int main() {
   reflectExactlyHalvesNonCriticalPhysicalDamage();
   mistAndFocusEnergySetTheirOwnFields();
   recoverHealsHalfMaxHpAndFailsAtFullHealth();
+  restAndSoftBoiledFailAtFullHealthWithoutSleeping();
   restFullyHealsCuresStatusAndSleepsForAFixedTwoTurns();
   whirlwindAndRoarAlwaysReportForcedSwitchOnUse();
   disableLocksOutARandomMoveWithPpAndFailsIfNoneQualify();

@@ -1388,7 +1388,7 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
     }
   } else if (moveId == RECOVER_MOVE_ID || moveId == SOFT_BOILED_MOVE_ID) {
     if (attacker.currentHp >= attacker.maxHp) {
-      result.event = BattleLogEvent::MoveNoEffect;
+      result.event = BattleLogEvent::MoveFailed;  // still spends the turn and the PP, like the real games
     } else {
       const uint16_t healAmount = clampToUint16(std::max<uint32_t>(1U, attacker.maxHp / 2U));
       attacker.currentHp =
@@ -1396,14 +1396,19 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
       result.drainApplied = true;  // reuses the "It regained health!" clause
     }
   } else if (moveId == REST_MOVE_ID) {
-    attacker.currentHp = attacker.maxHp;
-    attacker.status = Ailment::Sleep;
-    // Rest's real Gen 1 duration is a fixed 2 turns, unlike the random 1-3
-    // (simplified from the real 1-7) this engine rolls for every other
-    // sleep-inducing move.
-    attacker.statusTurns = 2;
-    result.event = BattleLogEvent::InflictedStatus;
-    result.drainApplied = true;
+    if (attacker.currentHp >= attacker.maxHp) {
+      result.event = BattleLogEvent::MoveFailed;  // same as Recover: the turn and PP are spent, no sleep
+    } else {
+      attacker.currentHp = attacker.maxHp;
+      attacker.status = Ailment::Sleep;
+      attacker.toxicCounter = 0;
+      // Rest's real Gen 1 duration is a fixed 2 turns, unlike the random 1-3
+      // (simplified from the real 1-7) this engine rolls for every other
+      // sleep-inducing move.
+      attacker.statusTurns = 2;
+      result.event = BattleLogEvent::InflictedStatus;
+      result.drainApplied = true;
+    }
   } else if (moveId == LEECH_SEED_MOVE_ID) {
     // Grass-type targets are immune to Leech Seed in the real games (a
     // Conversion-converted Grass type included - see effectiveTypesFor()).
