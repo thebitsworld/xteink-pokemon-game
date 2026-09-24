@@ -45,6 +45,10 @@ class PokemonBattleStore {
   // false (nothing written) only if NOT ONE entry could be applied.
   bool upsertEntries(std::span<const BattleRecordEntry> entries);
   bool removeEntry(uint32_t recordId);
+  // True when every slot holds an entry, i.e. a new record id cannot be
+  // inserted without evicting one first. Lets callers tell "store full" apart
+  // from a transient write failure before destroying anyone's entry.
+  bool isFull() const;
   // Frees one slot for a Pokemon that needs a fresh entry - see
   // PokemonBattleStoreCodec.h's evictBattleEntryNotIn() doc comment.
   bool evictEntryNotIn(std::span<const uint32_t> keepIds);

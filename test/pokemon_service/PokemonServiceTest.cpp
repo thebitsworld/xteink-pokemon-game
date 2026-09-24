@@ -1863,6 +1863,56 @@ TEST(PokemonService, UseConsumableAndConsumeItemSpendsExactlyOneItemOnlyWhenAppl
   EXPECT_EQ(healed->currentHp, 18U);
 }
 
+// useConsumableAndConsumeItem() dry-runs the Rare Candy first, purely to check
+// eligibility before touching the bag. That probe must have no side effects:
+// it used to persist the newly-learned move via queueMoveLearnIfNeeded()
+// before the dryRun early-return, so an unowned candy (or any failure after
+// the probe) still handed the Pokemon a free move.
+TEST(PokemonService, RareCandyProbeWithNoCandyOwnedDoesNotTeachAFreeMove) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // Pikachu, level 5, moves [84, 45, 0, 0]
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  // Find the first level-up that would drop a brand new move into an empty slot.
+  uint8_t learnLevel = 0;
+  uint8_t learnMove = 0;
+  for (const pokemon::LearnsetEntry& learn : pokemon::learnsetFor(25)) {
+    if (learn.level > 5 && learn.moveId != 84 && learn.moveId != 45) {
+      learnLevel = learn.level;
+      learnMove = learn.moveId;
+      break;
+    }
+  }
+  ASSERT_GT(learnLevel, 5U);
+
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  leader.totalXp = pokemon::xpRequired(static_cast<uint8_t>(learnLevel - 1));
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  for (const uint8_t move : entry.moves) ASSERT_NE(move, learnMove);
+  bool hasEmptySlot = false;
+  for (const uint8_t move : entry.moves) hasEmptySlot = hasEmptySlot || move == 0;
+  ASSERT_TRUE(hasEmptySlot);
+
+  // No Rare Candy in the bag: the probe runs, the spend fails, nothing applies.
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_EQ(state.bagCounts[24 - 7], 0U);
+  EXPECT_NE(service.useConsumableAndConsumeItem(1, 24), pokemon::UseConsumableOutcome::Applied);
+
+  const pokemon::BattleRecordEntry* after = battleStore.findEntry(1);
+  ASSERT_NE(after, nullptr);
+  for (const uint8_t move : after->moves) EXPECT_NE(move, learnMove);
+}
+
 TEST(PokemonService, LearnMoveIntoSlotOverwritesUnconditionallyAtFullPp) {
   Storage.clear();
   pokemon::PokemonStore store;

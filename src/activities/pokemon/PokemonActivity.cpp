@@ -432,7 +432,10 @@ void formatBattleActionLine(char* buffer, const size_t size, const pokemon::Batt
   char statSuffix[64] = "";
   if (action.event == pokemon::BattleLogEvent::StatRaised || action.event == pokemon::BattleLogEvent::StatLowered ||
       action.event == pokemon::BattleLogEvent::StatChangeFailed) {
-    const pokemon::StatChangeEffect* effect = pokemon::statChangeForMove(moveId);
+    // Metronome/Mirror Move have no stat-change entry of their own; the effect
+    // that actually fired belongs to the move they redirected to.
+    const pokemon::StatChangeEffect* effect =
+        pokemon::statChangeForMove(action.redirectedMoveId != 0 ? action.redirectedMoveId : moveId);
     const char* targetName = effect != nullptr && effect->targetsSelf ? name : speciesName(other.speciesId);
     const char* statName = statKindName(effect != nullptr ? effect->stat : pokemon::StatKind::Attack);
     const char* templateStr = action.event == pokemon::BattleLogEvent::StatRaised    ? tr(STR_POKEMON_STAT_ROSE)
@@ -2090,7 +2093,11 @@ void PokemonActivity::activate() {
         return;
       }
       if (selected_ == (isGym ? 1 : 2)) {
-        if (bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory) == 0) {
+        // Same formula as logicalCount()'s Screen::BattleBag row count: the
+        // X-items live outside bagCounts, so gating on bagCounts alone locked
+        // players out of items they still owned.
+        if (bagItemCount(snapshot_.state.bagCounts, isBattleUsableCategory) == 0 &&
+            extraItemCount(snapshot_.state, isBattleUsableCategory) == 0) {
           showMessage(tr(STR_POKEMON_NOT_APPLICABLE), Screen::Battle);
           return;
         }
@@ -2354,8 +2361,12 @@ void PokemonActivity::activate() {
         setScreen(Screen::Actions);
         return;
       }
-      if (service_.releasePokemon(focusedRecordId_) != pokemon::ServiceStatus::Ok) {
-        showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Pc);
+      if (const auto released = service_.releasePokemon(focusedRecordId_); released != pokemon::ServiceStatus::Ok) {
+        // NotApplicable = a rule refused it (e.g. the starter can't be
+        // released), not a storage failure.
+        showMessage(released == pokemon::ServiceStatus::NotApplicable ? tr(STR_POKEMON_NOT_APPLICABLE)
+                                                                       : tr(STR_POKEMON_SAVE_ERROR),
+                    Screen::Pc);
         return;
       }
       if (!refreshSnapshot()) return;
@@ -2769,6 +2780,13 @@ void PokemonActivity::buildRows() {
     rows_[local].subtitle = subtitles_[local].data();
   };
 
+  // focusedRecord_ is constant across the whole pass, so peek its moveset once
+  // here instead of once per visible row in each of the four moveset screens.
+  const bool focusedMovesetScreen = screen_ == Screen::Moveset || screen_ == Screen::MovesetPick ||
+                                    screen_ == Screen::TmReplaceSlot || screen_ == Screen::PpUpSlot;
+  const pokemon::BattleRecordEntry focusedEntry = focusedMovesetScreen && focusedRecord_.recordId != 0
+                                                      ? service_.peekBattleMoves(focusedRecord_)
+                                                      : pokemon::BattleRecordEntry{};
   for (int local = 0; local < rowCount_; ++local) {
     const int index = start + local;
     switch (screen_) {
@@ -2877,8 +2895,7 @@ void PokemonActivity::buildRows() {
         break;
       }
       case Screen::Moveset: {
-        const pokemon::BattleRecordEntry entry =
-            focusedRecord_.recordId != 0 ? service_.peekBattleMoves(focusedRecord_) : pokemon::BattleRecordEntry{};
+        const pokemon::BattleRecordEntry& entry = focusedEntry;
         const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
         char value[16];
         snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index],
@@ -2888,7 +2905,7 @@ void PokemonActivity::buildRows() {
       }
       case Screen::MovesetPick: {
         if (focusedRecord_.recordId == 0) break;
-        const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(focusedRecord_);
+        const pokemon::BattleRecordEntry& entry = focusedEntry;
         const size_t learnable =
             learnableMoveCount(focusedRecord_.speciesId, pokemon::levelForXp(focusedRecord_.totalXp), entry);
         if (static_cast<size_t>(index) >= learnable) {
@@ -2906,8 +2923,7 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_CANCEL));
           break;
         }
-        const pokemon::BattleRecordEntry entry =
-            focusedRecord_.recordId != 0 ? service_.peekBattleMoves(focusedRecord_) : pokemon::BattleRecordEntry{};
+        const pokemon::BattleRecordEntry& entry = focusedEntry;
         const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
         char value[16];
         snprintf(value, sizeof(value), "PP %u/%u", entry.pp[index],
@@ -2920,8 +2936,7 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_CANCEL));
           break;
         }
-        const pokemon::BattleRecordEntry entry =
-            focusedRecord_.recordId != 0 ? service_.peekBattleMoves(focusedRecord_) : pokemon::BattleRecordEntry{};
+        const pokemon::BattleRecordEntry& entry = focusedEntry;
         const pokemon::MoveData* move = pokemon::moveData(entry.moves[index]);
         char value[24];
         if (move == nullptr) {
@@ -2936,7 +2951,13 @@ void PokemonActivity::buildRows() {
       case Screen::Pc: {
         if (local == 0) {
           pcCount_ = 0;
-          if (service_.readPcPage(pcOrder_, start, pcPage_, pcCount_) != pokemon::ServiceStatus::Ok) {
+          // Bound the fetch to what actually fits on screen: rowsPerPage() is
+          // often below ROW_CAPACITY, and overfetching let rowCount_ grow past
+          // the laid-out list (rows spilling under the footer, and a tap on an
+          // overflow row resolving against a stale page).
+          const std::span<pokemon::PokemonRecord> pageOut(pcPage_.data(),
+                                                          static_cast<size_t>(std::max(1, rowsPerPage())));
+          if (service_.readPcPage(pcOrder_, start, pageOut, pcCount_) != pokemon::ServiceStatus::Ok) {
             rowCount_ = 1;
             row(local, tr(STR_POKEMON_LOAD_ERROR));
             break;
@@ -4487,12 +4508,17 @@ void PokemonActivity::renderRowArt() {
 // read-only (never creates or writes a battle-store entry), matching every
 // other read-only HP peek in this file (Summary, usablePartySlotAt()).
 void PokemonActivity::renderPartyRowHealth(const int rowY, const pokemon::PokemonRecord& record) {
-  const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   const pokemon::BaseStats* stats = pokemon::baseStatsFor(record.speciesId);
   // ensureIvEv(), not peekIvEv() - the party list's max-HP figure should
   // reflect a Pokemon's real (rolled) IV as soon as it's on the team, not
-  // stay at the IV-less-0 default until its first battle rolls one.
+  // stay at the IV-less-0 default until its first battle rolls one. This must
+  // come BEFORE peekBattleMoves(): a Pokemon with no battle entry yet gets a
+  // synthesized full-HP value computed from whatever IV is persisted at that
+  // moment, so peeking first made it fall short of the real (higher) max HP
+  // and drew a phantom "wounded" bar on the row's first render (Summary
+  // orders these two calls the same way, for the same reason).
   const pokemon::IvEvEntry ivEv = service_.ensureIvEv(record.recordId, pokemon::isRecordShiny(record));
+  const pokemon::BattleRecordEntry entry = service_.peekBattleMoves(record);
   constexpr size_t hpIndex = static_cast<size_t>(pokemon::StatIndex::Hp);
   const uint16_t maxHp = stats == nullptr ? 1
                                           : pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(record.totalXp),

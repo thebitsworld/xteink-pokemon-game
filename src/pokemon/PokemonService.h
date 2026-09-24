@@ -374,8 +374,10 @@ class PokemonService {
   // to resolve if the moveset is already full. A Pokemon with no battle
   // entry yet is skipped - its first battle synthesizes an up-to-date
   // moveset for its current level already, so there is nothing to catch up.
+  // persistMoves=false skips the battle-store write (used by dry-run probes,
+  // which must not have side effects).
   void queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader, uint8_t previousLevel,
-                              uint8_t currentLevel, bool queuePrompts = true);
+                              uint8_t currentLevel, bool queuePrompts = true, bool persistMoves = true);
   static bool creditFromTracker(void* context, uint16_t minutes, uint8_t bookProgressPercent);
   IvEvEntry* findPendingIvEvRoll(uint32_t recordId);
   void cachePendingIvEvRoll(const IvEvEntry& entry);

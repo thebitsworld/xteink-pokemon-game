@@ -252,6 +252,9 @@ void SlideshowActivity::renderCurrentImage() {
   if (FsHelpers::hasPngExtension(filePath)) {
     ImageDimensions dims;
     if (!PngToFramebufferConverter::getDimensionsStatic(filePath, dims)) {
+      // Every other failure path in this function resets the render mode
+      // before drawing its message; do the same here.
+      renderer.setRenderMode(GfxRenderer::BW);
       drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
       return;
     }

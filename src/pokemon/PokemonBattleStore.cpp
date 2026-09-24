@@ -185,6 +185,11 @@ bool PokemonBattleStore::upsertEntries(const std::span<const BattleRecordEntry> 
   return writeState(candidate);
 }
 
+bool PokemonBattleStore::isFull() const {
+  if (!loaded_) load();
+  return pokemon::battleEntryCount(state_) >= state_.entries.size();
+}
+
 bool PokemonBattleStore::removeEntry(const uint32_t recordId) {
   if (!loaded_) load();
   BattleStoreState candidate = state_;

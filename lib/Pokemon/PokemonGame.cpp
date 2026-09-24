@@ -753,6 +753,10 @@ bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutat
   if (!validateState(state) || !validateRecord(record) || mutation.kind != RecordMutationKind::None) {
     return false;
   }
+  // The Champion's final team slot is chosen from the starter's species (see
+  // championFinalSlotFor()), looked up from the starter's own record - a
+  // released starter would silently make him field the wrong counter.
+  if (record.origin == Origin::Starter) return false;
   for (const uint32_t partyRecordId : state.partyRecordIds) {
     if (partyRecordId == record.recordId) return false;  // withdraw to the Box first
   }

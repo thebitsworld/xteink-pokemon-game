@@ -667,7 +667,7 @@ UseConsumableOutcome PokemonService::useConsumableImpl(const uint32_t recordId, 
     if (loadReadyState(state) != ServiceStatus::Ok) return UseConsumableOutcome::Failed;
     const uint8_t nextLevel = static_cast<uint8_t>(level + 1U);
     record.totalXp = xpRequired(nextLevel);
-    queueMoveLearnIfNeeded(state, record, level, nextLevel);
+    queueMoveLearnIfNeeded(state, record, level, nextLevel, true, /*persistMoves=*/!dryRun);
     bool evolutionQueued = false;
     if (!queueEvolutionIfEligible(state, record, evolutionQueued)) return UseConsumableOutcome::Failed;
     if (dryRun) return UseConsumableOutcome::Applied;
@@ -910,7 +910,16 @@ ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRec
 
   const BattleRecordEntry synthesized = synthesizeBattleEntry(record, ensureIvEv(recordId));
   if (!battleStore_.upsertEntry(synthesized)) {
-    // Only reachable when every one of the store's POKEMON_BATTLE_MAX_ENTRIES
+    // A failed insert is not necessarily "store full": a transient SD write or
+    // verify failure also lands here, and evicting then would destroy an
+    // unrelated boxed Pokemon's moveset/PP-Up data for nothing (the retry would
+    // fail for the same reason). Only reclaim a slot when the store really is
+    // full; otherwise report the storage error as-is.
+    if (!battleStore_.isFull()) {
+      LOG_ERR("PokemonService", "Failed to persist synthesized battle entry (store not full)");
+      return ServiceStatus::StorageError;
+    }
+    // Reached when every one of the store's POKEMON_BATTLE_MAX_ENTRIES
     // slots is already taken - since deposit/release no longer proactively
     // free a slot (round 10 audit bug 1), a long-played save can fill all of
     // them with Pokemon that are no longer even in the party. This function
@@ -1123,7 +1132,7 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
 
 void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRecord& leader,
                                             const uint8_t previousLevel, const uint8_t currentLevel,
-                                            const bool queuePrompts) {
+                                            const bool queuePrompts, const bool persistMoves) {
   if (currentLevel <= previousLevel) return;
   const BattleRecordEntry* existing = battleStore_.findEntry(leader.recordId);
   if (existing == nullptr) return;
@@ -1161,7 +1170,7 @@ void PokemonService::queueMoveLearnIfNeeded(PokemonState& state, const PokemonRe
       enqueuePendingEvent(state, event);  // best-effort: a full queue just skips this one (the Moves screen still offers it)
     }
   }
-  if (changed) battleStore_.upsertEntry(entry);
+  if (changed && persistMoves) battleStore_.upsertEntry(entry);
 }
 
 BattleTurnResult PokemonService::resolveBattleTurn(BattleCombatant& player, BattleCombatant& opponent,
