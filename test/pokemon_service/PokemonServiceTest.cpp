@@ -1494,6 +1494,161 @@ TEST(PokemonService, RareCandyLevelUpLearnsIntoASavedMovesetWithoutABattleEntry)
   EXPECT_TRUE(hasLearned);
 }
 
+// The Moveset action is offered for boxed Pokemon too, but the battle store
+// only has 6 slots. With all 6 taken by party members there was nothing to
+// evict, so editing a boxed Pokemon's moveset failed with a save error even
+// though the moveset store could take the write directly.
+TEST(PokemonService, BoxedPokemonMovesetCanBeEditedWhileTheBattleStoreIsFullOfPartyEntries) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  for (uint32_t id = 2; id <= 6; ++id) appendOwnedPokemon(store, caughtPokemon(id, 25), true);  // party of 6
+  appendOwnedPokemon(store, caughtPokemon(7, 25), false);                                      // one boxed Pikachu
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  pokemon::BattleRecordEntry scratch{};
+  for (uint32_t id = 1; id <= 6; ++id) ASSERT_EQ(service.loadBattleEntry(id, scratch), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(battleStore.isFull());
+
+  EXPECT_EQ(service.teachMove(7, 5), pokemon::TeachMoveOutcome::Learned);  // used to fail: nothing to evict
+  for (uint32_t id = 1; id <= 6; ++id) EXPECT_NE(battleStore.findEntry(id), nullptr);  // no party entry was touched
+
+  pokemon::PokemonRecord boxed{};
+  ASSERT_TRUE(store.readRecord(7, boxed));
+  const pokemon::BattleRecordEntry moves = service.peekBattleMoves(boxed);
+  EXPECT_EQ(moves.moves[2], 5U);  // durable in the moveset store even without a battle entry
+  EXPECT_GT(moves.pp[2], 0U);
+
+  // ...and forgetting works the same way.
+  EXPECT_EQ(service.forgetMove(7, 0), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(service.peekBattleMoves(boxed).moves[0], 45U);
+}
+
+// A MoveLearn prompt can sit in the queue while the player empties slots on
+// the Moves screen; choosing an empty row past the first gap wrote a move into
+// a hole in the packed moveset, which the codec rejects (a bogus save error).
+TEST(PokemonService, ResolveMoveLearnIntoAnEmptyRowPastAGapLandsInTheFirstEmptySlot) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // synthesizes to moves [84, 45, 0, 0] at level 5
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+  pokemon::BattleRecordEntry scratch{};
+  ASSERT_EQ(service.loadBattleEntry(1, scratch), pokemon::ServiceStatus::Ok);
+
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  state.pendingEvents[0] = {1, 129, 26, pokemon::Gender::Unknown, pokemon::EvolutionItem::None,
+                            pokemon::PendingEventKind::MoveLearn};
+  ASSERT_TRUE(store.commit(state));
+
+  ASSERT_EQ(service.resolveMoveLearn(3), pokemon::ServiceStatus::Ok);  // row 4 is empty; slot 2 is the first empty one
+  const pokemon::BattleRecordEntry* updated = battleStore.findEntry(1);
+  ASSERT_NE(updated, nullptr);
+  EXPECT_EQ(updated->moves[2], 129U);
+  EXPECT_EQ(updated->moves[3], 0U);
+}
+
+TEST(PokemonService, DepositIsBlockedOnceTheBoxIsAtItsCap) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  appendOwnedPokemon(store, caughtPokemon(2, 25), true);  // a second party member to deposit
+  for (uint32_t id = 3; id < 3 + pokemon::PC_BOX_MAX_RECORDS; ++id) appendOwnedPokemon(store, caughtPokemon(id, 25), false);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  EXPECT_EQ(service.depositPokemon(2), pokemon::ServiceStatus::BoxFull);  // would make a 513th boxed record
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.partyRecordIds[1], 2U);  // still in the party
+
+  ASSERT_EQ(service.depositPokemon(1), pokemon::ServiceStatus::BoxFull);  // any party member, not just this one
+  // (releaseRecord needs the record out of the party; free a slot in the Box instead)
+  ASSERT_EQ(service.releasePokemon(3), pokemon::ServiceStatus::Ok);
+  EXPECT_EQ(service.depositPokemon(2), pokemon::ServiceStatus::Ok);
+}
+
+// Cancelling an evolution leaves the species alone, so it must not run the
+// "learn everything the new species already knows" catch-up - that only made
+// sense for a real evolution, and on Cancel it refilled slots the player had
+// emptied on purpose.
+TEST(PokemonService, CancellingAnEvolutionDoesNotRefillEmptiedMoveSlots) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  // Charmander -> Charmeleon is a level evolution (Pikachu's is a stone), at
+  // level 16; 30 leaves plenty of learnset behind it.
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  leader.speciesId = 4;
+  leader.totalXp = pokemon::xpRequired(30);
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 4));
+  ASSERT_TRUE(pokemon::markSpecies(state.caughtSpecies, 4));
+  state.pendingEvents[0] = {1, 5, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::None,
+                            pokemon::PendingEventKind::Evolution};
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+
+  pokemon::BattleRecordEntry entry{};
+  entry.recordId = 1;
+  entry.moves = {10, 45, 0, 0};  // the player deliberately kept just two moves
+  entry.pp = {35, 40, 0, 0};
+  entry.currentHp = 30;
+  ASSERT_TRUE(battleStore.upsertEntry(entry));
+
+  ASSERT_EQ(service.resolveEvolution(pokemon::EvolutionChoice::Cancel), pokemon::ServiceStatus::Ok);
+  const pokemon::BattleRecordEntry* after = battleStore.findEntry(1);
+  ASSERT_NE(after, nullptr);
+  EXPECT_EQ(after->moves[2], 0U);
+  EXPECT_EQ(after->moves[3], 0U);
+}
+
+// A new game always reuses record id 1. If clearing the side stores at reset
+// time failed (or the main save was removed on its own), the new starter used
+// to inherit the old id-1 moves.
+TEST(PokemonService, NewStarterDoesNotInheritStaleSideStoreEntriesForRecordIdOne) {
+  Storage.clear();
+  {
+    pokemon::PokemonStore store;
+    pokemon::PokemonBattleStore battleStore;
+    pokemon::PokemonIvEvStore ivEvStore;
+    pokemon::PokemonHallOfFameStore hallOfFameStore;
+    pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+    ASSERT_EQ(service.createStarter(25, pokemon::Gender::Male, "Pika"), pokemon::ServiceStatus::Ok);
+    ASSERT_EQ(service.teachMove(1, 5), pokemon::TeachMoveOutcome::Learned);  // battle + moveset entries for id 1
+  }
+  // Only the main save goes away; every side store is left exactly as it was.
+  Storage.remove("/.crosspoint/pokemon-a.bin");
+  Storage.remove("/.crosspoint/pokemon-b.bin");
+
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+  ASSERT_EQ(service.createStarter(25, pokemon::Gender::Male, "Pika2"), pokemon::ServiceStatus::Ok);
+
+  pokemon::PokemonRecord record{};
+  ASSERT_TRUE(store.readRecord(1, record));
+  const pokemon::BattleRecordEntry fresh = service.peekBattleMoves(record);
+  EXPECT_EQ(fresh.moves[2], 0U);  // default level-5 Pikachu, not the previous game's TM move
+  EXPECT_EQ(battleStore.findEntry(1), nullptr);
+}
+
 // Round 8 audit item C: teachMove() then a separate consumeBagItem() call
 // (the old PokemonActivity.cpp flow) could learn the move and then, if the
 // second write failed, keep it without ever charging the TM/HM.

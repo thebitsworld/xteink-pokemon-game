@@ -123,6 +123,15 @@ ServiceStatus PokemonService::createStarter(const uint16_t speciesId, const Gend
     LOG_ERR("PokemonService", "Failed to create starter");
     return ServiceStatus::StorageError;
   }
+  // Record id 1 is always reused by a new game. reset() clears the side stores
+  // best-effort; if any of that failed (or the main save was removed on its
+  // own), drop whatever is still filed under id 1 so the new starter doesn't
+  // inherit an old one's moves/HP/IVs - the same stale-entry drop
+  // resolveEncounter() does for a reused catch id.
+  if (battleStore_.findEntry(starter.recordId) != nullptr) battleStore_.removeEntry(starter.recordId);
+  if (movesetStore_.findEntry(starter.recordId) != nullptr) movesetStore_.removeEntry(starter.recordId);
+  if (ivEvStore_.findEntry(starter.recordId) != nullptr) ivEvStore_.removeEntry(starter.recordId);
+  clearPendingIvEvRoll(starter.recordId);
   return ServiceStatus::Ok;
 }
 
@@ -185,6 +194,14 @@ ServiceStatus PokemonService::depositPokemon(const uint32_t recordId) {
   while (slot < partyCount && state.partyRecordIds[slot] != recordId) ++slot;
   if (slot == partyCount) return ServiceStatus::NotFound;
   if (partyCount == 1) return ServiceStatus::LastPokemon;
+  // The Box has its own cap (PC_BOX_MAX_RECORDS); the IV/EV and moveset
+  // stores are sized on the assumption that party + Box never exceed
+  // PARTY_SIZE + PC_BOX_MAX_RECORDS. A full-Box catch is already blocked, but
+  // depositing from a full party into a full Box used to slip a 513th record
+  // in (and free a party slot for another catch).
+  if (store_.recordCount() >= partyCount && store_.recordCount() - partyCount >= PC_BOX_MAX_RECORDS) {
+    return ServiceStatus::BoxFull;
+  }
   for (; slot + 1U < partyCount; ++slot) state.partyRecordIds[slot] = state.partyRecordIds[slot + 1U];
   state.partyRecordIds[partyCount - 1U] = 0;
   if (!store_.commit(state)) {
@@ -371,7 +388,10 @@ ServiceStatus PokemonService::resolveEvolution(const EvolutionChoice choice) {
   // has been walked through yet - queueMoveLearnIfNeeded() already knows
   // how to silently fill an empty slot or queue a replace-prompt if the
   // moveset is full, so no separate handling is needed for either case.
-  queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp), false);
+  // Only a real evolution has new-species moves to catch up on: on Cancel the
+  // record keeps its species, and this would silently refill any slot the
+  // player had deliberately emptied with unknown learnset moves.
+  if (choice == EvolutionChoice::Evolve) queueMoveLearnIfNeeded(state, record, 0, levelForXp(record.totalXp), false);
   if (!store_.commit(state, mutation)) {
     LOG_ERR("PokemonService", "Failed to resolve evolution");
     return ServiceStatus::StorageError;
@@ -405,12 +425,26 @@ ServiceStatus PokemonService::resolveMoveLearn(const int replaceSlot) {
     for (const uint8_t known : entry.moves) alreadyKnown = alreadyKnown || known == event.speciesId;
     if (!alreadyKnown) {
       const MoveData* move = moveData(event.speciesId);
-      entry.moves[replaceSlot] = event.speciesId;
+      // The prompt can sit in the queue while the player forgets moves on the
+      // Moves screen; picking an EMPTY row past the first gap would leave a
+      // hole in the packed moveset, which validateBattleRecordEntry rejects
+      // (a bogus save error) - land in the first empty slot instead, exactly
+      // as learnMoveIntoSlot() does.
+      size_t targetSlot = static_cast<size_t>(replaceSlot);
+      if (entry.moves[targetSlot] == 0) {
+        for (size_t candidate = 0; candidate < targetSlot; ++candidate) {
+          if (entry.moves[candidate] == 0) {
+            targetSlot = candidate;
+            break;
+          }
+        }
+      }
+      entry.moves[targetSlot] = event.speciesId;
       // maxPpFor(), not the move's raw base PP - PP Up is tied to the slot, not
       // the move identity, so a slot that's already been PP-Up'd keeps that
-      // bonus for whatever move ends up there (entry.ppUp[replaceSlot] itself
+      // bonus for whatever move ends up there (entry.ppUp[targetSlot] itself
       // is left untouched).
-      entry.pp[replaceSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[replaceSlot]);
+      entry.pp[targetSlot] = move == nullptr ? 0 : maxPpFor(move->pp, entry.ppUp[targetSlot]);
       if (!persistBattleEntry(entry, /*movesetChanged=*/true)) {
         LOG_ERR("PokemonService", "Failed to save learned move");
         return ServiceStatus::StorageError;
@@ -949,12 +983,26 @@ ServiceStatus PokemonService::loadBattleEntry(const uint32_t recordId, BattleRec
     // moveset has no moveset-store copy yet - save those first.
     backfillMovesetStoreFromBattleStore();
     PokemonState state{};
-    if (loadReadyState(state) == ServiceStatus::Ok) {
+    const bool haveState = loadReadyState(state) == ServiceStatus::Ok;
+    if (haveState) {
       battleStore_.evictEntryNotIn(std::span<const uint32_t>(state.partyRecordIds.data(), PARTY_SIZE));
     }
     if (!battleStore_.upsertEntry(synthesized)) {
-      LOG_ERR("PokemonService", "Failed to persist synthesized battle entry");
-      return ServiceStatus::StorageError;
+      // Not only party members come through here: the Moveset screen (and a
+      // MoveLearn prompt for a deposited Pokemon) also edits boxed ones. When
+      // all 6 slots belong to party members there is nothing to evict, and no
+      // need to: a boxed Pokemon's moves/PP Ups live in the moveset store
+      // (persistBattleEntry() writes there directly), and its transient
+      // HP/PP/status can simply be derived on demand. Hand back the derived
+      // entry instead of failing the edit with a bogus save error.
+      bool inParty = !haveState;  // can't tell -> stay conservative and report the failure
+      if (haveState) {
+        for (const uint32_t partyId : state.partyRecordIds) inParty = inParty || partyId == recordId;
+      }
+      if (inParty) {
+        LOG_ERR("PokemonService", "Failed to persist synthesized battle entry");
+        return ServiceStatus::StorageError;
+      }
     }
   }
   output = synthesized;
@@ -1061,10 +1109,15 @@ HallOfFameState PokemonService::peekHallOfFame() const {
 }
 
 bool PokemonService::persistBattleEntry(const BattleRecordEntry& entry, const bool movesetChanged) {
-  if (!battleStore_.upsertEntry(entry)) return false;
   const MovesetEntry wanted{entry.recordId, entry.moves, entry.ppUp};
   const MovesetEntry* stored = movesetStore_.findEntry(entry.recordId);
   const bool needsWrite = stored == nullptr ? movesetChanged : !(*stored == wanted);
+  if (!battleStore_.upsertEntry(entry)) {
+    // A boxed Pokemon has no room in the party-sized battle store when all 6
+    // slots are party members' (see loadBattleEntry()); its moveset edit is
+    // still durable in the moveset store, which is all a boxed Pokemon needs.
+    return battleStore_.findEntry(entry.recordId) == nullptr && needsWrite && movesetStore_.upsertEntry(wanted);
+  }
   if (needsWrite && !movesetStore_.upsertEntry(wanted)) {
     LOG_ERR("PokemonService", "Failed to save moveset for record %u", static_cast<unsigned>(entry.recordId));
   }

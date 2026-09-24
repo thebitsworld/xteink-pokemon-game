@@ -28,13 +28,17 @@ bool sequenceIsNewer(const uint32_t candidate, const uint32_t current) {
   return candidate != current && candidate - current < 0x80000000U;
 }
 
-// Reads and decodes one alternating-format slot; a missing, oversized, short
-// or invalid file just isn't a candidate.
-bool inspectSlot(const char* path, MovesetStoreState& outputState, uint32_t& outputSequence) {
+// Reads and decodes one alternating-format slot; a missing, oversized or
+// invalid file just isn't a candidate. `transientFailure` is set when the slot
+// could not be READ at all (open failed, out of memory, short read): that says
+// nothing about the file's contents, so load() must not mistake it for "no
+// saved movesets" and let the next write replace a perfectly good file.
+bool inspectSlot(const char* path, MovesetStoreState& outputState, uint32_t& outputSequence, bool& transientFailure) {
   if (!Storage.exists(path)) return false;
   FsFile file = Storage.open(path, O_RDONLY);
   if (!file) {
     LOG_ERR("PokemonMovesetStore", "Failed to open %s", path);
+    transientFailure = true;
     return false;
   }
   const uint64_t fileSize = file.fileSize64();
@@ -49,12 +53,14 @@ bool inspectSlot(const char* path, MovesetStoreState& outputState, uint32_t& out
   if (!bytes) {
     LOG_ERR("PokemonMovesetStore", "Out of memory reading %s", path);
     file.close();
+    transientFailure = true;
     return false;
   }
   const bool readOk = readExact(file, bytes->data(), static_cast<size_t>(fileSize));
   file.close();
   if (!readOk) {
-    LOG_ERR("PokemonMovesetStore", "Short read on %s, discarding", path);
+    LOG_ERR("PokemonMovesetStore", "Short read on %s", path);
+    transientFailure = true;
     return false;
   }
   return decodeMovesetStoreFile(bytes->data(), static_cast<size_t>(fileSize), outputState, outputSequence);
@@ -72,13 +78,22 @@ void PokemonMovesetStore::load() const {
   std::unique_ptr<MovesetStoreState> stateA(new (std::nothrow) MovesetStoreState());
   std::unique_ptr<MovesetStoreState> stateB(new (std::nothrow) MovesetStoreState());
   if (!stateA || !stateB) {
-    LOG_ERR("PokemonMovesetStore", "Out of memory loading moveset store, staying empty");
+    // Not "loaded": reads see an empty store for now, writes are refused, and
+    // the next call retries - a failed load must never turn into a write that
+    // replaces the real file with an empty one.
+    LOG_ERR("PokemonMovesetStore", "Out of memory loading moveset store, will retry");
+    loaded_ = false;
     return;
   }
   uint32_t sequenceA = 0;
   uint32_t sequenceB = 0;
-  const bool readyA = inspectSlot(STORE_PATH_A, *stateA, sequenceA);
-  const bool readyB = inspectSlot(STORE_PATH_B, *stateB, sequenceB);
+  bool transientFailure = false;
+  const bool readyA = inspectSlot(STORE_PATH_A, *stateA, sequenceA, transientFailure);
+  const bool readyB = inspectSlot(STORE_PATH_B, *stateB, sequenceB, transientFailure);
+  if (transientFailure) {
+    loaded_ = false;  // see above: retry on the next call rather than trust a partial read
+    return;
+  }
   if (!readyA && !readyB) return;  // fresh install, or both slots lost - stay empty, not an error
   activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
   state_ = activeIsA_ ? *stateA : *stateB;
@@ -144,6 +159,7 @@ bool PokemonMovesetStore::writeState(const MovesetStoreState& state) const {
 
 bool PokemonMovesetStore::upsertEntry(const MovesetEntry& entry) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(state_));
   if (!candidate) {
     LOG_ERR("PokemonMovesetStore", "Out of memory upserting moveset entry");
@@ -155,6 +171,7 @@ bool PokemonMovesetStore::upsertEntry(const MovesetEntry& entry) {
 
 bool PokemonMovesetStore::upsertEntries(const std::span<const MovesetEntry> entries) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(state_));
   if (!candidate) {
     LOG_ERR("PokemonMovesetStore", "Out of memory upserting moveset entries");
@@ -170,6 +187,7 @@ bool PokemonMovesetStore::upsertEntries(const std::span<const MovesetEntry> entr
 
 bool PokemonMovesetStore::removeEntry(const uint32_t recordId) {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(state_));
   if (!candidate) {
     LOG_ERR("PokemonMovesetStore", "Out of memory removing moveset entry");
@@ -181,6 +199,7 @@ bool PokemonMovesetStore::removeEntry(const uint32_t recordId) {
 
 bool PokemonMovesetStore::reset() {
   if (!loaded_) load();
+  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
   std::unique_ptr<MovesetStoreState> empty(new (std::nothrow) MovesetStoreState());
   if (!empty) {
     LOG_ERR("PokemonMovesetStore", "Out of memory resetting moveset store");

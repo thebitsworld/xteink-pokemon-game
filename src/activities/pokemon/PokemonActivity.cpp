@@ -1637,6 +1637,8 @@ void PokemonActivity::activate() {
             showMessage(tr(STR_POKEMON_LAST_PARTY), actionSource_);
           else if (status == pokemon::ServiceStatus::PartyFull)
             showMessage(tr(STR_POKEMON_PARTY_FULL), actionSource_);
+          else if (status == pokemon::ServiceStatus::BoxFull)
+            showMessage(tr(STR_POKEMON_BOX_FULL), actionSource_);
           else if (status != pokemon::ServiceStatus::Ok)
             showMessage(tr(STR_POKEMON_SAVE_ERROR), actionSource_);
           else {
