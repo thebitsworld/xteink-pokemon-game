@@ -88,6 +88,7 @@ struct World {
   World() : service(store, battle, ivev, hof, {nullptr, below}) {}
 };
 
+std::map<uint32_t, uint8_t> expectedLevel;
 std::map<uint32_t, std::array<uint8_t, 4>> expectedMoves;
 std::map<uint32_t, int> expectedPpUpSum;
 long opNo = 0;
@@ -195,6 +196,18 @@ void oracle(World& w, const bool assertKept) {
   pokemon::PokemonMovesetStore movesetStore;
   for (const auto& r : records) {
     if (battleStore.findEntry(r.recordId) == nullptr && movesetStore.findEntry(r.recordId) == nullptr) {
+      // Both entries gone (evicted/backfill skipped/failed write): a customised moveset must not
+      // silently turn into the level default - unless the level changed, which changes the default.
+      if (const auto lost = expectedMoves.find(r.recordId);
+          assertKept && lost != expectedMoves.end() && expectedLevel[r.recordId] == pokemon::levelForXp(r.totalXp)) {
+        const pokemon::BattleRecordEntry derived = w.service.peekBattleMoves(r);
+        for (const uint8_t move : lost->second) {
+          if (move == 0) continue;
+          bool has = false;
+          for (const uint8_t known : derived.moves) has = has || known == move;
+          SVC_INV(has, "a customised moveset was lost when its entries were dropped");
+        }
+      }
       expectedMoves.erase(r.recordId);
       expectedPpUpSum.erase(r.recordId);
       continue;
@@ -212,6 +225,7 @@ void oracle(World& w, const bool assertKept) {
       SVC_INV(sum >= expectedPpUpSum[r.recordId], "PP Ups were lost");
     }
     expectedMoves[r.recordId] = entry.moves;
+    expectedLevel[r.recordId] = pokemon::levelForXp(r.totalXp);
     int sum = 0;
     for (const uint8_t up : entry.ppUp) sum += up;
     expectedPpUpSum[r.recordId] = sum;
@@ -389,18 +403,45 @@ void runOneOp(World*& world, std::unique_ptr<World>& owner, const uint32_t which
 
 }  // namespace svcfuzz
 
-TEST(PokemonService, RandomOperationSequencesKeepEveryStoreConsistent) {
+// `legacyUpgrade` starts every game the way a save from before the moveset store
+// looks: customised battle entries with no moveset copy, followed by a restart
+// (the firmware update). Their moves must still survive being evicted.
+void runRandomSequences(const bool legacyUpgrade) {
   using namespace svcfuzz;
-  rngState = 0x9E3779B97F4A7C15ULL;
+  rngState = legacyUpgrade ? 0x1234567890ABCDEFULL : 0x9E3779B97F4A7C15ULL;
   reported = 0;
   for (int game = 0; game < 12; ++game) {
     Storage.clear();
     expectedMoves.clear();
     expectedPpUpSum.clear();
+    expectedLevel.clear();
     std::unique_ptr<World> owner = std::make_unique<World>();
     World* world = owner.get();
     const std::array<uint16_t, 4> starters{1, 4, 7, 25};
     ASSERT_EQ(world->service.createStarter(starters[rnd() % 4], pokemon::Gender::Male, "S"), pokemon::ServiceStatus::Ok);
+    if (legacyUpgrade) {
+      for (int c = 0; c < 9; ++c) {
+        queueEncounter(*world);
+        uint32_t caught = 0;
+        world->service.resolveEncounter(pokemon::EncounterChoice::Catch, caught);
+        if (c % 3 == 0) world->service.depositPokemon(pickRecord(true, false).recordId);
+      }
+      const auto records = allRecords();
+      for (size_t k = 0; k < records.size() && k < 6; ++k) {
+        pokemon::BattleRecordEntry entry = world->service.peekBattleMoves(records[k]);
+        entry.moves = {static_cast<uint8_t>(1 + rnd() % 150), static_cast<uint8_t>(151 + rnd() % 14), 0, 0};
+        entry.pp = {1, 1, 0, 0};
+        entry.ppUp = {static_cast<uint8_t>(rnd() % 4), 0, 0, 0};
+        entry.currentHp = 1;
+        entry.status = pokemon::Ailment::None;
+        entry.statusTurns = 0;
+        entry.toxicCounter = 0;
+        world->battle.upsertEntry(entry);  // straight into the battle store: no moveset copy
+      }
+      owner = std::make_unique<World>();
+      world = owner.get();
+      world->store.begin();
+    }
     for (int step = 0; step < 300; ++step) {
       ++opNo;
       const bool inject = rnd() % 12 == 0;
@@ -422,6 +463,12 @@ TEST(PokemonService, RandomOperationSequencesKeepEveryStoreConsistent) {
     }
   }
   Storage.clear();
+}
+
+TEST(PokemonService, RandomOperationSequencesKeepEveryStoreConsistent) { runRandomSequences(false); }
+
+TEST(PokemonService, RandomOperationSequencesAfterUpgradingAPreMovesetStoreSaveKeepEveryMove) {
+  runRandomSequences(true);
 }
 
 TEST(PokemonService, VerifiedCheckpointDurablyCreditsStateAndLeader) {
