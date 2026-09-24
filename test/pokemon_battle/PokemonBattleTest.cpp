@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "Pokemon/PokemonBattle.h"
+#include "Pokemon/PokemonBattleStoreCodec.h"
 #include "Pokemon/PokemonSpecies.h"
 
 namespace {
@@ -2345,6 +2346,168 @@ void recoilAndDrainAreCappedByTheTargetsRemainingHp() {
   CHECK(drainer.currentHp - drainerHpBefore == 2);  // half of the 4 HP actually taken
 }
 
+// Property test: thousands of random fights (random species, levels, movesets,
+// statuses, both wild and trainer) must never break a structural invariant of the
+// engine, and the live player's state must always be something the battle store
+// can persist (an entry the codec rejects means a silently lost save).
+namespace fuzz {
+uint64_t rngState = 88172645463325252ULL;
+uint32_t nextRand() {
+  rngState ^= rngState << 13;
+  rngState ^= rngState >> 7;
+  rngState ^= rngState << 17;
+  return static_cast<uint32_t>(rngState >> 11);
+}
+uint32_t below(void*, const uint32_t n) { return n == 0 ? 0 : nextRand() % n; }
+const RandomSource RNG{nullptr, below};
+int reported = 0;
+
+#define FUZZ_INV(cond, what)                                                                                 \
+  do {                                                                                                       \
+    if (!(cond)) {                                                                                           \
+      if (reported < 10) std::fprintf(stderr, "battle %ld turn %d: invariant broken: %s\n", battleId, turn, what); \
+      ++reported;                                                                                            \
+      ++failures;                                                                                            \
+    }                                                                                                        \
+  } while (false)
+
+void checkSide(const BattleCombatant& c, const long battleId, const int turn) {
+  FUZZ_INV(c.currentHp <= c.maxHp, "hp above max");
+  FUZZ_INV(c.attackStage >= -6 && c.attackStage <= 6, "attack stage");
+  FUZZ_INV(c.defenseStage >= -6 && c.defenseStage <= 6, "defense stage");
+  FUZZ_INV(c.specialStage >= -6 && c.specialStage <= 6, "special stage");
+  FUZZ_INV(c.speedStage >= -6 && c.speedStage <= 6, "speed stage");
+  FUZZ_INV(c.accuracyStage >= -6 && c.accuracyStage <= 6, "accuracy stage");
+  FUZZ_INV(c.evasionStage >= -6 && c.evasionStage <= 6, "evasion stage");
+  if (c.currentHp == 0) {
+    FUZZ_INV(c.status == Ailment::None, "fainted combatant keeps a status");
+    FUZZ_INV(c.toxicCounter == 0, "fainted combatant keeps a toxic counter");
+  }
+  if (c.toxicCounter > 0) FUZZ_INV(c.status == Ailment::Poison, "toxic counter without poison");
+  FUZZ_INV(c.substituteHp <= c.maxHp, "substitute above max hp");
+  FUZZ_INV(c.trappedTurnsRemaining <= 8, "trap duration");
+  FUZZ_INV(c.disableTurnsRemaining <= 5, "disable duration");
+  if (c.forcedMoveId != 0) {
+    bool known = false;
+    for (const auto& move : c.moves) known = known || move.moveId == c.forcedMoveId;
+    FUZZ_INV(known, "locked into a move it does not have");
+  }
+  if (!c.transformed && !c.mimicActive) {
+    bool sawEmpty = false;
+    for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+      if (c.moves[i].moveId == 0) {
+        sawEmpty = true;
+        continue;
+      }
+      FUZZ_INV(!sawEmpty, "gap in the moveset");
+      const pokemon::MoveData* data = pokemon::moveData(c.moves[i].moveId);
+      FUZZ_INV(data != nullptr, "unknown move id");
+      if (data != nullptr) FUZZ_INV(c.moves[i].currentPp <= pokemon::maxPpFor(data->pp, c.ppUp[i]), "pp above max");
+    }
+  }
+}
+
+void checkPersistable(const BattleCombatant& p, const long battleId, const int turn) {
+  if (p.transformed) return;  // persisted from the stored moveset instead
+  pokemon::BattleRecordEntry entry{};
+  entry.recordId = 1;
+  for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+    if (p.mimicActive && p.mimicSlot == i) {
+      entry.moves[i] = pokemon::MIMIC_MOVE_ID;
+      entry.pp[i] = p.mimicOriginalPp;
+    } else {
+      entry.moves[i] = p.moves[i].moveId;
+      entry.pp[i] = p.moves[i].currentPp;
+    }
+    entry.ppUp[i] = p.ppUp[i];
+  }
+  entry.currentHp = p.currentHp;
+  entry.status = p.status;
+  entry.statusTurns = p.statusTurns;
+  entry.toxicCounter = p.status == Ailment::Poison ? p.toxicCounter : 0;
+  FUZZ_INV(pokemon::validateBattleRecordEntry(entry), "live player state cannot be persisted");
+}
+
+BattleCombatant make(const uint16_t species, const uint8_t level, const bool player) {
+  BattleCombatant c{};
+  c.speciesId = species;
+  c.level = level;
+  for (auto& v : c.iv) v = static_cast<uint8_t>(nextRand() % 16);
+  if (player) {
+    for (auto& v : c.ev) v = static_cast<uint8_t>(nextRand() % 256);
+  }
+  const pokemon::BaseStats* stats = pokemon::baseStatsFor(species);
+  c.maxHp = pokemon::battleMaxHp(stats->hp, level, c.iv[0], c.ev[0]);
+  c.currentHp = static_cast<uint16_t>(nextRand() % 3 == 0 ? c.maxHp : 1 + nextRand() % c.maxHp);
+  size_t filled = 0;
+  while (filled < pokemon::BATTLE_MOVE_SLOTS) {
+    if (filled >= 1 && nextRand() % 4 == 0) break;
+    const uint8_t id = static_cast<uint8_t>(1 + nextRand() % pokemon::POKEMON_MOVE_ID_MAX);
+    const pokemon::MoveData* data = pokemon::moveData(id);
+    if (data == nullptr) continue;
+    bool duplicate = false;
+    for (size_t j = 0; j < filled; ++j) duplicate = duplicate || c.moves[j].moveId == id;
+    if (duplicate) continue;
+    c.ppUp[filled] = static_cast<uint8_t>(nextRand() % 4);
+    const uint8_t maxPp = pokemon::maxPpFor(data->pp, c.ppUp[filled]);
+    c.moves[filled] = BattleMoveSlot{id, static_cast<uint8_t>(1 + nextRand() % maxPp)};
+    ++filled;
+  }
+  static const Ailment statuses[] = {Ailment::None,      Ailment::None,      Ailment::None,  Ailment::Poison,
+                                     Ailment::Burn,      Ailment::Paralysis, Ailment::Sleep, Ailment::Freeze};
+  c.status = statuses[nextRand() % 8];
+  if (c.status == Ailment::Sleep) c.statusTurns = static_cast<uint8_t>(1 + nextRand() % 3);
+  return c;
+}
+}  // namespace fuzz
+
+void randomFightsNeverBreakAnEngineInvariant() {
+  using namespace fuzz;
+  rngState = 88172645463325252ULL;
+  reported = 0;
+  for (long battleId = 0; battleId < 6000; ++battleId) {
+    BattleCombatant player = make(static_cast<uint16_t>(1 + nextRand() % 151), static_cast<uint8_t>(2 + nextRand() % 99), true);
+    BattleCombatant opponent = make(static_cast<uint16_t>(1 + nextRand() % 151), static_cast<uint8_t>(2 + nextRand() % 99), false);
+    const bool wild = nextRand() % 2 != 0;
+    for (int turn = 0; turn < 80; ++turn) {
+      uint8_t slot = pokemon::BATTLE_MOVE_SLOTS;
+      const uint8_t forced = player.bideTurnsRemaining > 0 ? pokemon::BIDE_MOVE_ID : player.forcedMoveId;
+      bool chosen = false;
+      if (forced != 0) {
+        for (uint8_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+          if (player.moves[i].moveId == forced) {
+            slot = i;
+            chosen = true;
+            break;
+          }
+        }
+      }
+      if (!chosen) {
+        uint8_t usable[4];
+        int count = 0;
+        for (uint8_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+          if (player.moves[i].moveId != 0 && player.moves[i].currentPp > 0 &&
+              !(player.disableTurnsRemaining > 0 && player.disabledMoveSlot == i)) {
+            usable[count++] = i;
+          }
+        }
+        slot = count == 0 ? pokemon::BATTLE_MOVE_SLOTS : usable[nextRand() % count];
+      }
+      const pokemon::BattleTurnResult result = pokemon::stepBattle(player, opponent, slot, RNG, wild);
+      checkSide(player, battleId, turn);
+      checkSide(opponent, battleId, turn);
+      checkPersistable(player, battleId, turn);
+      if (result.outcome == BattleOutcome::PlayerWon) FUZZ_INV(opponent.currentHp == 0, "PlayerWon with the opponent standing");
+      if (result.outcome == BattleOutcome::OpponentWon) FUZZ_INV(player.currentHp == 0, "OpponentWon with the player standing");
+      if (result.outcome == BattleOutcome::InProgress) {
+        FUZZ_INV(player.currentHp > 0 && opponent.currentHp > 0, "fight in progress with a fainted side");
+      }
+      if (result.outcome != BattleOutcome::InProgress) break;
+      if (wild && (result.player.event == BattleLogEvent::Teleported || result.player.event == BattleLogEvent::ForcedSwitch)) break;
+    }
+  }
+}
+
 int main() {
   statFormulasScaleWithLevel();
   damagingMoveReducesDefenderHpAndReportsSuperEffective();
@@ -2450,6 +2613,7 @@ int main() {
   metronomeSelectedTrapMoveDoesNotLockTheAttackerIn();
   endOfTurnStatusTickDoesNotOverwriteTeleportOrForcedSwitch();
   wildTeleportOrRoarEndsTheEncounterBeforeTheOpponentActs();
+  randomFightsNeverBreakAnEngineInvariant();
   recoilAndDrainAreCappedByTheTargetsRemainingHp();
   metronomeRedirectedToExplosionFaintsTheUser();
   mutualKoFromTheSingleActorStepsCleansUpBothSides();

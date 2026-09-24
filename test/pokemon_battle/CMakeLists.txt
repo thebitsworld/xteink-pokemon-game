@@ -73,6 +73,8 @@ add_executable(PokemonBattleTest
   ${REPO_ROOT}/lib/Pokemon/PokemonLearnsets.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonTypeChart.cpp
   ${REPO_ROOT}/lib/Pokemon/PokemonBattle.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonBattleStoreCodec.cpp
+  ${REPO_ROOT}/lib/Pokemon/PokemonCrc32.cpp
 )
 
 target_include_directories(PokemonBattleTest PRIVATE

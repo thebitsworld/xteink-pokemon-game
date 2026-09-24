@@ -1,6 +1,12 @@
 #include <HalStorage.h>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <map>
+#include <set>
+#include <vector>
+
+#include "pokemon/PokemonMovesetStore.h"
 #include "pokemon/PokemonService.h"
 
 namespace {
@@ -55,6 +61,367 @@ void appendOwnedPokemon(pokemon::PokemonStore& store, const pokemon::PokemonReco
   }
   const pokemon::RecordMutation mutation{record.recordId, record, pokemon::RecordMutationKind::Append};
   ASSERT_TRUE(store.commit(state, mutation));
+}
+
+// Property test over the whole save layer: random sequences of catches, releases,
+// Party/Box swaps, moveset edits, PP Ups, XP awards, reading credit, evolutions
+// and restarts, with random SD read/write failures thrown in. After every step
+// the save must re-open from disk, every store must agree with the main save, and
+// nothing the player set up (learned moves, PP Ups) may quietly disappear.
+namespace svcfuzz {
+
+uint64_t rngState = 0x9E3779B97F4A7C15ULL;
+uint32_t rnd() {
+  rngState ^= rngState << 13;
+  rngState ^= rngState >> 7;
+  rngState ^= rngState << 17;
+  return static_cast<uint32_t>(rngState >> 11);
+}
+uint32_t below(void*, const uint32_t n) { return n == 0 ? 0 : rnd() % n; }
+
+struct World {
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battle;
+  pokemon::PokemonIvEvStore ivev;
+  pokemon::PokemonHallOfFameStore hof;
+  pokemon::PokemonService service;
+  World() : service(store, battle, ivev, hof, {nullptr, below}) {}
+};
+
+std::map<uint32_t, std::array<uint8_t, 4>> expectedMoves;
+std::map<uint32_t, int> expectedPpUpSum;
+long opNo = 0;
+const char* lastOp = "";
+int reported = 0;
+
+#define SVC_INV(cond, msg)                                                                                     \
+  do {                                                                                                         \
+    if (!(cond)) {                                                                                             \
+      if (reported++ < 10) ADD_FAILURE() << "op " << opNo << " (" << lastOp << "): " << (msg);                 \
+    }                                                                                                          \
+  } while (false)
+
+std::vector<pokemon::PokemonRecord> allRecords() {
+  std::vector<pokemon::PokemonRecord> out;
+  pokemon::PokemonStore fresh;
+  if (fresh.begin() != pokemon::StoreBeginResult::Ready) return out;
+  for (uint32_t id = 1; id < fresh.nextRecordId(); ++id) {
+    pokemon::PokemonRecord record{};
+    if (fresh.readRecord(id, record)) out.push_back(record);
+  }
+  return out;
+}
+
+void checkInvariants(World& w, const bool cleanOp) {
+  Storage.setFailRead(false);
+  Storage.setFailWritableOpen(false);
+  pokemon::PokemonStore fresh;
+  SVC_INV(fresh.begin() == pokemon::StoreBeginResult::Ready, "main save cannot be re-opened");
+  pokemon::PokemonState state{};
+  if (!fresh.loadState(state)) {
+    SVC_INV(false, "state cannot be loaded");
+    return;
+  }
+  SVC_INV(pokemon::validateState(state), "state is invalid");
+  SVC_INV(state.partyRecordIds[0] != 0, "party is empty");
+  const auto records = allRecords();
+  std::set<uint32_t> ids;
+  for (const auto& r : records) ids.insert(r.recordId);
+  SVC_INV(records.size() == fresh.recordCount(), "record count does not match the records readable");
+  for (const uint32_t partyId : state.partyRecordIds) {
+    if (partyId != 0) SVC_INV(ids.count(partyId) == 1, "party member without a record");
+  }
+  for (const auto& e : state.pendingEvents) {
+    if (e.kind == pokemon::PendingEventKind::Evolution || e.kind == pokemon::PendingEventKind::MoveLearn) {
+      SVC_INV(ids.count(e.recordId) == 1, "pending event for a missing record");
+    }
+  }
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonMovesetStore movesetStore;
+  pokemon::PokemonIvEvStore ivevStore;
+  SVC_INV(battleStore.entries().size() <= pokemon::POKEMON_BATTLE_MAX_ENTRIES, "battle store over capacity");
+  for (const auto& e : battleStore.entries()) {
+    if (cleanOp) SVC_INV(ids.count(e.recordId) == 1, "battle entry for a missing record");
+    SVC_INV(pokemon::validateBattleRecordEntry(e), "invalid battle entry");
+    SVC_INV(e.moves[0] != 0, "battle entry without a move");
+    if (const pokemon::MovesetEntry* saved = movesetStore.findEntry(e.recordId); saved != nullptr) {
+      SVC_INV(saved->moves == e.moves && saved->ppUp == e.ppUp, "moveset store disagrees with the battle entry");
+    }
+    for (const auto& r : records) {
+      if (r.recordId != e.recordId) continue;
+      const pokemon::BaseStats* stats = pokemon::baseStatsFor(r.speciesId);
+      const pokemon::IvEvEntry* ivEv = ivevStore.findEntry(e.recordId);
+      if (ivEv != nullptr && stats != nullptr) {
+        const uint16_t maxHp =
+            pokemon::battleMaxHp(stats->hp, pokemon::levelForXp(r.totalXp), ivEv->iv[0], ivEv->ev[0]);
+        SVC_INV(e.currentHp <= maxHp, "battle HP above max HP");
+      }
+      for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) {
+        if (e.moves[i] == 0) continue;
+        const pokemon::MoveData* move = pokemon::moveData(e.moves[i]);
+        SVC_INV(move != nullptr && e.pp[i] <= pokemon::maxPpFor(move->pp, e.ppUp[i]), "PP above its maximum");
+      }
+    }
+  }
+  if (cleanOp) {
+    for (uint32_t id = 1; id < 400; ++id) {
+      if (movesetStore.findEntry(id) != nullptr) SVC_INV(ids.count(id) == 1, "moveset entry for a missing record");
+      if (ivevStore.findEntry(id) != nullptr) SVC_INV(ids.count(id) == 1, "IV/EV entry for a missing record");
+    }
+  }
+  for (const auto& r : records) {
+    const pokemon::BattleRecordEntry derived = w.service.peekBattleMoves(r);
+    SVC_INV(pokemon::validateBattleRecordEntry(derived), "derived entry is invalid");
+    SVC_INV(derived.moves[0] != 0, "derived entry has no move");
+  }
+}
+
+// Moves and PP Ups a Pokemon has been given must survive deposits, withdrawals,
+// battle-store evictions and restarts. Only Pokemon with their own battle/moveset
+// entry are tracked: one without derives a default moveset from its level.
+void oracle(World& w, const bool assertKept) {
+  const auto records = allRecords();
+  std::set<uint32_t> live;
+  for (const auto& r : records) live.insert(r.recordId);
+  for (auto it = expectedMoves.begin(); it != expectedMoves.end();) {
+    if (live.count(it->first) == 0) {
+      expectedPpUpSum.erase(it->first);
+      it = expectedMoves.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonMovesetStore movesetStore;
+  for (const auto& r : records) {
+    if (battleStore.findEntry(r.recordId) == nullptr && movesetStore.findEntry(r.recordId) == nullptr) {
+      expectedMoves.erase(r.recordId);
+      expectedPpUpSum.erase(r.recordId);
+      continue;
+    }
+    const pokemon::BattleRecordEntry entry = w.service.peekBattleMoves(r);
+    if (const auto found = expectedMoves.find(r.recordId); assertKept && found != expectedMoves.end()) {
+      for (const uint8_t move : found->second) {
+        if (move == 0) continue;
+        bool has = false;
+        for (const uint8_t known : entry.moves) has = has || known == move;
+        SVC_INV(has, "a learned move was lost");
+      }
+      int sum = 0;
+      for (const uint8_t up : entry.ppUp) sum += up;
+      SVC_INV(sum >= expectedPpUpSum[r.recordId], "PP Ups were lost");
+    }
+    expectedMoves[r.recordId] = entry.moves;
+    int sum = 0;
+    for (const uint8_t up : entry.ppUp) sum += up;
+    expectedPpUpSum[r.recordId] = sum;
+  }
+}
+
+pokemon::PokemonRecord pickRecord(const bool partyOnly, const bool boxOnly) {
+  const auto records = allRecords();
+  pokemon::PokemonStore fresh;
+  pokemon::PokemonState state{};
+  if (fresh.begin() != pokemon::StoreBeginResult::Ready || !fresh.loadState(state)) return {};
+  std::vector<pokemon::PokemonRecord> candidates;
+  for (const auto& r : records) {
+    bool inParty = false;
+    for (const uint32_t p : state.partyRecordIds) inParty = inParty || p == r.recordId;
+    if ((partyOnly && !inParty) || (boxOnly && inParty)) continue;
+    candidates.push_back(r);
+  }
+  return candidates.empty() ? pokemon::PokemonRecord{} : candidates[rnd() % candidates.size()];
+}
+
+void queueEncounter(World& w) {
+  pokemon::PokemonState state{};
+  if (!w.store.loadState(state) || pokemon::pendingEventCount(state) > 0) return;
+  const uint16_t species = static_cast<uint16_t>(1 + rnd() % 150);
+  const pokemon::SpeciesData* data = pokemon::speciesData(species);
+  const pokemon::Gender gender = data->genderRate == 255 ? pokemon::Gender::Genderless
+                                 : data->genderRate == 0 ? pokemon::Gender::Male
+                                 : data->genderRate == 8 ? pokemon::Gender::Female
+                                 : (rnd() % 2 != 0 ? pokemon::Gender::Male : pokemon::Gender::Female);
+  state.pendingEvents[0] = pokemon::PendingEvent{0, species, static_cast<uint8_t>(2 + rnd() % 30), gender,
+                                                 pokemon::EvolutionItem::None, pokemon::PendingEventKind::Encounter};
+  pokemon::markSpecies(state.seenSpecies, species);
+  w.store.commit(state);
+}
+
+void runOneOp(World*& world, std::unique_ptr<World>& owner, const uint32_t which) {
+  World& w = *world;
+  pokemon::PokemonRecord r{};
+  uint32_t id = 0;
+  switch (which) {
+    case 0:
+    case 1:
+    case 2:
+      lastOp = "catch";
+      queueEncounter(w);
+      w.service.resolveEncounter(rnd() % 4 != 0 ? pokemon::EncounterChoice::Catch : pokemon::EncounterChoice::Pass, id);
+      break;
+    case 3:
+      lastOp = "deposit";
+      w.service.depositPokemon(pickRecord(true, false).recordId);
+      break;
+    case 4:
+      lastOp = "withdraw";
+      w.service.withdrawPokemon(pickRecord(false, true).recordId);
+      break;
+    case 5:
+      lastOp = "release";
+      if (rnd() % 4 == 0) w.service.releasePokemon(pickRecord(false, true).recordId);
+      break;
+    case 6:
+      lastOp = "teach";
+      w.service.teachMove(pickRecord(false, false).recordId, static_cast<uint8_t>(1 + rnd() % 165),
+                          static_cast<int>(rnd() % 5) - 1);
+      break;
+    case 7:
+      lastOp = "learn into slot";
+      w.service.learnMoveIntoSlot(pickRecord(false, false).recordId, static_cast<uint8_t>(rnd() % 4),
+                                  static_cast<uint8_t>(1 + rnd() % 165));
+      break;
+    case 8:
+      lastOp = "forget";
+      w.service.forgetMove(pickRecord(false, false).recordId, static_cast<uint8_t>(rnd() % 4));
+      break;
+    case 9:
+      lastOp = "PP Up";
+      w.service.applyPpUp(pickRecord(false, false).recordId, static_cast<uint8_t>(rnd() % 4));
+      break;
+    case 10:
+    case 11:
+      lastOp = "award battle XP";
+      w.service.awardBattleXp(pickRecord(true, false).recordId, static_cast<uint8_t>(2 + rnd() % 60), rnd() % 2 != 0,
+                              static_cast<uint16_t>(1 + rnd() % 150));
+      break;
+    case 12: {
+      lastOp = "save battle entry";
+      pokemon::BattleRecordEntry entry{};
+      if (w.service.loadBattleEntry(pickRecord(true, false).recordId, entry) == pokemon::ServiceStatus::Ok) {
+        entry.currentHp = static_cast<uint16_t>(rnd() % (entry.currentHp + 1U));
+        for (size_t i = 0; i < 4; ++i) {
+          if (entry.moves[i] != 0) entry.pp[i] = static_cast<uint8_t>(rnd() % (entry.pp[i] + 1U));
+        }
+        w.service.saveBattleEntry(entry);
+      }
+      break;
+    }
+    case 13:
+    case 14:
+      lastOp = "reading credit";
+      w.service.creditMinutes(static_cast<uint16_t>(1 + rnd() % 200), static_cast<uint8_t>(rnd() % 101));
+      break;
+    case 15: {
+      lastOp = "resolve pending event";
+      pokemon::PokemonState state{};
+      if (!w.store.loadState(state)) break;
+      const pokemon::PendingEvent* pending = pokemon::pendingEventFront(state);
+      if (pending == nullptr) break;
+      switch (pending->kind) {
+        case pokemon::PendingEventKind::Encounter:
+          w.service.resolveEncounter(rnd() % 2 != 0 ? pokemon::EncounterChoice::Catch : pokemon::EncounterChoice::Pass, id);
+          break;
+        case pokemon::PendingEventKind::Item:
+          w.service.acknowledgeItem();
+          break;
+        case pokemon::PendingEventKind::Evolution:
+          w.service.resolveEvolution(rnd() % 2 != 0 ? pokemon::EvolutionChoice::Evolve : pokemon::EvolutionChoice::Cancel);
+          break;
+        case pokemon::PendingEventKind::MoveLearn:
+          w.service.resolveMoveLearn(static_cast<int>(rnd() % 5) - 1);
+          break;
+        default:
+          break;
+      }
+      break;
+    }
+    case 16: {
+      lastOp = "Rare Candy";
+      pokemon::PokemonState state{};
+      if (w.store.loadState(state)) {
+        state.bagCounts[24 - 7] = 3;
+        w.store.commit(state);
+      }
+      w.service.useConsumableAndConsumeItem(pickRecord(false, false).recordId, 24);
+      break;
+    }
+    case 17: {
+      lastOp = "medicine";
+      pokemon::PokemonState state{};
+      if (w.store.loadState(state)) {
+        for (int i = 0; i < 4; ++i) state.bagCounts[11 - 7 + i] = 2;
+        w.store.commit(state);
+      }
+      w.service.useConsumableAndConsumeItem(pickRecord(false, false).recordId, static_cast<uint8_t>(11 + rnd() % 6));
+      break;
+    }
+    case 18:
+      lastOp = "evolve now";
+      w.service.evolveNow(pickRecord(false, false).recordId);
+      break;
+    case 19: {
+      lastOp = "vitamin";
+      pokemon::PokemonState state{};
+      if (w.store.loadState(state)) {
+        state.vitaminCounts.fill(3);
+        w.store.commit(state);
+      }
+      w.service.useVitamin(pickRecord(false, false).recordId,
+                           static_cast<uint8_t>(pokemon::VITAMIN_ITEM_ID_FIRST + rnd() % 5));
+      break;
+    }
+    case 20:
+      lastOp = "restart";
+      owner = std::make_unique<World>();
+      world = owner.get();
+      world->store.begin();
+      break;
+    case 21:
+      lastOp = "reorder party";
+      w.service.movePartyMember(static_cast<uint8_t>(rnd() % 6), static_cast<uint8_t>(rnd() % 6));
+      break;
+    default:
+      break;
+  }
+}
+
+}  // namespace svcfuzz
+
+TEST(PokemonService, RandomOperationSequencesKeepEveryStoreConsistent) {
+  using namespace svcfuzz;
+  rngState = 0x9E3779B97F4A7C15ULL;
+  reported = 0;
+  for (int game = 0; game < 12; ++game) {
+    Storage.clear();
+    expectedMoves.clear();
+    expectedPpUpSum.clear();
+    std::unique_ptr<World> owner = std::make_unique<World>();
+    World* world = owner.get();
+    const std::array<uint16_t, 4> starters{1, 4, 7, 25};
+    ASSERT_EQ(world->service.createStarter(starters[rnd() % 4], pokemon::Gender::Male, "S"), pokemon::ServiceStatus::Ok);
+    for (int step = 0; step < 300; ++step) {
+      ++opNo;
+      const bool inject = rnd() % 12 == 0;
+      if (inject) {
+        if (rnd() % 2 != 0) {
+          Storage.setFailRead(true);
+        } else {
+          Storage.setFailWritableOpen(true);
+        }
+      }
+      const uint32_t which = rnd() % 22;
+      runOneOp(world, owner, which);
+      Storage.setFailRead(false);
+      Storage.setFailWritableOpen(false);
+      checkInvariants(*world, !inject);
+      const bool editsMoves = which == 5 || which == 6 || which == 7 || which == 8 || which == 9 || which == 15;
+      oracle(*world, !inject && !editsMoves);
+      if (reported >= 10) return;
+    }
+  }
+  Storage.clear();
 }
 
 TEST(PokemonService, VerifiedCheckpointDurablyCreditsStateAndLeader) {
