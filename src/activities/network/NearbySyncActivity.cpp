@@ -18,6 +18,7 @@
 #include "RecentBooksStore.h"
 #include "SilentRestart.h"
 #include "activities/home/RecentBookProgress.h"
+#include "activities/reader/BookReadingStats.h"
 #include "activities/reader/GlobalReadingStats.h"
 #include "components/TouchActionButtons.h"
 #include "components/TouchHeaderBackButton.h"
@@ -100,6 +101,65 @@ bool readRawProgress(const std::string& cachePath, uint8_t* output, uint8_t& len
     }
   }
   return false;
+}
+
+static_assert(ns::BOOK_STATS_TIME_BUCKETS == READING_TIME_BUCKET_COUNT, "book stats wire layout");
+static_assert(ns::BOOK_STATS_WEEKDAYS == READING_DAY_OF_WEEK_COUNT, "book stats wire layout");
+
+ns::WireDate toWire(const ReadingStatsDate& date) {
+  return date.isValid() ? ns::WireDate{date.year, date.month, date.day} : ns::WireDate{};
+}
+
+ReadingStatsDate fromWire(const ns::WireDate& date) {
+  ReadingStatsDate out;
+  if (date.valid()) {
+    out.year = date.year;
+    out.month = date.month;
+    out.day = date.day;
+  }
+  return out;
+}
+
+ns::BookStatsWire toWire(const BookReadingStats& stats) {
+  ns::BookStatsWire wire;
+  wire.sessionCount = stats.sessionCount;
+  wire.totalReadingSeconds = stats.totalReadingSeconds;
+  wire.totalPagesTurned = stats.totalPagesTurned;
+  wire.isCompleted = stats.isCompleted;
+  wire.avgSecondsPerForwardPage = stats.avgSecondsPerForwardPage;
+  wire.paceSampleCount = stats.paceSampleCount;
+  wire.estimatedTimeLeftSeconds = stats.estimatedTimeLeftSeconds;
+  wire.startDateManual = stats.startDateManual;
+  wire.finishedDateManual = stats.finishedDateManual;
+  wire.startDate = toWire(stats.startDate);
+  wire.finishedDate = toWire(stats.finishedDate);
+  std::copy(stats.timeOfDaySeconds.begin(), stats.timeOfDaySeconds.end(), wire.timeOfDaySeconds.begin());
+  std::copy(stats.dayOfWeekSeconds.begin(), stats.dayOfWeekSeconds.end(), wire.dayOfWeekSeconds.begin());
+  return wire;
+}
+
+BookReadingStats fromWire(const ns::BookStatsWire& wire) {
+  BookReadingStats stats;
+  stats.sessionCount = wire.sessionCount;
+  stats.totalReadingSeconds = wire.totalReadingSeconds;
+  stats.totalPagesTurned = wire.totalPagesTurned;
+  stats.isCompleted = wire.isCompleted;
+  stats.avgSecondsPerForwardPage = wire.avgSecondsPerForwardPage;
+  stats.paceSampleCount = wire.paceSampleCount;
+  stats.estimatedTimeLeftSeconds = wire.estimatedTimeLeftSeconds;
+  stats.startDateManual = wire.startDateManual;
+  stats.finishedDateManual = wire.finishedDateManual;
+  stats.startDate = fromWire(wire.startDate);
+  stats.finishedDate = fromWire(wire.finishedDate);
+  std::copy(wire.timeOfDaySeconds.begin(), wire.timeOfDaySeconds.end(), stats.timeOfDaySeconds.begin());
+  std::copy(wire.dayOfWeekSeconds.begin(), wire.dayOfWeekSeconds.end(), stats.dayOfWeekSeconds.begin());
+  return stats;
+}
+
+// A book that was never read has nothing worth sending.
+bool hasAnyBookStats(const ns::BookStatsWire& stats) {
+  return stats.sessionCount != 0 || stats.totalReadingSeconds != 0 || stats.totalPagesTurned != 0 ||
+         stats.isCompleted || stats.startDate.valid() || stats.finishedDate.valid();
 }
 
 std::string joinPath(const std::string& folder, const char* name) {
@@ -246,9 +306,10 @@ bool NearbySyncActivity::prepareBookSection() {
   }
   book_ = ns::BookPositionRecord{};
   copyText(book_.path, path.c_str(), path.size());
-  if (!readRawProgress(Epub::cachePathForFilePath(path, CACHE_ROOT), book_.progress.data(), book_.progressLength)) {
-    return false;
-  }
+  const std::string cachePath = Epub::cachePathForFilePath(path, CACHE_ROOT);
+  if (!readRawProgress(cachePath, book_.progress.data(), book_.progressLength)) return false;
+  book_.stats = toWire(BookReadingStats::load(cachePath));
+  book_.hasStats = hasAnyBookStats(book_.stats);
   const RecentBook recent = RECENT_BOOKS.getDataFromBook(path);
   const std::string title = recent.title.empty() ? std::string(ns::baseName(path.c_str())) : recent.title;
   copyText(book_.title, title.c_str(), title.size());
@@ -794,6 +855,11 @@ void NearbySyncActivity::applyBookSection(const ns::ContainerHeader& header) {
   }
   if (record.percentBasisPoints != ns::UNKNOWN_PERCENT) {
     RecentBookProgress::saveCachedEpubPercent(cachePath, static_cast<float>(record.percentBasisPoints) / 100.0f);
+  }
+  if (record.hasStats) {
+    // Combined with this reader's own stats for the book (see mergeBookStats()).
+    const BookReadingStats local = BookReadingStats::load(cachePath);
+    fromWire(ns::mergeBookStats(toWire(local), record.stats)).save(cachePath);
   }
   // Becomes this reader's most recent book, like opening it would.
   const RecentBook existing = RECENT_BOOKS.getDataFromBook(path);

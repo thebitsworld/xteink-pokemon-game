@@ -72,7 +72,7 @@ ParseResult decodeContainerTable(const uint8_t* data, size_t available, Containe
 // ---- Book position section ------------------------------------------------
 //
 // pathLength(2) path  titleLength(1) title  percentBasisPoints(2)
-// progressLength(1) progress
+// progressLength(1) progress  hasStats(1) [BookStatsWire, BOOK_STATS_WIRE_BYTES]
 //
 // `progress` is the EPUB's progress.bin exactly as the reader stores it
 // (spine, page, page count and - in the 10-byte form - the visible-text offset
@@ -83,7 +83,53 @@ constexpr size_t MAX_BOOK_PATH_BYTES = 255;
 constexpr size_t MAX_BOOK_TITLE_BYTES = 64;
 constexpr size_t MAX_PROGRESS_BYTES = 10;
 constexpr uint16_t UNKNOWN_PERCENT = 0xFFFF;
-constexpr size_t MAX_BOOK_RECORD_BYTES = 2 + MAX_BOOK_PATH_BYTES + 1 + MAX_BOOK_TITLE_BYTES + 2 + 1 + MAX_PROGRESS_BYTES;
+
+// The book's own reading stats (the reader's BookReadingStats, field for
+// field), so the book's Reading Stats screen on the receiver is not empty.
+constexpr size_t BOOK_STATS_TIME_BUCKETS = 4;
+constexpr size_t BOOK_STATS_WEEKDAYS = 7;
+constexpr size_t BOOK_STATS_WIRE_BYTES = 2 + 4 + 4 + 1 + 2 + 2 + 4 + 1 + 4 + 4 + 4 * BOOK_STATS_TIME_BUCKETS +
+                                         4 * BOOK_STATS_WEEKDAYS;
+
+struct WireDate {
+  uint16_t year = 0;  // 0 = no date
+  uint8_t month = 0;
+  uint8_t day = 0;
+
+  bool valid() const { return year != 0 && month != 0 && day != 0; }
+  bool operator==(const WireDate&) const = default;
+};
+
+struct BookStatsWire {
+  uint16_t sessionCount = 0;
+  uint32_t totalReadingSeconds = 0;
+  uint32_t totalPagesTurned = 0;
+  bool isCompleted = false;
+  uint16_t avgSecondsPerForwardPage = 0;
+  uint16_t paceSampleCount = 0;
+  uint32_t estimatedTimeLeftSeconds = 0;
+  bool startDateManual = false;
+  bool finishedDateManual = false;
+  WireDate startDate{};
+  WireDate finishedDate{};
+  std::array<uint32_t, BOOK_STATS_TIME_BUCKETS> timeOfDaySeconds{};
+  std::array<uint32_t, BOOK_STATS_WEEKDAYS> dayOfWeekSeconds{};
+
+  bool operator==(const BookStatsWire&) const = default;
+};
+
+// Combines the receiver's own stats for the book with the sender's. Without
+// knowing which sessions both readers already share, ADDING would count them
+// twice on every repeated sync, so every counter takes the larger of the two
+// (idempotent: syncing again changes nothing). Completion is kept if either
+// side has it; the start date is the earlier one, the finished date the later
+// one (a manual date wins over an automatic one); pace comes from whichever
+// side has more samples; the time-left estimate follows the sender, whose
+// position the receiver just took.
+BookStatsWire mergeBookStats(const BookStatsWire& local, const BookStatsWire& incoming);
+
+constexpr size_t MAX_BOOK_RECORD_BYTES =
+    2 + MAX_BOOK_PATH_BYTES + 1 + MAX_BOOK_TITLE_BYTES + 2 + 1 + MAX_PROGRESS_BYTES + 1 + BOOK_STATS_WIRE_BYTES;
 
 struct BookPositionRecord {
   std::array<char, MAX_BOOK_PATH_BYTES + 1> path{};
@@ -91,6 +137,8 @@ struct BookPositionRecord {
   uint16_t percentBasisPoints = UNKNOWN_PERCENT;  // 0..10000
   uint8_t progressLength = 0;                     // 4, 6 or 10
   std::array<uint8_t, MAX_PROGRESS_BYTES> progress{};
+  bool hasStats = false;  // the book's own reading stats follow
+  BookStatsWire stats{};
 
   bool operator==(const BookPositionRecord&) const = default;
 };

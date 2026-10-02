@@ -59,7 +59,115 @@ bool takeShortString(const uint8_t*& cursor, const uint8_t* end, std::array<char
   return true;
 }
 
+void putDate(uint8_t* cursor, const WireDate& date) {
+  writeU16(cursor, date.year);
+  cursor[2] = date.month;
+  cursor[3] = date.day;
+}
+
+WireDate takeDate(const uint8_t* cursor) {
+  WireDate date;
+  date.year = readU16(cursor);
+  date.month = cursor[2];
+  date.day = cursor[3];
+  return date;
+}
+
+// Fixed BOOK_STATS_WIRE_BYTES layout.
+void encodeBookStats(const BookStatsWire& stats, uint8_t* out) {
+  writeU16(out, stats.sessionCount);
+  writeU32(out + 2, stats.totalReadingSeconds);
+  writeU32(out + 6, stats.totalPagesTurned);
+  out[10] = stats.isCompleted ? 1 : 0;
+  writeU16(out + 11, stats.avgSecondsPerForwardPage);
+  writeU16(out + 13, stats.paceSampleCount);
+  writeU32(out + 15, stats.estimatedTimeLeftSeconds);
+  out[19] = (stats.startDateManual ? 1 : 0) | (stats.finishedDateManual ? 2 : 0);
+  putDate(out + 20, stats.startDate);
+  putDate(out + 24, stats.finishedDate);
+  uint8_t* cursor = out + 28;
+  for (const uint32_t value : stats.timeOfDaySeconds) {
+    writeU32(cursor, value);
+    cursor += 4;
+  }
+  for (const uint32_t value : stats.dayOfWeekSeconds) {
+    writeU32(cursor, value);
+    cursor += 4;
+  }
+}
+
+void decodeBookStats(const uint8_t* in, BookStatsWire& stats) {
+  stats.sessionCount = readU16(in);
+  stats.totalReadingSeconds = readU32(in + 2);
+  stats.totalPagesTurned = readU32(in + 6);
+  stats.isCompleted = in[10] != 0;
+  stats.avgSecondsPerForwardPage = readU16(in + 11);
+  stats.paceSampleCount = readU16(in + 13);
+  stats.estimatedTimeLeftSeconds = readU32(in + 15);
+  stats.startDateManual = (in[19] & 1U) != 0;
+  stats.finishedDateManual = (in[19] & 2U) != 0;
+  stats.startDate = takeDate(in + 20);
+  stats.finishedDate = takeDate(in + 24);
+  const uint8_t* cursor = in + 28;
+  for (uint32_t& value : stats.timeOfDaySeconds) {
+    value = readU32(cursor);
+    cursor += 4;
+  }
+  for (uint32_t& value : stats.dayOfWeekSeconds) {
+    value = readU32(cursor);
+    cursor += 4;
+  }
+}
+
+bool dateBefore(const WireDate& a, const WireDate& b) {
+  if (a.year != b.year) return a.year < b.year;
+  if (a.month != b.month) return a.month < b.month;
+  return a.day < b.day;
+}
+
+// Picks one of two optional dates: a manual date beats an automatic one;
+// otherwise the earlier (wantEarlier) or later one.
+void pickDate(const WireDate& localDate, const bool localManual, const WireDate& otherDate, const bool otherManual,
+              const bool wantEarlier, WireDate& outDate, bool& outManual) {
+  outDate = localDate;
+  outManual = localManual;
+  if (!otherDate.valid()) return;
+  if (!localDate.valid() || (otherManual && !localManual)) {
+    outDate = otherDate;
+    outManual = otherManual;
+    return;
+  }
+  if (localManual && !otherManual) return;
+  if (wantEarlier ? dateBefore(otherDate, localDate) : dateBefore(localDate, otherDate)) {
+    outDate = otherDate;
+    outManual = otherManual;
+  }
+}
+
 }  // namespace
+
+BookStatsWire mergeBookStats(const BookStatsWire& local, const BookStatsWire& incoming) {
+  BookStatsWire merged;
+  merged.sessionCount = std::max(local.sessionCount, incoming.sessionCount);
+  merged.totalReadingSeconds = std::max(local.totalReadingSeconds, incoming.totalReadingSeconds);
+  merged.totalPagesTurned = std::max(local.totalPagesTurned, incoming.totalPagesTurned);
+  merged.isCompleted = local.isCompleted || incoming.isCompleted;
+  const BookStatsWire& pace = incoming.paceSampleCount > local.paceSampleCount ? incoming : local;
+  merged.avgSecondsPerForwardPage = pace.avgSecondsPerForwardPage;
+  merged.paceSampleCount = pace.paceSampleCount;
+  merged.estimatedTimeLeftSeconds = incoming.estimatedTimeLeftSeconds;
+  pickDate(local.startDate, local.startDateManual, incoming.startDate, incoming.startDateManual, true,
+           merged.startDate, merged.startDateManual);
+  pickDate(local.finishedDate, local.finishedDateManual, incoming.finishedDate, incoming.finishedDateManual, false,
+           merged.finishedDate, merged.finishedDateManual);
+  for (size_t i = 0; i < BOOK_STATS_TIME_BUCKETS; ++i) {
+    merged.timeOfDaySeconds[i] = std::max(local.timeOfDaySeconds[i], incoming.timeOfDaySeconds[i]);
+  }
+  for (size_t i = 0; i < BOOK_STATS_WEEKDAYS; ++i) {
+    merged.dayOfWeekSeconds[i] = std::max(local.dayOfWeekSeconds[i], incoming.dayOfWeekSeconds[i]);
+  }
+  return merged;
+}
 
 uint32_t maxSectionBytes(const SectionType type) {
   return type == SectionType::BookFile ? MAX_BOOK_FILE_BYTES : MAX_SECTION_BYTES;
@@ -151,7 +259,8 @@ bool encodeBookPosition(const BookPositionRecord& record, uint8_t* output, const
       (record.percentBasisPoints > 10000 && record.percentBasisPoints != UNKNOWN_PERCENT)) {
     return false;
   }
-  const size_t length = 2 + pathLength + 1 + titleLength + 2 + 1 + progressLength;
+  const size_t length =
+      2 + pathLength + 1 + titleLength + 2 + 1 + progressLength + 1 + (record.hasStats ? BOOK_STATS_WIRE_BYTES : 0);
   if (output == nullptr || capacity < length) return false;
   uint8_t* cursor = output;
   writeU16(cursor, static_cast<uint16_t>(pathLength));
@@ -163,6 +272,9 @@ bool encodeBookPosition(const BookPositionRecord& record, uint8_t* output, const
   cursor += 2;
   *cursor++ = progressLength;
   std::memcpy(cursor, record.progress.data(), progressLength);
+  cursor += progressLength;
+  *cursor++ = record.hasStats ? 1 : 0;
+  if (record.hasStats) encodeBookStats(record.stats, cursor);
   written = length;
   return true;
 }
@@ -189,10 +301,15 @@ bool decodeBookPosition(const uint8_t* data, const size_t length, BookPositionRe
   record.progressLength = *cursor++;
   if ((record.progressLength != 4 && record.progressLength != 6 && record.progressLength != 10) ||
       (record.percentBasisPoints > 10000 && record.percentBasisPoints != UNKNOWN_PERCENT) ||
-      static_cast<size_t>(end - cursor) != record.progressLength) {
+      static_cast<size_t>(end - cursor) < record.progressLength + 1U) {
     return false;
   }
   std::memcpy(record.progress.data(), cursor, record.progressLength);
+  cursor += record.progressLength;
+  const uint8_t hasStats = *cursor++;
+  if (hasStats > 1 || static_cast<size_t>(end - cursor) != (hasStats != 0 ? BOOK_STATS_WIRE_BYTES : 0)) return false;
+  record.hasStats = hasStats != 0;
+  if (record.hasStats) decodeBookStats(cursor, record.stats);
   output = record;
   return true;
 }

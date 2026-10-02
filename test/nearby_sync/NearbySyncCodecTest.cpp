@@ -113,6 +113,79 @@ void bookPositionRoundTripsAndRejectsBadInput() {
   CHECK(decoded.progressLength == 4 && decoded.percentBasisPoints == ns::UNKNOWN_PERCENT);
 }
 
+ns::BookStatsWire sampleBookStats() {
+  ns::BookStatsWire stats;
+  stats.sessionCount = 12;
+  stats.totalReadingSeconds = 18000;
+  stats.totalPagesTurned = 420;
+  stats.avgSecondsPerForwardPage = 41;
+  stats.paceSampleCount = 300;
+  stats.estimatedTimeLeftSeconds = 7200;
+  stats.startDate = {2026, 9, 1};
+  stats.timeOfDaySeconds = {100, 200, 300, 400};
+  stats.dayOfWeekSeconds = {1, 2, 3, 4, 5, 6, 7};
+  return stats;
+}
+
+void bookStatsTravelWithThePosition() {
+  ns::BookPositionRecord record;
+  setText(record.path, "/Books/Rosa.epub");
+  setText(record.title, "Rosa");
+  record.progressLength = 10;
+  record.hasStats = true;
+  record.stats = sampleBookStats();
+  record.stats.finishedDate = {2026, 10, 2};
+  record.stats.finishedDateManual = true;
+  record.stats.isCompleted = true;
+  std::array<uint8_t, ns::MAX_BOOK_RECORD_BYTES> bytes{};
+  size_t written = 0;
+  CHECK(ns::encodeBookPosition(record, bytes.data(), bytes.size(), written));
+  ns::BookPositionRecord decoded;
+  CHECK(ns::decodeBookPosition(bytes.data(), written, decoded));
+  CHECK(decoded == record);
+  CHECK(!ns::decodeBookPosition(bytes.data(), written - 1, decoded));
+}
+
+void mergingBookStatsNeverDoubleCounts() {
+  ns::BookStatsWire sender = sampleBookStats();
+  ns::BookStatsWire receiver;
+  receiver.sessionCount = 3;
+  receiver.totalReadingSeconds = 20000;  // read longer here, fewer sessions
+  receiver.totalPagesTurned = 100;
+  receiver.avgSecondsPerForwardPage = 55;
+  receiver.paceSampleCount = 50;
+  receiver.estimatedTimeLeftSeconds = 9999;
+  receiver.startDate = {2026, 8, 15};
+  receiver.timeOfDaySeconds = {500, 0, 0, 0};
+
+  const ns::BookStatsWire merged = ns::mergeBookStats(receiver, sender);
+  CHECK(merged.sessionCount == 12);
+  CHECK(merged.totalReadingSeconds == 20000);
+  CHECK(merged.totalPagesTurned == 420);
+  CHECK(merged.avgSecondsPerForwardPage == 41 && merged.paceSampleCount == 300);  // more samples wins
+  CHECK(merged.estimatedTimeLeftSeconds == 7200);                                  // follows the sender
+  CHECK((merged.startDate == ns::WireDate{2026, 8, 15}));                          // earlier start
+  CHECK((merged.timeOfDaySeconds == std::array<uint32_t, 4>{500, 200, 300, 400}));
+  CHECK(!merged.isCompleted && !merged.finishedDate.valid());
+  // Idempotent: syncing the same stats again changes nothing.
+  CHECK(ns::mergeBookStats(merged, sender) == merged);
+  // Nothing locally yet: the receiver just takes the sender's stats.
+  CHECK(ns::mergeBookStats(ns::BookStatsWire{}, sender) == sender);
+
+  // A manual date beats an automatic one either way round; completion sticks.
+  ns::BookStatsWire manual = sender;
+  manual.startDate = {2026, 9, 20};
+  manual.startDateManual = true;
+  manual.isCompleted = true;
+  manual.finishedDate = {2026, 9, 30};
+  ns::BookStatsWire automatic = receiver;
+  automatic.finishedDate = {2026, 10, 1};
+  const ns::BookStatsWire combined = ns::mergeBookStats(automatic, manual);
+  CHECK((combined.startDate == ns::WireDate{2026, 9, 20}) && combined.startDateManual);
+  CHECK(combined.isCompleted);
+  CHECK((combined.finishedDate == ns::WireDate{2026, 10, 1}));  // later of two automatic dates
+}
+
 void statsPayloadRuleMatchesStatsSync() {
   std::array<uint8_t, 159> stats{};
   stats[0] = 3;
@@ -213,6 +286,8 @@ int main() {
   crcMatchesStandardCrc32();
   tableRoundTripsAndLocatesSections();
   bookPositionRoundTripsAndRejectsBadInput();
+  bookStatsTravelWithThePosition();
+  mergingBookStatsNeverDoubleCounts();
   statsPayloadRuleMatchesStatsSync();
   offerRoundTripsWithAnyCombinationOfSections();
   resultCarriesTheReceiversStats();
