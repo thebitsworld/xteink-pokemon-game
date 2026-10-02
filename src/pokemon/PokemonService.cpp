@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <limits>
 
+#include "PokemonSaveTransfer.h"
+
 #if !defined(POKEMON_SERVICE_HOST_TEST)
 #include <Arduino.h>
 #endif
@@ -1586,6 +1588,9 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
 
 #if !defined(POKEMON_SERVICE_HOST_TEST)
 PokemonService& devicePokemonService() {
+  // Must run before any store below first reads its files: finishes a nearby
+  // save transfer that was committed but cut off before it was installed.
+  [[maybe_unused]] static const bool transferRecovered = save_transfer::applyPendingSaveTransfer();
   static PokemonStore store;
   static PokemonBattleStore battleStore;
   static PokemonIvEvStore ivEvStore;

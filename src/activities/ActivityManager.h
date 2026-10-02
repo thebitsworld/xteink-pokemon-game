@@ -150,6 +150,10 @@ class ActivityManager {
   void goToNearbyStatsSync();
   bool goToNearbyBookSend(std::string path, bool returnToReader);
   void goToNearbyBookReceive();
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // sendSave: true sends this device's Pokemon save, false waits for one.
+  void goToPokemonSaveTransfer(bool sendSave);
+#endif
   void goToSettings(bool dismissOnUpSwipe = false);
   void goToFileBrowser(std::string path = {});
   void goToSlideshow();
