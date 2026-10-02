@@ -66,6 +66,7 @@ bool ContainerSource::open(const std::array<uint8_t, MAC_BYTES>& senderMac) {
       section.crc32 = crc32Of(memory_.data() + source.memoryOffset, source.memorySize);
       continue;
     }
+    if (source.stream->digest(section.size, section.crc32)) continue;
     if (!source.stream->restart()) return false;
     uint32_t crc = CRC_INITIAL;
     uint64_t size = 0;
@@ -75,7 +76,7 @@ bool ContainerSource::open(const std::array<uint8_t, MAC_BYTES>& senderMac) {
       if (count == 0) break;
       crc = crc32Update(crc, copyBuffer(), static_cast<size_t>(count));
       size += static_cast<size_t>(count);
-      if (size > MAX_SECTION_BYTES) return false;
+      if (size > maxSectionBytes(source.type)) return false;
     }
     section.size = static_cast<uint32_t>(size);
     section.crc32 = crc ^ CRC_INITIAL;
@@ -196,6 +197,73 @@ bool readSection(const ContainerHeader& header, const size_t index, uint8_t* out
 }
 
 void discardReceived() { removeIfPresent(RECEIVE_PATH); }
+
+bool installSectionAsFile(const ContainerHeader& header, const size_t index, const std::string& destination) {
+  if (destination.empty() || destination[0] != '/' || Storage.exists(destination.c_str())) return false;
+  const size_t slash = destination.find_last_of('/');
+  const std::string folder = slash == 0 ? "/" : destination.substr(0, slash);
+  const std::string temp =
+      (folder == "/" ? std::string("/.") : folder + "/.") + destination.substr(slash + 1) + ".crossink-part";
+  if (folder != "/" && !Storage.ensureDirectoryExists(folder.c_str())) return false;
+  if (!extractSection(header, index, temp.c_str())) return false;
+  if (!Storage.rename(temp.c_str(), destination.c_str())) {
+    removeIfPresent(temp.c_str());
+    LOG_ERR(LOG_TAG, "Failed to install %s", destination.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool FileSectionStream::open(const char* path, const uint32_t maxBytes) {
+  path_ = path;
+  measured_ = false;
+  file_.close();
+  HalFile file = Storage.open(path, O_RDONLY);
+  if (!file) return false;
+  const uint64_t size = file.fileSize64();
+  if (size == 0 || size > maxBytes) {
+    file.close();
+    return false;
+  }
+  uint32_t crc = CRC_INITIAL;
+  uint64_t remaining = size;
+  while (remaining > 0) {
+    const size_t chunk = static_cast<size_t>(std::min<uint64_t>(remaining, COPY_CHUNK_BYTES));
+    if (file.read(copyBuffer(), chunk) != static_cast<int>(chunk)) {
+      file.close();
+      return false;
+    }
+    crc = crc32Update(crc, copyBuffer(), chunk);
+    remaining -= chunk;
+  }
+  file.close();
+  size_ = static_cast<uint32_t>(size);
+  crc_ = crc ^ CRC_INITIAL;
+  measured_ = true;
+  return true;
+}
+
+bool FileSectionStream::restart() {
+  file_.close();
+  if (!measured_) return false;
+  file_ = Storage.open(path_.c_str(), O_RDONLY);
+  // A file that changed size since it was checksummed would not match the table.
+  return static_cast<bool>(file_) && file_.fileSize64() == size_;
+}
+
+int FileSectionStream::read(uint8_t* output, const size_t capacity) {
+  if (!file_) return -1;
+  const int count = file_.read(output, capacity);
+  if (count == 0) file_.close();
+  return count;
+}
+
+bool FileSectionStream::digest(uint32_t& size, uint32_t& crc) const {
+  if (!measured_) return false;
+  size = size_;
+  crc = crc_;
+  return true;
+}
 
 bool writeFileAtomic(const char* path, const uint8_t* data, const size_t size, const char* tempPath) {
   const std::string temp = tempPath != nullptr ? std::string(tempPath) : std::string(path) + ".tmp";

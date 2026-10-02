@@ -47,6 +47,7 @@ class NearbySyncActivity final : public Activity {
  private:
   enum class State : uint8_t {
     ChooseRole,
+    Preparing,
     ChooseSendMode,
     Discovering,
     DeviceList,
@@ -73,6 +74,9 @@ class NearbySyncActivity final : public Activity {
   static constexpr uint32_t DISCOVERY_INTERVAL_MS = 900;
   static constexpr uint32_t RETRY_INTERVAL_MS = 450;
   static constexpr uint8_t MAX_RETRIES = 12;
+  // After the last chunk the receiver re-reads and checks the whole container
+  // (seconds for a multi-megabyte book) before it answers.
+  static constexpr uint16_t MAX_RESULT_RETRIES = 240;
   static constexpr uint8_t MAX_APPROVAL_RETRIES = 60;
   static constexpr uint32_t RECEIVE_TIMEOUT_MS = 15000;
   static constexpr uint32_t UI_REFRESH_MS = 1800;
@@ -101,6 +105,9 @@ class NearbySyncActivity final : public Activity {
   bool hasStats_ = false;
   bool hasBook_ = false;
   nearby_sync::BookPositionRecord book_{};
+  // The book EPUB itself, sent only if the receiver asks for it.
+  nearby_sync::FileSectionStream bookFile_;
+  bool bookFileAdded_ = false;
 
   HalFile receiveFile_;
   std::array<uint8_t, freeink::nearby::V2_CHUNK_BYTES> chunkBuffer_{};
@@ -111,10 +118,13 @@ class NearbySyncActivity final : public Activity {
   uint32_t sessionId_ = 0;
   uint32_t lastActionMs_ = 0;
   uint32_t lastUiMs_ = 0;
-  uint8_t retryCount_ = 0;
+  uint16_t retryCount_ = 0;
 
   // Receiver.
   bool receiverHasPokemonSave_ = false;
+  bool wantsBookFile_ = false;
+  uint64_t expectedTotal_ = 0;
+  Outcome bookFileOutcome_ = Outcome::None;
   std::array<uint8_t, nearby_sync::RESULT_MAX_BYTES> resultBuffer_{};
   size_t resultLength_ = 0;
   Outcome pokemonOutcome_ = Outcome::None;
@@ -140,6 +150,7 @@ class NearbySyncActivity final : public Activity {
   // Receiver application.
   bool applyReceivedContainer();
   void applyStatsSection(const nearby_sync::ContainerHeader& header);
+  void applyBookFileSection(const nearby_sync::ContainerHeader& header);
   void applyBookSection(const nearby_sync::ContainerHeader& header);
   bool stagePokemonSection(const nearby_sync::ContainerHeader& header);
   void buildResult(bool ok);
@@ -158,6 +169,8 @@ class NearbySyncActivity final : public Activity {
   bool sendDiscovery();
   bool sendAdvertisement(const uint8_t* destination);
   bool sendOffer();
+  bool sendAccept();
+  void beginSend();
   void acceptOffer();
   void rejectOffer();
   bool sendNextChunk();

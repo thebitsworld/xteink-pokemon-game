@@ -170,6 +170,49 @@ void atomicWriteKeepsTheOldFileOnFailure() {
   CHECK(get("/p.bin") == pattern(10, 2));
 }
 
+void bookFileTravelsAndInstallsNextToNothing() {
+  Storage.clear();
+  const Bytes epub = pattern(70000, 3);
+  put("/Books/Rosa.epub", epub);
+  ns::FileSectionStream book;
+  CHECK(!book.open("/missing.epub", ns::MAX_BOOK_FILE_BYTES));
+  CHECK(!book.open("/Books/Rosa.epub", 1000));  // over the limit
+  CHECK(book.open("/Books/Rosa.epub", ns::MAX_BOOK_FILE_BYTES));
+  CHECK(book.size() == epub.size());
+  uint32_t size = 0;
+  uint32_t crc = 0;
+  CHECK(book.digest(size, crc) && size == epub.size() && crc == ns::crc32Of(epub.data(), epub.size()));
+
+  const Bytes stats = statsV3();
+  ns::ContainerSource source;
+  CHECK(source.addMemorySection(ns::SectionType::ReadingStats, stats.data(), stats.size()));
+  CHECK(source.addStreamSection(ns::SectionType::BookFile, book));
+  CHECK(source.open({1, 2, 3, 4, 5, 6}));
+  const Bytes container = stream(source);
+  CHECK(container.size() == source.totalBytes());
+
+  // Receiving reader: no copy of the book yet.
+  Storage.clear();
+  put(ns::RECEIVE_PATH, container);
+  ns::ContainerHeader header;
+  CHECK(ns::verifyReceived(header) == ns::VerifyResult::Ok);
+  const size_t index = static_cast<size_t>(header.find(ns::SectionType::BookFile));
+  CHECK(ns::installSectionAsFile(header, index, "/Received/Rosa.epub"));
+  CHECK(get("/Received/Rosa.epub") == epub);
+  CHECK(!Storage.exists("/Received/.Rosa.epub.crossink-part"));
+  // Never overwrites a book that is already there.
+  CHECK(!ns::installSectionAsFile(header, index, "/Received/Rosa.epub"));
+  CHECK(ns::installSectionAsFile(header, index, "/Rosa.epub"));
+  CHECK(get("/Rosa.epub") == epub);
+
+  // The sender's file changing after it was checksummed is refused, not sent.
+  Storage.clear();
+  put("/Books/Rosa.epub", epub);
+  CHECK(book.open("/Books/Rosa.epub", ns::MAX_BOOK_FILE_BYTES));
+  put("/Books/Rosa.epub", pattern(100, 1));
+  CHECK(!book.restart());
+}
+
 }  // namespace
 
 int main() {
@@ -177,6 +220,7 @@ int main() {
   corruptOrTruncatedContainersAreRejected();
   peerStatsLandInSyncedStatsAtomically();
   atomicWriteKeepsTheOldFileOnFailure();
+  bookFileTravelsAndInstallsNextToNothing();
   if (failures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

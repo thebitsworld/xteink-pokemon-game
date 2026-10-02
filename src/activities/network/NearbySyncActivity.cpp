@@ -174,7 +174,7 @@ void NearbySyncActivity::onEnter() {
   if (role_ == Role::Ask) {
     setState(State::ChooseRole);
   } else if (role_ == Role::Send) {
-    if (prepareSend()) setState(State::ChooseSendMode);
+    beginSend();
   } else {
     startListening();
   }
@@ -266,7 +266,18 @@ bool NearbySyncActivity::prepareBookSection() {
   }
   offer_.bookTitle = book_.title;
   offer_.bookPercentBasisPoints = book_.percentBasisPoints;
+  offer_.bookPath = book_.path;
+  // Checksummed now (the "Preparing" screen), so the file can be added
+  // instantly if the receiver turns out not to have it.
+  offer_.bookFileBytes = bookFile_.open(path.c_str(), ns::MAX_BOOK_FILE_BYTES) ? bookFile_.size() : 0;
   return true;
+}
+
+// Checksumming a book takes a moment on a big EPUB: say so first.
+void NearbySyncActivity::beginSend() {
+  setState(State::Preparing);
+  if (requestUpdateAndWait() != RequestUpdateResult::Rendered) requestUpdate(true);
+  if (prepareSend()) setState(State::ChooseSendMode);
 }
 
 bool NearbySyncActivity::prepareSend() {
@@ -423,15 +434,29 @@ void NearbySyncActivity::handleSenderPacket(const nearby::EspNowTransport::Event
     return;
   }
   if (!sameMac(peerMac_, event.sourceMac.data())) return;
-  if (packet.type == nearby::PacketType::Accept && state_ == State::WaitingForApproval && packet.payloadLength == 2) {
+  if (packet.type == nearby::PacketType::Accept && state_ == State::WaitingForApproval &&
+      (packet.payloadLength == 2 || packet.payloadLength == 3)) {
     negotiatedChunkBytes_ =
         std::clamp<uint16_t>(nearby::readU16(packet.payload), nearby::COMPAT_CHUNK_BYTES, nearby::V2_CHUNK_BYTES);
+    const bool wantsBook = packet.payloadLength == 3 && (packet.payload[2] & ns::ACCEPT_WANTS_BOOK_FILE) != 0;
+    uint64_t expected = offer_.totalBytes;
+    if (wantsBook) {
+      // The receiver has no copy of the book: add the file itself.
+      if (offer_.bookFileBytes == 0 ||
+          (!bookFileAdded_ && !source_.addStreamSection(ns::SectionType::BookFile, bookFile_))) {
+        setError(tr(STR_NEARBY_TRANSFER_SOURCE_FAILED));
+        return;
+      }
+      bookFileAdded_ = true;
+      expected = ns::totalWithBookFile(offer_);
+    }
     // Rewind (and re-checksum: the Pokemon section streams from SD files).
-    if (!source_.open(localMac_) || source_.totalBytes() != offer_.totalBytes) {
+    if (!source_.open(localMac_) || source_.totalBytes() != expected) {
       setError(tr(STR_NEARBY_TRANSFER_SOURCE_FAILED));
       return;
     }
-    session_.begin(nearby::ReliableTransferSession::Role::Sender, sessionId_, offer_.totalBytes, negotiatedChunkBytes_);
+    session_.begin(nearby::ReliableTransferSession::Role::Sender, sessionId_, source_.totalBytes(),
+                   negotiatedChunkBytes_);
     retryCount_ = 0;
     setState(State::Sending);
     sendNextChunk();
@@ -506,14 +531,14 @@ void NearbySyncActivity::handleReceiverPacket(const nearby::EspNowTransport::Eve
       setError(refusal);
       return;
     }
+    wantsBookFile_ = offer.has(ns::OFFER_HAS_BOOK) && offer.bookFileBytes > 0 && locateBook(offer.bookPath.data()).empty();
+    expectedTotal_ = wantsBookFile_ ? ns::totalWithBookFile(offer) : offer.totalBytes;
     setState(State::OfferPrompt);
     return;
   }
   if (packet.sessionId != sessionId_ || !sameMac(peerMac_, event.sourceMac.data())) return;
   if (packet.type == nearby::PacketType::Offer && state_ == State::Receiving) {
-    uint8_t payload[2];  // our Accept was lost: repeat it
-    nearby::writeU16(payload, negotiatedChunkBytes_);
-    sendPacket(nearby::PacketType::Accept, peerMac_.data(), 0, payload, sizeof(payload));
+    sendAccept();  // our Accept was lost: repeat it
     return;
   }
   if (packet.type == nearby::PacketType::Data && state_ == State::Receiving) {
@@ -543,6 +568,8 @@ void NearbySyncActivity::handleReceiverPacket(const nearby::EspNowTransport::Eve
       return;
     }
     if (state_ != State::Receiving) return;
+    setState(State::Installing);
+    if (requestUpdateAndWait() != RequestUpdateResult::Rendered) requestUpdate(true);
     if (!finishReceived(nearby::readU64(packet.payload), nearby::readU32(packet.payload + 8))) {
       const uint8_t failed = ns::RESULT_FAILED;
       sendPacket(nearby::PacketType::Result, peerMac_.data(), 0, &failed, 1);
@@ -553,8 +580,6 @@ void NearbySyncActivity::handleReceiverPacket(const nearby::EspNowTransport::Eve
                static_cast<uint16_t>(resultLength_));
 #if defined(CROSSINK_ENABLE_POKEMON)
     if (pokemonOutcome_ == Outcome::Applied) {
-      setState(State::Installing);
-      if (requestUpdateAndWait() != RequestUpdateResult::Rendered) requestUpdate(true);
       // Already committed: anything left over finishes on the next boot.
       installPending_ = !st::applyPendingSaveTransfer();
     }
@@ -574,8 +599,10 @@ void NearbySyncActivity::acceptOffer() {
   total = Storage.totalBytes();
   used = Storage.usedBytes();
 #endif
-  // The container, the Pokemon bundle extracted from it, and the installed save.
-  if (total > 0 && used <= total && 3ULL * offer_.totalBytes > total - used) {
+  // The container, plus a second copy of each part once it is extracted from
+  // it (the Pokemon bundle is also installed: a third copy).
+  const uint64_t needed = 3ULL * offer_.totalBytes + (wantsBookFile_ ? 2ULL * offer_.bookFileBytes : 0);
+  if (total > 0 && used <= total && needed > total - used) {
     const uint8_t reason = REJECT_STORAGE;
     sendPacket(nearby::PacketType::Reject, peerMac_.data(), 0, &reason, 1);
     setError(tr(STR_NEARBY_TRANSFER_NO_SPACE));
@@ -587,19 +614,24 @@ void NearbySyncActivity::acceptOffer() {
     setError(tr(STR_NEARBY_TRANSFER_WRITE_FAILED));
     return;
   }
-  session_.begin(nearby::ReliableTransferSession::Role::Receiver, sessionId_, offer_.totalBytes, negotiatedChunkBytes_);
+  session_.begin(nearby::ReliableTransferSession::Role::Receiver, sessionId_, expectedTotal_, negotiatedChunkBytes_);
   retryCount_ = 0;
   setState(State::Receiving);
   // Draw the progress screen before data arrives: a full e-ink refresh in the
   // middle of the transfer would stall the loop long enough for retries.
   if (requestUpdateAndWait() != RequestUpdateResult::Rendered) requestUpdate(true);
-  uint8_t payload[2];
-  nearby::writeU16(payload, negotiatedChunkBytes_);
-  if (!sendPacket(nearby::PacketType::Accept, peerMac_.data(), 0, payload, sizeof(payload))) {
+  if (!sendAccept()) {
     setError(tr(STR_NEARBY_TRANSFER_RADIO_FAILED));
     return;
   }
   lastActionMs_ = millis();
+}
+
+bool NearbySyncActivity::sendAccept() {
+  uint8_t payload[3];
+  nearby::writeU16(payload, negotiatedChunkBytes_);
+  payload[2] = wantsBookFile_ ? ns::ACCEPT_WANTS_BOOK_FILE : 0;
+  return sendPacket(nearby::PacketType::Accept, peerMac_.data(), 0, payload, sizeof(payload));
 }
 
 void NearbySyncActivity::rejectOffer() {
@@ -687,6 +719,7 @@ bool NearbySyncActivity::applyReceivedContainer() {
   }
   if (header.find(ns::SectionType::PokemonSave) >= 0 && !stagePokemonSection(header)) return false;
   applyStatsSection(header);
+  applyBookFileSection(header);  // before the position, which needs the book in place
   applyBookSection(header);
   return true;
 }
@@ -723,6 +756,17 @@ void NearbySyncActivity::applyStatsSection(const ns::ContainerHeader& header) {
   const bool ok = ns::readSection(header, static_cast<size_t>(index), stats.data(), stats.size(), length) &&
                   header.senderMac != localMac_ && ns::storePeerStats(header.senderMac, stats.data(), length);
   statsOutcome_ = ok ? Outcome::Applied : Outcome::Failed;
+}
+
+// The book, sent because this reader had no copy: saved where Receive File
+// saves books, under the sender's file name.
+void NearbySyncActivity::applyBookFileSection(const ns::ContainerHeader& header) {
+  const int index = header.find(ns::SectionType::BookFile);
+  if (index < 0) return;
+  const std::string destination = joinPath(SETTINGS.nearbyReceiveFolder, ns::baseName(offer_.bookPath.data()));
+  const bool ok = Storage.exists(destination.c_str()) ||
+                  ns::installSectionAsFile(header, static_cast<size_t>(index), destination);
+  bookFileOutcome_ = ok ? Outcome::Applied : Outcome::Failed;
 }
 
 void NearbySyncActivity::applyBookSection(const ns::ContainerHeader& header) {
@@ -862,7 +906,7 @@ void NearbySyncActivity::updateTimers() {
     return;
   }
   if (state_ != State::Sending || now - lastActionMs_ < RETRY_INTERVAL_MS) return;
-  if (++retryCount_ > MAX_RETRIES) {
+  if (++retryCount_ > (pendingChunkLength_ > 0 ? MAX_RETRIES : MAX_RESULT_RETRIES)) {
     setError(tr(STR_NEARBY_TRANSFER_TIMEOUT));
     return;
   }
@@ -913,7 +957,7 @@ void NearbySyncActivity::activateSelected() {
     case State::ChooseRole:
       if (selectedIndex_ == 0) {
         role_ = Role::Send;
-        if (prepareSend()) setState(State::ChooseSendMode);
+        beginSend();
       } else {
         role_ = Role::Receive;
         startListening();
@@ -1148,7 +1192,19 @@ void NearbySyncActivity::render(RenderLock&&) {
       note(tr(STR_NEARBY_SYNC_ITEM_STATS), y);
       y += lineHeight + 12;
     }
-    if (offer_.has(ns::OFFER_HAS_BOOK)) note(bookLine(), y);
+    if (offer_.has(ns::OFFER_HAS_BOOK)) {
+      note(bookLine(), y);
+      if (wantsBookFile_) {
+        char size[24];
+        const uint32_t tenthsOfMb = (offer_.bookFileBytes * 10ULL + 512ULL * 1024ULL) / (1024ULL * 1024ULL);
+        snprintf(size, sizeof(size), "%u.%u MB", static_cast<unsigned>(tenthsOfMb / 10),
+                 static_cast<unsigned>(tenthsOfMb % 10));
+        snprintf(line, sizeof(line), tr(STR_NEARBY_SYNC_BOOK_WILL_COPY), size);
+        note(line, y + 2 * lineHeight, 3);
+      }
+    }
+  } else if (state_ == State::Preparing) {
+    heading(tr(STR_NEARBY_SYNC_PREPARING), height / 2);
   } else if (state_ == State::Sending || state_ == State::Receiving) {
     heading(state_ == State::Sending ? tr(STR_NEARBY_SYNC_SENDING) : tr(STR_NEARBY_SYNC_RECEIVING), height / 2 - 45);
     GUI.drawProgressBar(renderer,
@@ -1172,6 +1228,11 @@ void NearbySyncActivity::render(RenderLock&&) {
         note(statsOutcome_ == Outcome::Applied ? tr(STR_NEARBY_SYNC_STATS_DONE) : tr(STR_NEARBY_SYNC_STATS_FAILED), y);
         y += 2 * lineHeight;
       }
+      if (bookFileOutcome_ != Outcome::None) {
+        note(bookFileOutcome_ == Outcome::Applied ? tr(STR_NEARBY_SYNC_BOOK_COPIED) : tr(STR_NEARBY_SYNC_BOOK_COPY_FAILED),
+             y);
+        y += 2 * lineHeight;
+      }
       if (bookOutcome_ == Outcome::Applied) {
         note(tr(STR_NEARBY_SYNC_BOOK_DONE), y);
         y += lineHeight + 6;
@@ -1193,7 +1254,10 @@ void NearbySyncActivity::render(RenderLock&&) {
         note(statsOutcome_ == Outcome::Applied ? tr(STR_NEARBY_SYNC_STATS_DONE) : tr(STR_NEARBY_SYNC_STATS_FAILED), y);
         y += 2 * lineHeight;
       }
-      if (hasBook_) note(bookLine(), y);
+      if (hasBook_) {
+        note(bookLine(), y);
+        if (bookFileAdded_) note(tr(STR_NEARBY_SYNC_BOOK_SENT), y + 2 * lineHeight);
+      }
     }
   } else if (state_ == State::Error) {
     heading(tr(STR_NEARBY_TRANSFER_FAILED), height / 2);

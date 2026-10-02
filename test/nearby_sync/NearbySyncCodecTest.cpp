@@ -67,6 +67,19 @@ void tableRoundTripsAndLocatesSections() {
   CHECK(!ns::encodeContainerTable(duplicate, bytes.data(), bytes.size(), written));
   ns::ContainerHeader empty;
   CHECK(!ns::encodeContainerTable(empty, bytes.data(), bytes.size(), written));
+
+  // Only the book file may be bigger than the ordinary section limit.
+  ns::ContainerHeader withBook = header;
+  withBook.sections[3] = {ns::SectionType::BookFile, 20U * 1024U * 1024U, 0xAAAA0004U};
+  withBook.sectionCount = 4;
+  CHECK(ns::encodeContainerTable(withBook, bytes.data(), bytes.size(), written));
+  CHECK(ns::decodeContainerTable(bytes.data(), written, decoded) == ns::ParseResult::Ok);
+  CHECK(decoded.find(ns::SectionType::BookFile) == 3);
+  ns::ContainerHeader bigStats = header;
+  bigStats.sections[0].size = ns::MAX_SECTION_BYTES + 1;
+  CHECK(!ns::encodeContainerTable(bigStats, bytes.data(), bytes.size(), written));
+  withBook.sections[3].size = ns::MAX_BOOK_FILE_BYTES + 1;
+  CHECK(!ns::encodeContainerTable(withBook, bytes.data(), bytes.size(), written));
 }
 
 void bookPositionRoundTripsAndRejectsBadInput() {
@@ -127,6 +140,8 @@ void offerRoundTripsWithAnyCombinationOfSections() {
   setText(full.pokemon.leaderName, "Fiammetta");
   setText(full.bookTitle, "Il nome della rosa");
   full.bookPercentBasisPoints = 4237;
+  setText(full.bookPath, "/Books/Il nome della rosa.epub");
+  full.bookFileBytes = 3 * 1024 * 1024;
   setText(full.senderName, "X3 di Davide");
 
   std::array<uint8_t, ns::OFFER_MAX_BYTES> bytes{};
@@ -138,6 +153,16 @@ void offerRoundTripsWithAnyCombinationOfSections() {
   CHECK(decoded == full);
   CHECK(!ns::decodeOffer(bytes.data(), written - 1, decoded));
   CHECK(!ns::decodeOffer(bytes.data(), written + 1, decoded));
+  CHECK(ns::decodeOffer(bytes.data(), written, decoded));
+  CHECK(ns::totalWithBookFile(decoded) == 123456ULL + ns::SECTION_ENTRY_BYTES + 3 * 1024 * 1024);
+
+  // A book offer needs an absolute path, and a file within the book limit.
+  ns::Offer relativeBook = full;
+  setText(relativeBook.bookPath, "Books/x.epub");
+  CHECK(!ns::encodeOffer(relativeBook, bytes.data(), bytes.size(), written));
+  ns::Offer hugeBook = full;
+  hugeBook.bookFileBytes = ns::MAX_BOOK_FILE_BYTES + 1;
+  CHECK(!ns::encodeOffer(hugeBook, bytes.data(), bytes.size(), written));
 
   // Stats only: the Pokemon/book fields are not on the wire at all.
   ns::Offer statsOnly;

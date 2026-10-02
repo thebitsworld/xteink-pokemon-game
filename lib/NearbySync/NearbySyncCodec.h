@@ -21,16 +21,23 @@ constexpr uint8_t CONTAINER_VERSION = 1;
 constexpr size_t HEADER_BYTES = 16;
 constexpr size_t SECTION_ENTRY_BYTES = 12;
 constexpr size_t TABLE_CRC_BYTES = 4;
-constexpr size_t MAX_SECTIONS = 3;
+constexpr size_t MAX_SECTIONS = 4;
 constexpr size_t MAX_TABLE_BYTES = HEADER_BYTES + MAX_SECTIONS * SECTION_ENTRY_BYTES + TABLE_CRC_BYTES;
 constexpr size_t MAC_BYTES = 6;
 constexpr uint32_t MAX_SECTION_BYTES = 2U * 1024U * 1024U;
+// The book file itself may be much bigger than any other section.
+constexpr uint32_t MAX_BOOK_FILE_BYTES = 64U * 1024U * 1024U;
+constexpr uint32_t MAX_CONTAINER_BYTES = 3U * MAX_SECTION_BYTES + MAX_BOOK_FILE_BYTES + 256U;
 
 enum class SectionType : uint8_t {
   PokemonSave = 1,   // a Pokemon save bundle (PokemonSaveBundleCodec.h), byte for byte
   ReadingStats = 2,  // the sender's /.crosspoint/global_stats.bin
   BookPosition = 3,  // BookPositionRecord, see below
+  BookFile = 4,      // the EPUB itself, only when the receiver asked for it (it had no copy)
 };
+
+// Largest size a section of `type` may declare.
+uint32_t maxSectionBytes(SectionType type);
 
 struct Section {
   SectionType type = SectionType::ReadingStats;
@@ -139,6 +146,10 @@ struct Offer {
   PokemonOfferSummary pokemon{};
   std::array<char, MAX_BOOK_TITLE_BYTES + 1> bookTitle{};
   uint16_t bookPercentBasisPoints = UNKNOWN_PERCENT;
+  // The sender's path to the book, so the receiver can tell whether it already
+  // has it, and the file's size (0 = the sender cannot send the file itself).
+  std::array<char, MAX_BOOK_PATH_BYTES + 1> bookPath{};
+  uint32_t bookFileBytes = 0;
   std::array<char, NAME_BYTES> senderName{};
 
   bool has(const uint8_t flag) const { return (flags & flag) != 0; }
@@ -146,9 +157,18 @@ struct Offer {
 };
 
 constexpr size_t OFFER_MAX_BYTES = 4 + 4 + 2 + 1 + 1 + 2 + 4 + 2 + 1 + 1 + 1 + 2 + 1 + (NAME_BYTES - 1) + 1 +
-                                   MAX_BOOK_TITLE_BYTES + 2 + 1 + (NAME_BYTES - 1);
+                                   MAX_BOOK_TITLE_BYTES + 2 + 1 + MAX_BOOK_PATH_BYTES + 4 + 1 + (NAME_BYTES - 1);
 
 bool encodeOffer(const Offer& offer, uint8_t* output, size_t capacity, size_t& written);
+// Container size once a BookFile section of `bookFileBytes` is added to an
+// offer's container (one more table entry plus the file).
+inline uint64_t totalWithBookFile(const Offer& offer) {
+  return static_cast<uint64_t>(offer.totalBytes) + SECTION_ENTRY_BYTES + offer.bookFileBytes;
+}
+
+// The receiver's Accept: chunkBytes(2) + flags(1). ACCEPT_WANTS_BOOK_FILE asks
+// the sender to add the book file because this reader has no copy of it.
+constexpr uint8_t ACCEPT_WANTS_BOOK_FILE = 1U << 0;
 bool decodeOffer(const uint8_t* data, size_t length, Offer& output);
 
 // ---- Result ------------------------------------------------------------------

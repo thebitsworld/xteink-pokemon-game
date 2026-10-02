@@ -25,7 +25,7 @@ uint32_t readU32(const uint8_t* in) {
 }
 
 bool knownSection(const uint8_t type) {
-  return type >= static_cast<uint8_t>(SectionType::PokemonSave) && type <= static_cast<uint8_t>(SectionType::BookPosition);
+  return type >= static_cast<uint8_t>(SectionType::PokemonSave) && type <= static_cast<uint8_t>(SectionType::BookFile);
 }
 
 bool validSections(const ContainerHeader& header) {
@@ -34,7 +34,7 @@ bool validSections(const ContainerHeader& header) {
   for (size_t i = 0; i < header.sectionCount; ++i) {
     const auto type = static_cast<uint8_t>(header.sections[i].type);
     if (!knownSection(type) || (seen & (1U << type)) != 0) return false;
-    if (header.sections[i].size == 0 || header.sections[i].size > MAX_SECTION_BYTES) return false;
+    if (header.sections[i].size == 0 || header.sections[i].size > maxSectionBytes(header.sections[i].type)) return false;
     seen |= 1U << type;
   }
   return true;
@@ -60,6 +60,10 @@ bool takeShortString(const uint8_t*& cursor, const uint8_t* end, std::array<char
 }
 
 }  // namespace
+
+uint32_t maxSectionBytes(const SectionType type) {
+  return type == SectionType::BookFile ? MAX_BOOK_FILE_BYTES : MAX_SECTION_BYTES;
+}
 
 uint32_t crc32Update(uint32_t crc, const uint8_t* data, const size_t size) {
   for (size_t i = 0; i < size; ++i) {
@@ -238,6 +242,10 @@ bool encodeOffer(const Offer& offer, uint8_t* output, const size_t capacity, siz
     cursor = putShortString(cursor, offer.bookTitle.data(), MAX_BOOK_TITLE_BYTES);
     writeU16(cursor, offer.bookPercentBasisPoints);
     cursor += 2;
+    if (offer.bookPath[0] != '/' || offer.bookFileBytes > MAX_BOOK_FILE_BYTES) return false;
+    cursor = putShortString(cursor, offer.bookPath.data(), MAX_BOOK_PATH_BYTES);
+    writeU32(cursor, offer.bookFileBytes);
+    cursor += 4;
   }
   cursor = putShortString(cursor, offer.senderName.data(), NAME_BYTES - 1);
   written = static_cast<size_t>(cursor - output);
@@ -274,9 +282,13 @@ bool decodeOffer(const uint8_t* data, const size_t length, Offer& output) {
     offer.bookPercentBasisPoints = readU16(cursor);
     cursor += 2;
     if (offer.bookPercentBasisPoints > 10000 && offer.bookPercentBasisPoints != UNKNOWN_PERCENT) return false;
+    if (!takeShortString(cursor, end, offer.bookPath) || offer.bookPath[0] != '/' || end - cursor < 4) return false;
+    offer.bookFileBytes = readU32(cursor);
+    cursor += 4;
+    if (offer.bookFileBytes > MAX_BOOK_FILE_BYTES) return false;
   }
   if (!takeShortString(cursor, end, offer.senderName) || cursor != end || offer.senderName[0] == '\0') return false;
-  if (offer.totalBytes == 0 || offer.totalBytes > MAX_SECTION_BYTES * MAX_SECTIONS) return false;
+  if (offer.totalBytes == 0 || offer.totalBytes > MAX_CONTAINER_BYTES) return false;
   output = offer;
   return true;
 }

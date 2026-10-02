@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 // SD-card side of "Sync with nearby reader" (NearbySyncActivity): streams the
 // outgoing container section by section, and on the receiving side verifies
@@ -25,6 +26,32 @@ class SectionStream {
   virtual bool restart() = 0;
   // >0 bytes copied, 0 at the end, -1 on error.
   virtual int read(uint8_t* output, size_t capacity) = 0;
+  // Size and CRC-32 when already known (a multi-megabyte book is checksummed
+  // once up front instead of on every ContainerSource::open()). False means
+  // "measure me by reading".
+  virtual bool digest(uint32_t& size, uint32_t& crc) const {
+    (void)size;
+    (void)crc;
+    return false;
+  }
+};
+
+// A whole file as a section (the book EPUB).
+class FileSectionStream final : public SectionStream {
+ public:
+  // Checksums the file. False if it cannot be read or is over `maxBytes`.
+  bool open(const char* path, uint32_t maxBytes);
+  bool restart() override;
+  int read(uint8_t* output, size_t capacity) override;
+  bool digest(uint32_t& size, uint32_t& crc) const override;
+  uint32_t size() const { return size_; }
+
+ private:
+  std::string path_;
+  HalFile file_;
+  uint32_t size_ = 0;
+  uint32_t crc_ = 0;
+  bool measured_ = false;
 };
 
 class ContainerSource {
@@ -71,6 +98,10 @@ bool extractSection(const ContainerHeader& header, size_t index, const char* des
 // Reads a small section of RECEIVE_PATH into memory.
 bool readSection(const ContainerHeader& header, size_t index, uint8_t* output, size_t capacity, size_t& length);
 void discardReceived();
+// Installs section `index` of RECEIVE_PATH as a new file at `destination`
+// (via a hidden temp file next to it + rename). Refuses to overwrite an
+// existing file.
+bool installSectionAsFile(const ContainerHeader& header, size_t index, const std::string& destination);
 
 // Writes `data` to `path` through a temp file (`tempPath`, default `path`.tmp)
 // + rename, so a power cut leaves either the old file or the new one.
