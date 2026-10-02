@@ -156,6 +156,8 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Sync Stats";
   } else if (mode == NetworkMode::NEARBY_BOOK_RECEIVE) {
     modeName = "Receive File";
+  } else if (mode == NetworkMode::NEARBY_FULL_SYNC) {
+    modeName = "Sync with Nearby Reader";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
@@ -175,6 +177,10 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     activityManager.goToNearbyBookReceive();
     return;
   }
+  if (mode == NetworkMode::NEARBY_FULL_SYNC) {
+    activityManager.goToNearbySync();
+    return;
+  }
 
   if (!networkBootReady) {
     switch (mode) {
@@ -192,6 +198,7 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
         break;
       case NetworkMode::NEARBY_STATS_SYNC:
       case NetworkMode::NEARBY_BOOK_RECEIVE:
+      case NetworkMode::NEARBY_FULL_SYNC:
         break;
     }
     return;

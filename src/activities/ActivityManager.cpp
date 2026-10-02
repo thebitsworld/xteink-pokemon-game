@@ -34,9 +34,7 @@
 #include "network/CrossPointWebServerActivity.h"
 #include "network/NearbyBookTransferActivity.h"
 #include "network/NearbyStatsSyncActivity.h"
-#if defined(CROSSINK_ENABLE_POKEMON)
-#include "pokemon/PokemonSaveTransferActivity.h"
-#endif
+#include "network/NearbySyncActivity.h"
 #include "network/UsbDriveActivity.h"
 #include "reader/BookReadingStats.h"
 #include "reader/BookStatsActivity.h"
@@ -903,11 +901,21 @@ void ActivityManager::goToNearbyBookReceive() {
   replaceActivity(std::move(activity));
 }
 
+void ActivityManager::goToNearbySync() {
+  auto activity = makeUniqueNoThrow<NearbySyncActivity>(renderer, mappedInput, NearbySyncActivity::Role::Ask,
+                                                        NearbySyncActivity::Scope::Everything);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: nearby sync");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 #if defined(CROSSINK_ENABLE_POKEMON)
 void ActivityManager::goToPokemonSaveTransfer(const bool sendSave) {
-  auto activity = makeUniqueNoThrow<PokemonSaveTransferActivity>(
-      renderer, mappedInput,
-      sendSave ? PokemonSaveTransferActivity::Mode::Send : PokemonSaveTransferActivity::Mode::Receive);
+  auto activity = makeUniqueNoThrow<NearbySyncActivity>(
+      renderer, mappedInput, sendSave ? NearbySyncActivity::Role::Send : NearbySyncActivity::Role::Receive,
+      NearbySyncActivity::Scope::PokemonOnly);
   if (!activity) {
     LOG_ERR("ACT", "OOM: Pokemon save transfer");
     return;
