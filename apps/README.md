@@ -35,7 +35,7 @@ This firmware features a lightweight, sandboxed **Lua 5.4** application engine t
 ## Architecture Overview
 
 - **Engine:** Sandboxed Lua 5.4 runtime embedded within the firmware.
-- **Location on Device:** `/.crosssmudge/applications/<app_id>/` (fallback: `/.smudge/applications/<app_id>/`).
+- **Location on Device:** `/.crosspoint/apps/<app_id>/`.
 - **Dynamic Discovery:** The firmware discovers all installed applications on SD card startup and populates the **Applications** menu automatically.
 - **Zero-Flash Iteration:** Changes made to Lua scripts or assets on the SD card take effect immediately the next time the app is launched.
 
@@ -43,7 +43,7 @@ This firmware features a lightweight, sandboxed **Lua 5.4** application engine t
 
 ## Application Directory Structure
 
-Every application lives in its own subdirectory inside `apps/` (or on device in `/.crosssmudge/applications/<app_id>/`):
+Every application lives in its own subdirectory inside `apps/` (or on device in `/.crosspoint/apps/<app_id>/`):
 
 ```text
 apps/
@@ -521,11 +521,11 @@ end
 
 ### Method 2: Direct SD Card Copy / USB Drive Mode
 1. Connect your device via USB Drive mode or insert the SD card into your PC.
-2. Copy your application folder into `/.crosssmudge/applications/<app_id>/`.
+2. Copy your application folder into `/.crosspoint/apps/<app_id>/`.
 3. Eject the drive. Open **Applications** on your device to launch!
 
 ### Method 3: In the Native Simulator
-1. Place your application folder inside `apps/<app_id>/` in the repository (and mirror it to `fs_/.crosssmudge/applications/<app_id>/`).
+1. Place your application folder inside `apps/<app_id>/` in the repository (and mirror it to `fs_/.crosspoint/apps/<app_id>/`).
 2. Build and launch the simulator:
    ```bash
    pio run -e pokemon-simulator-X3

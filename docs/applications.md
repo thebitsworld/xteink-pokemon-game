@@ -25,10 +25,13 @@ scripts, and optionally an `icon.raw` icon.
 2. **Web manager:** start **File Transfer** on the reader, open its address in a browser and go to
    **Applications**. Drag an app folder or a `.zip` of it onto the page to install it; the page also
    lists installed apps, their size, and lets you delete them.
-3. **SD card:** copy the app folder into one of these folders on the SD card:
-   `/.crosspoint/applications/`, `/.crosssmudge/applications/` or `/applications/`.
+3. **SD card:** copy the app folder into `/.crosspoint/apps/` on the SD card (`.crosspoint` is a
+   hidden folder; turn on hidden files on your computer to see it). Apps in `/apps/`,
+   `/applications/` or CrossSmudge's `/.crosssmudge/applications/` are found too.
 
-The App Store and the web manager install into `/.crosssmudge/applications/`.
+Everything the apps use lives under the hidden `/.crosspoint` folder: the apps in `apps/`, their
+saved data in `apps-data/`, the list settings in `apps-settings.bin`, and the App Store cache in
+`cache/apps/`. Keeping it hidden stops the Library from listing apps' `.txt` data files as books.
 
 ## Using apps
 
