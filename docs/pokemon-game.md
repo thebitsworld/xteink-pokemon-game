@@ -165,6 +165,11 @@ and don't affect each other. Updating the firmware never touches your books or y
 Pokémon save. See [Installation](installation.md) for how saves are protected during an
 update, and where the save files live if you ever want to back them up yourself.
 
+To carry your game over to another reader, send it directly over the air with
+[Pokémon Save Transfer](pokemon-save-transfer.md) (**Pokémon > Settings**), or use
+[Sync with Nearby Reader](nearby-sync.md) (**File Transfer**) to bring your reading stats
+and the book you're reading along with it. No Wi-Fi or computer is needed.
+
 ## How this compares to the original games
 
 This is a faithful companion, not a byte-for-byte remake, and a handful of things are

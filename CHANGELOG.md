@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Added
+
+- Pokémon Save Transfer: send your whole Pokémon game (party, PC Box, Bag, Pokédex, badges, movesets, IVs/EVs, Hall of Fame) straight to another reader nearby over ESP-NOW - no Wi-Fi, internet or computer needed. Choose Copy (both readers keep it) or Move (the sender starts over). The receiver checks a summary and must accept; its previous save is kept in `/.crosspoint/pokemon-backup/`. Every file is checksummed, and the install finishes safely even after a power cut. Find it under Pokémon > Settings, or under the starter Pokémon on a reader with no game yet.
+- Sync with Nearby Reader (File Transfer menu): one sync carries the Pokémon save, exchanges reading stats both ways, and moves the position of the book you were reading - copying the EPUB too if the other reader doesn't have it, along with that book's own reading stats.
+- Both features come from the CrossLingua fork of this project (github.com/davide-tonetto-884585/xteink-pokemon-crosslingua), with translations added for every supported language.
+
 ## [1.7.0] - 2026-10-04
 
 ### Changed
