@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Changed
+
+- Smarter Gym Leaders, Elite Four and Champion. They now pick moves by the damage they would actually do (power, same-type bonus, type matchup, accuracy) and go for a knockout when one is there, instead of only looking at the type matchup - no more Growl when Tackle is the better move. Status moves are only used when they would work: no paralysing a Pokémon that is already paralysed, no Thunder Wave on a Ground type, no Dream Eater on an awake target, no Explosion while still healthy. Early Gym Leaders still make mistakes now and then; the Elite Four and the Champion almost never do. Wild Pokémon fight as before.
+- Trainers heal when your next attack would knock their Pokémon out (and not when it would be knocked out even at full HP), and decide whether to switch from the moves your Pokémon actually has rather than its type.
+
+### Fixed
+
+- A Pokémon a trainer withdrew came back later at full HP. It now comes back with the HP, PP and status it left with.
+
 ## [1.8.0-rc.1] - 2026-10-05
 
 ### Added
