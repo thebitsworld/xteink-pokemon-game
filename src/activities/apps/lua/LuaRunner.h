@@ -44,6 +44,14 @@ class LuaRunner {
   bool hasError() const { return hasError_; }
   const std::string& getErrorMessage() const { return errorMessage_; }
 
+  // Memory figures for the apps memory log (AppMemoryLog).
+  size_t luaHeapLimitBytes() const { return maxLuaHeapBytes_; }
+  size_t luaPeakBytes() const { return peakAllocatedBytes_; }
+  // Lowest system free heap seen by an allocation; 0 where it is not measured
+  // (simulator, PSRAM boards).
+  uint32_t minFreeHeapBytes() const { return minFreeHeap_; }
+  uint32_t refusedAllocations() const { return refusedAllocations_; }
+
  private:
   GfxRenderer& renderer_;
   MappedInputManager& input_;
@@ -60,6 +68,9 @@ class LuaRunner {
   // Memory sandbox tracking
   size_t currentAllocatedBytes_ = 0;
   size_t maxLuaHeapBytes_ = 0;
+  size_t peakAllocatedBytes_ = 0;
+  uint32_t minFreeHeap_ = 0;
+  uint32_t refusedAllocations_ = 0;
 
   static void* customLuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize);
 

@@ -97,11 +97,14 @@ void* LuaRunner::customLuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize)
   // an internal emergency GC safely (gcemergency=1) if this allocator returns nullptr.
   constexpr size_t kMinSystemSafetyBytes = 3 * 1024;
   uint32_t freeH = ESP.getFreeHeap();
+  if (self->minFreeHeap_ == 0 || freeH < self->minFreeHeap_) self->minFreeHeap_ = freeH;
   if (freeH < kMinSystemSafetyBytes + addedBytes || self->currentAllocatedBytes_ + addedBytes > self->maxLuaHeapBytes_) {
+    self->refusedAllocations_++;
     return nullptr;
   }
 #else
   if (self->currentAllocatedBytes_ + addedBytes > self->maxLuaHeapBytes_) {
+    self->refusedAllocations_++;
     return nullptr;
   }
 #endif
@@ -115,6 +118,7 @@ void* LuaRunner::customLuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize)
     } else {
       self->currentAllocatedBytes_ -= (osize - nsize);
     }
+    if (self->currentAllocatedBytes_ > self->peakAllocatedBytes_) self->peakAllocatedBytes_ = self->currentAllocatedBytes_;
   }
   return newPtr;
 }
@@ -125,6 +129,9 @@ bool LuaRunner::init() {
   hasError_ = false;
   errorMessage_.clear();
   currentAllocatedBytes_ = 0;
+  peakAllocatedBytes_ = 0;
+  minFreeHeap_ = 0;
+  refusedAllocations_ = 0;
 
 #if defined(SIMULATOR_DEVICE_X3)
   maxLuaHeapBytes_ = 75 * 1024;  // 75 KB exact X3 hardware DRAM ceiling

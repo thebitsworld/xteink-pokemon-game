@@ -7,6 +7,7 @@
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
 #include "activities/Activity.h"
+#include "activities/apps/lua/AppMemoryLog.h"
 #include "activities/apps/lua/LuaRunner.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -30,6 +31,7 @@ class LuaAppActivity : public Activity {
 
   void onEnter() override {
     Activity::onEnter();
+    openMemory_ = app_memory_log::takeOpenSnapshot();
     runner_ = std::make_unique<ink::LuaRunner>(renderer, mappedInput, appDir_, appId_);
 
     if (!runner_->init()) {
@@ -176,7 +178,9 @@ class LuaAppActivity : public Activity {
       std::lock_guard<std::mutex> lock(luaMutex_);
       if (runner_) {
         runner_->onExit();
+        const bool hadError = runner_->hasError();
         runner_->shutdown();
+        app_memory_log::recordSession(appId_, openMemory_, *runner_, hadError);
         runner_.reset();
       }
     }
@@ -189,6 +193,7 @@ class LuaAppActivity : public Activity {
   std::string entryScript_;
   std::string appId_;
   std::unique_ptr<ink::LuaRunner> runner_;
+  app_memory_log::OpenSnapshot openMemory_;
   std::mutex luaMutex_;
 
   void renderError(const char* msg) {
