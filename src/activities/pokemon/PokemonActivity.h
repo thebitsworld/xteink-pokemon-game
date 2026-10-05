@@ -139,6 +139,11 @@ class PokemonActivity final : public Activity {
                            bool preserveSideEffects = false);
   bool enterBattle(const pokemon::PendingEvent& pending);
   bool enterGymBattle(uint8_t gymIndex);
+  // Sends out gym team member `member` (real team index `teamIndex`): builds
+  // the combatant, sets the trainer AI's skill for this gym, and restores what
+  // it had left if the trainer withdrew it earlier (gymBench_). preserveSideEffects
+  // as for setupBattleOpponent(): true for any send-out after the first.
+  void setupGymOpponent(uint8_t teamIndex, const pokemon::GymTeamMember& member, bool preserveSideEffects);
   void savePlayerBattleEntry();
   void resolveBattleAsPass();
   void finishItemUseMidBattle(const char* usedLine);
@@ -297,6 +302,17 @@ class PokemonActivity final : public Activity {
   // deliberately simplified stand-in for the real games' actual per-trainer
   // item stock, which this project has no data for at all.
   uint8_t opponentHealChargesRemaining_ = 0;
+  // A gym team member the trainer withdrew (trainerAiShouldActInsteadOfMoveThisTurn())
+  // keeps its HP, PP and major status for when it comes back, indexed by its
+  // real gymTeamFor() index - it used to come back freshly built at full HP.
+  struct GymBenchState {
+    bool saved = false;
+    uint16_t currentHp = 0;
+    pokemon::Ailment status = pokemon::Ailment::None;
+    uint8_t statusTurns = 0;
+    std::array<uint8_t, pokemon::BATTLE_MOVE_SLOTS> pp{};
+  };
+  std::array<GymBenchState, pokemon::MAX_GYM_TEAM_SIZE> gymBench_{};
   int battlePartySlot_ = 0;               // which snapshot_.party[] slot is currently battlePlayer_
   bool forcedBattleSwitch_ = false;       // true while the active Pokemon just fainted - Back can't cancel out
   // How many times RUN has already failed THIS wild battle - Gen 1's real

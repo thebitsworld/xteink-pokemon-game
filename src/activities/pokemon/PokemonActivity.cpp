@@ -1251,6 +1251,24 @@ uint16_t worstCasePlayerEffectivenessAgainst(const pokemon::SpeciesData& playerS
   }
   return worst;
 }
+
+// How hard the player's actual attacks hit `defender`: the best type
+// multiplier among the player's usable damaging moves. Falls back to the
+// player's own types when it has no damaging move left to judge by.
+uint16_t playerMoveThreatAgainst(const pokemon::BattleCombatant& player, const pokemon::SpeciesData& playerSpecies,
+                                 const pokemon::SpeciesData& defender) {
+  uint16_t worst = 0;
+  bool anyDamaging = false;
+  for (uint8_t slot = 0; slot < pokemon::BATTLE_MOVE_SLOTS; ++slot) {
+    const pokemon::BattleMoveSlot& move = player.moves[slot];
+    if (move.moveId == 0 || move.currentPp == 0) continue;
+    const pokemon::MoveData* data = pokemon::moveData(move.moveId);
+    if (data == nullptr || data->power == 0) continue;
+    anyDamaging = true;
+    worst = std::max(worst, worstCaseEffectivenessAgainst(data->type, defender));
+  }
+  return anyDamaging ? worst : worstCasePlayerEffectivenessAgainst(playerSpecies, defender);
+}
 }  // namespace
 
 bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer, const size_t size) {
@@ -1277,11 +1295,18 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
   const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
   const char* leaderName = gym == nullptr ? "?" : gym->leaderName;
 
-  // Heal: a low-HP active Pokemon gets fully restored (HP and status) - a
-  // simplified stand-in for a real Full Restore, see
-  // opponentHealChargesRemaining_'s doc comment.
-  if (opponentHealChargesRemaining_ > 0 && battleOpponent_.maxHp > 0 &&
-      static_cast<uint32_t>(battleOpponent_.currentHp) * 100U / battleOpponent_.maxHp <= 25U) {
+  // Heal: fully restore (HP and status) a Pokemon that is low, or that the
+  // player's best attack would knock out next turn - a simplified stand-in
+  // for a real Full Restore, see opponentHealChargesRemaining_'s doc comment.
+  // Not when that attack would knock it out even from full HP: the charge
+  // would just be wasted.
+  const uint32_t hpPercent =
+      battleOpponent_.maxHp == 0 ? 100U : static_cast<uint32_t>(battleOpponent_.currentHp) * 100U / battleOpponent_.maxHp;
+  const uint16_t playerThreat = pokemon::bestExpectedDamage(battlePlayer_, battleOpponent_);
+  const bool inKnockoutRange = hpPercent <= 50U && playerThreat >= battleOpponent_.currentHp;
+  const bool healWouldBeWasted = playerThreat >= battleOpponent_.maxHp;
+  if (opponentHealChargesRemaining_ > 0 && battleOpponent_.maxHp > 0 && (hpPercent <= 25U || inKnockoutRange) &&
+      !healWouldBeWasted) {
     battleOpponent_.currentHp = battleOpponent_.maxHp;
     battleOpponent_.status = pokemon::Ailment::None;
     battleOpponent_.statusTurns = 0;
@@ -1292,20 +1317,18 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
   }
 
   // Switch: only while the Champion isn't involved and there's still a
-  // not-yet-fought reserve to switch into. A documented simplification:
-  // the Pokemon being switched OUT is simply reslotted into the
-  // not-yet-fought suffix of gymTeamOrder_, so if it's ever sent back out
-  // later (whether by another voluntary switch or the normal faint-driven
-  // advance), setupBattleOpponent() gives it a full-HP fresh start rather
-  // than remembering whatever damage/status it had when benched - this
-  // project has no side-storage for a benched-but-alive opponent's state.
+  // not-yet-fought reserve to switch into. The Pokemon being switched OUT is
+  // reslotted into the not-yet-fought suffix of gymTeamOrder_, and its HP, PP
+  // and major status are kept in gymBench_ for when it comes back (Gen 1
+  // rules: stat stages and confusion reset on a switch, bad poison becomes
+  // regular poison).
   if (gymChallengeIndex_ == pokemon::CHAMPION_GYM_INDEX) return false;
   const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
   if (gymChallengeTeamProgress_ + 1U >= team.size()) return false;
   const pokemon::SpeciesData* playerSpecies = pokemon::speciesData(battlePlayer_.speciesId);
   const pokemon::SpeciesData* currentSpecies = pokemon::speciesData(battleOpponent_.speciesId);
   if (playerSpecies == nullptr || currentSpecies == nullptr) return false;
-  const uint16_t currentDanger = worstCasePlayerEffectivenessAgainst(*playerSpecies, *currentSpecies);
+  const uint16_t currentDanger = playerMoveThreatAgainst(battlePlayer_, *playerSpecies, *currentSpecies);
   // Only worth retreating from a clearly bad matchup, and only once it's
   // actually hurting - a fresh Pokemon that merely resists poorly isn't
   // worth burning a switch over.
@@ -1317,14 +1340,20 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
        ++candidate) {
     const pokemon::SpeciesData* candidateSpecies = pokemon::speciesData(team[gymTeamOrder_[candidate]].speciesId);
     if (candidateSpecies == nullptr) continue;
-    if (worstCasePlayerEffectivenessAgainst(*playerSpecies, *candidateSpecies) <= 100U) {
+    if (playerMoveThreatAgainst(battlePlayer_, *playerSpecies, *candidateSpecies) <= 100U) {
+      GymBenchState& bench = gymBench_[gymTeamOrder_[gymChallengeTeamProgress_]];
+      bench.saved = true;
+      bench.currentHp = battleOpponent_.currentHp;
+      const bool confused = battleOpponent_.status == pokemon::Ailment::Confusion;
+      bench.status = confused ? pokemon::Ailment::None : battleOpponent_.status;
+      bench.statusTurns = confused ? 0 : battleOpponent_.statusTurns;
+      for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) bench.pp[i] = battleOpponent_.moves[i].currentPp;
       std::swap(gymTeamOrder_[gymChallengeTeamProgress_], gymTeamOrder_[candidate]);
       const pokemon::GymTeamMember& next = team[gymTeamOrder_[gymChallengeTeamProgress_]];
       // Same ongoing gym battle, opponent voluntarily switching - the
-      // trainer's own side-wide Reflect/Light Screen/Mist must survive this
-      // (see setupBattleOpponent()'s preserveSideEffects doc comment).
-      setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId),
-                          /*isShiny=*/false, /*preserveSideEffects=*/true);
+      // trainer's own side-wide Reflect/Light Screen/Mist survive this (see
+      // setupBattleOpponent()'s preserveSideEffects doc comment).
+      setupGymOpponent(gymTeamOrder_[gymChallengeTeamProgress_], next, /*preserveSideEffects=*/true);
       snprintf(buffer, size, tr(STR_POKEMON_SENT_OUT), leaderName, speciesName(battleOpponent_.speciesId));
       return true;
     }
@@ -1591,15 +1620,32 @@ bool PokemonActivity::enterBattle(const pokemon::PendingEvent& pending) {
   return true;
 }
 
+void PokemonActivity::setupGymOpponent(const uint8_t teamIndex, const pokemon::GymTeamMember& member,
+                                       const bool preserveSideEffects) {
+  setupBattleOpponent(member.speciesId, member.level, member.moves, service_.rollGenderFor(member.speciesId),
+                      /*isShiny=*/false, preserveSideEffects);
+  // Gyms 1-3 make the most mistakes, gyms 4-8 fewer, the Elite Four and the
+  // Champion almost none - see BattleCombatant::aiSkill.
+  battleOpponent_.aiSkill = gymChallengeIndex_ <= 3 ? 1 : gymChallengeIndex_ <= 8 ? 2 : 3;
+  if (teamIndex >= gymBench_.size() || !gymBench_[teamIndex].saved) return;
+  const GymBenchState& bench = gymBench_[teamIndex];
+  battleOpponent_.currentHp = std::min(bench.currentHp, battleOpponent_.maxHp);
+  battleOpponent_.status = bench.status;
+  battleOpponent_.statusTurns = bench.statusTurns;
+  for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battleOpponent_.moves[i].currentPp = bench.pp[i];
+  gymBench_[teamIndex] = {};
+}
+
 bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
   const auto team = pokemon::gymTeamFor(gymIndex);
   if (team.empty()) return false;
   const int slot = firstUsablePartySlot();
   if (slot < 0 || !setupBattlePlayer(slot)) return false;
-  setupBattleOpponent(team[0].speciesId, team[0].level, team[0].moves, service_.rollGenderFor(team[0].speciesId));
   gymChallengeIndex_ = gymIndex;
   gymChallengeTeamProgress_ = 0;
   for (size_t i = 0; i < pokemon::MAX_GYM_TEAM_SIZE; ++i) gymTeamOrder_[i] = static_cast<uint8_t>(i);
+  gymBench_ = {};
+  setupGymOpponent(0, team[0], /*preserveSideEffects=*/false);
   // A small, fixed stand-in for the real games' actual per-trainer item
   // stock (which this project tracks no data for at all) - see
   // opponentHealChargesRemaining_'s doc comment.
@@ -1923,8 +1969,7 @@ void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
     // the previous one fainted - the trainer's own side-wide Reflect/Light
     // Screen/Mist must survive this (see setupBattleOpponent()'s
     // preserveSideEffects doc comment).
-    setupBattleOpponent(next.speciesId, next.level, next.moves, service_.rollGenderFor(next.speciesId),
-                        /*isShiny=*/false, /*preserveSideEffects=*/true);
+    setupGymOpponent(gymTeamOrder_[gymChallengeTeamProgress_], next, /*preserveSideEffects=*/true);
     const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
     snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
              speciesName(battleOpponent_.speciesId));

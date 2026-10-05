@@ -1623,6 +1623,229 @@ void resolveGenericMoveEffect(BattleCombatant& attacker, BattleCombatant& defend
   }
 }
 
+// --- Trainer AI -------------------------------------------------------------
+
+// A RandomSource that always lands mid-range, so computeDamage() gives the
+// typical damage roll for estimates instead of a random one.
+uint32_t midpointBelow(void*, const uint32_t upperExclusive) { return upperExclusive / 2U; }
+constexpr RandomSource MIDPOINT_RANDOM{nullptr, midpointBelow};
+
+bool slotUsable(const BattleCombatant& combatant, const uint8_t slot) {
+  const BattleMoveSlot& move = combatant.moves[slot];
+  if (move.moveId == 0 || move.currentPp == 0) return false;
+  return !(combatant.disableTurnsRemaining > 0 && combatant.disabledMoveSlot == slot);
+}
+
+uint16_t percentOf(const uint16_t value, const uint32_t percent) {
+  return clampToUint16(static_cast<uint32_t>(value) * percent / 100U);
+}
+
+int8_t statStageOf(const BattleCombatant& combatant, const StatKind stat) {
+  switch (stat) {
+    case StatKind::Attack: return combatant.attackStage;
+    case StatKind::Defense: return combatant.defenseStage;
+    case StatKind::Special: return combatant.specialStage;
+    case StatKind::Speed: return combatant.speedStage;
+    case StatKind::Accuracy: return combatant.accuracyStage;
+    case StatKind::Evasion: return combatant.evasionStage;
+  }
+  return 0;
+}
+
+// What a non-damaging move is worth this turn, in HP-equivalent units (so it
+// competes directly with estimateMoveDamage() of the attacking moves): zero
+// when it would do nothing - a status the target already has or is immune
+// to, a stat stage already at its cap, a heal at full HP, a screen already up.
+uint16_t statusMoveValue(const BattleCombatant& self, const BattleCombatant& target, const MoveData& move,
+                         const uint8_t moveId) {
+  const uint16_t targetMax = std::max<uint16_t>(1, target.maxHp);
+  const uint16_t selfMax = std::max<uint16_t>(1, self.maxHp);
+  const uint32_t selfHpPercent = static_cast<uint32_t>(self.currentHp) * 100U / selfMax;
+  const uint32_t targetHpPercent = static_cast<uint32_t>(target.currentHp) * 100U / targetMax;
+  const uint32_t accuracy = move.accuracy == 0 ? 100U : move.accuracy;
+
+  switch (moveId) {
+    case RECOVER_MOVE_ID:
+    case SOFT_BOILED_MOVE_ID:
+      return selfHpPercent <= 50U ? percentOf(static_cast<uint16_t>(selfMax - self.currentHp), 120U) : 0;
+    case REST_MOVE_ID:
+      return selfHpPercent <= 35U && self.status != Ailment::Sleep
+                 ? static_cast<uint16_t>(selfMax - self.currentHp)
+                 : 0;
+    case HAZE_MOVE_ID: {
+      int score = 0;
+      for (const StatKind stat : {StatKind::Attack, StatKind::Defense, StatKind::Special, StatKind::Speed,
+                                  StatKind::Accuracy, StatKind::Evasion}) {
+        score += std::max<int>(0, statStageOf(target, stat));  // the player's boosts it removes
+        score += std::max<int>(0, -statStageOf(self, stat));   // and our own drops
+      }
+      return percentOf(targetMax, static_cast<uint32_t>(score) * 10U);
+    }
+    case LEECH_SEED_MOVE_ID: {
+      const SpeciesData* species = speciesData(target.speciesId);
+      const bool grass = species != nullptr && (species->primaryType == PokemonType::Grass ||
+                                                species->secondaryType == PokemonType::Grass);
+      return target.seeded || grass || target.substituteHp > 0 ? 0 : percentOf(targetMax, 25U * accuracy / 100U);
+    }
+    case REFLECT_MOVE_ID:
+      return self.reflectActive ? 0 : percentOf(targetMax, 15U);
+    case LIGHT_SCREEN_MOVE_ID:
+      return self.lightScreenActive ? 0 : percentOf(targetMax, 15U);
+    case SUBSTITUTE_MOVE_ID:
+      return self.substituteHp > 0 || selfHpPercent <= 40U ? 0 : percentOf(targetMax, 15U);
+    case MIST_MOVE_ID:
+      return self.mistActive ? 0 : percentOf(targetMax, 5U);
+    case FOCUS_ENERGY_MOVE_ID:
+      return self.direHitActive ? 0 : percentOf(targetMax, 5U);
+    case WHIRLWIND_MOVE_ID:
+    case ROAR_MOVE_ID:
+    case TELEPORT_MOVE_ID:
+      return 0;  // nothing to send away or escape from in a trainer battle
+    default:
+      break;
+  }
+
+  // Inflicting a status: worth more against a healthy target, worthless if it
+  // already has one, is immune, or is behind a Substitute.
+  if (move.ailment != Ailment::None && move.ailment != Ailment::All) {
+    if (target.status != Ailment::None || target.substituteHp > 0) return 0;
+    const SpeciesData* species = speciesData(target.speciesId);
+    if (species != nullptr) {
+      const EffectiveTypes types = effectiveTypesFor(target, *species);
+      if (typeIsImmuneToAilment(types, move.ailment) ||
+          typeEffectivenessPercent(move.type, types.primary, types.secondary) == 0) {
+        return 0;
+      }
+    }
+    uint32_t weight = 30U;
+    if (move.ailment == Ailment::Sleep) weight = 60U;
+    if (move.ailment == Ailment::Paralysis) weight = 40U;
+    if (move.ailment == Ailment::Poison) weight = moveId == TOXIC_MOVE_ID ? 45U : 30U;
+    return percentOf(targetMax, weight * accuracy / 100U * std::max<uint32_t>(targetHpPercent, 20U) / 100U);
+  }
+
+  // Raising our own stat or lowering the player's: the first stages are worth
+  // a little, nothing once the stage is maxed out, less when we are about to
+  // go down anyway.
+  if (const StatChangeEffect* change = statChangeForMove(moveId)) {
+    const int8_t stage = statStageOf(change->targetsSelf ? self : target, change->stat);
+    const int8_t room = change->stages > 0 ? static_cast<int8_t>(6 - stage) : static_cast<int8_t>(6 + stage);
+    if (room <= 0 || (!change->targetsSelf && target.mistActive)) return 0;
+    const int8_t applied = change->stages > 0 ? stage : static_cast<int8_t>(-stage);
+    uint32_t weight = applied >= 2 ? 4U : 12U;
+    if (selfHpPercent <= 40U) weight /= 3U;
+    return percentOf(targetMax, weight * accuracy / 100U);
+  }
+
+  // Metronome, Mirror Move, Mimic, Transform, Conversion, Bide, Disable,
+  // Counter: hard to judge, so a small flat value keeps them in rotation.
+  return percentOf(targetMax, 5U);
+}
+
+// The trainer AI's pick: score every usable move (expected damage for an
+// attack, a KO above everything else, statusMoveValue() for the rest) and take
+// the best, ties broken at random. aiSkill sets how often it plays a random
+// usable move instead, so early gyms still make mistakes.
+uint8_t chooseTrainerMoveSlot(const BattleCombatant& player, const BattleCombatant& opponent,
+                              const RandomSource& random) {
+  std::array<uint8_t, BATTLE_MOVE_SLOTS> usable{};
+  uint8_t usableCount = 0;
+  for (uint8_t index = 0; index < BATTLE_MOVE_SLOTS; ++index) {
+    if (slotUsable(opponent, index)) usable[usableCount++] = index;
+  }
+  if (usableCount == 0) return BATTLE_MOVE_SLOTS;
+
+  const uint32_t mistakePercent = opponent.aiSkill >= 3 ? 5U : opponent.aiSkill == 2 ? 15U : 30U;
+  uint32_t mistakeRoll = 0;
+  if (rollBelow(random, 100U, mistakeRoll) && mistakeRoll < mistakePercent) {
+    uint32_t pick = 0;
+    if (!rollBelow(random, usableCount, pick) || pick >= usableCount) pick = 0;
+    return usable[pick];
+  }
+
+  std::array<uint32_t, BATTLE_MOVE_SLOTS> scores{};
+  uint32_t bestScore = 0;
+  for (uint8_t i = 0; i < usableCount; ++i) {
+    const uint8_t slot = usable[i];
+    const MoveData* move = moveData(opponent.moves[slot].moveId);
+    if (move == nullptr) continue;
+    uint32_t score = 0;
+    const uint16_t damage = estimateMoveDamage(opponent, player, slot);
+    if (damage > 0) {
+      score = damage;
+      // A knockout beats any amount of damage; among knockouts, the most
+      // accurate one wins.
+      if (damage * 100U / std::max<uint32_t>(1U, move->accuracy == 0 ? 100U : move->accuracy) >= player.currentHp) {
+        score = 100000U + (move->accuracy == 0 ? 100U : move->accuracy);
+      }
+    } else if (move->power == 0 && fixedDamageEntryForMove(move->moveId) == nullptr) {
+      score = statusMoveValue(opponent, player, *move, move->moveId);
+    }
+    scores[i] = score;
+    bestScore = std::max(bestScore, score);
+  }
+
+  std::array<uint8_t, BATTLE_MOVE_SLOTS> best{};
+  uint8_t bestCount = 0;
+  for (uint8_t i = 0; i < usableCount; ++i) {
+    if (scores[i] == bestScore) best[bestCount++] = usable[i];
+  }
+  uint32_t pick = 0;
+  if (bestCount > 1 && (!rollBelow(random, bestCount, pick) || pick >= bestCount)) pick = 0;
+  return best[pick];
+}
+
+}  // namespace
+
+uint16_t estimateMoveDamage(const BattleCombatant& attacker, const BattleCombatant& defender, const uint8_t moveSlot) {
+  if (moveSlot >= BATTLE_MOVE_SLOTS || !slotUsable(attacker, moveSlot)) return 0;
+  const uint8_t moveId = attacker.moves[moveSlot].moveId;
+  const MoveData* move = moveData(moveId);
+  if (move == nullptr) return 0;
+  const SpeciesData* defenderSpecies = speciesData(defender.speciesId);
+  if (defenderSpecies == nullptr) return 0;
+  const EffectiveTypes defenderTypes = effectiveTypesFor(defender, *defenderSpecies);
+  const uint16_t effectiveness = typeEffectivenessPercent(move->type, defenderTypes.primary, defenderTypes.secondary);
+  const uint32_t accuracy = move->accuracy == 0 ? 100U : move->accuracy;
+
+  uint32_t damage = 0;
+  if (const FixedDamageTableEntry* fixed = fixedDamageEntryForMove(moveId)) {
+    if (effectiveness == 0) return 0;
+    switch (fixed->kind) {
+      case FixedDamageKind::Ohko: damage = defender.currentHp; break;
+      case FixedDamageKind::LevelDamage:
+      case FixedDamageKind::Psywave: damage = attacker.level; break;
+      case FixedDamageKind::FlatDamage: damage = fixed->flatAmount; break;
+      case FixedDamageKind::HalveDefenderHp: damage = std::max<uint32_t>(1U, defender.currentHp / 2U); break;
+      case FixedDamageKind::Counter: return 0;  // depends on what the other side does this turn
+    }
+  } else {
+    if (move->power == 0 || move->category == MoveCategory::Status) return 0;
+    if (moveId == DREAM_EATER_MOVE_ID && defender.status != Ailment::Sleep) return 0;
+    // Explosion/Self-Destruct faint the user: only worth it as a last act.
+    if (isSelfDestructMove(moveId) && static_cast<uint32_t>(attacker.currentHp) * 4U > attacker.maxHp) return 0;
+    MoveData effective = *move;
+    if (moveId == LOW_KICK_MOVE_ID) effective.power = LOW_KICK_SIMPLIFIED_POWER;
+    damage = computeDamage(attacker, defender, effective, moveId, MIDPOINT_RANDOM, false);
+    if (const MultiHitTableEntry* multiHit = multiHitEntryForMove(moveId)) {
+      damage *= multiHit->fixedHits != 0 ? multiHit->fixedHits : 3U;
+    }
+    if (twoTurnEntryForMove(moveId) != nullptr) damage /= 2U;    // charges for a turn first
+    if (moveId == HYPER_BEAM_MOVE_ID) damage = damage * 3U / 4U;  // then has to recharge
+  }
+  return clampToUint16(damage * accuracy / 100U);
+}
+
+uint16_t bestExpectedDamage(const BattleCombatant& attacker, const BattleCombatant& defender) {
+  uint16_t best = 0;
+  for (uint8_t slot = 0; slot < BATTLE_MOVE_SLOTS; ++slot) {
+    best = std::max(best, estimateMoveDamage(attacker, defender, slot));
+  }
+  return best;
+}
+
+namespace {
+
 // A crude but serviceable AI: mostly prefers whichever usable move(s) are
 // most effective against the player (ties broken randomly instead of
 // always the lowest slot index), but 1 in 4 turns picks among ALL usable
@@ -1645,6 +1868,8 @@ uint8_t chooseOpponentMoveSlot(const BattleCombatant& player, const BattleCombat
       if (opponent.moves[index].moveId == opponent.forcedMoveId) return index;
     }
   }
+
+  if (opponent.aiSkill > 0) return chooseTrainerMoveSlot(player, opponent, random);
 
   const SpeciesData* playerSpecies = speciesData(player.speciesId);
   std::array<uint8_t, BATTLE_MOVE_SLOTS> usable{};

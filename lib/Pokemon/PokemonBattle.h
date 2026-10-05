@@ -118,6 +118,12 @@ struct BattleCombatant {
   // Four/Champion trainer never sets it (their fixed roster has no
   // persisted record to be shiny at all).
   bool isShiny = false;
+  // How the opponent picks its moves (see chooseOpponentMoveSlot()). 0 is a
+  // wild Pokemon: the best type matchup, with a 25% chance of any usable
+  // move. 1-3 are trainers (gyms 1-3, gyms 4-8, Elite Four/Champion): every
+  // move is scored by expected damage and situational value, with a 30%/15%/
+  // 5% chance of a random usable move instead. Set by the UI, never persisted.
+  uint8_t aiSkill = 0;
   // Gen 1 stat stages, -6..+6, reset to 0 whenever a fresh BattleCombatant is
   // built (a new battle, or either side switching) - matching how the real
   // games never carry stat stages across a switch/battle boundary. Never
@@ -409,6 +415,17 @@ struct StatChangeEffect {
 // resolveAction() since it resets every stage on both sides rather than
 // changing one stat by one amount).
 const StatChangeEffect* statChangeForMove(uint8_t moveId);
+
+// Expected damage of `attacker`'s move in `moveSlot` against `defender` right
+// now: the real damage formula at its mid damage roll, no critical hit,
+// times the move's accuracy and its hit count (multi-hit moves count 3 hits,
+// two-turn moves half). Includes fixed-damage moves (Seismic Toss, Dragon
+// Rage, Super Fang, OHKO moves). 0 for status moves, an empty or PP-less
+// slot, a move the target is immune to, or Dream Eater on an awake target.
+// Used by the trainer AI to judge both its own moves and the player's threat.
+uint16_t estimateMoveDamage(const BattleCombatant& attacker, const BattleCombatant& defender, uint8_t moveSlot);
+// The highest estimateMoveDamage() over `attacker`'s usable moves.
+uint16_t bestExpectedDamage(const BattleCombatant& attacker, const BattleCombatant& defender);
 
 // Applies Gen 1's real stat-stage multiplier table to a computed Attack/
 // Defense/Special/Speed value: stage>=0 multiplies by (2+stage)/2, stage<0
