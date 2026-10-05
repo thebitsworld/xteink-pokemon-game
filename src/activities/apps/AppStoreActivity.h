@@ -31,7 +31,7 @@ class AppStoreActivity : public Activity {
     catalogUrl_ = "https://raw.githubusercontent.com/Mumfee/CrossSmudge/main/apps/catalog.json";
     baseUrl_ = "https://raw.githubusercontent.com/Mumfee/CrossSmudge/main/apps/";
     selectedIndex_ = 0;
-    errorTitle_ = "Network Error";
+    errorTitle_ = tr(STR_APPS_NETWORK_ERROR);
     errorMessage_.clear();
     lastFailedAppIndex_ = -1;
     if (isWifiConnected()) {
@@ -56,12 +56,12 @@ class AppStoreActivity : public Activity {
         if (!isWifiConnected()) {
           renderNoWifi();
         } else {
-          renderLoading("Connecting to App Catalog...");
+          renderLoading(tr(STR_APPS_CONNECTING_CATALOG));
         }
         break;
 
       case State::FETCHING_CATALOG:
-        renderLoading("Fetching App Catalog from GitHub...");
+        renderLoading(tr(STR_APPS_FETCHING_CATALOG));
         break;
 
       case State::CATALOG_READY:
@@ -245,7 +245,7 @@ class AppStoreActivity : public Activity {
   State state_ = State::CHECK_WIFI;
   std::string catalogUrl_;
   std::string baseUrl_;
-  std::string errorTitle_ = "Network Error";
+  std::string errorTitle_;
   std::string errorMessage_;
   int lastFailedAppIndex_ = -1;
   std::vector<CatalogApp> apps_;
@@ -311,7 +311,6 @@ class AppStoreActivity : public Activity {
     std::string hostPath = "apps/" + app.id + "/icon.raw";
     FILE* hf = fopen(hostPath.c_str(), "rb");
     if (!hf) hf = fopen(("../" + hostPath).c_str(), "rb");
-    if (!hf) hf = fopen(("/var/home/brady/C/crosssmudge/" + hostPath).c_str(), "rb");
     if (hf) {
       size_t r = fread(app.iconData, 1, sizeof(app.iconData), hf);
       fclose(hf);
@@ -376,7 +375,6 @@ class AppStoreActivity : public Activity {
     if (err != HttpDownloader::OK) {
       FILE* f = fopen("apps/catalog.json", "rb");
       if (!f) f = fopen("../apps/catalog.json", "rb");
-      if (!f) f = fopen("/var/home/brady/C/crosssmudge/apps/catalog.json", "rb");
       if (f) {
         HalFile outF;
         if (Storage.openFileForWrite("STORE", tmpCatalog.c_str(), outF)) {
@@ -397,8 +395,8 @@ class AppStoreActivity : public Activity {
       Storage.remove(tmpCatalog.c_str());
       state_ = State::ERROR;
       lastFailedAppIndex_ = -1;
-      errorTitle_ = "Network Error";
-      errorMessage_ = "Failed to download catalog.json.\nCheck network connection.";
+      errorTitle_ = tr(STR_APPS_NETWORK_ERROR);
+      errorMessage_ = tr(STR_APPS_ERR_CATALOG_DOWNLOAD);
       requestUpdate();
       return;
     }
@@ -408,8 +406,8 @@ class AppStoreActivity : public Activity {
       Storage.remove(tmpCatalog.c_str());
       state_ = State::ERROR;
       lastFailedAppIndex_ = -1;
-      errorTitle_ = "Storage Error";
-      errorMessage_ = "Failed to read catalog.tmp.\nCheck SD card.";
+      errorTitle_ = tr(STR_APPS_STORAGE_ERROR);
+      errorMessage_ = tr(STR_APPS_ERR_CATALOG_READ);
       requestUpdate();
       return;
     }
@@ -422,8 +420,8 @@ class AppStoreActivity : public Activity {
     if (jsonErr) {
       state_ = State::ERROR;
       lastFailedAppIndex_ = -1;
-      errorTitle_ = "Catalog Error";
-      errorMessage_ = std::string("JSON Parse Error: ") + jsonErr.c_str();
+      errorTitle_ = tr(STR_APPS_CATALOG_ERROR);
+      errorMessage_ = formatText(tr(STR_APPS_ERR_JSON), jsonErr.c_str());
       requestUpdate();
       return;
     }
@@ -652,8 +650,8 @@ class AppStoreActivity : public Activity {
     if (!isWifiConnected()) {
       state_ = State::ERROR;
       lastFailedAppIndex_ = selectedIndex_;
-      errorTitle_ = "Network Error";
-      errorMessage_ = "Wi-Fi disconnected.\nPlease reconnect to Wi-Fi.";
+      errorTitle_ = tr(STR_APPS_NETWORK_ERROR);
+      errorMessage_ = tr(STR_APPS_ERR_WIFI_LOST);
       requestUpdate();
       return;
     }
@@ -672,8 +670,8 @@ class AppStoreActivity : public Activity {
     if (!dirOk) {
       LOG_ERR("STORE", "Failed to create target directory: %s", targetDir.c_str());
       state_ = State::ERROR;
-      errorTitle_ = "Storage Error";
-      errorMessage_ = "Failed creating app folder.\nCheck SD card space & write-lock.";
+      errorTitle_ = tr(STR_APPS_STORAGE_ERROR);
+      errorMessage_ = tr(STR_APPS_ERR_APP_FOLDER);
       requestUpdate();
       return;
     }
@@ -696,8 +694,8 @@ class AppStoreActivity : public Activity {
         if (!Storage.ensureDirectoryExists(parentDir.c_str())) {
           LOG_ERR("STORE", "Failed to create parent directory: %s", parentDir.c_str());
           state_ = State::ERROR;
-          errorTitle_ = "Storage Error";
-          errorMessage_ = "Failed creating folder:\n" + parentDir;
+          errorTitle_ = tr(STR_APPS_STORAGE_ERROR);
+          errorMessage_ = formatText(tr(STR_APPS_ERR_FOLDER), parentDir.c_str());
           requestUpdate();
           return;
         }
@@ -721,7 +719,6 @@ class AppStoreActivity : public Activity {
       std::string hostSrc = "apps/" + app.id + "/" + app.files[i];
       FILE* inHost = fopen(hostSrc.c_str(), "rb");
       if (!inHost) inHost = fopen(("../" + hostSrc).c_str(), "rb");
-      if (!inHost) inHost = fopen(("/var/home/brady/C/crosssmudge/" + hostSrc).c_str(), "rb");
       if (inHost) {
         HalFile outF;
         if (Storage.openFileForWrite("STORE", destPath.c_str(), outF)) {
@@ -763,14 +760,14 @@ class AppStoreActivity : public Activity {
         LOG_ERR("STORE", "Failed downloading %s: %d", app.files[i].c_str(), err);
         state_ = State::ERROR;
         if (err == HttpDownloader::FILE_ERROR) {
-          errorTitle_ = "Storage Error";
-          errorMessage_ = "Failed writing to SD Card:\n" + app.files[i] + "\nCheck space & write-lock.";
+          errorTitle_ = tr(STR_APPS_STORAGE_ERROR);
+          errorMessage_ = formatText(tr(STR_APPS_ERR_WRITE), app.files[i].c_str());
         } else {
-          errorTitle_ = "Network Error";
+          errorTitle_ = tr(STR_APPS_NETWORK_ERROR);
           if (!isWifiConnected()) {
-            errorMessage_ = "Wi-Fi disconnected.\nPlease reconnect to Wi-Fi.";
+            errorMessage_ = tr(STR_APPS_ERR_WIFI_LOST);
           } else {
-            errorMessage_ = "Failed downloading:\n" + app.files[i] + "\nCheck connection or retry.";
+            errorMessage_ = formatText(tr(STR_APPS_ERR_DOWNLOAD), app.files[i].c_str());
           }
         }
         requestUpdate();
@@ -800,13 +797,20 @@ class AppStoreActivity : public Activity {
     requestUpdate();
   }
 
+  // printf-style formatting of a translated message with one string argument.
+  static std::string formatText(const char* format, const char* arg) {
+    char buffer[192];
+    snprintf(buffer, sizeof(buffer), format, arg);
+    return buffer;
+  }
+
   void renderLoading(const char* msg) {
     int w = renderer.getScreenWidth();
     int h = renderer.getScreenHeight();
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, "App Store", "Connecting");
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_CONNECTING));
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 20, msg, true, EpdFontFamily::BOLD);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
@@ -819,12 +823,12 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, "App Store", "Offline");
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_OFFLINE));
 
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, "Wi-Fi Not Connected", true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(SMALL_FONT_ID, h / 2 - 10, "Connect to Wi-Fi to browse community apps.", true);
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_WIFI_NOT_CONNECTED), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(SMALL_FONT_ID, h / 2 - 10, tr(STR_APPS_CONNECT_WIFI_HINT), true);
 
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Connect Wi-Fi", "", "");
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_CONNECT_WIFI), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
@@ -835,8 +839,8 @@ class AppStoreActivity : public Activity {
 
     renderer.clearScreen();
     char subBuf[64];
-    snprintf(subBuf, sizeof(subBuf), "%zu Apps Available", apps_.size());
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, "App Store", subBuf);
+    snprintf(subBuf, sizeof(subBuf), tr(STR_APPS_AVAILABLE), static_cast<unsigned>(apps_.size()));
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), subBuf);
 
     int startY = m.topPadding + m.headerHeight + 6;
     int rowH = 56;
@@ -874,19 +878,16 @@ class AppStoreActivity : public Activity {
       renderer.drawText(UI_10_FONT_ID, 68, y + 8, titleBuf, !isSelected, EpdFontFamily::BOLD);
 
       // Author & Version
-      char authBuf[64];
-      snprintf(authBuf, sizeof(authBuf), "by %s  •  v%s", app.author.c_str(), app.version.c_str());
+      char authBuf[96];
+      snprintf(authBuf, sizeof(authBuf), tr(STR_APPS_AUTHOR_VERSION), app.author.c_str(), app.version.c_str());
       renderer.drawText(SMALL_FONT_ID, 68, y + 28, authBuf, !isSelected);
 
       // Status badge on the right
-      const char* statusStr = "[ Install ]";
-      if (app.isInstalled) {
-        if (app.installedVersion != app.version) {
-          statusStr = "[ Update ]";
-        } else {
-          statusStr = "[ Installed ]";
-        }
-      }
+      const char* status = !app.isInstalled                    ? tr(STR_APPS_INSTALL)
+                           : app.installedVersion != app.version ? tr(STR_APPS_UPDATE)
+                                                                 : tr(STR_APPS_INSTALLED);
+      char statusStr[48];
+      snprintf(statusStr, sizeof(statusStr), "[ %s ]", status);
       int sw = renderer.getTextWidth(SMALL_FONT_ID, statusStr, EpdFontFamily::BOLD);
       renderer.drawText(SMALL_FONT_ID, w - 32 - sw - 10, y + 18, statusStr, !isSelected, EpdFontFamily::BOLD);
     }
@@ -894,13 +895,13 @@ class AppStoreActivity : public Activity {
     // Page indicator and prompt below list
     int totalPages = std::max(1, (count + rowsPerPage - 1) / rowsPerPage);
     int curPage = (selectedIndex_ / rowsPerPage) + 1;
-    char pageBuf[64];
-    snprintf(pageBuf, sizeof(pageBuf), "Page %d of %d  •  %d Apps", curPage, totalPages, count);
+    char pageBuf[96];
+    snprintf(pageBuf, sizeof(pageBuf), tr(STR_APPS_PAGE), curPage, totalPages, count);
     int footY = startY + (rowsPerPage * rowH) + 12;
     renderer.drawCenteredText(SMALL_FONT_ID, footY, pageBuf, true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(SMALL_FONT_ID, footY + 18, "Press Confirm or Tap to view details", true);
+    renderer.drawCenteredText(SMALL_FONT_ID, footY + 18, tr(STR_APPS_TAP_DETAILS), true);
 
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Details", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_DETAILS), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
@@ -918,7 +919,7 @@ class AppStoreActivity : public Activity {
     const auto& app = apps_[selectedIndex_];
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, "App Store", app.name.c_str());
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), app.name.c_str());
 
     // 1. Hero Card at top
     int cardY = m.topPadding + m.headerHeight + 12;
@@ -934,27 +935,27 @@ class AppStoreActivity : public Activity {
       expand32To64(app.iconData, scaled);
       renderer.drawIcon(scaled, iconFrameX + 6, iconFrameY + 6, 64, 64);
     } else {
-      renderer.drawCenteredText(SMALL_FONT_ID, iconFrameY + 28, "No Icon", true);
+      renderer.drawCenteredText(SMALL_FONT_ID, iconFrameY + 28, tr(STR_APPS_NO_ICON), true);
     }
 
     // App Details beside Hero Icon
     int infoX = 116;
     renderer.drawText(UI_12_FONT_ID, infoX, cardY + 14, app.name.c_str(), true, EpdFontFamily::BOLD);
 
-    char devBuf[64];
-    snprintf(devBuf, sizeof(devBuf), "Developer: %s", app.author.c_str());
+    char devBuf[96];
+    snprintf(devBuf, sizeof(devBuf), tr(STR_APPS_DEVELOPER), app.author.c_str());
     renderer.drawText(SMALL_FONT_ID, infoX, cardY + 40, devBuf, true);
 
-    char verBuf[64];
+    char verBuf[128];
     if (app.isInstalled) {
       if (app.installedVersion != app.version) {
-        snprintf(verBuf, sizeof(verBuf), "Installed: v%s  ->  New: v%s", app.installedVersion.c_str(),
+        snprintf(verBuf, sizeof(verBuf), tr(STR_APPS_VERSION_UPGRADE), app.installedVersion.c_str(),
                  app.version.c_str());
       } else {
-        snprintf(verBuf, sizeof(verBuf), "Version: v%s (Up to date)", app.version.c_str());
+        snprintf(verBuf, sizeof(verBuf), tr(STR_APPS_VERSION_CURRENT), app.version.c_str());
       }
     } else {
-      snprintf(verBuf, sizeof(verBuf), "Latest Version: v%s", app.version.c_str());
+      snprintf(verBuf, sizeof(verBuf), tr(STR_APPS_VERSION_LATEST), app.version.c_str());
     }
     renderer.drawText(SMALL_FONT_ID, infoX, cardY + 60, verBuf, true, EpdFontFamily::BOLD);
 
@@ -962,7 +963,7 @@ class AppStoreActivity : public Activity {
     int descY = cardY + cardH + 12;
     int descH = 176;
     renderer.drawRoundedRect(16, descY, w - 32, descH, 1, 8, true);
-    renderer.drawText(UI_10_FONT_ID, 28, descY + 12, "About this Application", true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, 28, descY + 12, tr(STR_APPS_ABOUT), true, EpdFontFamily::BOLD);
     renderer.drawLine(28, descY + 34, w - 28, descY + 34, Color::Black);
 
     auto dLines = renderer.wrappedText(SMALL_FONT_ID, app.description.c_str(), w - 56, 5);
@@ -976,18 +977,18 @@ class AppStoreActivity : public Activity {
     int pkgY = descY + descH + 12;
     int pkgH = 118;
     renderer.drawRoundedRect(16, pkgY, w - 32, pkgH, 1, 8, true);
-    renderer.drawText(UI_10_FONT_ID, 28, pkgY + 12, "Package Details", true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, 28, pkgY + 12, tr(STR_APPS_PACKAGE_DETAILS), true, EpdFontFamily::BOLD);
     renderer.drawLine(28, pkgY + 34, w - 28, pkgY + 34, Color::Black);
 
-    char pkgIdBuf[64];
-    snprintf(pkgIdBuf, sizeof(pkgIdBuf), "Package ID: %s", app.id.c_str());
+    char pkgIdBuf[96];
+    snprintf(pkgIdBuf, sizeof(pkgIdBuf), tr(STR_APPS_PACKAGE_ID), app.id.c_str());
     renderer.drawText(SMALL_FONT_ID, 28, pkgY + 44, pkgIdBuf, true);
 
-    char pkgFilesBuf[64];
-    snprintf(pkgFilesBuf, sizeof(pkgFilesBuf), "Distribution: %zu package files on GitHub", app.files.size());
+    char pkgFilesBuf[96];
+    snprintf(pkgFilesBuf, sizeof(pkgFilesBuf), tr(STR_APPS_PACKAGE_FILES), static_cast<unsigned>(app.files.size()));
     renderer.drawText(SMALL_FONT_ID, 28, pkgY + 64, pkgFilesBuf, true);
 
-    std::string pathBuf = "Location: /.crosssmudge/applications/" + app.id;
+    const std::string pathBuf = formatText(tr(STR_APPS_LOCATION), ("/.crosssmudge/applications/" + app.id).c_str());
     renderer.drawText(SMALL_FONT_ID, 28, pkgY + 84, pathBuf.c_str(), true);
 
     // 4. Action Buttons (Touch + Physical Prompts)
@@ -999,29 +1000,31 @@ class AppStoreActivity : public Activity {
       int bw = 320;
       int bx = (w - bw) / 2;
       renderer.fillRoundedRect(bx, btnY, bw, btnH, 8, Color::Black);
-      int tw = renderer.getTextWidth(UI_12_FONT_ID, "Install Application", EpdFontFamily::BOLD);
-      renderer.drawText(UI_12_FONT_ID, bx + (bw - tw) / 2, btnY + 14, "Install Application", false,
+      int tw = renderer.getTextWidth(UI_12_FONT_ID, tr(STR_APPS_INSTALL_APP), EpdFontFamily::BOLD);
+      renderer.drawText(UI_12_FONT_ID, bx + (bw - tw) / 2, btnY + 14, tr(STR_APPS_INSTALL_APP), false,
                         EpdFontFamily::BOLD);
     } else {
       // Upgrade or Reinstall (Left) + Uninstall (Right)
       int bw = 200;
       int bx1 = 24;
       int bx2 = w - 24 - bw;
-      const char* primaryText = (app.installedVersion != app.version) ? "Upgrade App" : "Reinstall";
+      const char* primaryText = (app.installedVersion != app.version) ? tr(STR_APPS_UPGRADE_APP) : tr(STR_APPS_REINSTALL);
 
       renderer.fillRoundedRect(bx1, btnY, bw, btnH, 8, Color::Black);
       int tw1 = renderer.getTextWidth(UI_12_FONT_ID, primaryText, EpdFontFamily::BOLD);
       renderer.drawText(UI_12_FONT_ID, bx1 + (bw - tw1) / 2, btnY + 14, primaryText, false, EpdFontFamily::BOLD);
 
       renderer.drawRoundedRect(bx2, btnY, bw, btnH, 2, 8, true);
-      int tw2 = renderer.getTextWidth(UI_12_FONT_ID, "Uninstall", EpdFontFamily::BOLD);
-      renderer.drawText(UI_12_FONT_ID, bx2 + (bw - tw2) / 2, btnY + 14, "Uninstall", true, EpdFontFamily::BOLD);
+      int tw2 = renderer.getTextWidth(UI_12_FONT_ID, tr(STR_APPS_UNINSTALL), EpdFontFamily::BOLD);
+      renderer.drawText(UI_12_FONT_ID, bx2 + (bw - tw2) / 2, btnY + 14, tr(STR_APPS_UNINSTALL), true,
+                        EpdFontFamily::BOLD);
     }
 
     // Button hints
     const char* hint1 = tr(STR_BACK);
-    const char* hint2 = !app.isInstalled ? "Install" : (app.installedVersion != app.version ? "Upgrade" : "Reinstall");
-    const char* hint3 = app.isInstalled ? "Uninstall" : "";
+    const char* hint2 = !app.isInstalled ? tr(STR_APPS_INSTALL)
+                        : (app.installedVersion != app.version ? tr(STR_APPS_UPGRADE) : tr(STR_APPS_REINSTALL));
+    const char* hint3 = app.isInstalled ? tr(STR_APPS_UNINSTALL) : "";
     const auto labels = mappedInput.mapLabels(hint1, hint2, hint3, "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
@@ -1032,16 +1035,16 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, "Installing App", appName);
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_INSTALLING), appName);
 
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, "Downloading from GitHub...", true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_DOWNLOADING), true, EpdFontFamily::BOLD);
 
-    char fileBuf[80];
-    snprintf(fileBuf, sizeof(fileBuf), "File %d of %d: %s", currentFileNum_, totalFiles_,
+    char fileBuf[128];
+    snprintf(fileBuf, sizeof(fileBuf), tr(STR_APPS_FILE_PROGRESS), currentFileNum_, totalFiles_,
              currentDownloadingFile_.c_str());
     renderer.drawCenteredText(SMALL_FONT_ID, h / 2, fileBuf, true);
 
-    const auto labels = mappedInput.mapLabels("Cancel", "", "", "");
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
@@ -1051,9 +1054,9 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, "App Store", "Error");
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_ERROR));
 
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, errorTitle_.empty() ? "Error" : errorTitle_.c_str(), true,
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, errorTitle_.empty() ? tr(STR_APPS_ERROR) : errorTitle_.c_str(), true,
                               EpdFontFamily::BOLD);
     auto lines = renderer.wrappedText(SMALL_FONT_ID, errorMessage_.c_str(), w - 64, 4);
     int dy = h / 2;
@@ -1062,7 +1065,7 @@ class AppStoreActivity : public Activity {
       dy += renderer.getLineHeight(SMALL_FONT_ID) + 2;
     }
 
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Retry", "", "");
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 };

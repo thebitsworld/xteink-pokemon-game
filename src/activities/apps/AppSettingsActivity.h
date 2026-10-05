@@ -68,20 +68,18 @@ class AppSettingsActivity : public Activity {
     constexpr int totalItems = 2;
 
     // 1. Draw Header
-    GUI.drawHeader(renderer, Rect{0, headerY, pageWidth, headerH}, "App Settings");
+    GUI.drawHeader(renderer, Rect{0, headerY, pageWidth, headerH}, tr(STR_APPS_SETTINGS));
 
     // 2. Draw Menu with Sort Options
     GUI.drawButtonMenu(
         renderer, Rect{0, startY, pageWidth, menuHeight}, totalItems, cursorIndex,
-        [&settings](int index) -> const char* {
-          if (index == 0) {
-            return (settings.sortMode == MenuSortMode::Alphabetical) ? "Alphabetical (A - Z)  [Active]"
-                                                                     : "Alphabetical (A - Z)";
-          } else if (index == 1) {
-            return (settings.sortMode == MenuSortMode::MostUsed) ? "Most Frequently Used  [Active]"
-                                                                 : "Most Frequently Used";
-          }
-          return "";
+        [this, &settings](int index) -> const char* {
+          if (index > 1) return "";
+          const char* label = index == 0 ? tr(STR_APPS_SORT_ALPHA) : tr(STR_APPS_SORT_USAGE);
+          const MenuSortMode mode = index == 0 ? MenuSortMode::Alphabetical : MenuSortMode::MostUsed;
+          if (settings.sortMode != mode) return label;
+          snprintf(activeLabel_, sizeof(activeLabel_), "%s  [%s]", label, tr(STR_APPS_ACTIVE));
+          return activeLabel_;
         },
         [](int index) { return (index == 0) ? UIIcon::Library : UIIcon::Recent; });
 
@@ -94,6 +92,7 @@ class AppSettingsActivity : public Activity {
 
  private:
   int cursorIndex = 0;
+  char activeLabel_[96] = "";
 
   void applySelection() {
     auto& settings = SmudgeSettings::getInstance();

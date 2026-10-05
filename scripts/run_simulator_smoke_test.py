@@ -33,6 +33,10 @@ POKEMON_ART_ERROR_PATTERNS = (
     "[GFX] Failed to read row",
 )
 POKEMON_DETAIL_SUCCESS_MARKER = "Pokemon Pokedex detail card rendered"
+# test/lua_apps/<id>/ are copied into the SD sandbox for --lua-apps; the smoke
+# app logs these markers as it runs (test/lua_apps/smoke/main.lua).
+LUA_APPS_SOURCE = ROOT / "test" / "lua_apps"
+LUA_SMOKE_MARKERS = ("LUA_SMOKE init ok", "LUA_SMOKE draw ok", "LUA_SMOKE confirm 1", "LUA_SMOKE exit")
 THEMES = {
     "classic": 0,
     "lyra": 1,
@@ -101,6 +105,24 @@ def prepare_pokedex_card_fixture(target: Path, width: int = 472, height: int = 7
     target.write_bytes(header + dib + palette + pixels)
 
 
+def prepare_lua_apps(temp_root: Path) -> None:
+    target = temp_root / "fs_" / ".crosspoint" / "applications"
+    target.mkdir(parents=True, exist_ok=True)
+    for app in sorted(LUA_APPS_SOURCE.iterdir()):
+        if app.is_dir():
+            shutil.copytree(app, target / app.name)
+
+
+def lua_smoke_output_error(output: str) -> str | None:
+    for line in output.splitlines():
+        if "[ERR]" in line and "[LUA]" in line:
+            return f"Lua error: {line.strip()}"
+    for marker in LUA_SMOKE_MARKERS:
+        if marker not in output:
+            return f"missing Lua app marker: {marker}"
+    return None
+
+
 def pokemon_smoke_output_error(output: str) -> str | None:
     for pattern in POKEMON_ART_ERROR_PATTERNS:
         if pattern in output:
@@ -120,6 +142,8 @@ def build_smoke_environment(
     env["CROSSINK_SIMULATOR_SMOKE_PAGE_TURNS"] = str(args.page_turns)
     if args.pokemon:
         env["CROSSINK_SIMULATOR_START_POKEMON"] = "1"
+    if args.lua_apps:
+        env["CROSSINK_SIMULATOR_LUA_APPS"] = "1"
     if args.home_navigation:
         env["CROSSINK_SIMULATOR_HOME_NAVIGATION"] = "1"
     if args.landscape:
@@ -165,6 +189,8 @@ def run_smoke(args: argparse.Namespace) -> int:
         simulator_book_path = prepare_fs(temp_root, book)
         if args.pokemon:
             prepare_pokemon_assets(temp_root)
+        if args.lua_apps:
+            prepare_lua_apps(temp_root)
 
         if args.font_dir:
             shutil.copytree(Path(args.font_dir), temp_root / "fs_" / "fonts", dirs_exist_ok=True)
@@ -198,6 +224,12 @@ def run_smoke(args: argparse.Namespace) -> int:
             print(f"Pokemon smoke test failed: {pokemon_error}", file=sys.stderr)
             return 2
 
+    if args.lua_apps:
+        lua_error = lua_smoke_output_error(proc.stdout)
+        if lua_error is not None:
+            print(f"Lua apps smoke test failed: {lua_error}", file=sys.stderr)
+            return 2
+
     if "Simulator smoke test passed" not in proc.stdout:
         print("Simulator smoke test did not print its success marker", file=sys.stderr)
         return 2
@@ -225,6 +257,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pokemon", action="store_true", help="Run the Pokemon onboarding and collection smoke route")
     parser.add_argument("--home-navigation", action="store_true",
                         help="Exercise Home navigation through the Pokemon row to Settings")
+    parser.add_argument("--lua-apps", action="store_true",
+                        help="Run the Lua Applications route with the test/lua_apps smoke app")
     parser.add_argument("--landscape", action="store_true", help="Run the Pokemon route in landscape orientation")
     parser.add_argument("--frontlight-sync", action="store_true", help="Check frontlight sync outside the reader with stats enabled and disabled (X4 Pro)")
     parser.add_argument("--frontlight-layout", action="store_true", help="Check frontlight drawer bounds and handle taps across scales, orientations and themes (X4 Pro)")
@@ -238,6 +272,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--landscape requires --pokemon")
     if args.pokemon and args.env not in ("pokemon-simulator-X3", "pokemon-x4-pro-simulator"):
         parser.error("--pokemon requires --env pokemon-simulator-X3 or pokemon-x4-pro-simulator")
+    if args.lua_apps and args.pokemon:
+        parser.error("--lua-apps and --pokemon are separate routes; run them one at a time")
+    if args.lua_apps and args.env not in ("pokemon-simulator-X3", "pokemon-x4-pro-simulator"):
+        parser.error("--lua-apps requires --env pokemon-simulator-X3 or pokemon-x4-pro-simulator")
     if args.home_navigation and args.env != "pokemon-simulator-X3":
         parser.error("--home-navigation requires --env pokemon-simulator-X3")
     return args

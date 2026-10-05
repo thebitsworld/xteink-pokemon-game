@@ -33,7 +33,7 @@ class LuaAppActivity : public Activity {
     runner_ = std::make_unique<ink::LuaRunner>(renderer, mappedInput, appDir_, appId_);
 
     if (!runner_->init()) {
-      renderError("Failed to initialize Lua VM");
+      renderError(tr(STR_APPS_LUA_INIT_FAILED));
       return;
     }
 
@@ -187,9 +187,9 @@ class LuaAppActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, appName_.c_str(), "Script Error");
+    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, appName_.c_str(), tr(STR_APPS_SCRIPT_ERROR));
 
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, "Application Error", true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_APP_ERROR), true, EpdFontFamily::BOLD);
     if (msg) {
       auto lines = renderer.wrappedText(SMALL_FONT_ID, msg, w - 64, 5);
       int y = h / 2 - 10;

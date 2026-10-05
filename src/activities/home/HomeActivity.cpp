@@ -273,7 +273,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  items.push({"Applications", Library, HomeMenuAction::Applications});
+  items.push({tr(STR_APPS_TITLE), Library, HomeMenuAction::Applications});
 #endif
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
   items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
@@ -308,7 +308,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  items.push({"Applications", Library, HomeMenuAction::Applications});
+  items.push({tr(STR_APPS_TITLE), Library, HomeMenuAction::Applications});
 #endif
   // No Settings entry in this minimal menu variant (reached another way in
   // this theme) - Slideshow still goes last, matching the "below Settings"
