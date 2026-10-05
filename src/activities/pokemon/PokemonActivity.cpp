@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "activities/ActivityManager.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
@@ -29,6 +30,9 @@ namespace fui = freeink::ui;
 namespace {
 constexpr fui::ActionId ACTION_ROW = 1;
 constexpr uint16_t STARTERS[] = {1, 4, 7, 25};
+// The Starter screen's extra, full-width button after the four partners: a new
+// device can take over an existing save from a nearby one instead of starting.
+constexpr int STARTER_RECEIVE_SAVE_INDEX = 4;
 // Screen::Battle's own FIGHT/BALL/BAG/SWITCH/RUN command grid (2 columns to
 // save vertical space - see renderBattleMenu()); shared with loop()'s
 // grid-aware Up/Down/Left/Right navigation for that screen.
@@ -48,6 +52,11 @@ constexpr int STARTER_BUTTON_ROW_HEIGHT = 120;
 // to leave (the marker used to sit *after* the icon, at markerInset=86,
 // almost touching it).
 constexpr int ROW_ICON_X = 24;
+
+// Screen::Settings rows after the Home Screen toggle (index 0).
+const char* settingsActionLabel(const int index) {
+  return index == 1 ? tr(STR_POKEMON_SEND_SAVE) : index == 2 ? tr(STR_POKEMON_RECEIVE_SAVE) : tr(STR_POKEMON_RESET);
+}
 
 const char* speciesName(const uint16_t id) {
   const pokemon::SpeciesData* species = pokemon::speciesData(id);
@@ -888,6 +897,8 @@ Rect PokemonActivity::choiceCellRect(const int index) const {
   const int x = margin + (spansRow ? 0 : (local % columns) * (buttonWidth + gap));
   // Starter buttons are taller: each carries the Pokemon's picture.
   const int rowHeight = screen_ == Screen::Starter ? STARTER_BUTTON_ROW_HEIGHT : MENU_GRID_ROW_HEIGHT;
+  if (screen_ == Screen::Starter && index == STARTER_RECEIVE_SAVE_INDEX)
+    return Rect{x, top + row * rowHeight, buttonWidth, MENU_GRID_ROW_HEIGHT - 8};
   return Rect{x, top + row * rowHeight, buttonWidth, rowHeight - 8};
 }
 
@@ -974,7 +985,7 @@ void PokemonActivity::moveChoiceSelection(const MappedInputManager::Button direc
 int PokemonActivity::logicalCount() const {
   switch (screen_) {
     case Screen::Starter:
-      return 4;
+      return STARTER_RECEIVE_SAVE_INDEX + 1;
     case Screen::Gender:
     case Screen::NicknameQuestion:
     case Screen::Move:
@@ -986,7 +997,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::Menu:
       return 8;
     case Screen::Settings:
-      return 2;
+      return 4;
     case Screen::Party:
       return pokemon::PARTY_SIZE;
     case Screen::Actions: {
@@ -2011,6 +2022,10 @@ void PokemonActivity::activate() {
   }
   switch (screen_) {
     case Screen::Starter:
+      if (selected_ == STARTER_RECEIVE_SAVE_INDEX) {
+        activityManager.goToPokemonSaveTransfer(false);
+        return;
+      }
       starterSpecies_ = STARTERS[selected_];
       setScreen(Screen::Gender);
       return;
@@ -2058,6 +2073,8 @@ void PokemonActivity::activate() {
         } else {
           setScreen(Screen::Settings, selected_);
         }
+      } else if (selected_ == 1 || selected_ == 2) {
+        activityManager.goToPokemonSaveTransfer(selected_ == 1);
       } else {
         setScreen(Screen::ResetFirst);
       }
@@ -3311,7 +3328,7 @@ void PokemonActivity::buildRows() {
     const int index = start + local;
     switch (screen_) {
       case Screen::Starter:
-        row(local, speciesName(STARTERS[index]));
+        row(local, index < STARTER_RECEIVE_SAVE_INDEX ? speciesName(STARTERS[index]) : tr(STR_POKEMON_RECEIVE_SAVE));
         break;
       case Screen::Gender:
         row(local, index == 0 ? tr(STR_POKEMON_MALE) : tr(STR_POKEMON_FEMALE));
@@ -3341,7 +3358,7 @@ void PokemonActivity::buildRows() {
           row(local, tr(STR_POKEMON_HOME_SCREEN),
               SETTINGS.pokemonHomeScreen != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
         } else {
-          row(local, tr(STR_POKEMON_RESET));
+          row(local, settingsActionLabel(index));
         }
         break;
       case Screen::Party:
@@ -4721,7 +4738,7 @@ void PokemonActivity::renderChoiceButtons() {
   for (int index = choicePageStart(); index < pageEnd; ++index) {
     const Rect cell = choiceCellRect(index);
     const bool selected = index == selected_;
-    if (screen_ == Screen::Starter) {
+    if (screen_ == Screen::Starter && index < STARTER_RECEIVE_SAVE_INDEX) {
       // Black-on-black art would vanish inside a filled button, so a starter
       // shows selection as a thick border instead.
       renderer.drawRoundedRect(cell.x, cell.y, cell.width, cell.height, selected ? 4 : 1, 6, true);
@@ -4778,6 +4795,9 @@ void PokemonActivity::renderChoiceButtons() {
     const char* label = "";
     char combined[64];
     switch (screen_) {
+      case Screen::Starter:
+        label = tr(STR_POKEMON_RECEIVE_SAVE);
+        break;
       case Screen::Gender:
         label = index == 0 ? tr(STR_POKEMON_MALE) : tr(STR_POKEMON_FEMALE);
         break;
@@ -4794,7 +4814,7 @@ void PokemonActivity::renderChoiceButtons() {
                    SETTINGS.pokemonHomeScreen != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
           label = combined;
         } else {
-          label = tr(STR_POKEMON_RESET);
+          label = settingsActionLabel(index);
         }
         break;
       case Screen::Actions:
@@ -5100,7 +5120,7 @@ void PokemonActivity::renderRowArt() {
     const int battleSwitchSlot =
         screen_ == Screen::BattleSwitch ? usablePartySlotAt(static_cast<size_t>(start + local)) : -1;
     if (screen_ == Screen::Starter)
-      speciesId = STARTERS[start + local];
+      speciesId = start + local < STARTER_RECEIVE_SAVE_INDEX ? STARTERS[start + local] : 0;
     else if ((screen_ == Screen::Party || screen_ == Screen::Move || screen_ == Screen::ItemTarget) &&
              start + local < snapshot_.partyCount)
       speciesId = snapshot_.party[start + local].speciesId;

@@ -37,6 +37,26 @@ PAGES = {
     "fonts":    ("FontsPageHtml",    "Fonts - CrossInk",           "fonts",    ""),
 }
 
+
+def lua_apps_enabled():
+    """True when the PlatformIO env being built sets CROSSINK_ENABLE_LUA_APPS.
+    Outside PlatformIO (run by hand) every page is built."""
+    try:
+        Import("env")  # noqa: F821 - SCons builtin in PlatformIO pre-scripts
+    except NameError:
+        return True
+    flags = env.GetProjectOption("build_flags", [])  # noqa: F821
+    if isinstance(flags, str):
+        flags = [flags]
+    return any("CROSSINK_ENABLE_LUA_APPS" in flag for flag in flags)
+
+# The Lua applications manager (and its nav link) only exists in builds with
+# the Lua app engine - see CrossPointWebServer's /applications routes.
+LUA_APPS = lua_apps_enabled()
+if LUA_APPS:
+    PAGES["applications"] = ("ApplicationsPageHtml", "Applications - CrossInk", "applications",
+                             '  <script src="/js/jszip.min.js"></script>')
+
 PRESERVE_TAGS = "pre|code|textarea|script|style"
 
 def minify_html(html):
@@ -144,9 +164,11 @@ for slug, (ident, title, active, head_extra) in PAGES.items():
     values = {
         "title": title, "v": v, "head_extra": head_extra,
         "styles": page_css, "body": page_html, "script": script,
-        "cls_home": "", "cls_files": "", "cls_settings": "", "cls_fonts": "",
+        "cls_home": "", "cls_files": "", "cls_applications": "", "cls_settings": "", "cls_fonts": "",
     }
     values[f"cls_{active}"] = ' class="active"'
+    values["nav_applications"] = (
+        f'<a href="/applications"{values["cls_applications"]}>Applications</a>' if LUA_APPS else "")
     html = minify_html(render(base, values))
     orig, comp = emit_gzip(os.path.join(OUT, f"{ident}.generated.h"), ident, html)
     print(f"{ident:18} {orig:>7}B -> {comp:>6}B gz")

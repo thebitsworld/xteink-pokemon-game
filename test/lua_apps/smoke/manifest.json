@@ -1,0 +1,8 @@
+{
+  "id": "smoke",
+  "name": "Lua Smoke Test",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Exercises the smudge.* API for the simulator smoke test",
+  "entry": "main.lua"
+}

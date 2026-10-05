@@ -115,6 +115,9 @@ class HomeActivity final : public Activity {
   void onSavedItemsOpen();
 #if defined(CROSSINK_ENABLE_POKEMON)
   void onPokemonOpen();
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  void onApplicationsOpen();
+#endif
 #endif
 
   int getMenuItemCount() const;

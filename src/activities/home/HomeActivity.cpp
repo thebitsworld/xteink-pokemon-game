@@ -44,6 +44,9 @@
 #include "Memory.h"
 #include "PokemonDashboardLayout.h"
 #include "activities/pokemon/PokemonActivity.h"
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+#include "activities/apps/ApplicationsActivity.h"
+#endif
 #include "components/pokemon/PokemonHomeAccessory.h"
 #endif
 
@@ -71,6 +74,9 @@ enum class HomeMenuAction {
   Settings,
 #if defined(CROSSINK_ENABLE_POKEMON)
   Pokemon,
+#endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  Applications,
 #endif
 };
 
@@ -266,6 +272,9 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
 #if defined(CROSSINK_ENABLE_POKEMON)
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  items.push({tr(STR_APPS_TITLE), Library, HomeMenuAction::Applications});
+#endif
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
   items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
 }
@@ -297,6 +306,9 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
 #if defined(CROSSINK_ENABLE_POKEMON)
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
+#endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  items.push({tr(STR_APPS_TITLE), Library, HomeMenuAction::Applications});
 #endif
   // No Settings entry in this minimal menu variant (reached another way in
   // this theme) - Slideshow still goes last, matching the "below Settings"
@@ -1504,6 +1516,11 @@ void HomeActivity::loop() {
             onPokemonOpen();
             break;
 #endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+          case HomeMenuAction::Applications:
+            onApplicationsOpen();
+            break;
+#endif
           case HomeMenuAction::ContinueReading:
           case HomeMenuAction::Settings:
             break;
@@ -1762,6 +1779,11 @@ void HomeActivity::loop() {
 #if defined(CROSSINK_ENABLE_POKEMON)
       case HomeMenuAction::Pokemon:
         onPokemonOpen();
+        break;
+#endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+      case HomeMenuAction::Applications:
+        onApplicationsOpen();
         break;
 #endif
     }
@@ -2434,6 +2456,17 @@ void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
 #if defined(CROSSINK_ENABLE_POKEMON)
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+void HomeActivity::onApplicationsOpen() {
+  auto apps = makeUniqueNoThrow<ApplicationsActivity>(renderer, mappedInput);
+  if (!apps) {
+    LOG_ERR("HOME", "Could not allocate Applications activity");
+    return;
+  }
+  startActivityForResult(std::move(apps), [](const ActivityResult&) {});
+}
+#endif
+
 void HomeActivity::onPokemonOpen() {
   auto pokemon = makeUniqueNoThrow<PokemonActivity>(renderer, mappedInput);
   if (!pokemon) {

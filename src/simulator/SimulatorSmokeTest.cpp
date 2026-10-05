@@ -57,6 +57,9 @@
 #include <Memory.h>
 
 #include "activities/pokemon/PokemonActivity.h"
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+#include "activities/apps/ApplicationsActivity.h"
+#endif
 #endif
 #include "util/ButtonShortcutController.h"
 
@@ -92,6 +95,7 @@ enum class SmokeStep : uint8_t {
   Sleep,
   Reader,
   Pokemon,
+  LuaApps,
   ReaderInput,
   CarouselHome,
   FrontlightLayout,
@@ -128,6 +132,17 @@ void startPokemonActivity() {
   auto activity = makeUniqueNoThrow<PokemonActivity>(renderer, mappedInputManager);
   if (!activity) {
     LOG_ERR("SMOKE", "Could not allocate Pokemon simulator activity");
+    std::_Exit(2);
+  }
+  activityManager.replaceActivity(std::move(activity));
+}
+#endif
+
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+void startApplicationsActivity() {
+  auto activity = makeUniqueNoThrow<ApplicationsActivity>(renderer, mappedInputManager);
+  if (!activity) {
+    LOG_ERR("SMOKE", "Could not allocate Applications simulator activity");
     std::_Exit(2);
   }
   activityManager.replaceActivity(std::move(activity));
@@ -242,6 +257,7 @@ class SimulatorSmokeTest {
   static bool enabled() { return std::getenv("CROSSINK_SIMULATOR_SMOKE_TEST") != nullptr; }
 
   static bool pokemonMode() { return std::getenv("CROSSINK_SIMULATOR_START_POKEMON") != nullptr; }
+  static bool luaAppsMode() { return std::getenv("CROSSINK_SIMULATOR_LUA_APPS") != nullptr; }
   // Phase 3 battle-screen touch audit (ItemTarget/BattleSwitch/BattleBag/
   // BattleBalls): these only exist inside an active battle, which this
   // script cannot set up on its own (no public PokemonService API to queue
@@ -1528,6 +1544,15 @@ class SimulatorSmokeTest {
         }
 #endif
         applyRequestedTheme();
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+        if (luaAppsMode()) {
+          startApplicationsActivity();
+          queueStep("Lua Applications", SmokeStep::LuaApps, 4);
+          break;
+        }
+#else
+        if (luaAppsMode()) fail("Lua apps smoke test requested without CROSSINK_ENABLE_LUA_APPS");
+#endif
 #if defined(CROSSINK_ENABLE_POKEMON)
         if (pokemonMode()) {
           startPokemonActivity();
@@ -1992,6 +2017,15 @@ class SimulatorSmokeTest {
 #endif
         break;
 
+      case SmokeStep::LuaApps:
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+        buildLuaAppsInputScript();
+        step = SmokeStep::ReaderInput;
+#else
+        fail("Lua apps smoke-test step is unavailable");
+#endif
+        break;
+
       case SmokeStep::ReaderInput:
         runInputScript();
         break;
@@ -2253,6 +2287,36 @@ class SimulatorSmokeTest {
     inputScript.push_back(press(button));
     inputScript.push_back(release(button));
   }
+
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  // The runner copies test/lua_apps/smoke into the SD sandbox, so the
+  // alphabetical list is: Lua Smoke Test, then the built-in App Store and App
+  // Settings. Launches the app, presses Confirm inside it, exits with Back
+  // (the app calls smudge.exit()), then opens App Settings. The runner checks
+  // the app's "LUA_SMOKE ..." log markers and that no Lua error was logged.
+  void buildLuaAppsInputScript() {
+    inputScript.clear();
+    scriptIndex = 0;
+    inputScript.push_back(render("Lua Applications", 4));
+    inputScript.push_back(assertActivity("Applications"));
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Lua Smoke Test app", 8));
+    inputScript.push_back(assertActivity("Lua Smoke Test"));
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Lua Smoke Test app after Confirm", 4));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Lua Applications Restored", 6));
+    inputScript.push_back(assertActivity("Applications"));
+    addTap(MappedInputManager::Button::Up);  // wraps to the last entry, App Settings
+    inputScript.push_back(render("Lua Applications Settings selected", 3));
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Lua App Settings", 4));
+    inputScript.push_back(assertActivity("AppSettings"));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Lua Applications Restored 2", 4));
+    inputScript.push_back(assertActivity("Applications"));
+  }
+#endif
 
   void buildHomeNavigationInputScript() {
     inputScript.clear();

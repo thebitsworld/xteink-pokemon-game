@@ -31,9 +31,11 @@ const char* I18n::get(StrId id) const {
   // Use generated helper function - no hardcoded switch needed!
   const LangStrings lang = getLanguageStrings(_language);
 
-  // If bit 15 of the offset is set, apply the offset to the English lookup table
+  // 0xFFFF marks a string identical to English (not stored in this language's
+  // blob): read it from the English blob instead. Any other value is a plain
+  // byte offset, so a blob can use the full 16-bit range (see gen_i18n.py).
   const uint16_t off = lang.offsets[index];
-  if (off & 0x8000) return STRINGS_EN_DATA + (off & 0x7FFF);
+  if (off == 0xFFFF) return STRINGS_EN_DATA + OFFSETS_EN[index];
   return lang.data + off;
 }
 
