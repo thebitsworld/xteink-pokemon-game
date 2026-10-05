@@ -12,6 +12,18 @@ function on_init()
     if tonumber(smudge.load("runs", "0")) ~= runs then
         error("save/load round trip failed")
     end
+    -- Writes outside the app's own folders must be refused.
+    if smudge.write_file("/.crosspoint/lua-smoke-escape.txt", "x") then
+        error("write_file outside the app folder was allowed")
+    end
+    if smudge.write_file("../escape.txt", "x") then
+        error("write_file with .. was allowed")
+    end
+    if not smudge.write_file("scratch.txt", "ok") then
+        error("write_file inside the app folder failed")
+    end
+    smudge.delete_file("scratch.txt")
+    smudge.log("LUA_SMOKE sandbox ok")
     smudge.log("LUA_SMOKE init ok")
 end
 

@@ -36,7 +36,7 @@ POKEMON_DETAIL_SUCCESS_MARKER = "Pokemon Pokedex detail card rendered"
 # test/lua_apps/<id>/ are copied into the SD sandbox for --lua-apps; the smoke
 # app logs these markers as it runs (test/lua_apps/smoke/main.lua).
 LUA_APPS_SOURCE = ROOT / "test" / "lua_apps"
-LUA_SMOKE_MARKERS = ("LUA_SMOKE init ok", "LUA_SMOKE draw ok", "LUA_SMOKE confirm 1", "LUA_SMOKE exit")
+LUA_SMOKE_MARKERS = ("LUA_SMOKE sandbox ok", "LUA_SMOKE init ok", "LUA_SMOKE draw ok", "LUA_SMOKE confirm 1", "LUA_SMOKE exit")
 THEMES = {
     "classic": 0,
     "lyra": 1,

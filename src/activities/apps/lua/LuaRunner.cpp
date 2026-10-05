@@ -1069,10 +1069,21 @@ int LuaRunner::l_header(lua_State* L) {
   return 0;
 }
 
+// smudge.save/load keys become file names in the app's saved-data folder, so
+// they must not carry a path.
+static bool isSafeSaveKey(const char* key) {
+  return key[0] != '\0' && strchr(key, '/') == nullptr && strchr(key, '\\') == nullptr &&
+         strstr(key, "..") == nullptr;
+}
+
 int LuaRunner::l_save(lua_State* L) {
   if (!s_activeRunner) return 0;
   const char* key = luaL_checkstring(L, 1);
   const char* val = luaL_checkstring(L, 2);
+  if (!isSafeSaveKey(key)) {
+    LOG_INF("LUA", "[%s] save key refused: %s", s_activeRunner->appId_.c_str(), key);
+    return 0;
+  }
 
   std::string filePath = s_activeRunner->saveDir_ + "/" + key + ".dat";
   Storage.writeFile(filePath.c_str(), String(val));
@@ -1087,7 +1098,7 @@ int LuaRunner::l_load(lua_State* L) {
   const char* key = luaL_checkstring(L, 1);
   std::string filePath = s_activeRunner->saveDir_ + "/" + key + ".dat";
 
-  if (Storage.exists(filePath.c_str())) {
+  if (isSafeSaveKey(key) && Storage.exists(filePath.c_str())) {
     String val = Storage.readFile(filePath.c_str());
     lua_pushstring(L, val.c_str());
   } else if (lua_gettop(L) >= 2) {
@@ -1716,6 +1727,26 @@ int LuaRunner::l_getDevice(lua_State* L) {
   return 1;
 }
 
+// Where an app may write or delete: inside its own folder or its saved-data
+// folder, never elsewhere on the SD card (books, other apps, the Pokemon save).
+// A relative path is taken from the app folder; ".." is rejected outright.
+static bool resolveWritablePath(const std::string& appDir, const std::string& saveDir, const char* path,
+                                std::string& out) {
+  if (path == nullptr || path[0] == '\0' || strstr(path, "..") != nullptr) return false;
+  if (path[0] != '/') {
+    out = appDir + "/" + path;
+    return true;
+  }
+  const std::string full = path;
+  for (const std::string* root : {&appDir, &saveDir}) {
+    if (full.size() > root->size() + 1 && full.compare(0, root->size(), *root) == 0 && full[root->size()] == '/') {
+      out = full;
+      return true;
+    }
+  }
+  return false;
+}
+
 int LuaRunner::l_writeFile(lua_State* L) {
   if (!s_activeRunner) {
     lua_pushboolean(L, false);
@@ -1726,9 +1757,11 @@ int LuaRunner::l_writeFile(lua_State* L) {
   const char* content = luaL_checklstring(L, 2, &len);
   bool append = (lua_gettop(L) >= 3) ? lua_toboolean(L, 3) : false;
 
-  std::string fullPath = path;
-  if (path[0] != '/') {
-    fullPath = s_activeRunner->appDir_ + "/" + path;
+  std::string fullPath;
+  if (!resolveWritablePath(s_activeRunner->appDir_, s_activeRunner->saveDir_, path, fullPath)) {
+    LOG_INF("LUA", "[%s] write_file outside the app's folders refused: %s", s_activeRunner->appId_.c_str(), path);
+    lua_pushboolean(L, false);
+    return 1;
   }
 
   HalFile f = Storage.open(fullPath.c_str(), append ? (O_WRONLY | O_CREAT | O_APPEND) : (O_WRONLY | O_CREAT | O_TRUNC));
@@ -1749,9 +1782,11 @@ int LuaRunner::l_deleteFile(lua_State* L) {
     return 1;
   }
   const char* path = luaL_checkstring(L, 1);
-  std::string fullPath = path;
-  if (path[0] != '/') {
-    fullPath = s_activeRunner->appDir_ + "/" + path;
+  std::string fullPath;
+  if (!resolveWritablePath(s_activeRunner->appDir_, s_activeRunner->saveDir_, path, fullPath)) {
+    LOG_INF("LUA", "[%s] delete_file outside the app's folders refused: %s", s_activeRunner->appId_.c_str(), path);
+    lua_pushboolean(L, false);
+    return 1;
   }
   bool ok = Storage.remove(fullPath.c_str());
   lua_pushboolean(L, ok);

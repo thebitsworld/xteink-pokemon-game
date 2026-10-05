@@ -20,6 +20,10 @@
 #include <WiFi.h>
 #endif
 
+#ifndef CROSSINK_APP_STORE_URL
+#define CROSSINK_APP_STORE_URL "https://raw.githubusercontent.com/thebitsworld/xteink-pokemon-game/main/apps/"
+#endif
+
 class AppStoreActivity : public Activity {
  public:
   AppStoreActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -28,8 +32,9 @@ class AppStoreActivity : public Activity {
   void onEnter() override {
     Activity::onEnter();
     sdFontSystem.releaseForNetwork(renderer);
-    catalogUrl_ = "https://raw.githubusercontent.com/Mumfee/CrossSmudge/main/apps/catalog.json";
-    baseUrl_ = "https://raw.githubusercontent.com/Mumfee/CrossSmudge/main/apps/";
+    // This repo's own apps/ folder (catalog.json + one folder per app).
+    catalogUrl_ = std::string(CROSSINK_APP_STORE_URL) + "catalog.json";
+    baseUrl_ = CROSSINK_APP_STORE_URL;
     selectedIndex_ = 0;
     errorTitle_ = tr(STR_APPS_NETWORK_ERROR);
     errorMessage_.clear();
