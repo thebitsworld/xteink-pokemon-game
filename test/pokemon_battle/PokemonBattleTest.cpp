@@ -2507,6 +2507,85 @@ void randomFightsNeverBreakAnEngineInvariant() {
   }
 }
 
+
+// --- Trainer AI (BattleCombatant::aiSkill > 0) ------------------------------
+// MAX_RANDOM keeps the AI from taking its random-move "mistake" (that roll
+// lands on 99, above every skill's mistake percentage) and breaks score ties
+// towards the last slot, so these isolate the scoring itself.
+
+uint8_t trainerPick(BattleCombatant player, BattleCombatant opponent) {
+  opponent.aiSkill = 3;
+  return pokemon::stepOpponentOnlyTurn(player, opponent, MAX_RANDOM).opponent.moveSlot;
+}
+
+void trainerAiPrefersARealAttackOverASameTypeZeroPowerMove() {
+  // Growl and Tackle are both Normal: the old type-only AI saw them as equals
+  // (and MAX_RANDOM's tie-break lands on Growl in slot 1); the trainer AI
+  // knows Growl deals no damage here.
+  const BattleCombatant player = makeCombatant(4, 20, {33});
+  const BattleCombatant wild = makeCombatant(7, 20, {33, 45});
+  BattleCombatant legacyPlayer = player;
+  BattleCombatant legacyWild = wild;
+  CHECK(pokemon::stepOpponentOnlyTurn(legacyPlayer, legacyWild, MAX_RANDOM).opponent.moveSlot == 1);
+  // A healthy target at -6 Attack makes Growl worthless outright.
+  BattleCombatant cappedPlayer = player;
+  cappedPlayer.attackStage = -6;
+  CHECK(trainerPick(cappedPlayer, wild) == 0);
+}
+
+void trainerAiTakesTheMostAccurateKnockout() {
+  // Both Hydro Pump (80% accurate) and Tackle knock out a 1 HP Charmander;
+  // the trainer takes the sure one.
+  BattleCombatant player = makeCombatant(4, 20, {33});
+  player.currentHp = 1;
+  const BattleCombatant squirtle = makeCombatant(7, 20, {56, 33});
+  CHECK(trainerPick(player, squirtle) == 1);
+}
+
+void trainerAiOnlyUsesStatusMovesThatWouldWork() {
+  // A healthy, unstatused Charmander: paralysing it is worth more than a
+  // Tackle at this level.
+  const BattleCombatant player = makeCombatant(4, 20, {33});
+  const BattleCombatant pikachu = makeCombatant(25, 20, {86, 33});
+  CHECK(trainerPick(player, pikachu) == 0);
+  // Already paralysed: Thunder Wave would do nothing, so attack instead.
+  BattleCombatant paralysed = player;
+  paralysed.status = pokemon::Ailment::Paralysis;
+  CHECK(trainerPick(paralysed, pikachu) == 1);
+  // Ground types are immune to Thunder Wave (Geodude, 74).
+  const BattleCombatant geodude = makeCombatant(74, 20, {33});
+  CHECK(trainerPick(geodude, pikachu) == 1);
+}
+
+void trainerAiOnlyDreamEatsASleepingTarget() {
+  const BattleCombatant awake = makeCombatant(4, 20, {33});
+  const BattleCombatant drowzee = makeCombatant(96, 20, {138, 33});
+  CHECK(trainerPick(awake, drowzee) == 1);
+  BattleCombatant asleep = awake;
+  asleep.status = pokemon::Ailment::Sleep;
+  asleep.statusTurns = 3;
+  CHECK(trainerPick(asleep, drowzee) == 0);
+}
+
+void trainerAiKeepsExplosionForWhenItIsAboutToFaint() {
+  const BattleCombatant player = makeCombatant(4, 20, {33});
+  BattleCombatant geodude = makeCombatant(74, 20, {153, 33});
+  CHECK(trainerPick(player, geodude) == 1);
+  geodude.currentHp = static_cast<uint16_t>(geodude.maxHp / 5U);
+  CHECK(trainerPick(player, geodude) == 0);
+}
+
+void estimateMoveDamageHandlesImmunityFixedDamageAndEmptySlots() {
+  const BattleCombatant pikachu = makeCombatant(25, 20, {84, 69});  // Thunder Shock, Seismic Toss
+  const BattleCombatant geodude = makeCombatant(74, 20, {33});
+  const BattleCombatant squirtle = makeCombatant(7, 20, {33});
+  CHECK(pokemon::estimateMoveDamage(pikachu, geodude, 0) == 0);    // Electric vs Ground
+  CHECK(pokemon::estimateMoveDamage(pikachu, squirtle, 0) > 0);
+  CHECK(pokemon::estimateMoveDamage(pikachu, squirtle, 1) == 20);  // Seismic Toss = the user's level
+  CHECK(pokemon::estimateMoveDamage(pikachu, squirtle, 2) == 0);   // empty slot
+  CHECK(pokemon::bestExpectedDamage(pikachu, squirtle) >= pokemon::estimateMoveDamage(pikachu, squirtle, 0));
+}
+
 int main() {
   statFormulasScaleWithLevel();
   damagingMoveReducesDefenderHpAndReportsSuperEffective();
@@ -2667,5 +2746,11 @@ int main() {
   runAwayAttemptCountEventuallyGuaranteesEscape();
   hazeClearsStatusConfusionScreensAndToxicCounterOnBothSides();
   speedTieIsBrokenByACoinFlipInsteadOfAlwaysFavoringThePlayer();
+  trainerAiPrefersARealAttackOverASameTypeZeroPowerMove();
+  trainerAiTakesTheMostAccurateKnockout();
+  trainerAiOnlyUsesStatusMovesThatWouldWork();
+  trainerAiOnlyDreamEatsASleepingTarget();
+  trainerAiKeepsExplosionForWhenItIsAboutToFaint();
+  estimateMoveDamageHandlesImmunityFixedDamageAndEmptySlots();
   return failures == 0 ? 0 : 1;
 }
