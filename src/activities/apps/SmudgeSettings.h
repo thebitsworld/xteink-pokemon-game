@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "FsHelpers.h"
+#include "activities/apps/lua/AppPaths.h"
 
 enum class MenuSortMode : uint8_t { Alphabetical = 0, MostUsed = 1 };
 
@@ -27,12 +28,10 @@ class SmudgeSettings {
   std::vector<AppUsageData> apps;
 
   static constexpr uint32_t SETTINGS_MAGIC = 0x534D4447;  // 'SMDG'
-  static constexpr char settingsFile[] = "/.smudge/settings.bin";
+  static constexpr const char* settingsFile = app_paths::SETTINGS_FILE;
 
   void ensureDirectoriesExist() {
-    if (!Storage.exists("/.smudge")) {
-      Storage.mkdir("/.smudge");
-    }
+    Storage.ensureDirectoryExists("/.crosspoint");
   }
 
   void recordAppLaunch(const std::string& name) {

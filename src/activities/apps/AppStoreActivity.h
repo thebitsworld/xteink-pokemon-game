@@ -11,6 +11,7 @@
 #include "Logging.h"
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
+#include "activities/apps/lua/AppPaths.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -296,13 +297,12 @@ class AppStoreActivity : public Activity {
 
   void loadAppIcon(CatalogApp& app, bool allowDownload = false) {
     app.hasIcon = false;
-    std::string iconPath1 = "/.crosssmudge/applications/" + app.id + "/icon.raw";
-    std::string iconPath2 = "/.smudge/applications/" + app.id + "/icon.raw";
-    std::string cachePath = "/.crosssmudge/cache/icons/" + app.id + ".raw";
+    const std::string installedDir = app_paths::findAppDir(app.id);
+    const std::string iconPath = installedDir.empty() ? "" : installedDir + "/icon.raw";
+    const std::string cachePath = std::string(app_paths::CACHE_DIR) + "/icons/" + app.id + ".raw";
 
     HalFile f;
-    if (Storage.openFileForRead("STORE", iconPath1.c_str(), f) ||
-        Storage.openFileForRead("STORE", iconPath2.c_str(), f) ||
+    if ((!iconPath.empty() && Storage.openFileForRead("STORE", iconPath.c_str(), f)) ||
         Storage.openFileForRead("STORE", cachePath.c_str(), f)) {
       size_t readBytes = f.read(app.iconData, sizeof(app.iconData));
       f.close();
@@ -327,9 +327,7 @@ class AppStoreActivity : public Activity {
 #endif
 
     if (allowDownload && isWifiConnected()) {
-      Storage.ensureDirectoryExists("/.crosssmudge");
-      Storage.ensureDirectoryExists("/.crosssmudge/cache");
-      Storage.ensureDirectoryExists("/.crosssmudge/cache/icons");
+      Storage.ensureDirectoryExists((std::string(app_paths::CACHE_DIR) + "/icons").c_str());
       std::string iconUrl = baseUrl_ + app.id + "/icon.raw";
       HttpDownloader::DownloadOptions options;
 #if defined(FREEINK_NET_WOLFSSL)
@@ -355,9 +353,8 @@ class AppStoreActivity : public Activity {
   void fetchCatalog() {
     sdFontSystem.releaseForNetwork(renderer);
 
-    std::string tmpCatalog = "/.crosssmudge/cache/catalog.tmp";
-    Storage.ensureDirectoryExists("/.crosssmudge");
-    Storage.ensureDirectoryExists("/.crosssmudge/cache");
+    std::string tmpCatalog = std::string(app_paths::CACHE_DIR) + "/catalog.tmp";
+    Storage.ensureDirectoryExists(app_paths::CACHE_DIR);
     Storage.remove(tmpCatalog.c_str());
 
     HttpDownloader::DownloadOptions options;
@@ -460,14 +457,10 @@ class AppStoreActivity : public Activity {
   }
 
   void checkInstalledStatus(CatalogApp& app) {
-    std::string path1 = "/.crosssmudge/applications/" + app.id + "/manifest.json";
-    std::string path2 = "/.smudge/applications/" + app.id + "/manifest.json";
-
+    const std::string installedDir = app_paths::findAppDir(app.id);
     std::string manifestPath;
-    if (Storage.exists(path1.c_str())) {
-      manifestPath = path1;
-    } else if (Storage.exists(path2.c_str())) {
-      manifestPath = path2;
+    if (!installedDir.empty() && Storage.exists((installedDir + "/manifest.json").c_str())) {
+      manifestPath = installedDir + "/manifest.json";
     }
 
     if (!manifestPath.empty()) {
@@ -668,10 +661,8 @@ class AppStoreActivity : public Activity {
 
     sdFontSystem.releaseForNetwork(renderer);
 
-    std::string targetDir = "/.crosssmudge/applications/" + app.id;
-    bool dirOk = Storage.ensureDirectoryExists("/.crosssmudge") &&
-                 Storage.ensureDirectoryExists("/.crosssmudge/applications") &&
-                 Storage.ensureDirectoryExists(targetDir.c_str());
+    std::string targetDir = app_paths::installDirFor(app.id);
+    bool dirOk = Storage.ensureDirectoryExists(targetDir.c_str());
     if (!dirOk) {
       LOG_ERR("STORE", "Failed to create target directory: %s", targetDir.c_str());
       state_ = State::ERROR;
@@ -787,14 +778,9 @@ class AppStoreActivity : public Activity {
   }
 
   void uninstallApp(CatalogApp& app) {
-    std::string dir1 = "/.crosssmudge/applications/" + app.id;
-    std::string dir2 = "/.smudge/applications/" + app.id;
-
-    if (Storage.exists(dir1.c_str())) {
-      Storage.removeDir(dir1.c_str());
-    }
-    if (Storage.exists(dir2.c_str())) {
-      Storage.removeDir(dir2.c_str());
+    // Remove every copy, wherever it was installed or copied by hand.
+    for (std::string dir = app_paths::findAppDir(app.id); !dir.empty(); dir = app_paths::findAppDir(app.id)) {
+      if (!Storage.removeDir(dir.c_str())) break;
     }
 
     checkInstalledStatus(app);
@@ -993,7 +979,7 @@ class AppStoreActivity : public Activity {
     snprintf(pkgFilesBuf, sizeof(pkgFilesBuf), tr(STR_APPS_PACKAGE_FILES), static_cast<unsigned>(app.files.size()));
     renderer.drawText(SMALL_FONT_ID, 28, pkgY + 64, pkgFilesBuf, true);
 
-    const std::string pathBuf = formatText(tr(STR_APPS_LOCATION), ("/.crosssmudge/applications/" + app.id).c_str());
+    const std::string pathBuf = formatText(tr(STR_APPS_LOCATION), app_paths::installDirFor(app.id).c_str());
     renderer.drawText(SMALL_FONT_ID, 28, pkgY + 84, pathBuf.c_str(), true);
 
     // 4. Action Buttons (Touch + Physical Prompts)

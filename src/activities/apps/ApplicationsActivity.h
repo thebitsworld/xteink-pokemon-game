@@ -195,7 +195,7 @@ class ApplicationsActivity : public Activity {
 
     std::vector<AppEntry> allApps;
 
-    // Dynamically discover and load SD card packages (both .crosssmudge and .smudge)
+    // Discover installed packages on the SD card (app_paths::SCAN_DIRS)
     auto installedPackages = AppPackage::scanApplications();
     for (const auto& pkg : installedPackages) {
       std::string dir = pkg.path;

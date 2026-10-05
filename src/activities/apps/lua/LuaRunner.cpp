@@ -1,5 +1,7 @@
 #include "activities/apps/lua/LuaRunner.h"
 
+#include "activities/apps/lua/AppPaths.h"
+
 #include <HalClock.h>
 #include <HalStorage.h>
 
@@ -44,7 +46,7 @@ static const char* sdFileReader(lua_State* /*L*/, void* ud, size_t* sz) {
 LuaRunner::LuaRunner(GfxRenderer& renderer, MappedInputManager& input, const std::string& appDir,
                      const std::string& appId)
     : renderer_(renderer), input_(input), appDir_(appDir), appId_(appId) {
-  saveDir_ = "/.smudge/saved_data/" + appId_;
+  saveDir_ = std::string(app_paths::DATA_DIR) + "/" + appId_;
 }
 
 LuaRunner::~LuaRunner() { shutdown(); }

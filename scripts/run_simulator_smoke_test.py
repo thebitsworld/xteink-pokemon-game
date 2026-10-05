@@ -106,7 +106,7 @@ def prepare_pokedex_card_fixture(target: Path, width: int = 472, height: int = 7
 
 
 def prepare_lua_apps(temp_root: Path) -> None:
-    target = temp_root / "fs_" / ".crosspoint" / "applications"
+    target = temp_root / "fs_" / ".crosspoint" / "apps"
     target.mkdir(parents=True, exist_ok=True)
     for app in sorted(LUA_APPS_SOURCE.iterdir()):
         if app.is_dir():

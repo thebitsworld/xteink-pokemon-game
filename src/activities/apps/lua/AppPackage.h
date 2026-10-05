@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AppPaths.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -17,7 +19,7 @@ struct AppPackage {
   std::string author;      // e.g. "Community"
   std::string description; // e.g. "Simple e-ink tally counter"
   std::string entryScript; // default "main.lua"
-  std::string path;        // e.g. "/.crosssmudge/applications/counter"
+  std::string path;        // e.g. "/.crosspoint/apps/counter"
 
   // 32x32 1-bit icon (32 * 32 / 8 = 128 bytes)
   bool hasIcon = false;
@@ -25,15 +27,7 @@ struct AppPackage {
 
   static std::vector<AppPackage> scanApplications() {
     std::vector<AppPackage> apps;
-    const char* searchDirs[] = {
-        "/.crosssmudge/applications",
-        "/applications",
-        "/apps",
-        "/.smudge/applications",
-        "/.crosspoint/applications"
-    };
-
-    for (const char* baseDir : searchDirs) {
+    for (const char* baseDir : app_paths::SCAN_DIRS) {
       if (!Storage.exists(baseDir)) {
         continue;
       }

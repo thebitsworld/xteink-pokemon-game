@@ -79,7 +79,7 @@ async function loadApplications() {
     if (!data.apps || data.apps.length === 0) {
       const p = document.createElement('p');
       p.className = 'empty';
-      p.textContent = 'No applications installed in /.crosssmudge/applications.';
+      p.textContent = 'No applications installed in /.crosspoint/apps.';
       el.appendChild(p);
       return;
     }

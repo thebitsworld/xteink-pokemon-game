@@ -2552,22 +2552,7 @@ bool isValidAppIdentifier(const char* id) {
   return true;
 }
 
-std::string findAppDirectory(const char* appId) {
-  const char* candidates[] = {
-      "/.crosssmudge/applications",
-      "/applications",
-      "/apps",
-      "/.smudge/applications",
-      "/.crosspoint/applications"
-  };
-  for (const char* base : candidates) {
-    std::string path = std::string(base) + "/" + appId;
-    if (Storage.exists(path.c_str())) {
-      return path;
-    }
-  }
-  return "";
-}
+std::string findAppDirectory(const char* appId) { return app_paths::findAppDir(appId); }
 }  // namespace
 
 void CrossPointWebServer::handleApplicationsPage() const {
@@ -2770,10 +2755,8 @@ void CrossPointWebServer::handleAppUploadData() {
       appUpload.appId = appIdArg.c_str();
       appUpload.relPath = pathArg.c_str();
 
-      // Canonical install root is /.crosssmudge/applications/<appId>
-      std::string appBaseDir = "/.crosssmudge/applications/" + appUpload.appId;
-      Storage.ensureDirectoryExists("/.crosssmudge");
-      Storage.ensureDirectoryExists("/.crosssmudge/applications");
+      // Canonical install root: app_paths::INSTALL_DIR/<appId>
+      std::string appBaseDir = app_paths::installDirFor(appUpload.appId);
       Storage.ensureDirectoryExists(appBaseDir.c_str());
 
       std::string fullPath = appBaseDir + "/" + appUpload.relPath;
@@ -2881,14 +2864,7 @@ void CrossPointWebServer::handleAppDelete() {
   }
 
   bool removedAny = false;
-  const char* baseDirs[] = {
-      "/.crosssmudge/applications",
-      "/applications",
-      "/apps",
-      "/.smudge/applications",
-      "/.crosspoint/applications"
-  };
-  for (const char* base : baseDirs) {
+  for (const char* base : app_paths::SCAN_DIRS) {
     std::string path = std::string(base) + "/" + appId;
     if (Storage.exists(path.c_str())) {
       if (Storage.removeDir(path.c_str())) {
