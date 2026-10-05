@@ -1,8 +1,0 @@
-{
-  "id": "lifecounter",
-  "name": "Life Counter",
-  "version": "1.0.0",
-  "author": "Mumfee",
-  "description": "Magic: The Gathering & card game life tracker with commander damage",
-  "entry": "main.lua"
-}
