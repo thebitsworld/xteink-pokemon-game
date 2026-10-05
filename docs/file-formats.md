@@ -262,6 +262,46 @@ Each 16-byte entry:
 | 14 | 1 | Status ailment (`0` none, `1` paralysis, `2` sleep, `3` freeze, `4` burn, `5` poison, `6` confusion) |
 | 15 | 1 | Status turn counter (sleep/confusion only; `0` for the other four ailments) |
 
+## Pokémon save transfer bundle (`/.crosspoint/pokemon-transfer.{part,ready,installing}`)
+
+The single blob a nearby Pokémon save transfer sends (see
+`docs/pokemon-save-transfer.md`, `lib/Pokemon/PokemonSaveBundleCodec.h`). It
+is every Pokémon save file, copied byte for byte (both double-buffer slots and
+any legacy file, sequence numbers included), behind one table. All integers
+are little-endian.
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Magic `PKSB` |
+| 4 | 1 | Bundle version (`1`) |
+| 5 | 1 | Entry count `N` (1-13) |
+| 6 | 2 | Reserved (`0`) |
+| 8 | 2 | Main snapshot format version of the sender (`POKEMON_SNAPSHOT_VERSION`) |
+| 10 | 1 | Battle store version |
+| 11 | 1 | IV/EV store version |
+| 12 | 1 | Moveset store version |
+| 13 | 1 | Hall of Fame store version |
+| 14 | 2 | Reserved (`0`) |
+| 16 | 12 × N | Entries: file id (`u8`) + 3 reserved bytes + size (`u32`) + CRC-32 of the file (`u32`) |
+| 16 + 12N | 4 | CRC-32 of everything before it |
+| 20 + 12N | … | File data, in entry order |
+
+File ids name a fixed allowlist, never a path: `0` `pokemon-a.bin`, `1`
+`pokemon-b.bin`, `2` `pokemon-v2-a.bin`, `3` `pokemon-v2-b.bin`, `4`
+`pokemon-battle-a.bin`, `5` `pokemon-battle-b.bin`, `6` `pokemon-battle.bin`,
+`7` `pokemon-moves-a.bin`, `8` `pokemon-moves-b.bin`, `9`
+`pokemon-ivev-a.bin`, `10` `pokemon-ivev-b.bin`, `11` `pokemon-hof-a.bin`,
+`12` `pokemon-hof-b.bin`. A bundle must contain at least one of ids `0`/`1`.
+The receiver rejects any store version newer than its own.
+
+The receiver's journal: the bundle arrives as `pokemon-transfer.part`; once
+verified it is renamed `pokemon-transfer.ready` (commit point). Installing
+moves every current save file into `/.crosspoint/pokemon-backup/`, renames
+the journal to `pokemon-transfer.installing`, writes each file as
+`<name>.tmp` and renames it into place, then deletes the journal. A leftover
+`.ready`/`.installing` is finished the next time the Pokémon game loads; a
+leftover `.part` is unverified and ignored (overwritten by the next transfer).
+
 ## `/pokemon/`
 
 The locally generated artwork pack is stored separately from firmware state:
