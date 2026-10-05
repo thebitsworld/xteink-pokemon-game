@@ -41,6 +41,29 @@ static const char* sdFileReader(lua_State* /*L*/, void* ud, size_t* sz) {
   *sz = bytesRead;
   return ctx->buffer;
 }
+
+// Replaces the chunk just loaded (on top of the stack) with the same code minus
+// its debug info - line numbers and local names, about a quarter of a loaded
+// script - so larger apps fit the Lua heap (75 KB on the X3). The bytecode goes
+// through a buffer outside the Lua heap, and the original is collected before
+// the copy is loaded, so this never needs room for both at once. The cost:
+// script errors no longer carry line numbers. SMUDGE_DEBUG=1 keeps them in the
+// simulator. Returns a lua_load() status.
+static int stripLoadedChunk(lua_State* L, const char* chunkName) {
+#if defined(SIMULATOR)
+  const char* keepDebug = getenv("SMUDGE_DEBUG");
+  if (keepDebug != nullptr && keepDebug[0] == '1') return LUA_OK;
+#endif
+  std::string bytecode;
+  const auto writer = [](lua_State*, const void* data, const size_t size, void* ud) -> int {
+    static_cast<std::string*>(ud)->append(static_cast<const char*>(data), size);
+    return 0;
+  };
+  if (lua_dump(L, writer, &bytecode, /*strip=*/1) != 0 || bytecode.empty()) return LUA_OK;  // keep it as loaded
+  lua_pop(L, 1);
+  lua_gc(L, LUA_GCCOLLECT, 0);
+  return luaL_loadbufferx(L, bytecode.data(), bytecode.size(), chunkName, "b");
+}
 }  // namespace
 
 LuaRunner::LuaRunner(GfxRenderer& renderer, MappedInputManager& input, const std::string& appDir,
@@ -182,6 +205,7 @@ bool LuaRunner::loadScript(const std::string& scriptPath) {
 
   int status = lua_load(L, sdFileReader, &ctx, scriptPath.c_str(), nullptr);
   ctx.file.close();
+  if (status == LUA_OK) status = stripLoadedChunk(L, scriptPath.c_str());
 
   if (status != LUA_OK) {
     const char* err = lua_tostring(L, -1);
@@ -578,6 +602,7 @@ int LuaRunner::l_dofile(lua_State* L) {
 
   int status = lua_load(L, sdFileReader, &ctx, fullPath.c_str(), nullptr);
   ctx.file.close();
+  if (status == LUA_OK) status = stripLoadedChunk(L, fullPath.c_str());
 
   if (status != LUA_OK) {
     return lua_error(L);

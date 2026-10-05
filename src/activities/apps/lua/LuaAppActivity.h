@@ -106,6 +106,16 @@ class LuaAppActivity : public Activity {
       buttonHandled = true;
     }
 
+    // A held finger reaches the app as on_touch(x, y, "long_press"); the rest
+    // of that contact is suppressed so letting go is not also a tap.
+    int lx = 0, ly = 0;
+    if (mappedInput.wasScreenLongPress(lx, ly)) {
+      mappedInput.suppressCurrentTouchContact();
+      std::lock_guard<std::mutex> lock(luaMutex_);
+      runner_->onTouch(lx, ly, "long_press");
+      buttonHandled = true;
+    }
+
     int tx = 0, ty = 0;
     if (mappedInput.wasScreenTapped(tx, ty)) {
       std::lock_guard<std::mutex> lock(luaMutex_);
