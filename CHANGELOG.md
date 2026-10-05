@@ -1,9 +1,14 @@
 ## [Unreleased]
 
+### Added
+
+- Three new games in the App Store, made for this firmware and playable with the buttons (X3/X4) or touch (X4 Pro): Minesweeper (three sizes, best times, hold to flag), Connect Four (against the device at three levels, or two players on one reader) and Klondike Solitaire (draw one or three, undo, auto-finish, your game kept for next time). Their rules are inspired by the CrossPlay firmware's versions (github.com/ma-r-s/crossplay).
+
 ### Changed
 
 - Smarter Gym Leaders, Elite Four and Champion. They now pick moves by the damage they would actually do (power, same-type bonus, type matchup, accuracy) and go for a knockout when one is there, instead of only looking at the type matchup - no more Growl when Tackle is the better move. Status moves are only used when they would work: no paralysing a Pokémon that is already paralysed, no Thunder Wave on a Ground type, no Dream Eater on an awake target, no Explosion while still healthy. Early Gym Leaders still make mistakes now and then; the Elite Four and the Champion almost never do. Wild Pokémon fight as before.
 - Trainers heal when your next attack would knock their Pokémon out (and not when it would be knocked out even at full HP), and decide whether to switch from the moves your Pokémon actually has rather than its type.
+- Lua apps load without their debug info, which saves about a quarter of an app's memory on the X3; script errors no longer show line numbers on the device. Touch apps can now react to a held finger (`on_touch(x, y, "long_press")`).
 
 ### Fixed
 

@@ -2,9 +2,16 @@
 
 > Adapted from [CrossSmudge](https://github.com/Mumfee/CrossSmudge)'s developer guide (MIT licensed).
 > The app engine and the apps in this folder come from CrossSmudge; apps written for it run here
-> unchanged. Differences in this firmware: `bitter*` font names draw with LexendDeca, and
+> unchanged. Differences in this firmware: `bitter*` font names draw with LexendDeca;
 > `smudge.write_file()`/`smudge.delete_file()` only reach the app's own folder and its saved-data
-> folder.
+> folder; touch long presses arrive as `on_touch(x, y, "long_press")`; and scripts are loaded
+> without their debug info (line numbers, local names), which saves about a quarter of an app's
+> memory - so script errors carry no line numbers on the device. Run the simulator with
+> `SMUDGE_DEBUG=1` to keep them while developing.
+>
+> Keep the logic of a bigger app in its own file with no `smudge.*` calls, as `minesweeper/`,
+> `connectfour/` and `solitaire/` do: `test/lua_apps/<app>_test.lua` then tests it on a computer
+> with the firmware's own Lua (`ctest -R LuaAppLogic`).
 
 This firmware features a lightweight, sandboxed **Lua 5.4** application engine that enables anyone to build, share, and install custom e-paper applications directly from SD card storage—**no firmware compilation or flashing required**.
 
@@ -161,12 +168,19 @@ function on_button(btn, pressed)
 end
 ```
 
-### `on_touch(event, x, y)` *(Touch-Enabled Devices)*
-Called on touch events on supported hardware (e.g. Seeed reTerminal Sticky, Xteink X4 Pro). `event` is `"down"`, `"move"`, or `"up"`:
+### `on_tap(x, y)` and `on_touch(x, y, event)` *(Touch-Enabled Devices)*
+`on_tap(x, y)` is called for a tap. `on_touch(x, y, event)` is called with
+`event` `"tap"` for the same tap, and `"long_press"` when a finger is held still
+(about half a second); the release that ends a long press is not reported as a
+tap. Note the argument order: coordinates first.
 ```lua
-function on_touch(event, x, y)
-    if event == "up" then
-        -- Check if touch landed inside a button rectangle
+function on_tap(x, y)
+    -- Check if the tap landed inside a button rectangle
+end
+
+function on_touch(x, y, event)
+    if event == "long_press" then
+        -- e.g. flag a cell
     end
 end
 ```
