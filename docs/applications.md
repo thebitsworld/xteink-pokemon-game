@@ -20,7 +20,8 @@ scripts, and optionally an `icon.raw` icon.
 
 1. **App Store (Wi-Fi):** in **Applications > App Store**, connect to Wi-Fi, pick an app and choose
    **Install app**. Installed apps can be upgraded, reinstalled or uninstalled from the same page.
-   The store currently lists CrossSmudge's community catalog.
+   The store lists the apps in this repository's [`apps/`](../apps/) folder
+   (`apps/catalog.json`), downloaded from GitHub.
 2. **Web manager:** start **File Transfer** on the reader, open its address in a browser and go to
    **Applications**. Drag an app folder or a `.zip` of it onto the page to install it; the page also
    lists installed apps, their size, and lets you delete them.
@@ -43,14 +44,17 @@ The App Store and the web manager install into `/.crosssmudge/applications/`.
 
 ## Writing apps
 
-See CrossSmudge's
-[Application Developer Guide](https://github.com/Mumfee/CrossSmudge/blob/main/apps/README.md) for
-the manifest format, the `icon.raw` format, the lifecycle callbacks (`on_init`, `on_draw`,
+See the [Application Developer Guide](../apps/README.md) (adapted from CrossSmudge's) for the
+manifest format, the `icon.raw` format, the lifecycle callbacks (`on_init`, `on_draw`,
 `on_button`, `on_touch`, ...) and the full `smudge.*` drawing, input and file API.
 
 Differences in this firmware:
 
 - The `bitter10` ... `bitter16` font names draw with LexendDeca, since Bitter is not built in.
+- `smudge.write_file()` and `smudge.delete_file()` only work inside the app's own folder and its
+  saved-data folder, and `smudge.save()`/`smudge.load()` keys cannot contain a path, so an app
+  cannot change your books, your Pokémon save or other apps.
+- To publish an app, add its folder and an entry in `apps/catalog.json` to this repository.
 - The simulator smoke test runs a small app from `test/lua_apps/smoke/`
   (`scripts/run_simulator_smoke_test.py --env pokemon-simulator-X3 --lua-apps`), which is also a
   minimal working example of an app.
