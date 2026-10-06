@@ -233,6 +233,21 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "checkers",
+      "name": "Checkers",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "English draughts with compulsory captures. Play the device at three levels or a friend on the same reader",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
