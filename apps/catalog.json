@@ -313,6 +313,42 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "chess",
+      "name": "Chess",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Full chess rules against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "view.lua",
+        "history.lua",
+        "chessmenu.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw",
+        "sprites/wK.raw",
+        "sprites/wQ.raw",
+        "sprites/wR.raw",
+        "sprites/wB.raw",
+        "sprites/wN.raw",
+        "sprites/wP.raw",
+        "sprites/bK.raw",
+        "sprites/bQ.raw",
+        "sprites/bR.raw",
+        "sprites/bB.raw",
+        "sprites/bN.raw",
+        "sprites/bP.raw",
+        "sprites/mK.raw",
+        "sprites/mQ.raw",
+        "sprites/mR.raw",
+        "sprites/mB.raw",
+        "sprites/mN.raw",
+        "sprites/mP.raw"
+      ]
     }
   ]
 }
