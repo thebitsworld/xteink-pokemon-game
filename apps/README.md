@@ -457,6 +457,18 @@ Follow these proven patterns to ensure your app is rock-solid:
 8. **Debounce File Writes:**  
    Flash memory has wear limits. Call `smudge.save()` when a game finishes or when exiting in `on_exit()`, rather than after every individual tap or score increment.
 
+9. **Load Code Only While It Is Needed, Then Drop It:**  
+   A module's code stays in memory as long as something refers to it. Keep code that only one screen or one moment needs in its own file, load it then, and set the variable to `nil` (followed by `collectgarbage("collect")`) when done. Yacht loads `ai.lua` for each of the device's turns, Nonogram loads `generator.lua` only to make a puzzle, and Knucklebones, Yacht and Nonogram load `menu.lua` (a shared start menu) only while the menu is on screen. Several smaller files also lower the compile peak, since each one is compiled on its own.
+
+10. **Big Grids as Strings:**  
+    A Lua table's array part grows in powers of two, so a 144-cell board takes 256 slots. A board that changes rarely is far cheaper as a string (`"0110..."`, read with `s:byte(i)`), and one that changes often as one short string per row.
+
+11. **32-bit Numbers:**  
+    The firmware's Lua is built with `LUA_32BITS`: integers are 32-bit and wrap past 2^31, and floats are single precision. A hand-written random generator such as `seed * 1103515245 % 2147483648` overflows and repeats after a few values; use `math.random`.
+
+12. **Measure:**  
+    Every app session appends a line to `/.crosspoint/apps-memory.txt` on the SD card: free heap before the app started, the Lua heap limit and peak, the lowest free heap seen and how many allocations were refused. The simulator (`pokemon-simulator-X3`) enforces the 75 KB limit. It runs as a 64-bit program, so its numbers are higher than the same app's on the reader (32-bit), which errs on the safe side.
+
 ---
 
 ## Complete "Hello World" Example

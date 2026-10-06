@@ -3,6 +3,8 @@
 ### Added
 
 - Three new games in the App Store, made for this firmware and playable with the buttons (X3/X4) or touch (X4 Pro): Minesweeper (three sizes, best times, hold to flag), Connect Four (against the device at three levels, or two players on one reader) and Klondike Solitaire (draw one or three, undo, auto-finish, your game kept for next time). Their rules are inspired by the CrossPlay firmware's versions (github.com/ma-r-s/crossplay).
+- Three more: Knucklebones (a dice duel on two 3x3 grids - matching dice multiply, and knock out your opponent's; against the device at three levels or two players), Yacht (five dice, three rolls, thirteen boxes, with the full joker rules; solo for a high score, against the device, or two players) and Nonogram (picture logic puzzles from 5x5 to 12x12, made fresh on the reader, each with a single solution you can reach without guessing).
+- `/.crosspoint/apps-memory.txt` on the SD card gets a line each time an app closes: the free memory before it started and the most it used, to see how much room apps really have on a reader.
 
 ### Changed
 
