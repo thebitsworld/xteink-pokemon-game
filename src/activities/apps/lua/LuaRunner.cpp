@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <vector>
 
 #include "CrossPointSettings.h"
 #include "GfxRenderer.h"
@@ -42,27 +43,75 @@ static const char* sdFileReader(lua_State* /*L*/, void* ud, size_t* sz) {
   return ctx->buffer;
 }
 
-// Replaces the chunk just loaded (on top of the stack) with the same code minus
-// its debug info - line numbers and local names, about a quarter of a loaded
-// script - so larger apps fit the Lua heap (75 KB on the X3). The bytecode goes
-// through a buffer outside the Lua heap, and the original is collected before
-// the copy is loaded, so this never needs room for both at once. The cost:
-// script errors no longer carry line numbers. SMUDGE_DEBUG=1 keeps them in the
-// simulator. Returns a lua_load() status.
-static int stripLoadedChunk(lua_State* L, const char* chunkName) {
+// Whether loaded chunks keep their debug info (line numbers, local names).
+// They do not on the reader: stripping it saves about a quarter of a loaded
+// script, so larger apps fit the Lua heap (75 KB on the X3), at the cost of
+// line numbers in script errors. SMUDGE_DEBUG=1 keeps them in the simulator.
+static bool keepDebugInfo() {
 #if defined(SIMULATOR)
   const char* keepDebug = getenv("SMUDGE_DEBUG");
-  if (keepDebug != nullptr && keepDebug[0] == '1') return LUA_OK;
+  return keepDebug != nullptr && keepDebug[0] == '1';
+#else
+  return false;
 #endif
-  std::string bytecode;
+}
+
+// The chunk on top of the stack as bytecode without debug info. The bytes go
+// to a buffer outside the Lua heap.
+static bool dumpStripped(lua_State* L, std::string& out) {
   const auto writer = [](lua_State*, const void* data, const size_t size, void* ud) -> int {
     static_cast<std::string*>(ud)->append(static_cast<const char*>(data), size);
     return 0;
   };
-  if (lua_dump(L, writer, &bytecode, /*strip=*/1) != 0 || bytecode.empty()) return LUA_OK;  // keep it as loaded
-  lua_pop(L, 1);
-  lua_gc(L, LUA_GCCOLLECT, 0);
-  return luaL_loadbufferx(L, bytecode.data(), bytecode.size(), chunkName, "b");
+  return lua_dump(L, writer, &out, /*strip=*/1) == 0 && !out.empty();
+}
+
+// Compiled-chunk cache --------------------------------------------------------
+// Compiling a script briefly needs two to three times the memory its code
+// keeps, so a module compiled while an app is running is often the app's
+// memory peak. Before an app starts, every .lua file in it is compiled once
+// (without debug info) into a cache file; later loads read that bytecode and
+// never need the compiler. A cache file starts with a tag and a hash of its
+// source, so editing or updating an app recompiles it. Bytecode is only ever
+// read from this cache, which the firmware writes and apps cannot: scripts
+// are loaded as text.
+
+constexpr char kCacheTag[4] = {'L', 'B', 'C', '1'};
+constexpr size_t kCacheHeaderSize = 8;  // tag + 32-bit source hash
+
+// FNV-1a of a file's contents, read 512 bytes at a time.
+static bool hashFile(const std::string& path, uint32_t& hash) {
+  HalFile file;
+  if (!Storage.openFileForRead("LUA", path.c_str(), file)) return false;
+  hash = 2166136261u;
+  uint8_t buf[512];
+  for (int n = file.read(buf, sizeof(buf)); n > 0; n = file.read(buf, sizeof(buf))) {
+    for (int i = 0; i < n; i++) hash = (hash ^ buf[i]) * 16777619u;
+  }
+  file.close();
+  return true;
+}
+
+static bool cacheIsCurrent(HalFile& file, uint32_t hash) {
+  uint8_t header[kCacheHeaderSize];
+  if (file.read(header, sizeof(header)) != static_cast<int>(sizeof(header))) return false;
+  if (memcmp(header, kCacheTag, sizeof(kCacheTag)) != 0) return false;
+  const uint32_t stored = header[4] | (header[5] << 8) | (header[6] << 16) | (static_cast<uint32_t>(header[7]) << 24);
+  return stored == hash;
+}
+
+static void writeCache(const std::string& cachePath, uint32_t hash, const std::string& bytecode) {
+  const size_t slash = cachePath.rfind('/');
+  if (slash != std::string::npos) Storage.ensureDirectoryExists(cachePath.substr(0, slash).c_str());
+  HalFile file = Storage.open(cachePath.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+  if (!file) return;
+  uint8_t header[kCacheHeaderSize];
+  memcpy(header, kCacheTag, sizeof(kCacheTag));
+  for (int i = 0; i < 4; i++) header[4 + i] = static_cast<uint8_t>(hash >> (8 * i));
+  bool ok = file.write(header, sizeof(header)) == sizeof(header) &&
+            file.write(bytecode.data(), bytecode.size()) == bytecode.size();
+  file.close();
+  if (!ok) Storage.remove(cachePath.c_str());  // a torn file would only be rejected later
 }
 }  // namespace
 
@@ -196,24 +245,117 @@ void LuaRunner::setError(const char* msg) {
   LOG_ERR("LUA", "[%s] %s", appId_.c_str(), errorMessage_.c_str());
 }
 
+// Where the compiled form of `scriptPath` is cached, or "" for a script
+// outside the app's folder.
+std::string LuaRunner::bytecodePath(const std::string& scriptPath) const {
+  if (scriptPath.size() <= appDir_.size() + 1 || scriptPath.compare(0, appDir_.size(), appDir_) != 0 ||
+      scriptPath[appDir_.size()] != '/') {
+    return "";
+  }
+  std::string name = scriptPath.substr(appDir_.size() + 1);
+  for (char& c : name) {
+    if (c == '/') c = '_';
+  }
+  return std::string(app_paths::CACHE_DIR) + "/bytecode/" + appId_ + "/" + name + "c";
+}
+
+// Pushes the compiled chunk of `scriptPath` (from the cache when it is
+// current, otherwise compiled and cached), or an error message. Returns a
+// lua_load() status.
+int LuaRunner::loadChunk(const std::string& scriptPath) {
+  const std::string cachePath = keepDebugInfo() ? "" : bytecodePath(scriptPath);
+  uint32_t hash = 0;
+  const bool hashed = !cachePath.empty() && hashFile(scriptPath, hash);
+  if (hashed) {
+    FileReaderContext ctx;
+    if (Storage.exists(cachePath.c_str()) && Storage.openFileForRead("LUA", cachePath.c_str(), ctx.file) &&
+        cacheIsCurrent(ctx.file, hash)) {
+      int status = lua_load(L, sdFileReader, &ctx, scriptPath.c_str(), "b");
+      ctx.file.close();
+      if (status == LUA_OK) return LUA_OK;
+      lua_pop(L, 1);  // unreadable (say, from another firmware's Lua): rebuild it
+    }
+  }
+
+  FileReaderContext ctx;
+  if (!Storage.openFileForRead("LUA", scriptPath.c_str(), ctx.file)) {
+    lua_pushfstring(L, "cannot open %s", scriptPath.c_str());
+    return LUA_ERRFILE;
+  }
+  int status = lua_load(L, sdFileReader, &ctx, scriptPath.c_str(), "t");
+  ctx.file.close();
+  if (status != LUA_OK || keepDebugInfo()) return status;
+
+  std::string bytecode;
+  if (!dumpStripped(L, bytecode)) return LUA_OK;  // keep it as compiled
+  if (hashed) writeCache(cachePath, hash, bytecode);
+  // Swap in the stripped copy; the original is collected first, so both are
+  // never in the heap at once.
+  lua_pop(L, 1);
+  lua_gc(L, LUA_GCCOLLECT, 0);
+  return luaL_loadbufferx(L, bytecode.data(), bytecode.size(), scriptPath.c_str(), "b");
+}
+
+// Compiles every .lua file of the app whose cached bytecode is missing or
+// out of date, while the app's heap is still nearly empty.
+void LuaRunner::precompileApp() {
+  if (keepDebugInfo()) return;
+  std::vector<std::string> dirs{appDir_};
+  std::vector<std::string> scripts;
+  for (size_t d = 0; d < dirs.size() && d < 16; d++) {
+    HalFile dir = Storage.open(dirs[d].c_str());
+    if (!dir || !dir.isDirectory()) continue;
+    char name[128];
+    for (HalFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+      name[0] = '\0';
+      entry.getName(name, sizeof(name));
+      const bool isDir = entry.isDirectory();
+      entry.close();
+      if (name[0] == '\0' || name[0] == '.') continue;
+      const std::string path = dirs[d] + "/" + name;
+      const size_t len = strlen(name);
+      if (isDir) {
+        dirs.push_back(path);
+      } else if (len > 4 && strcmp(name + len - 4, ".lua") == 0) {
+        scripts.push_back(path);
+      }
+    }
+    dir.close();
+  }
+  int compiled = 0;
+  for (const std::string& path : scripts) {
+    uint32_t hash = 0;
+    const std::string cachePath = bytecodePath(path);
+    if (cachePath.empty() || !hashFile(path, hash)) continue;
+    HalFile cached;
+    if (Storage.exists(cachePath.c_str()) && Storage.openFileForRead("LUA", cachePath.c_str(), cached) &&
+        cacheIsCurrent(cached, hash)) {
+      cached.close();
+      continue;
+    }
+    if (cached) cached.close();
+    if (loadChunk(path) == LUA_OK) compiled++;  // a broken script reports its error when it is loaded
+    lua_pop(L, 1);
+    lua_gc(L, LUA_GCCOLLECT, 0);
+  }
+  if (compiled > 0) LOG_INF("LUA", "[%s] compiled %d script(s) into the cache", appId_.c_str(), compiled);
+}
+
 bool LuaRunner::loadScript(const std::string& scriptPath) {
   if (!L && !init()) {
     return false;
   }
 
-  FileReaderContext ctx;
-  if (!Storage.openFileForRead("LUA", scriptPath.c_str(), ctx.file)) {
+  if (!Storage.exists(scriptPath.c_str())) {
     std::string err = "Failed to read script file: " + scriptPath;
     setError(err.c_str());
     return false;
   }
 
   s_activeRunner = this;
+  precompileApp();
 
-  int status = lua_load(L, sdFileReader, &ctx, scriptPath.c_str(), nullptr);
-  ctx.file.close();
-  if (status == LUA_OK) status = stripLoadedChunk(L, scriptPath.c_str());
-
+  int status = loadChunk(scriptPath);
   if (status != LUA_OK) {
     const char* err = lua_tostring(L, -1);
     setError(err);
@@ -599,18 +741,14 @@ int LuaRunner::l_dofile(lua_State* L) {
     fullPath = s_activeRunner->appDir_ + "/" + filename;
   }
 
-  FileReaderContext ctx;
-  if (!Storage.openFileForRead("LUA", fullPath.c_str(), ctx.file)) {
+  if (!Storage.exists(fullPath.c_str())) {
     return luaL_error(L, "cannot open %s", filename);
   }
 
-  // Collect dead objects before compiling/loading new file to free heap
+  // Collect dead objects before loading the new file to free heap
   lua_gc(L, LUA_GCCOLLECT, 0);
 
-  int status = lua_load(L, sdFileReader, &ctx, fullPath.c_str(), nullptr);
-  ctx.file.close();
-  if (status == LUA_OK) status = stripLoadedChunk(L, fullPath.c_str());
-
+  int status = s_activeRunner->loadChunk(fullPath);
   if (status != LUA_OK) {
     return lua_error(L);
   }

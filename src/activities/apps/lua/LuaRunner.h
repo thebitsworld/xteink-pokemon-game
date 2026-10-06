@@ -74,6 +74,10 @@ class LuaRunner {
 
   static void* customLuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize);
 
+  std::string bytecodePath(const std::string& scriptPath) const;
+  int loadChunk(const std::string& scriptPath);
+  void precompileApp();
+
   void registerSmudgeApi();
   void setError(const char* msg);
 
