@@ -1,0 +1,8 @@
+{
+  "id": "nonogram",
+  "name": "Nonogram",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Picture logic puzzles from 5x5 to 12x12, made fresh on the reader. Every one has a single solution",
+  "entry": "main.lua"
+}

@@ -1,11 +1,9 @@
 -- Logic tests for apps/solitaire/logic.lua (run by ctest: LuaAppLogic_solitaire).
 local K = dofile(APPS .. "/solitaire/logic.lua")
 
-local seed = 7
-local function rand(n)
-    seed = (seed * 1103515245 + 12345) % 2147483648
-    return seed % n + 1
-end
+-- math.random, seeded: Lua here has 32-bit integers, so a hand-rolled LCG overflows.
+math.randomseed(7)
+local function rand(n) return math.random(1, n) end
 
 local function card(rankValue, suitValue) return suitValue * 13 + rankValue end -- suit 0..3
 

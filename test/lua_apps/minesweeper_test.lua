@@ -1,11 +1,9 @@
 -- Logic tests for apps/minesweeper/logic.lua (run by ctest: LuaAppLogic_minesweeper).
 local Board = dofile(APPS .. "/minesweeper/logic.lua")
 
-local seed = 12345
-local function rand(n) -- deterministic LCG, 1..n
-    seed = (seed * 1103515245 + 12345) % 2147483648
-    return seed % n + 1
-end
+-- math.random, seeded: Lua here has 32-bit integers, so a hand-rolled LCG overflows.
+math.randomseed(12345)
+local function rand(n) return math.random(1, n) end
 
 local function countMines(b)
     local n = 0

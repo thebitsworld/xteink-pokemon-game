@@ -189,6 +189,50 @@
         "sprites/hearts.raw",
         "sprites/spades.raw"
       ]
+    },
+    {
+      "id": "knucklebones",
+      "name": "Knucklebones",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Dice duel on two 3x3 grids: stack matching dice, knock out your opponent's. Device or a friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "yacht",
+      "name": "Yacht",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Five dice, three rolls, thirteen boxes. Play solo for a high score, the device, or a friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "nonogram",
+      "name": "Nonogram",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Picture logic puzzles from 5x5 to 12x12, made fresh on the reader. Every one has a single solution",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "generator.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
