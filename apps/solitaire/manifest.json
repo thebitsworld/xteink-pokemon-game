@@ -1,0 +1,8 @@
+{
+  "id": "solitaire",
+  "name": "Solitaire",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Klondike solitaire, draw one or three, with undo and your game kept for later",
+  "entry": "main.lua"
+}

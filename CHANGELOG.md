@@ -1,9 +1,19 @@
 ## [Unreleased]
 
+### Added
+
+- Three new games in the App Store, made for this firmware and playable with the buttons (X3/X4) or touch (X4 Pro): Minesweeper (three sizes, best times, hold to flag), Connect Four (against the device at three levels, or two players on one reader) and Klondike Solitaire (draw one or three, undo, auto-finish, your game kept for next time). Their rules are inspired by the CrossPlay firmware's versions (github.com/ma-r-s/crossplay).
+- Three more: Knucklebones (a dice duel on two 3x3 grids - matching dice multiply, and knock out your opponent's; against the device at three levels or two players), Yacht (five dice, three rolls, thirteen boxes, with the full joker rules; solo for a high score, against the device, or two players) and Nonogram (picture logic puzzles from 5x5 to 12x12, made fresh on the reader, each with a single solution you can reach without guessing).
+- And three more: Checkers (English draughts with compulsory captures and multi-jump chains, against the device at three levels or two players), Sea Battle (sink the hidden fleet before it sinks yours, three levels from random shots to a probability hunter) and Hearts (the trick-taking card game against three computer players, with passing, shooting the moon and a game to 100).
+- And three more: Hex (connect your sides of a rhombus of hexagons, 7x7 to 11x11), Go (9x9 or 13x13, area scoring with komi, capture dead stones then pass) and Chess (all the rules - castling, en passant, promotion, every draw - with take-backs, either colour against the device, or two players).
+- `/.crosspoint/apps-memory.txt` on the SD card gets a line each time an app closes: the free memory before it started and the most it used, to see how much room apps really have on a reader.
+
 ### Changed
 
 - Smarter Gym Leaders, Elite Four and Champion. They now pick moves by the damage they would actually do (power, same-type bonus, type matchup, accuracy) and go for a knockout when one is there, instead of only looking at the type matchup - no more Growl when Tackle is the better move. Status moves are only used when they would work: no paralysing a Pokémon that is already paralysed, no Thunder Wave on a Ground type, no Dream Eater on an awake target, no Explosion while still healthy. Early Gym Leaders still make mistakes now and then; the Elite Four and the Champion almost never do. Wild Pokémon fight as before.
 - Trainers heal when your next attack would knock their Pokémon out (and not when it would be knocked out even at full HP), and decide whether to switch from the moves your Pokémon actually has rather than its type.
+- Lua apps are compiled once, when they start, into a bytecode cache on the SD card (`/.crosspoint/cache/apps/bytecode/`), so loading a part of an app while it runs no longer needs the compiler's extra memory - the bigger games fit the X3 because of it - and apps open faster from the second time. An app can no longer load a binary chunk it wrote itself; scripts are loaded as text only.
+- Lua apps load without their debug info, which saves about a quarter of an app's memory on the X3; script errors no longer show line numbers on the device. Touch apps can now react to a held finger (`on_touch(x, y, "long_press")`).
 
 ### Fixed
 

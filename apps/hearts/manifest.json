@@ -1,0 +1,8 @@
+{
+  "id": "hearts",
+  "name": "Hearts",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "The trick-taking card game against three computer players: dodge the hearts and the queen of spades",
+  "entry": "main.lua"
+}

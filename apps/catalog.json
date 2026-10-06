@@ -146,6 +146,209 @@
         "state.lua",
         "ui_base.lua"
       ]
+    },
+    {
+      "id": "minesweeper",
+      "name": "Minesweeper",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Clear the field without digging up a mine. Three sizes, best times, hold to flag",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "connectfour",
+      "name": "Connect Four",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Line up four discs. Play the device at three levels or a friend on the same reader",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "solitaire",
+      "name": "Solitaire",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Klondike solitaire, draw one or three, with undo and your game kept for later",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "icon.raw",
+        "sprites/clubs.raw",
+        "sprites/diamonds.raw",
+        "sprites/hearts.raw",
+        "sprites/spades.raw"
+      ]
+    },
+    {
+      "id": "knucklebones",
+      "name": "Knucklebones",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Dice duel on two 3x3 grids: stack matching dice, knock out your opponent's. Device or a friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "yacht",
+      "name": "Yacht",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Five dice, three rolls, thirteen boxes. Play solo for a high score, the device, or a friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "nonogram",
+      "name": "Nonogram",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Picture logic puzzles from 5x5 to 12x12, made fresh on the reader. Every one has a single solution",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "generator.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "checkers",
+      "name": "Checkers",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "English draughts with compulsory captures. Play the device at three levels or a friend on the same reader",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "seabattle",
+      "name": "Sea Battle",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Find and sink the hidden fleet before it sinks yours. Three levels, from random shots to a probability hunter",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "hearts",
+      "name": "Hearts",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "The trick-taking card game against three computer players: dodge the hearts and the queen of spades",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "save.lua",
+        "icon.raw",
+        "sprites/clubs.raw",
+        "sprites/clubs16.raw",
+        "sprites/diamonds.raw",
+        "sprites/diamonds16.raw",
+        "sprites/spades.raw",
+        "sprites/spades16.raw",
+        "sprites/hearts.raw",
+        "sprites/hearts16.raw"
+      ]
+    },
+    {
+      "id": "hex",
+      "name": "Hex",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Connect your two sides of a rhombus of hexagons before your opponent does. 7x7 to 11x11, device or friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "go",
+      "name": "Go",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "The board game of surrounding territory, 9x9 or 13x13, area scoring. Play the device or a friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "chess",
+      "name": "Chess",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Full chess rules against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "view.lua",
+        "history.lua",
+        "chessmenu.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw",
+        "sprites/wK.raw",
+        "sprites/wQ.raw",
+        "sprites/wR.raw",
+        "sprites/wB.raw",
+        "sprites/wN.raw",
+        "sprites/wP.raw",
+        "sprites/bK.raw",
+        "sprites/bQ.raw",
+        "sprites/bR.raw",
+        "sprites/bB.raw",
+        "sprites/bN.raw",
+        "sprites/bP.raw",
+        "sprites/mK.raw",
+        "sprites/mQ.raw",
+        "sprites/mR.raw",
+        "sprites/mB.raw",
+        "sprites/mN.raw",
+        "sprites/mP.raw"
+      ]
     }
   ]
 }

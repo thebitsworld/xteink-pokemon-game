@@ -1,0 +1,8 @@
+{
+  "id": "seabattle",
+  "name": "Sea Battle",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Find and sink the hidden fleet before it sinks yours. Three levels, from random shots to a probability hunter",
+  "entry": "main.lua"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "chess",
+  "name": "Chess",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Full chess rules against the device at three levels or a friend, with take-backs and saved games",
+  "entry": "main.lua"
+}

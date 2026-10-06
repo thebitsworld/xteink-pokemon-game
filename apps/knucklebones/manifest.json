@@ -1,0 +1,8 @@
+{
+  "id": "knucklebones",
+  "name": "Knucklebones",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Dice duel on two 3x3 grids: stack matching dice, knock out your opponent's. Device or a friend",
+  "entry": "main.lua"
+}

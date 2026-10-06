@@ -17,6 +17,8 @@ constexpr const char* DATA_DIR = "/.crosspoint/apps-data";
 constexpr const char* SETTINGS_FILE = "/.crosspoint/apps-settings.bin";
 // App Store download cache: catalog.tmp and icons/<id>.raw.
 constexpr const char* CACHE_DIR = "/.crosspoint/cache/apps";
+// One line per app session with the memory it had (AppMemoryLog).
+constexpr const char* MEMORY_LOG = "/.crosspoint/apps-memory.txt";
 
 // Folders scanned for installed apps, INSTALL_DIR first. The others are only
 // read, so apps copied by hand (or an SD card from CrossSmudge) still show up.

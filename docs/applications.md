@@ -10,8 +10,14 @@ Besides the Pokémon game, the firmware can run small games and utilities writte
 never needs a firmware update. Open them from **Home > Applications**.
 
 The app engine comes from [CrossSmudge](https://github.com/Mumfee/CrossSmudge) (MIT licensed), so
-apps written for CrossSmudge run here unchanged: 2048, Blackjack, Sudoku, Tetris, Wordle, the
-Codex deckbuilder and more.
+apps written for CrossSmudge run here unchanged. The App Store offers: Minesweeper, Connect Four
+(against the device or a friend), Klondike Solitaire, Knucklebones and Yacht (dice games against the
+device or a friend), Nonogram (picture logic puzzles), Checkers, Sea Battle, Hearts, Hex, Go, Chess,
+2048, Blackjack, Sudoku, Tetris, Wordle, Dice and the Codex deckbuilder.
+
+Each time an app closes, a line is added to `/.crosspoint/apps-memory.txt` on the SD card with the
+memory it had and used. If an app runs out of memory on your reader, that file shows how close it
+came.
 
 ## Installing apps
 
