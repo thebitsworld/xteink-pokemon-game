@@ -285,6 +285,20 @@
         "sprites/hearts.raw",
         "sprites/hearts16.raw"
       ]
+    },
+    {
+      "id": "hex",
+      "name": "Hex",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Connect your two sides of a rhombus of hexagons before your opponent does. 7x7 to 11x11, device or friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
