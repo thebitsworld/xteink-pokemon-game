@@ -1,0 +1,8 @@
+{
+  "id": "go",
+  "name": "Go",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "The board game of surrounding territory, 9x9 or 13x13, area scoring. Play the device or a friend",
+  "entry": "main.lua"
+}
