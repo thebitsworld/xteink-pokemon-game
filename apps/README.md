@@ -466,7 +466,10 @@ Follow these proven patterns to ensure your app is rock-solid:
 11. **32-bit Numbers:**  
     The firmware's Lua is built with `LUA_32BITS`: integers are 32-bit and wrap past 2^31, and floats are single precision. A hand-written random generator such as `seed * 1103515245 % 2147483648` overflows and repeats after a few values; use `math.random`.
 
-12. **Measure:**  
+12. **Compiling Costs More Than Keeping:**  
+    Loading a `.lua` file compiles it, and the compiler briefly needs two to three times the memory the loaded code keeps. A file loaded while most of the app is already in memory can therefore be the app's peak. Load big modules first, while memory is emptiest; drop what you can before loading another (Hearts drops its players before loading `save.lua` on exit, and restores a saved game before loading the players); and keep a small, often-shown piece of code in `main.lua` rather than compiling it from a file mid-game (Hearts keeps its menu in `main.lua` for this reason). Deep recursion costs memory too: the Lua stack grows by doubling, which is why the Checkers search caps its depth.
+
+13. **Measure:**  
     Every app session appends a line to `/.crosspoint/apps-memory.txt` on the SD card: free heap before the app started, the Lua heap limit and peak, the lowest free heap seen and how many allocations were refused. The simulator (`pokemon-simulator-X3`) enforces the 75 KB limit. It runs as a 64-bit program, so its numbers are higher than the same app's on the reader (32-bit), which errs on the safe side.
 
 ---
