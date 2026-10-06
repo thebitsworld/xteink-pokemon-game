@@ -262,6 +262,29 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "hearts",
+      "name": "Hearts",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "The trick-taking card game against three computer players: dodge the hearts and the queen of spades",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "save.lua",
+        "icon.raw",
+        "sprites/clubs.raw",
+        "sprites/clubs16.raw",
+        "sprites/diamonds.raw",
+        "sprites/diamonds16.raw",
+        "sprites/spades.raw",
+        "sprites/spades16.raw",
+        "sprites/hearts.raw",
+        "sprites/hearts16.raw"
+      ]
     }
   ]
 }
