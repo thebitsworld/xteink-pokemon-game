@@ -295,6 +295,7 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.clear();
   systemDeviceSettings.clear();
   systemFilesCacheSettings.clear();
+  systemFeatureSettings.clear();
   fileBrowserSettings.clear();
   systemReadingStatsSettings.clear();
   systemGlobalStatsSettings.clear();
@@ -340,6 +341,7 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings = buildSystemSettingsParentList(allSettings);
   systemDeviceSettings = buildSystemDeviceSettingsList(allSettings);
   systemFilesCacheSettings = buildSystemFilesCacheSettingsList(allSettings);
+  systemFeatureSettings = buildSystemFeaturesSettingsList(allSettings);
   systemReadingStatsSettings = buildSystemReadingStatsSettingsList(allSettings);
   systemGlobalStatsSettings = buildSystemGlobalStatsSettingsList(allSettings);
   controlsSettings = buildControlsSettingsParentList(allSettings);
@@ -458,6 +460,9 @@ void SettingsActivity::setCurrentSettingsForCategory() {
         case SettingAction::SystemFilesCache:
           currentSettings = &systemFilesCacheSettings;
           break;
+        case SettingAction::SystemFeatures:
+          currentSettings = &systemFeatureSettings;
+          break;
         case SettingAction::SystemReadingStats:
           currentSettings = &systemReadingStatsSettings;
           break;
@@ -511,6 +516,8 @@ StrId SettingsActivity::activeSubmenuTitleId() const {
       return StrId::STR_SYSTEM_DEVICE;
     case SettingAction::SystemFilesCache:
       return StrId::STR_SYSTEM_FILES_CACHE;
+    case SettingAction::SystemFeatures:
+      return StrId::STR_SYSTEM_FEATURES;
     case SettingAction::SystemReadingStats:
       return StrId::STR_READING_STATS;
     case SettingAction::SystemGlobalStats:
@@ -1232,6 +1239,7 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ControlsEdgeGestures:
       case SettingAction::SystemDevice:
       case SettingAction::SystemFilesCache:
+      case SettingAction::SystemFeatures:
       case SettingAction::SystemReadingStats:
       case SettingAction::SystemGlobalStats:
       case SettingAction::DisplaySleepScreen:
