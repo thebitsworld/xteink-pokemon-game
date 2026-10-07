@@ -7,7 +7,7 @@
 ### Changed
 
 - The Cover Grid Home theme now opens the Pokémon game too: its last cover is a Pokémon tile showing your party leader with its name and level (or a Poké Ball before you pick a starter), and the icon bar gains Applications and Slideshow. The grid shows five recent books instead of six to make room.
-- On every other Home theme, tap the band showing your party leader to open the Pokémon game. Applications has a game-controller icon in the Home menu.
+- On every other Home theme, the band showing your party leader opens the Pokémon game: tap it, or select it with the buttons (Up/Down; on Minimal and Dashboard the side buttons, then Open) and press Confirm. It replaces the Home menu's Pokémon entry, which comes back if you hide the band in the game's settings. Applications has a game-controller icon in the Home menu.
 - Before you pick a starter, Home shows a Poké Ball and "Choose your starter" where your party leader goes (tap it to start), and the Cover Grid keeps its Pokémon tile even before you open a book. The Pokémon menu entry has a Poké Ball icon instead of a book.
 - Settings > System > Features has switches for the Pokémon game, Applications and the Photo Slideshow (all on by default). Switched off, a feature disappears from Home; a switched-off Pokémon game also stops counting reading time and is not offered to nearby readers. Your save is kept, so switching it back on picks up where you left off.
 
