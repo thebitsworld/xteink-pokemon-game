@@ -273,7 +273,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  items.push({tr(STR_APPS_TITLE), Library, HomeMenuAction::Applications});
+  items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
 #endif
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
   items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
@@ -308,7 +308,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  items.push({tr(STR_APPS_TITLE), Library, HomeMenuAction::Applications});
+  items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
 #endif
   // No Settings entry in this minimal menu variant (reached another way in
   // this theme) - Slideshow still goes last, matching the "below Settings"
@@ -1423,6 +1423,15 @@ void HomeActivity::loop() {
 
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (pokemonAccessoryRect_.width > 0 && mappedInput.wasTapInRect(pokemonAccessoryRect_.x, pokemonAccessoryRect_.y,
+                                                                  pokemonAccessoryRect_.width,
+                                                                  pokemonAccessoryRect_.height)) {
+    onPokemonOpen();
+    return;
+  }
+#endif
+
   if (coverGridUi) {
     const int touched = coverGridUi->selectedAction(mappedInput);
     if (coverGridUi->app.invalidated()) requestUpdate();
@@ -2159,6 +2168,7 @@ void HomeActivity::render(RenderLock&&) {
   showPokemonAccessory = pokemon::pokemonHomeAccessoryVisible(SETTINGS.pokemonHomeScreen != 0,
                                                               pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme),
                                                               pokemonDashboard_.leader.recordId != 0);
+  pokemonAccessoryRect_ = {};
 #endif
 
   if (coverGridUi) {
@@ -2233,9 +2243,7 @@ void HomeActivity::render(RenderLock&&) {
 #if defined(CROSSINK_ENABLE_POKEMON)
     if (showPokemonAccessory) {
       constexpr int bandHeight = 68;
-      pokemon::drawPokemonHomeAccessory(
-          renderer, pokemonDashboard_,
-          Rect{0, pageHeight - metrics.buttonHintsHeight - bandHeight, pageWidth, bandHeight});
+      drawPokemonAccessory(Rect{0, pageHeight - metrics.buttonHintsHeight - bandHeight, pageWidth, bandHeight});
     }
 #endif
 
@@ -2300,9 +2308,7 @@ void HomeActivity::render(RenderLock&&) {
 #if defined(CROSSINK_ENABLE_POKEMON)
       if (showPokemonAccessory) {
         const auto& carouselTheme = static_cast<const LyraCarouselTheme&>(GUI);
-        pokemon::drawPokemonHomeAccessory(
-            renderer, pokemonDashboard_,
-            carouselTheme.homeAccessoryRect(renderer, pokemon::kPokemonHomeAccessoryHeight));
+        drawPokemonAccessory(carouselTheme.homeAccessoryRect(renderer, pokemon::kPokemonHomeAccessoryHeight));
       }
 #endif
 
@@ -2365,11 +2371,10 @@ void HomeActivity::render(RenderLock&&) {
     constexpr int bandHeight = pokemon::kPokemonHomeAccessoryHeight;
     if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) {
       const auto& carouselTheme = static_cast<const LyraCarouselTheme&>(GUI);
-      pokemon::drawPokemonHomeAccessory(renderer, pokemonDashboard_,
-                                        carouselTheme.homeAccessoryRect(renderer, bandHeight));
+      drawPokemonAccessory(carouselTheme.homeAccessoryRect(renderer, bandHeight));
     } else {
       const int bandY = metrics.homeTopPadding + homeCoverTileHeight + 2;
-      pokemon::drawPokemonHomeAccessory(renderer, pokemonDashboard_, Rect{0, bandY, pageWidth, bandHeight});
+      drawPokemonAccessory(Rect{0, bandY, pageWidth, bandHeight});
       menuStartY += pokemon::kPokemonHomeAccessoryFollowingOffset;
     }
   }
@@ -2482,6 +2487,11 @@ void HomeActivity::onApplicationsOpen() {
   startActivityForResult(std::move(apps), [](const ActivityResult&) {});
 }
 #endif
+
+void HomeActivity::drawPokemonAccessory(const Rect bounds) {
+  pokemon::drawPokemonHomeAccessory(renderer, pokemonDashboard_, bounds);
+  pokemonAccessoryRect_ = bounds;
+}
 
 void HomeActivity::onPokemonOpen() {
   auto pokemon = makeUniqueNoThrow<PokemonActivity>(renderer, mappedInput);
