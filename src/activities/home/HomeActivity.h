@@ -84,6 +84,13 @@ class HomeActivity final : public Activity {
   bool showAllDevicesStats = false;
 #if defined(CROSSINK_ENABLE_POKEMON)
   pokemon::PokemonDashboardSnapshot pokemonDashboard_{};
+  // Where the party leader was last drawn on Home (empty when it is not shown);
+  // tapping it opens the Pokemon game.
+  Rect pokemonAccessoryRect_{};
+  void drawPokemonAccessory(Rect bounds);
+  void loadPokemonDashboard();
+  void refreshPokemonBand();
+  bool pokemonBandSelected() const;
 #endif
 
   // Per-book stats and progress cached at onEnter() to avoid SD reads during navigation.

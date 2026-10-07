@@ -13,6 +13,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "GlobalActions.h"
 #include "MappedInputManager.h"
 #include "QuickActions.h"
@@ -149,7 +150,7 @@ void TxtReaderActivity::onEnter() {
   // Returns false when there's no starter yet (party empty) or the save isn't
   // ready - both routine, not worth logging; PokemonService itself already
   // logs the one real failure case (store I/O error).
-  pokemon::devicePokemonService().beginReadingSession();
+  if (features::pokemonGame()) pokemon::devicePokemonService().beginReadingSession();
 #endif
 
   // Trigger first update
@@ -174,7 +175,7 @@ void TxtReaderActivity::onExit() {
   // Independent of any CrossInk reading-stats setting - Pokemon crediting is
   // its own feature. Flushes any not-yet-checkpointed credited minutes so a
   // normal exit loses nothing.
-  pokemon::devicePokemonService().flushOnExit(millis());
+  if (features::pokemonGame()) pokemon::devicePokemonService().flushOnExit(millis());
 #endif
 
   // Reset orientation back to portrait for the rest of the UI
@@ -219,7 +220,7 @@ void TxtReaderActivity::loop() {
   // Checked every loop iteration (not just on page turns) so credited time
   // accrues, and gets checkpointed to disk, even across a long stretch of
   // reading without an actual page turn in between.
-  pokemon::devicePokemonService().checkpointIfDue(millis());
+  if (features::pokemonGame()) pokemon::devicePokemonService().checkpointIfDue(millis());
 #endif
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 #if CROSSINK_APP_CAP_TOUCH
@@ -393,10 +394,12 @@ void TxtReaderActivity::loop() {
   if (pageChanged) {
     requestUpdate();
 #if defined(CROSSINK_ENABLE_POKEMON)
-    auto& pokemonService = pokemon::devicePokemonService();
-    const int percent = totalPages > 0 ? (currentPage + 1) * 100 / totalPages : 0;
-    pokemonService.setBookProgressPercent(static_cast<uint8_t>(std::clamp(percent, 0, 100)));
-    pokemonService.onSuccessfulPageTurn(millis());
+    if (features::pokemonGame()) {
+      auto& pokemonService = pokemon::devicePokemonService();
+      const int percent = totalPages > 0 ? (currentPage + 1) * 100 / totalPages : 0;
+      pokemonService.setBookProgressPercent(static_cast<uint8_t>(std::clamp(percent, 0, 100)));
+      pokemonService.onSuccessfulPageTurn(millis());
+    }
 #endif
   }
 }

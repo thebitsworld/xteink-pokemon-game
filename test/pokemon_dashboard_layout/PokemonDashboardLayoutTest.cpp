@@ -85,8 +85,9 @@ TEST(PokemonDashboardLayoutTest, ClassicCoverIsUnchangedWithoutAPokemon) {
 }
 
 TEST(PokemonDashboardLayoutTest, DisabledHomeAccessoryNeverUsesDashboardSpace) {
+  // Shown with or without a starter (before one, it invites the player to pick).
   EXPECT_TRUE(pokemon::pokemonHomeAccessoryVisible(true, true, true));
-  EXPECT_FALSE(pokemon::pokemonHomeAccessoryVisible(false, true, true));
-  EXPECT_FALSE(pokemon::pokemonHomeAccessoryVisible(true, false, true));
-  EXPECT_FALSE(pokemon::pokemonHomeAccessoryVisible(true, true, false));
+  EXPECT_FALSE(pokemon::pokemonHomeAccessoryVisible(false, true, true));  // the game is switched off
+  EXPECT_FALSE(pokemon::pokemonHomeAccessoryVisible(true, false, true));  // hidden from Home
+  EXPECT_FALSE(pokemon::pokemonHomeAccessoryVisible(true, true, false));  // theme has no room
 }

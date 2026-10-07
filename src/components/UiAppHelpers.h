@@ -10,6 +10,7 @@
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
+#include "components/icons/homeExtraIcons.h"
 #include "components/icons/listIcons.h"
 
 // Shared glue for activities hosting a FreeInkApp: the font-bound render
@@ -104,6 +105,10 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
         return freeink::ui::bitmapFromIcon(icon_lyra_library_32);
       case UIIcon::Hotspot:
         return freeink::ui::bitmapFromIcon(icon_radio_tower_32);
+      case UIIcon::Gamepad:
+        return freeink::ui::bitmapFromIcon(icon_gamepad_32);
+      case UIIcon::Pokeball:
+        return freeink::ui::bitmapFromIcon(icon_pokeball_32);
       default:
         return {};
     }
@@ -127,6 +132,10 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
       return freeink::ui::bitmapFromIcon(icon_lyra_library_24);
     case UIIcon::Hotspot:
       return freeink::ui::bitmapFromIcon(icon_radio_tower_24);
+    case UIIcon::Gamepad:
+      return freeink::ui::bitmapFromIcon(icon_gamepad_24);
+    case UIIcon::Pokeball:
+      return freeink::ui::bitmapFromIcon(icon_pokeball_24);
     default:
       return {};
   }

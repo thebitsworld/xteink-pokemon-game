@@ -40,6 +40,7 @@ enum class SettingAction {
   ControlsEdgeGestures,
   SystemDevice,
   SystemFilesCache,
+  SystemFeatures,
   SystemReadingStats,
   SystemGlobalStats,
   Network,
@@ -254,6 +255,7 @@ class SettingsActivity final : public Activity {
   std::vector<SettingInfo> systemSettings;
   std::vector<SettingInfo> systemDeviceSettings;
   std::vector<SettingInfo> systemFilesCacheSettings;
+  std::vector<SettingInfo> systemFeatureSettings;
   std::vector<SettingInfo> fileBrowserSettings;
   std::vector<SettingInfo> systemReadingStatsSettings;
   std::vector<SettingInfo> systemGlobalStatsSettings;

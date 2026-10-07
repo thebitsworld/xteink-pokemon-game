@@ -13,6 +13,8 @@
 
 #include "CrossPointSettings.h"
 #include "PokemonArt.h"
+#include "components/UiAppHelpers.h"
+#include "components/icons/homeExtraIcons.h"
 #include "fontIds.h"
 
 namespace pokemon {
@@ -45,8 +47,23 @@ bool pokemonHomeAccessorySupported(const uint8_t theme) {
 void drawPokemonHomeAccessory(const GfxRenderer& renderer, const PokemonDashboardSnapshot& snapshot,
                               const Rect bounds) {
   const DashboardLayout layout = pokemonDashboardLayout(bounds.width, bounds.height);
-  if (snapshot.leader.recordId == 0 || !layout.valid) return;
+  if (!layout.valid) return;
   renderer.fillRect(bounds.x, bounds.y, bounds.width, bounds.height, false);
+  if (snapshot.leader.recordId == 0) {
+    // No starter yet: a Poke Ball and an invitation to pick one.
+    const freeink::Icon& ball = bounds.height >= 64 ? icon_pokeball_64 : icon_pokeball_32;
+    drawLucideIcon(renderer, ball, bounds.x + layout.sprite.x + (layout.sprite.width - ball.w) / 2,
+                   bounds.y + (bounds.height - ball.h) / 2);
+    const int textWidth = bounds.width - layout.identity.x - 6;
+    char titleFit[40];
+    char hintFit[48];
+    renderer.drawText(UI_12_FONT_ID, bounds.x + layout.identity.x, bounds.y + 5,
+                      fit(renderer, UI_12_FONT_ID, tr(STR_POKEMON), textWidth, titleFit, EpdFontFamily::BOLD), true,
+                      EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, bounds.x + layout.identity.x, bounds.y + bounds.height / 2 + 1,
+                      fit(renderer, UI_10_FONT_ID, tr(STR_POKEMON_CHOOSE_STARTER), textWidth, hintFit));
+    return;
+  }
   const int spriteWidth = std::min(layout.sprite.width, layout.sprite.height * 4 / 3);
   const int spriteX = layout.sprite.x + (layout.sprite.width - spriteWidth) / 2;
   drawPokemonSpeciesArt(renderer, snapshot.leader.speciesId, true,

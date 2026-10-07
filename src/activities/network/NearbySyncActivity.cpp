@@ -14,6 +14,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "SilentRestart.h"
@@ -262,7 +263,8 @@ const char* NearbySyncActivity::title() const {
 
 bool NearbySyncActivity::preparePokemonSection() {
 #if defined(CROSSINK_ENABLE_POKEMON)
-  if (!st::hasLocalSave()) return false;
+  // A switched-off game offers no save (receiving one still works).
+  if (!features::pokemonGame() || !st::hasLocalSave()) return false;
   pokemon::PokemonSnapshot snapshot;
   if (pokemon::devicePokemonService().loadSnapshot(snapshot) != pokemon::ServiceStatus::Ok) return false;
   auto stream = std::make_unique<PokemonBundleStream>();

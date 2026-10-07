@@ -10,6 +10,12 @@
 #include "components/bars/tab-bar.h"
 #include "components/media/book-card.h"
 #include "components/media/cover-grid.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonService.h"
+#endif
+
+// The icons along the bottom of the cover grid, in order.
+enum class CoverGridTab : uint8_t { Files, Library, Opds, Applications, Slideshow, Transfer, Settings };
 
 class CoverGridHomeUi final : public UiAppHost<16, 1> {
  public:
@@ -18,11 +24,23 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   static constexpr int GRID_COLUMNS = 3;
   static constexpr int GRID_ROWS = 2;
   static constexpr int MAX_BOOKS = 1 + GRID_COLUMNS * GRID_ROWS;
+  // Books to load: all the cells, or one fewer while the last cell is the
+  // Pokemon tile (the game is built in and switched on).
+  static int bookLimit();
+  static constexpr int MAX_TABS = 7;
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
   explicit CoverGridHomeUi(GfxRenderer& renderer);
   void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading, float featuredProgress);
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
+#if defined(CROSSINK_ENABLE_POKEMON)
+  void setPokemonSnapshot(const pokemon::PokemonDashboardSnapshot* snapshot) { pokemonSnapshot = snapshot; }
+#endif
+  // Selection values: the books first, then the Pokemon tile (when shown), then the tabs.
+  int tileCount() const { return pokemonTile ? 1 : 0; }
+  int tabCount() const { return tabTotal; }
+  CoverGridTab tabAt(int index) const { return tabOrder[index]; }
+  int tabIndexOf(CoverGridTab tab) const;
   int selectedAction(const MappedInputManager& input);
   // Exact generation size for a slot, recorded during draw. Rescaling a
   // dithered 1-bit image aliases badly.
@@ -36,10 +54,16 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   void draw(UiScreen& screen);
   void drawHeaderBand();
   void drawEmpty(UiScreen& screen);
+  void drawEmptyTile(UiScreen& screen, freeink::ui::Rect rect);
+  int firstGridValue() const { return books->empty() ? 0 : 1; }
   void drawCurrent(UiScreen& screen, freeink::ui::Rect rect, int coverRowHeight);
   void drawGrid(UiScreen& screen);
   freeink::ui::Rect layoutGrid(freeink::ui::Rect rect);
   void drawTabs(UiScreen& screen, freeink::ui::Rect rect);
+  void buildTabs();
+#if defined(CROSSINK_ENABLE_POKEMON)
+  void paintPokemonTile(freeink::ui::Rect rect);
+#endif
   bool paintFramedCover(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, size_t index);
   void refreshCoverPath(size_t index);
   void noteThumbSize(size_t index, int slotWidth, int slotHeight);
@@ -61,5 +85,11 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   freeink::ui::CoverGridProps grid;
   freeink::ui::Rect gridBounds{};
   freeink::ui::TabBarProps tabs;
-  std::array<freeink::ui::TabItem, 5> tabItems;
+  std::array<freeink::ui::TabItem, MAX_TABS> tabItems;
+  std::array<CoverGridTab, MAX_TABS> tabOrder{};
+  int tabTotal = 0;
+  bool pokemonTile = false;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  const pokemon::PokemonDashboardSnapshot* pokemonSnapshot = nullptr;
+#endif
 };

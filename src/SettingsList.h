@@ -586,9 +586,10 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 // can use it directly; mutable device UI lists use getSettingsList(), which
 // returns an owned copy and can add SD-card font and dictionary options.
 // Four edge gesture entries are compiled only for touch devices.
-// Sized from the measured pokemon-x3 count (109): this fork adds 3 Slideshow entries plus 1 entry gated behind
-// CROSSINK_ENABLE_POKEMON on top of upstream's entries; reserved for the max case.
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 109 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0);
+// Sized from the measured pokemon-x3 count (112): this fork adds 3 Slideshow entries, 1 entry gated behind
+// CROSSINK_ENABLE_POKEMON and 3 feature switches (Pokemon, Applications, Slideshow) on top of upstream's
+// entries; reserved for the max case.
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 112 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0);
 
 const std::vector<SettingInfo>& getBaseSettingsList();
 
@@ -1042,9 +1043,10 @@ inline std::vector<SettingInfo> buildDisplaySleepSettingsList(const std::vector<
 
 inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> systemSettings;
-  systemSettings.reserve(8);
+  systemSettings.reserve(9);
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_DEVICE, SettingAction::SystemDevice));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FILES_CACHE, SettingAction::SystemFilesCache));
+  systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FEATURES, SettingAction::SystemFeatures));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_READING_STATS, SettingAction::SystemReadingStats));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
@@ -1081,6 +1083,20 @@ inline std::vector<SettingInfo> buildSystemFilesCacheSettingsList(const std::vec
   addSettingByName(settings, allSettings, StrId::STR_REMOVE_READ_FROM_RECENTS);
   addSettingByName(settings, allSettings, StrId::STR_MOVE_FINISHED_TO_READ);
   settings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+  return settings;
+}
+
+// The feature switches (FeatureToggles.h): what this build has, each on or off.
+inline std::vector<SettingInfo> buildSystemFeaturesSettingsList(const std::vector<SettingInfo>& allSettings) {
+  std::vector<SettingInfo> settings;
+  settings.reserve(3);
+#if defined(CROSSINK_ENABLE_POKEMON)
+  addSettingByName(settings, allSettings, StrId::STR_POKEMON);
+#endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  addSettingByName(settings, allSettings, StrId::STR_APPS_TITLE);
+#endif
+  addSettingByName(settings, allSettings, StrId::STR_SLIDESHOW);
   return settings;
 }
 
