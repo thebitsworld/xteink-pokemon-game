@@ -405,6 +405,28 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "tide",
+      "name": "Tide & Paper",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Collect pairs and sets of sea cards against the device, then stop the round - or bet on a last chance. First to 40 wins",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "setup.lua",
+        "ai.lua",
+        "layout.lua",
+        "view.lua",
+        "input.lua",
+        "result.lua",
+        "tmenu.lua",
+        "save.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
