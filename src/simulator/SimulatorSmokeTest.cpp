@@ -2324,11 +2324,17 @@ class SimulatorSmokeTest {
     inputScript.push_back(assertActivity("Home"));
 
     // Standard themes render Browse, Recent Books, File Transfer, Pokemon,
-    // then Settings. Minimal and Dashboard expose Menu, Browse, and Settings.
+    // Applications (with Lua apps), then Settings. Minimal and Dashboard
+    // expose Menu, Browse, and Settings.
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+    constexpr int applicationsEntries = 1;
+#else
+    constexpr int applicationsEntries = 0;
+#endif
     if (homeNavigationUsesCarouselInteraction()) {
-      for (int index = 0; index < 4; ++index) addTap(MappedInputManager::Button::Right);
+      for (int index = 0; index < 4 + applicationsEntries; ++index) addTap(MappedInputManager::Button::Right);
     } else {
-      const int downPresses = homeNavigationUsesMinimalInteraction() ? 3 : 4;
+      const int downPresses = homeNavigationUsesMinimalInteraction() ? 3 : 4 + applicationsEntries;
       for (int index = 0; index < downPresses; ++index) addTap(MappedInputManager::Button::Down);
     }
     inputScript.push_back(render("Home Settings selected", 3));
