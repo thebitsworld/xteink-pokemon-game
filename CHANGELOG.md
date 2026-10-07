@@ -4,6 +4,10 @@
 
 - Two more games in the App Store: Bazaar (a two-player trading card game against the device at two levels - take goods from the market, swap them, then sell sets for falling-value tokens; best of three rounds) and Whodunit (logic-grid murder mysteries made fresh on the reader at three levels: read the clues and the case file, mark the grid, then accuse the murderer with their weapon and place; every case has exactly one answer you can reach without guessing).
 
+### Changed
+
+- The Cover Grid Home theme now opens the Pokémon game too: its last cover is a Pokémon tile showing your party leader with its name and level (or a Poké Ball before you pick a starter), and the icon bar gains Applications and Slideshow. The grid shows five recent books instead of six to make room.
+
 ## [1.8.0-rc.2] - 2026-10-06
 
 ### Added
