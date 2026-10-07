@@ -7,6 +7,7 @@
 ### Changed
 
 - The Cover Grid Home theme now opens the Pokémon game too: its last cover is a Pokémon tile showing your party leader with its name and level (or a Poké Ball before you pick a starter), and the icon bar gains Applications and Slideshow. The grid shows five recent books instead of six to make room.
+- On every other Home theme, tap the band showing your party leader to open the Pokémon game. Applications has a game-controller icon in the Home menu.
 
 ## [1.8.0-rc.2] - 2026-10-06
 
