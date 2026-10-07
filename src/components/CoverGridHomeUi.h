@@ -23,13 +23,10 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   static constexpr int THUMB_HEIGHT = 400;
   static constexpr int GRID_COLUMNS = 3;
   static constexpr int GRID_ROWS = 2;
-#if defined(CROSSINK_ENABLE_POKEMON)
-  // The last grid cell opens the Pokemon game, showing the party leader.
-  static constexpr int POKEMON_TILES = 1;
-#else
-  static constexpr int POKEMON_TILES = 0;
-#endif
-  static constexpr int MAX_BOOKS = 1 + GRID_COLUMNS * GRID_ROWS - POKEMON_TILES;
+  static constexpr int MAX_BOOKS = 1 + GRID_COLUMNS * GRID_ROWS;
+  // Books to load: all the cells, or one fewer while the last cell is the
+  // Pokemon tile (the game is built in and switched on).
+  static int bookLimit();
   static constexpr int MAX_TABS = 7;
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
   explicit CoverGridHomeUi(GfxRenderer& renderer);
@@ -40,7 +37,7 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   void setPokemonSnapshot(const pokemon::PokemonDashboardSnapshot* snapshot) { pokemonSnapshot = snapshot; }
 #endif
   // Selection values: the books first, then the Pokemon tile (when shown), then the tabs.
-  int tileCount() const { return books != nullptr && !books->empty() ? POKEMON_TILES : 0; }
+  int tileCount() const { return pokemonTile ? 1 : 0; }
   int tabCount() const { return tabTotal; }
   CoverGridTab tabAt(int index) const { return tabOrder[index]; }
   int tabIndexOf(CoverGridTab tab) const;
@@ -57,6 +54,8 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   void draw(UiScreen& screen);
   void drawHeaderBand();
   void drawEmpty(UiScreen& screen);
+  void drawEmptyTile(UiScreen& screen, freeink::ui::Rect rect);
+  int firstGridValue() const { return books->empty() ? 0 : 1; }
   void drawCurrent(UiScreen& screen, freeink::ui::Rect rect, int coverRowHeight);
   void drawGrid(UiScreen& screen);
   freeink::ui::Rect layoutGrid(freeink::ui::Rect rect);
@@ -89,6 +88,7 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   std::array<freeink::ui::TabItem, MAX_TABS> tabItems;
   std::array<CoverGridTab, MAX_TABS> tabOrder{};
   int tabTotal = 0;
+  bool pokemonTile = false;
 #if defined(CROSSINK_ENABLE_POKEMON)
   const pokemon::PokemonDashboardSnapshot* pokemonSnapshot = nullptr;
 #endif

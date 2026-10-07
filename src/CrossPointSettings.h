@@ -609,6 +609,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Show the lead Pokemon on supported home screens. Training continues when hidden.
   uint8_t pokemonHomeScreen = 1;
 #endif
+  // Settings > System feature switches (see FeatureToggles.h).
+  uint8_t slideshowEnabled = 1;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  uint8_t pokemonGameEnabled = 1;
+#endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+  uint8_t applicationsEnabled = 1;
+#endif
   uint8_t swapLibraryFileBrowser = 0;
   bool supportsLibraryFileBrowserSwap() const { return uiTheme == MINIMAL || uiTheme == DASHBOARD; }
   bool isLibraryFileBrowserSwapped() const { return supportsLibraryFileBrowserSwap() && swapLibraryFileBrowser; }

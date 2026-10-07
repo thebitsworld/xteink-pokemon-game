@@ -39,8 +39,8 @@ HomeAccessorySizing classicHomeAccessorySizing(const int baseCoverHeight, const 
           kPokemonHomeAccessoryFollowingOffset};
 }
 
-bool pokemonHomeAccessoryVisible(const bool enabled, const bool themeSupported, const bool hasLeader) {
-  return enabled && themeSupported && hasLeader;
+bool pokemonHomeAccessoryVisible(const bool gameEnabled, const bool shownOnHome, const bool themeSupported) {
+  return gameEnabled && shownOnHome && themeSupported;
 }
 
 }  // namespace pokemon

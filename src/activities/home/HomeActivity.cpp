@@ -29,6 +29,7 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "GlobalActions.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
@@ -270,13 +271,13 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
 #if defined(CROSSINK_ENABLE_POKEMON)
-  items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
+  if (features::pokemonGame()) items.push({tr(STR_POKEMON), Pokeball, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
+  if (features::applications()) items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
 #endif
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
-  items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
+  if (features::slideshow()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
 }
 
 HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
@@ -305,15 +306,15 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
 #if defined(CROSSINK_ENABLE_POKEMON)
-  items.push({tr(STR_POKEMON), Book, HomeMenuAction::Pokemon});
+  if (features::pokemonGame()) items.push({tr(STR_POKEMON), Pokeball, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
+  if (features::applications()) items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
 #endif
   // No Settings entry in this minimal menu variant (reached another way in
   // this theme) - Slideshow still goes last, matching the "below Settings"
   // placement in appendHomeMenuItems() above.
-  items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
+  if (features::slideshow()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
   return items;
 }
 
@@ -840,12 +841,7 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
 #if defined(CROSSINK_ENABLE_POKEMON)
-  pokemonDashboard_ = {};
-  // The cover grid always shows the leader on its Pokemon tile.
-  if ((SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) ||
-      UITheme::hasCoverGridHome()) {
-    pokemon::devicePokemonService().loadDashboardSnapshot(pokemonDashboard_);
-  }
+  loadPokemonDashboard();
 #endif
 
   hasOpdsServers = OPDS_STORE.hasServers();
@@ -875,7 +871,7 @@ void HomeActivity::onEnter() {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int recentBooksToLoad =
-      coverGridUi ? CoverGridHomeUi::MAX_BOOKS
+      coverGridUi ? CoverGridHomeUi::bookLimit()
                   : std::min(kMaxCachedBooks, std::max(metrics.homeRecentBooksCount, HOME_BOOK_SWAP_RECENT_COUNT));
   RECENT_BOOKS.ensureLoaded();
   loadRecentBooks(recentBooksToLoad);
@@ -2165,9 +2161,9 @@ void HomeActivity::render(RenderLock&&) {
   };
   bool showPokemonAccessory = false;
 #if defined(CROSSINK_ENABLE_POKEMON)
-  showPokemonAccessory = pokemon::pokemonHomeAccessoryVisible(SETTINGS.pokemonHomeScreen != 0,
-                                                              pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme),
-                                                              pokemonDashboard_.leader.recordId != 0);
+  showPokemonAccessory =
+      pokemon::pokemonHomeAccessoryVisible(features::pokemonGame(), SETTINGS.pokemonHomeScreen != 0,
+                                           pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme));
   pokemonAccessoryRect_ = {};
 #endif
 
@@ -2398,7 +2394,7 @@ void HomeActivity::render(RenderLock&&) {
                           : mappedInput.mapLabels(readLabel, tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  displayHomeBuffer();
+    displayHomeBuffer();
 
   if (!firstRenderDone) {
     firstRenderDone = true;
@@ -2499,13 +2495,19 @@ void HomeActivity::onPokemonOpen() {
     LOG_ERR("HOME", "Could not allocate Pokemon activity");
     return;
   }
-  startActivityForResult(std::move(pokemon), [this](const ActivityResult&) {
-    pokemonDashboard_ = {};
-    if ((SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) ||
-        UITheme::hasCoverGridHome()) {
-      pokemon::devicePokemonService().loadDashboardSnapshot(pokemonDashboard_);
-    }
-  });
+  startActivityForResult(std::move(pokemon), [this](const ActivityResult&) { loadPokemonDashboard(); });
+}
+
+// The party leader for the Home band or the cover grid's tile. Left empty
+// (a Poke Ball is shown) before a starter is picked; not read at all while
+// the game is switched off.
+void HomeActivity::loadPokemonDashboard() {
+  pokemonDashboard_ = {};
+  if (!features::pokemonGame()) return;
+  if ((SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) ||
+      UITheme::hasCoverGridHome()) {
+    pokemon::devicePokemonService().loadDashboardSnapshot(pokemonDashboard_);
+  }
 }
 #endif
 

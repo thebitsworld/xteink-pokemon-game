@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <utility>
 
+#include "FeatureToggles.h"
 #include "MappedInputManager.h"
 #include "UITheme.h"
 #include "components/icons/homeExtraIcons.h"
@@ -34,6 +35,7 @@ CoverGridHomeUi::CoverGridHomeUi(GfxRenderer& renderer)
 void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bool continuing, float featuredProgress) {
   books = &recent;
   hasOpds = opds;
+  pokemonTile = features::pokemonGame();
   buildTabs();
   if (!recent.empty()) coverCache.begin();
   reset();
@@ -57,6 +59,8 @@ void CoverGridHomeUi::refreshCoverPath(size_t index) {
           ? UITheme::getCoverThumbPath((*books)[index].coverBmpPath, thumbWidths[index], thumbHeights[index], false)
           : std::string();
 }
+
+int CoverGridHomeUi::bookLimit() { return MAX_BOOKS - (features::pokemonGame() ? 1 : 0); }
 
 int CoverGridHomeUi::thumbWidthFor(size_t index) const {
   return index < thumbWidths.size() && thumbWidths[index] > 0 ? thumbWidths[index] : THUMB_HEIGHT * 2 / 3;
@@ -112,6 +116,7 @@ void CoverGridHomeUi::draw(UiScreen& screen) {
   auto tabRect = screen.takeBottom(72, tabGap);
   if (books->empty()) {
     drawTabs(screen, tabRect.inset(fui::Insets{0, COVER_CELL_INSET, 0, COVER_CELL_INSET}));
+    if (tileCount() > 0) drawEmptyTile(screen, screen.body());
     drawEmpty(screen);
     drawHeaderBand();
     return;
@@ -156,6 +161,23 @@ void CoverGridHomeUi::drawEmpty(UiScreen& screen) {
   screen.target().text(fui::Rect{body.x, y, body.width, titleHeight}, tr(STR_NO_OPEN_BOOK), title);
   y += titleHeight + theme.spaceSm;
   screen.target().text(fui::Rect{body.x, y, body.width, messageHeight}, tr(STR_START_READING), message);
+}
+
+// With no books yet, the Pokemon tile sits alone at the bottom of the body,
+// sized like a grid cell, and the "no open book" message centres above it.
+void CoverGridHomeUi::drawEmptyTile(UiScreen& screen, const fui::Rect body) {
+  const int cellWidth = body.width / GRID_COLUMNS;
+  card.coverSize.width = std::max(1, cellWidth - 2 * COVER_CELL_INSET);
+  card.coverSize.height = std::max(1, std::min(card.coverSize.width * 3 / 2, body.height / 2 - 12));
+  card.styles = screen.theme().listRow;
+  grid.cellInset = fui::Insets{COVER_CELL_INSET, COVER_CELL_INSET, COVER_CELL_INSET, COVER_CELL_INSET};
+  grid.coverSize = card.coverSize;
+  grid.rowHeight = grid.coverSize.height + 12;
+  const int16_t height = static_cast<int16_t>(grid.rowHeight);
+  gridBounds = fui::Rect{static_cast<int16_t>(body.x + (body.width - cellWidth) / 2),
+                         static_cast<int16_t>(body.bottom() - height), static_cast<int16_t>(cellWidth), height};
+  screen.takeBottom(height, screen.theme().spaceLg);
+  drawGrid(screen);
 }
 
 void CoverGridHomeUi::drawCurrent(UiScreen& screen, fui::Rect rect, const int coverRowHeight) {
@@ -215,12 +237,14 @@ fui::Rect CoverGridHomeUi::layoutGrid(fui::Rect rect) {
 void CoverGridHomeUi::drawGrid(UiScreen& screen) {
   const auto rect = gridBounds;
   grid.count = (books->size() > 1 ? books->size() - 1 : 0) + tileCount();
-  grid.columns = GRID_COLUMNS;
+  grid.itemProviderUserData = this;
+  grid.columns = books->empty() ? 1 : GRID_COLUMNS;
   grid.columnLayout = fui::CoverGridColumnLayout::SpaceBetween;
   grid.action = SELECT;
   grid.inputMask = fui::InputTouch;
-  grid.selectedIndex =
-      selected > 0 && selected < static_cast<int>(books->size()) + tileCount() ? selected - 1 : -1;
+  grid.selectedIndex = selected >= firstGridValue() && selected < static_cast<int>(books->size()) + tileCount()
+                           ? selected - firstGridValue()
+                           : -1;
   grid.selectionIndicator = fui::CoverGridSelectionIndicator::CoverFrame;
   grid.selectedCoverFrameGap = 6;
   grid.selectedCoverFrameWidth = 8;
@@ -229,13 +253,16 @@ void CoverGridHomeUi::drawGrid(UiScreen& screen) {
   grid.labelGap = 0;
   for (size_t i = 1; i < thumbHeights.size(); ++i) noteThumbSize(i, grid.coverSize.width, grid.coverSize.height);
   grid.scrollIndicator = false;
-  grid.itemProvider = [](uint16_t index, void*) { return fui::coverGridItem(nullptr, index + 1); };
+  // Grid cell values are selection values: the books after the featured one, then the tile.
+  grid.itemProvider = [](uint16_t index, void* user) {
+    return fui::coverGridItem(nullptr, index + static_cast<CoverGridHomeUi*>(user)->firstGridValue());
+  };
   grid.coverPainterUserData = this;
   grid.coverPainter = [](fui::DrawTarget& target, fui::Rect cover, const fui::CoverGridItem&, uint16_t index,
                          void* user) {
     auto& self = *static_cast<CoverGridHomeUi*>(user);
 #if defined(CROSSINK_ENABLE_POKEMON)
-    if (index + 1u >= self.books->size()) {
+    if (index + self.firstGridValue() >= static_cast<int>(self.books->size())) {
       self.paintPokemonTile(cover);
       return true;
     }
@@ -252,9 +279,9 @@ void CoverGridHomeUi::buildTabs() {
   add(CoverGridTab::Library);
   if (hasOpds) add(CoverGridTab::Opds);
 #if defined(CROSSINK_ENABLE_POKEMON) && defined(CROSSINK_ENABLE_LUA_APPS)
-  add(CoverGridTab::Applications);
+  if (features::applications()) add(CoverGridTab::Applications);
 #endif
-  add(CoverGridTab::Slideshow);
+  if (features::slideshow()) add(CoverGridTab::Slideshow);
   add(CoverGridTab::Transfer);
   add(CoverGridTab::Settings);
 }
@@ -325,10 +352,10 @@ const char* fitText(const GfxRenderer& renderer, const int font, const char* sou
 }  // namespace
 
 // The Pokemon tile: the party leader with its name and level, or a Poke Ball
-// before a starter is chosen. A "!" marks something waiting in the game.
+// and an invitation before a starter is chosen. A "!" marks something waiting
+// in the game.
 void CoverGridHomeUi::paintPokemonTile(const fui::Rect rect) {
   constexpr int16_t SHADOW_OFFSET = 2;
-  constexpr uint8_t POKE_BALL_ITEM_ID = 7;
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
   renderer.fillRect(rect.right(), rect.y + SHADOW_OFFSET, SHADOW_OFFSET, rect.height, true);
   renderer.fillRect(rect.x + SHADOW_OFFSET, rect.bottom(), rect.width, SHADOW_OFFSET, true);
@@ -339,16 +366,14 @@ void CoverGridHomeUi::paintPokemonTile(const fui::Rect rect) {
   const int lineBold = renderer.getLineHeight(UI_12_FONT_ID);
   const int lineSmall = renderer.getLineHeight(UI_10_FONT_ID);
   const int textWidth = rect.width - 8;
-  const int side = std::max(1, std::min<int>(rect.width - 8, rect.height - lineBold - lineSmall - 16));
-  const int artX = rect.x + (rect.width - side) / 2;
-  const int artY = rect.y + std::max(4, (rect.height - side - lineBold - lineSmall - 4) / 2);
-  const Rect art{artX, artY, side, side};
 
+  // The words first: a name and level, or "Pokemon" and the invitation to
+  // pick a starter (on two lines when it does not fit on one).
   char title[40];
-  char detail[24];
+  char detail[48];
+  char detail2[48] = "";
   int titleFont = UI_12_FONT_ID;
   if (hasLeader) {
-    pokemon::drawPokemonSpeciesArt(renderer, snapshot->leader.speciesId, true, art);
     const pokemon::SpeciesData* species = pokemon::speciesData(snapshot->leader.speciesId);
     const char* name = snapshot->leader.nickname[0] != '\0' ? snapshot->leader.nickname.data()
                                                             : (species == nullptr ? "???" : species->name);
@@ -360,17 +385,40 @@ void CoverGridHomeUi::paintPokemonTile(const fui::Rect rect) {
              static_cast<unsigned>(pokemon::levelXpProgress(snapshot->leader.totalXp).level));
     fitText(renderer, UI_10_FONT_ID, level, textWidth, detail, EpdFontFamily::REGULAR);
   } else {
-    pokemon::drawPokemonBagItemArt(renderer, POKE_BALL_ITEM_ID, art);
     fitText(renderer, UI_12_FONT_ID, tr(STR_POKEMON), textWidth, title, EpdFontFamily::BOLD);
-    detail[0] = '\0';
+    const char* hint = tr(STR_POKEMON_CHOOSE_STARTER);
+    snprintf(detail, sizeof(detail), "%s", hint);
+    if (renderer.getTextWidth(UI_10_FONT_ID, detail) > textWidth) {
+      // Break at the last space that leaves a first line that fits.
+      for (char* space = strrchr(detail, ' '); space != nullptr; space = strrchr(detail, ' ')) {
+        *space = '\0';
+        if (renderer.getTextWidth(UI_10_FONT_ID, detail) <= textWidth) {
+          fitText(renderer, UI_10_FONT_ID, hint + (space - detail) + 1, textWidth, detail2, EpdFontFamily::REGULAR);
+          break;
+        }
+      }
+      if (detail2[0] == '\0') fitText(renderer, UI_10_FONT_ID, hint, textWidth, detail, EpdFontFamily::REGULAR);
+    }
+  }
+  const int textHeight = lineBold + lineSmall + (detail2[0] != '\0' ? lineSmall : 0);
+  const int side = std::max(1, std::min<int>(rect.width - 8, rect.height - textHeight - 16));
+  const int artX = rect.x + (rect.width - side) / 2;
+  const int artY = rect.y + std::max(4, (rect.height - side - textHeight - 4) / 2);
+
+  if (hasLeader) {
+    pokemon::drawPokemonSpeciesArt(renderer, snapshot->leader.speciesId, true, Rect{artX, artY, side, side});
+  } else {
+    const freeink::Icon& ball = side >= 64 ? icon_pokeball_64 : icon_pokeball_32;
+    drawLucideIcon(renderer, ball, artX + (side - ball.w) / 2, artY + (side - ball.h) / 2);
   }
   int y = artY + side + 4;
   renderer.drawText(titleFont, rect.x + (rect.width - renderer.getTextWidth(titleFont, title, EpdFontFamily::BOLD)) / 2,
                     y, title, true, EpdFontFamily::BOLD);
   y += lineBold;
-  if (detail[0] != '\0') {
-    renderer.drawText(UI_10_FONT_ID, rect.x + (rect.width - renderer.getTextWidth(UI_10_FONT_ID, detail)) / 2, y,
-                      detail);
+  for (const char* line : {static_cast<const char*>(detail), static_cast<const char*>(detail2)}) {
+    if (line[0] == '\0') continue;
+    renderer.drawText(UI_10_FONT_ID, rect.x + (rect.width - renderer.getTextWidth(UI_10_FONT_ID, line)) / 2, y, line);
+    y += lineSmall;
   }
   if (hasLeader && snapshot->notice != pokemon::DashboardNotice::None) {
     renderer.drawText(UI_12_FONT_ID, rect.right() - 14, rect.y + 4, "!", true, EpdFontFamily::BOLD);

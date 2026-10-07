@@ -174,7 +174,8 @@ enum UIIcon {
   Wifi,
   Hotspot,
   Chart,
-  Gamepad
+  Gamepad,
+  Pokeball
 };
 
 // Default theme implementation (Classic Theme)

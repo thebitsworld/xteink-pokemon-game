@@ -279,6 +279,17 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
                            "readingIdleTimeThresholdUnits", StrId::STR_CAT_SYSTEM));
     add(SettingInfo::Toggle(StrId::STR_TRACK_READING_STATS, &CrossPointSettings::trackReadingStats, "trackReadingStats",
                             StrId::STR_CAT_SYSTEM));
+    // Feature switches: off hides the feature from Home (FeatureToggles.h).
+#if defined(CROSSINK_ENABLE_POKEMON)
+    add(SettingInfo::Toggle(StrId::STR_POKEMON, &CrossPointSettings::pokemonGameEnabled, "pokemonGameEnabled",
+                            StrId::STR_CAT_SYSTEM));
+#endif
+#if defined(CROSSINK_ENABLE_LUA_APPS)
+    add(SettingInfo::Toggle(StrId::STR_APPS_TITLE, &CrossPointSettings::applicationsEnabled, "applicationsEnabled",
+                            StrId::STR_CAT_SYSTEM));
+#endif
+    add(SettingInfo::Toggle(StrId::STR_SLIDESHOW, &CrossPointSettings::slideshowEnabled, "slideshowEnabled",
+                            StrId::STR_CAT_SYSTEM));
 
     // Frontlight quick-panel state: persisted + web-exposed, category-less so
     // it stays off the Settings screen (edited from the swipe-down panel).

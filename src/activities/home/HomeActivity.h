@@ -88,6 +88,7 @@ class HomeActivity final : public Activity {
   // tapping it opens the Pokemon game.
   Rect pokemonAccessoryRect_{};
   void drawPokemonAccessory(Rect bounds);
+  void loadPokemonDashboard();
 #endif
 
   // Per-book stats and progress cached at onEnter() to avoid SD reads during navigation.

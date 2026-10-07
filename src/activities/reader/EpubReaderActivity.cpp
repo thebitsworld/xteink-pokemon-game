@@ -33,6 +33,7 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "DictionaryWordSelectActivity.h"
 #include "EpubGrayscale.h"
 #include "EpubReaderBookmarkListActivity.h"
@@ -2460,7 +2461,7 @@ void EpubReaderActivity::onEnter() {
   // Returns false when there's no starter yet (party empty) or the save isn't
   // ready - both routine, not worth logging; PokemonService itself already
   // logs the one real failure case (store I/O error).
-  pokemon::devicePokemonService().beginReadingSession();
+  if (features::pokemonGame()) pokemon::devicePokemonService().beginReadingSession();
 #endif
 
   initializeCompletionPromptTrigger();
@@ -2520,7 +2521,7 @@ void EpubReaderActivity::onExit() {
   // Independent of the reading-stats tracking setting - that only controls
   // CrossInk's own reading-stats feature, not Pokemon crediting. Flushes any
   // not-yet-checkpointed credited minutes so a normal exit loses nothing.
-  pokemon::devicePokemonService().flushOnExit(millis());
+  if (features::pokemonGame()) pokemon::devicePokemonService().flushOnExit(millis());
 #endif
 
   BOOKMARKS.unload();
@@ -2817,7 +2818,7 @@ void EpubReaderActivity::loop() {
   // Checked every loop iteration (not just on page turns) so credited time
   // accrues, and gets checkpointed to disk, even across a long stretch of
   // reading without an actual page turn in between.
-  pokemon::devicePokemonService().checkpointIfDue(millis());
+  if (features::pokemonGame()) pokemon::devicePokemonService().checkpointIfDue(millis());
 #endif
   syncStatsTrackingState();
   if (pendingTtfRenderRelayout && epub) {
@@ -6007,7 +6008,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
 #if defined(CROSSINK_ENABLE_POKEMON)
   // Auto-page-turn is not the player actively reading - excluded from credit,
   // matching docs/development/pokemon-mechanics.md's anti-cheat design.
-  if (!(source && strcmp(source, "auto") == 0)) {
+  if (features::pokemonGame() && !(source && strcmp(source, "auto") == 0)) {
     auto& pokemonService = pokemon::devicePokemonService();
     pokemonService.setBookProgressPercent(
         static_cast<uint8_t>(clampPercent(static_cast<int>(getCurrentBookProgressPercent() + 0.5f))));

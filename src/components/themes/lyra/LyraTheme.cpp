@@ -79,6 +79,8 @@ const freeink::Icon* LyraTheme::iconForName(UIIcon icon, uint32_t size) {
         return &icon_lyra_library_24;
       case UIIcon::Gamepad:
         return &icon_gamepad_24;
+      case UIIcon::Pokeball:
+        return &icon_pokeball_24;
       default:
         return nullptr;
     }
@@ -108,6 +110,8 @@ const freeink::Icon* LyraTheme::iconForName(UIIcon icon, uint32_t size) {
         return &icon_radio_tower_32;
       case UIIcon::Gamepad:
         return &icon_gamepad_32;
+      case UIIcon::Pokeball:
+        return &icon_pokeball_32;
       default:
         return nullptr;
     }

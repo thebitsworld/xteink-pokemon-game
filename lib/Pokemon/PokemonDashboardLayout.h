@@ -31,6 +31,7 @@ constexpr int kPokemonHomeAccessoryFollowingOffset = 72;
 
 DashboardLayout pokemonDashboardLayout(int width, int height);
 HomeAccessorySizing classicHomeAccessorySizing(int baseCoverHeight, bool visible);
-bool pokemonHomeAccessoryVisible(bool enabled, bool themeSupported, bool hasLeader);
+// The Home band shows the party leader, or a Poke Ball inviting the player to pick a starter.
+bool pokemonHomeAccessoryVisible(bool gameEnabled, bool shownOnHome, bool themeSupported);
 
 }  // namespace pokemon

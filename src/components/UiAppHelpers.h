@@ -107,6 +107,8 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
         return freeink::ui::bitmapFromIcon(icon_radio_tower_32);
       case UIIcon::Gamepad:
         return freeink::ui::bitmapFromIcon(icon_gamepad_32);
+      case UIIcon::Pokeball:
+        return freeink::ui::bitmapFromIcon(icon_pokeball_32);
       default:
         return {};
     }
@@ -132,6 +134,8 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
       return freeink::ui::bitmapFromIcon(icon_radio_tower_24);
     case UIIcon::Gamepad:
       return freeink::ui::bitmapFromIcon(icon_gamepad_24);
+    case UIIcon::Pokeball:
+      return freeink::ui::bitmapFromIcon(icon_pokeball_24);
     default:
       return {};
   }

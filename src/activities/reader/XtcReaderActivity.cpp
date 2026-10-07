@@ -19,6 +19,7 @@
 #include "BookStatsTracking.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "GlobalActions.h"
 #include "MappedInputManager.h"
 #include "QuickActions.h"
@@ -147,7 +148,7 @@ void XtcReaderActivity::onEnter() {
   // Returns false when there's no starter yet (party empty) or the save isn't
   // ready - both routine, not worth logging; PokemonService itself already
   // logs the one real failure case (store I/O error).
-  pokemon::devicePokemonService().beginReadingSession();
+  if (features::pokemonGame()) pokemon::devicePokemonService().beginReadingSession();
 #endif
 
   // Trigger first update
@@ -173,7 +174,7 @@ void XtcReaderActivity::onExit() {
   // Independent of any CrossInk reading-stats setting - Pokemon crediting is
   // its own feature. Flushes any not-yet-checkpointed credited minutes so a
   // normal exit loses nothing.
-  pokemon::devicePokemonService().flushOnExit(millis());
+  if (features::pokemonGame()) pokemon::devicePokemonService().flushOnExit(millis());
 #endif
 
   // Generate carousel thumbnails while XTC is still loaded so the home screen
@@ -222,7 +223,7 @@ void XtcReaderActivity::loop() {
   // Checked every loop iteration (not just on page turns) so credited time
   // accrues, and gets checkpointed to disk, even across a long stretch of
   // reading without an actual page turn in between.
-  pokemon::devicePokemonService().checkpointIfDue(millis());
+  if (features::pokemonGame()) pokemon::devicePokemonService().checkpointIfDue(millis());
 #endif
   syncStatsTrackingState();
   if (quickActionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
@@ -602,7 +603,7 @@ void XtcReaderActivity::loop() {
     }
   }
 #if defined(CROSSINK_ENABLE_POKEMON)
-  if (needsUpdate) {
+  if (needsUpdate && features::pokemonGame()) {
     auto& pokemonService = pokemon::devicePokemonService();
     pokemonService.setBookProgressPercent(
         static_cast<uint8_t>(std::clamp(static_cast<int>(getCurrentBookProgressPercent() + 0.5f), 0, 100)));
