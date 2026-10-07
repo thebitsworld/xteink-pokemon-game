@@ -353,6 +353,8 @@ function on_init()
     math.randomseed(smudge.millis() + smudge.time())
     loadStats()
     loadGame()
+    -- openMenu() pauses the clock; a saved puzzle has not been running since boot.
+    resumeClock()
     openMenu()
 end
 

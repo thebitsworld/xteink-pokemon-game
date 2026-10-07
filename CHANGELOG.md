@@ -2,6 +2,8 @@
 
 ### Added
 
+- Tide & Paper in the App Store: collect pairs and sets of sea cards against the device (Easy or Normal), play pairs for their effects, then end the round with Stop - or bet on Last chance. First to 40 points wins; four mermaids win at once.
+- Dungeon Map in the App Store: wall in a dungeon from the number of walls in each row and column, the monsters standing in its dead ends and the treasure in its 3x3 rooms. Maps are made fresh on the reader at three levels, each with a single solution; How to play explains the rules.
 - Two more games in the App Store: Bazaar (a two-player trading card game against the device at two levels - take goods from the market, swap them, then sell sets for falling-value tokens; best of three rounds) and Whodunit (logic-grid murder mysteries made fresh on the reader at three levels: read the clues and the case file, mark the grid, then accuse the murderer with their weapon and place; every case has exactly one answer you can reach without guessing).
 
 ### Changed
@@ -10,6 +12,10 @@
 - On every other Home theme, the band showing your party leader opens the Pokémon game: tap it, or select it with the buttons (Up/Down; on Minimal and Dashboard the side buttons, then Open) and press Confirm. It replaces the Home menu's Pokémon entry, which comes back if you hide the band in the game's settings. Applications has a game-controller icon in the Home menu.
 - Before you pick a starter, Home shows a Poké Ball and "Choose your starter" where your party leader goes (tap it to start), and the Cover Grid keeps its Pokémon tile even before you open a book. The Pokémon menu entry has a Poké Ball icon instead of a book.
 - Settings > System > Features has switches for the Pokémon game, Applications and the Photo Slideshow (all on by default). Switched off, a feature disappears from Home; a switched-off Pokémon game also stops counting reading time and is not offered to nearby readers. Your save is kept, so switching it back on picks up where you left off.
+
+### Fixed
+
+- Nonogram: a puzzle resumed after reopening the app no longer counts the time since the reader was switched on.
 
 ## [1.8.0-rc.2] - 2026-10-06
 
