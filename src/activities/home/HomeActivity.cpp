@@ -248,6 +248,17 @@ bool ensureReusableCoverPath(RecentBook& book) {
   return true;
 }
 
+// Whether this Home shows the Pokemon band (set by HomeActivity::refreshPokemonBand()).
+// While it does, the band is the way into the game - a selectable item between the
+// books and the menu - so the menu leaves out its Pokemon entry; switch the band off
+// (in the game's settings) and the entry comes back, so the game is never out of reach.
+bool pokemonBandOnHome = false;
+int pokemonBandSlots() { return pokemonBandOnHome ? 1 : 0; }
+bool pokemonMenuEntryWanted() { return features::pokemonGame() && !pokemonBandOnHome; }
+// Minimal and Dashboard keep their four front-button actions (nav 0-3); the side
+// buttons move the focus onto the band instead.
+constexpr int kMinimalPokemonBandNav = 100;
+
 const char* savedItemsLabel(bool hasBookmarks, bool hasClippings) {
   if (hasBookmarks && hasClippings) return tr(STR_BOOKMARKS_AND_CLIPPINGS);
   if (hasClippings) return tr(STR_CLIPPINGS);
@@ -271,7 +282,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
 #if defined(CROSSINK_ENABLE_POKEMON)
-  if (features::pokemonGame()) items.push({tr(STR_POKEMON), Pokeball, HomeMenuAction::Pokemon});
+  if (pokemonMenuEntryWanted()) items.push({tr(STR_POKEMON), Pokeball, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
   if (features::applications()) items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
@@ -306,7 +317,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
 #if defined(CROSSINK_ENABLE_POKEMON)
-  if (features::pokemonGame()) items.push({tr(STR_POKEMON), Pokeball, HomeMenuAction::Pokemon});
+  if (pokemonMenuEntryWanted()) items.push({tr(STR_POKEMON), Pokeball, HomeMenuAction::Pokemon});
 #endif
 #if defined(CROSSINK_ENABLE_LUA_APPS)
   if (features::applications()) items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
@@ -514,9 +525,14 @@ int getVisibleRecentBookCount(const std::vector<RecentBook>& recentBooks) {
   return std::min(static_cast<int>(recentBooks.size()), metrics.homeRecentBooksCount);
 }
 
-int getHomeMenuSelectionOffset(const std::vector<RecentBook>& recentBooks) {
+// The selection index of the Pokemon band when it is shown: right after the books.
+int getPokemonBandSelectionIndex(const std::vector<RecentBook>& recentBooks) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   return metrics.homeContinueReadingInMenu ? 0 : getVisibleRecentBookCount(recentBooks);
+}
+
+int getHomeMenuSelectionOffset(const std::vector<RecentBook>& recentBooks) {
+  return getPokemonBandSelectionIndex(recentBooks) + pokemonBandSlots();
 }
 
 }  // namespace
@@ -849,6 +865,9 @@ void HomeActivity::onEnter() {
     coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
     if (!coverGridUi) LOG_ERR("HOME", "Cannot allocate cover grid UI; using standard Home");
   }
+#if defined(CROSSINK_ENABLE_POKEMON)
+  refreshPokemonBand();
+#endif
   const bool isCarouselTheme =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
@@ -945,6 +964,12 @@ void HomeActivity::onEnter() {
     if (menuIndex >= 0) {
       selectorIndex = getHomeMenuSelectionOffset(recentBooks) + menuIndex;
     }
+  }
+
+  // Home never opens on the Pokemon band: where it would (no books, or a
+  // theme whose Continue Reading is a menu entry), start on the menu after it.
+  if (!coverGridUi && pokemonBandOnHome && selectorIndex == getPokemonBandSelectionIndex(recentBooks)) {
+    selectorIndex = getHomeMenuSelectionOffset(recentBooks);
   }
 
   if (isCarouselTheme && hasValidCarouselDiskCache(recentBooks, renderer, getHighlightedBookIndex())) {
@@ -1617,26 +1642,38 @@ void HomeActivity::loop() {
     }
 
     const int homeNavCount = minimalHomeNavCount(!recentBooks.empty());
-    if (minimalHomeNavIndex >= homeNavCount) {
+    const bool bandFocused = minimalHomeNavIndex == kMinimalPokemonBandNav;
+    if (minimalHomeNavIndex >= homeNavCount && !bandFocused) {
       minimalHomeNavIndex = homeNavCount - 1;
     }
 
     // Touch readers do not show the front-button hints, so retain their
     // existing side-button handling without moving the non-touch hint focus.
+    // The Pokemon band, when shown, follows the last action in that cycle.
     if (mappedInput.hasTouch()) {
+      const int cycleCount = homeNavCount + pokemonBandSlots();
+      const int position = bandFocused ? homeNavCount : minimalHomeNavIndex;
+      const auto toNav = [homeNavCount](const int index) {
+        return index == homeNavCount ? kMinimalPokemonBandNav : index;
+      };
       if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-        minimalHomeNavIndex = minimalHomeNavIndex < 0
-                                  ? homeNavCount - 1
-                                  : ButtonNavigator::previousIndex(minimalHomeNavIndex, homeNavCount);
+        minimalHomeNavIndex =
+            toNav(position < 0 ? cycleCount - 1 : ButtonNavigator::previousIndex(position, cycleCount));
         requestUpdate();
         return;
       }
       if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-        minimalHomeNavIndex =
-            minimalHomeNavIndex < 0 ? 0 : ButtonNavigator::nextIndex(minimalHomeNavIndex, homeNavCount);
+        minimalHomeNavIndex = toNav(position < 0 ? 0 : ButtonNavigator::nextIndex(position, cycleCount));
         requestUpdate();
         return;
       }
+    } else if (pokemonBandOnHome && (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+                                     mappedInput.wasPressed(MappedInputManager::Button::Down))) {
+      // Without touch the four front buttons stay their four actions; the side
+      // buttons focus the Pokemon band (and leave it), and Confirm opens it.
+      minimalHomeNavIndex = bandFocused ? -1 : kMinimalPokemonBandNav;
+      requestUpdate();
+      return;
     }
 
     auto activateMinimalHomeNav = [this](int index) {
@@ -1655,6 +1692,11 @@ void HomeActivity::loop() {
         case 3:
           onContinueReading();
           break;
+#if defined(CROSSINK_ENABLE_POKEMON)
+        case kMinimalPokemonBandNav:
+          onPokemonOpen();
+          break;
+#endif
       }
     };
 
@@ -1808,6 +1850,12 @@ void HomeActivity::loop() {
       onSelectBook(recentBooks[selectorIndex].path);
       return;
     }
+#if defined(CROSSINK_ENABLE_POKEMON)
+    if (pokemonBandOnHome && selectorIndex == getPokemonBandSelectionIndex(recentBooks)) {
+      onPokemonOpen();
+      return;
+    }
+#endif
 
     auto menuItems = buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings,
                                                   metrics.homeContinueReadingInMenu && !recentBooks.empty());
@@ -1842,8 +1890,12 @@ void HomeActivity::loop() {
   if (isCarousel) {
     const int bookCount = visibleBookCount;
     const int menuItemCount = carouselMenuItemCount;
+    // Rows, top to bottom: the carousel, the Pokemon band (when shown), the icon strip.
+    const int bandIndex = bookCount;
+    const int menuBase = bookCount + pokemonBandSlots();
     bool inCarouselRow = (selectorIndex < bookCount);
-    const int menuIdx = inCarouselRow ? 0 : (selectorIndex - bookCount);
+    const bool onBand = pokemonBandOnHome && selectorIndex == bandIndex;
+    const int menuIdx = (inCarouselRow || onBand) ? 0 : (selectorIndex - menuBase);
 
     auto handleTouch = [&](const bool activate) {
       int touchedMenuIndex = -1;
@@ -1914,8 +1966,8 @@ void HomeActivity::loop() {
       if (inCarouselRow && bookCount > 0) {
         selectorIndex = (selectorIndex + 1) % bookCount;
         lastCarouselBookIndex = selectorIndex;
-      } else if (!inCarouselRow) {
-        selectorIndex = bookCount + (menuIdx + 1) % menuItemCount;
+      } else if (!inCarouselRow && !onBand) {
+        selectorIndex = menuBase + (menuIdx + 1) % menuItemCount;
       }
       requestUpdate();
     };
@@ -1923,8 +1975,8 @@ void HomeActivity::loop() {
       if (inCarouselRow && bookCount > 0) {
         selectorIndex = (selectorIndex + bookCount - 1) % bookCount;
         lastCarouselBookIndex = selectorIndex;
-      } else if (!inCarouselRow) {
-        selectorIndex = bookCount + (menuIdx + menuItemCount - 1) % menuItemCount;
+      } else if (!inCarouselRow && !onBand) {
+        selectorIndex = menuBase + (menuIdx + menuItemCount - 1) % menuItemCount;
       }
       requestUpdate();
     };
@@ -1966,26 +2018,29 @@ void HomeActivity::loop() {
       if (!handledHorizontalNav && mappedInput.wasPressed(MappedInputManager::Button::Left)) {
         moveLeft();
       }
+      // Down: carousel, band, icons, carousel again; Up the other way.
       if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
         if (inCarouselRow) {
           lastCarouselBookIndex = selectorIndex;
-          selectorIndex = bookCount;
-          invalidateCoverCache();
+          selectorIndex = bandIndex;  // the band, or the icon strip when it is not shown
+        } else if (onBand) {
+          selectorIndex = menuBase;
         } else {
           selectorIndex = lastCarouselBookIndex;
-          invalidateCoverCache();
         }
+        invalidateCoverCache();
         requestUpdate();
       }
       if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
         if (inCarouselRow) {
           lastCarouselBookIndex = selectorIndex;
-          selectorIndex = bookCount;
-          invalidateCoverCache();
-        } else {
+          selectorIndex = menuBase;
+        } else if (onBand || !pokemonBandOnHome) {
           selectorIndex = lastCarouselBookIndex;
-          invalidateCoverCache();
+        } else {
+          selectorIndex = bandIndex;
         }
+        invalidateCoverCache();
         requestUpdate();
       }
     }
@@ -2161,9 +2216,7 @@ void HomeActivity::render(RenderLock&&) {
   };
   bool showPokemonAccessory = false;
 #if defined(CROSSINK_ENABLE_POKEMON)
-  showPokemonAccessory =
-      pokemon::pokemonHomeAccessoryVisible(features::pokemonGame(), SETTINGS.pokemonHomeScreen != 0,
-                                           pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme));
+  showPokemonAccessory = pokemonBandOnHome;
   pokemonAccessoryRect_ = {};
 #endif
 
@@ -2226,13 +2279,17 @@ void HomeActivity::render(RenderLock&&) {
                             currentBookProgressPercent, &globalStats, currentBookChapterTitle.c_str());
 
     const int homeNavCount = minimalHomeNavCount(!recentBooks.empty());
-    if (minimalHomeNavIndex >= homeNavCount) {
+    if (minimalHomeNavIndex >= homeNavCount && minimalHomeNavIndex != kMinimalPokemonBandNav) {
       minimalHomeNavIndex = homeNavCount - 1;
     }
     if (showMinimalHomeButtonHints(mappedInput)) {
-      MinimalTheme::setHomeButtonHintSelection(minimalHomeNavIndex);
+      // With the Pokemon band focused, Confirm opens it instead of browsing.
+      const bool bandFocused = minimalHomeNavIndex == kMinimalPokemonBandNav;
+      MinimalTheme::setHomeButtonHintSelection(bandFocused ? 1 : minimalHomeNavIndex);
       GUI.drawButtonHints(renderer, tr(STR_MENU),
-                          SETTINGS.isLibraryFileBrowserSwapped() ? tr(STR_LIBRARY) : tr(STR_BROWSE),
+                          bandFocused                               ? tr(STR_OPEN)
+                          : SETTINGS.isLibraryFileBrowserSwapped() ? tr(STR_LIBRARY)
+                                                                   : tr(STR_BROWSE),
                           tr(STR_SETTINGS_SHORT), recentBooks.empty() ? "" : tr(STR_READ));
     }
 
@@ -2293,7 +2350,7 @@ void HomeActivity::render(RenderLock&&) {
       const auto menuItems = buildHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
       const int menuHighlightIndex = mappedInput.hasTouchHardware()
                                          ? carouselMenuTouchDownIndex
-                                         : (inCarouselRow ? -1 : selectorIndex - static_cast<int>(recentBooks.size()));
+                                         : (inCarouselRow ? -1 : selectorIndex - getHomeMenuSelectionOffset(recentBooks));
       GUI.drawButtonMenu(
           renderer, Rect{}, static_cast<int>(menuItems.size()), menuHighlightIndex,
           [&menuItems](int index) { return menuItems[index].label; },
@@ -2487,6 +2544,13 @@ void HomeActivity::onApplicationsOpen() {
 void HomeActivity::drawPokemonAccessory(const Rect bounds) {
   pokemon::drawPokemonHomeAccessory(renderer, pokemonDashboard_, bounds);
   pokemonAccessoryRect_ = bounds;
+  if (pokemonBandSelected()) renderer.drawRect(bounds.x + 2, bounds.y, bounds.width - 4, bounds.height, 3, true);
+}
+
+bool HomeActivity::pokemonBandSelected() const {
+  if (!pokemonBandOnHome) return false;
+  if (usesMinimalHomeInteraction()) return minimalHomeNavIndex == kMinimalPokemonBandNav;
+  return selectorIndex == getPokemonBandSelectionIndex(recentBooks);
 }
 
 void HomeActivity::onPokemonOpen() {
@@ -2495,7 +2559,14 @@ void HomeActivity::onPokemonOpen() {
     LOG_ERR("HOME", "Could not allocate Pokemon activity");
     return;
   }
-  startActivityForResult(std::move(pokemon), [this](const ActivityResult&) { loadPokemonDashboard(); });
+  startActivityForResult(std::move(pokemon), [this](const ActivityResult&) {
+    loadPokemonDashboard();
+    // The game's "show on Home" switch may have changed: the band, and with it
+    // the menu's Pokemon entry, may have come or gone.
+    refreshPokemonBand();
+    selectorIndex = std::clamp(selectorIndex, 0, std::max(0, getMenuItemCount() - 1));
+    minimalHomeNavIndex = -1;
+  });
 }
 
 // The party leader for the Home band or the cover grid's tile. Left empty
@@ -2508,6 +2579,27 @@ void HomeActivity::loadPokemonDashboard() {
       UITheme::hasCoverGridHome()) {
     pokemon::devicePokemonService().loadDashboardSnapshot(pokemonDashboard_);
   }
+}
+
+// Decides whether this Home shows the Pokemon band (see pokemonBandOnHome).
+// The Cover Grid has its own Pokemon tile instead.
+void HomeActivity::refreshPokemonBand() {
+  bool shown = !coverGridUi && pokemon::pokemonHomeAccessoryVisible(
+                                   features::pokemonGame(), SETTINGS.pokemonHomeScreen != 0,
+                                   pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme));
+  if (shown && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::CLASSIC) {
+    // Classic drops the band when the cover would get too short for it (same
+    // sums as render(): the four always-present menu rows stay clear of the hints).
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    constexpr int menuRows = 4;
+    const int requiredMenuHeight =
+        metrics.verticalSpacing + menuRows * metrics.menuRowHeight + (menuRows - 1) * metrics.menuSpacing;
+    const int maxCoverHeight = renderer.getScreenHeight() - metrics.buttonHintsHeight - metrics.homeTopPadding -
+                               metrics.homeMenuTopOffset - requiredMenuHeight;
+    const int coverHeight = std::clamp(maxCoverHeight, 0, metrics.homeCoverTileHeight);
+    shown = pokemon::classicHomeAccessorySizing(coverHeight, true).accessoryHeight != 0;
+  }
+  pokemonBandOnHome = shown;
 }
 #endif
 

@@ -89,6 +89,8 @@ class HomeActivity final : public Activity {
   Rect pokemonAccessoryRect_{};
   void drawPokemonAccessory(Rect bounds);
   void loadPokemonDashboard();
+  void refreshPokemonBand();
+  bool pokemonBandSelected() const;
 #endif
 
   // Per-book stats and progress cached at onEnter() to avoid SD reads during navigation.
