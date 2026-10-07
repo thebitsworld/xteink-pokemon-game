@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Added
+
+- Two more games in the App Store: Bazaar (a two-player trading card game against the device at two levels - take goods from the market, swap them, then sell sets for falling-value tokens; best of three rounds) and Whodunit (logic-grid murder mysteries made fresh on the reader at three levels: read the clues and the case file, mark the grid, then accuse the murderer with their weapon and place; every case has exactly one answer you can reach without guessing).
+
 ## [1.8.0-rc.2] - 2026-10-06
 
 ### Added

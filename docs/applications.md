@@ -13,6 +13,7 @@ The app engine comes from [CrossSmudge](https://github.com/Mumfee/CrossSmudge) (
 apps written for CrossSmudge run here unchanged. The App Store offers: Minesweeper, Connect Four
 (against the device or a friend), Klondike Solitaire, Knucklebones and Yacht (dice games against the
 device or a friend), Nonogram (picture logic puzzles), Checkers, Sea Battle, Hearts, Hex, Go, Chess,
+Bazaar (a trading card game), Whodunit (logic-grid murder mysteries),
 2048, Blackjack, Sudoku, Tetris, Wordle, Dice and the Codex deckbuilder.
 
 Each time an app closes, a line is added to `/.crosspoint/apps-memory.txt` on the SD card with the
