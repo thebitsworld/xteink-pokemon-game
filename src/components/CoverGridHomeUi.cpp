@@ -10,7 +10,17 @@
 
 #include "MappedInputManager.h"
 #include "UITheme.h"
+#include "components/icons/homeExtraIcons.h"
 #include "components/icons/listIcons.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include <PokemonSpecies.h>
+#include <Utf8.h>
+
+#include <cstring>
+
+#include "components/pokemon/PokemonArt.h"
+#include "fontIds.h"
+#endif
 
 namespace fui = freeink::ui;
 namespace {
@@ -24,6 +34,7 @@ CoverGridHomeUi::CoverGridHomeUi(GfxRenderer& renderer)
 void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bool continuing, float featuredProgress) {
   books = &recent;
   hasOpds = opds;
+  buildTabs();
   if (!recent.empty()) coverCache.begin();
   reset();
   app.on(SELECT, &CoverGridHomeUi::onAction, this);
@@ -203,12 +214,13 @@ fui::Rect CoverGridHomeUi::layoutGrid(fui::Rect rect) {
 
 void CoverGridHomeUi::drawGrid(UiScreen& screen) {
   const auto rect = gridBounds;
-  grid.count = books->size() > 1 ? books->size() - 1 : 0;
+  grid.count = (books->size() > 1 ? books->size() - 1 : 0) + tileCount();
   grid.columns = GRID_COLUMNS;
   grid.columnLayout = fui::CoverGridColumnLayout::SpaceBetween;
   grid.action = SELECT;
   grid.inputMask = fui::InputTouch;
-  grid.selectedIndex = selected > 0 && selected < static_cast<int>(books->size()) ? selected - 1 : -1;
+  grid.selectedIndex =
+      selected > 0 && selected < static_cast<int>(books->size()) + tileCount() ? selected - 1 : -1;
   grid.selectionIndicator = fui::CoverGridSelectionIndicator::CoverFrame;
   grid.selectedCoverFrameGap = 6;
   grid.selectedCoverFrameWidth = 8;
@@ -221,35 +233,61 @@ void CoverGridHomeUi::drawGrid(UiScreen& screen) {
   grid.coverPainterUserData = this;
   grid.coverPainter = [](fui::DrawTarget& target, fui::Rect cover, const fui::CoverGridItem&, uint16_t index,
                          void* user) {
-    return static_cast<CoverGridHomeUi*>(user)->paintFramedCover(target, cover, index + 1);
+    auto& self = *static_cast<CoverGridHomeUi*>(user);
+#if defined(CROSSINK_ENABLE_POKEMON)
+    if (index + 1u >= self.books->size()) {
+      self.paintPokemonTile(cover);
+      return true;
+    }
+#endif
+    return self.paintFramedCover(target, cover, index + 1);
   };
   fui::coverGrid(screen.frame(), rect, grid);
 }
 
+void CoverGridHomeUi::buildTabs() {
+  tabTotal = 0;
+  const auto add = [this](const CoverGridTab tab) { tabOrder[tabTotal++] = tab; };
+  add(CoverGridTab::Files);
+  add(CoverGridTab::Library);
+  if (hasOpds) add(CoverGridTab::Opds);
+#if defined(CROSSINK_ENABLE_POKEMON) && defined(CROSSINK_ENABLE_LUA_APPS)
+  add(CoverGridTab::Applications);
+#endif
+  add(CoverGridTab::Slideshow);
+  add(CoverGridTab::Transfer);
+  add(CoverGridTab::Settings);
+}
+
+int CoverGridHomeUi::tabIndexOf(const CoverGridTab tab) const {
+  for (int i = 0; i < tabTotal; ++i) {
+    if (tabOrder[i] == tab) return i;
+  }
+  return -1;
+}
+
 void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
-  static constexpr const freeink::Icon* ICONS[] = {&icon_folder_32, &icon_landmark_32, &icon_lyra_library_32,
-                                                   &icon_lyra_transfer_32, &icon_lyra_settings_32};
-  int count = 0;
-  for (int i = 0; i < 5; ++i) {
-    if (i == 2 && !hasOpds) continue;
-    auto& tab = tabItems[count];
-    tab.value = books->size() + count;
+  const int first = static_cast<int>(books->size()) + tileCount();
+  for (int i = 0; i < tabTotal; ++i) {
+    auto& tab = tabItems[i];
+    tab.value = first + i;
     tab.selected = selected == tab.value;
     tab.label = nullptr;
-    ++count;
   }
   tabs.tabs = tabItems.data();
-  tabs.count = count;
+  tabs.count = tabTotal;
   tabs.layout = fui::TabBarLayout::SpaceBetween;
   tabs.action = SELECT;
   tabs.inputMask = fui::InputTouch;
   tabs.iconSize = 32;
   tabs.iconPainterUserData = this;
   tabs.iconPainter = [](fui::DrawTarget&, fui::Rect iconRect, const fui::TabItem& tab, uint8_t, void* user) {
+    static constexpr const freeink::Icon* ICONS[] = {&icon_folder_32,  &icon_landmark_32,      &icon_lyra_library_32,
+                                                     &icon_gamepad_32, &icon_image_32,         &icon_lyra_transfer_32,
+                                                     &icon_lyra_settings_32};
     const auto& self = *static_cast<CoverGridHomeUi*>(user);
-    const int index = tab.value - static_cast<int>(self.books->size());
-    const int icon = !self.hasOpds && index >= 2 ? index + 1 : index;
-    drawLucideIcon(self.renderer, *ICONS[icon], iconRect.x, iconRect.y);
+    const int index = tab.value - static_cast<int>(self.books->size()) - self.tileCount();
+    drawLucideIcon(self.renderer, *ICONS[static_cast<int>(self.tabOrder[index])], iconRect.x, iconRect.y);
     return true;
   };
   tabs.tabStyles.normal.background = fui::Paint::solid(fui::Color::White);
@@ -268,3 +306,74 @@ bool CoverGridHomeUi::paintFramedCover(fui::DrawTarget& target, fui::Rect rect, 
   target.stroke(rect, ink, 1, 0);
   return drawn;
 }
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+namespace {
+// Copies `source` into `out`, cut short (on a UTF-8 boundary) to fit `width`.
+template <size_t Size>
+const char* fitText(const GfxRenderer& renderer, const int font, const char* source, const int width,
+                    char (&out)[Size], const EpdFontFamily::Style style) {
+  snprintf(out, Size, "%s", source == nullptr ? "" : source);
+  int length = utf8SafeTruncateBuffer(out, static_cast<int>(strlen(out)));
+  out[length] = '\0';
+  while (length > 0 && renderer.getTextWidth(font, out, style) > width) {
+    length = utf8SafeTruncateBuffer(out, length - 1);
+    out[length] = '\0';
+  }
+  return out;
+}
+}  // namespace
+
+// The Pokemon tile: the party leader with its name and level, or a Poke Ball
+// before a starter is chosen. A "!" marks something waiting in the game.
+void CoverGridHomeUi::paintPokemonTile(const fui::Rect rect) {
+  constexpr int16_t SHADOW_OFFSET = 2;
+  constexpr uint8_t POKE_BALL_ITEM_ID = 7;
+  renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
+  renderer.fillRect(rect.right(), rect.y + SHADOW_OFFSET, SHADOW_OFFSET, rect.height, true);
+  renderer.fillRect(rect.x + SHADOW_OFFSET, rect.bottom(), rect.width, SHADOW_OFFSET, true);
+  renderer.drawRect(rect.x, rect.y, rect.width, rect.height, true);
+
+  const auto* snapshot = pokemonSnapshot;
+  const bool hasLeader = snapshot != nullptr && snapshot->leader.recordId != 0;
+  const int lineBold = renderer.getLineHeight(UI_12_FONT_ID);
+  const int lineSmall = renderer.getLineHeight(UI_10_FONT_ID);
+  const int textWidth = rect.width - 8;
+  const int side = std::max(1, std::min<int>(rect.width - 8, rect.height - lineBold - lineSmall - 16));
+  const int artX = rect.x + (rect.width - side) / 2;
+  const int artY = rect.y + std::max(4, (rect.height - side - lineBold - lineSmall - 4) / 2);
+  const Rect art{artX, artY, side, side};
+
+  char title[40];
+  char detail[24];
+  int titleFont = UI_12_FONT_ID;
+  if (hasLeader) {
+    pokemon::drawPokemonSpeciesArt(renderer, snapshot->leader.speciesId, true, art);
+    const pokemon::SpeciesData* species = pokemon::speciesData(snapshot->leader.speciesId);
+    const char* name = snapshot->leader.nickname[0] != '\0' ? snapshot->leader.nickname.data()
+                                                            : (species == nullptr ? "???" : species->name);
+    // A long name drops to the smaller font before it is cut short.
+    if (renderer.getTextWidth(titleFont, name, EpdFontFamily::BOLD) > textWidth) titleFont = UI_10_FONT_ID;
+    fitText(renderer, titleFont, name, textWidth, title, EpdFontFamily::BOLD);
+    char level[24];
+    snprintf(level, sizeof(level), "%s %u", tr(STR_POKEMON_LEVEL),
+             static_cast<unsigned>(pokemon::levelXpProgress(snapshot->leader.totalXp).level));
+    fitText(renderer, UI_10_FONT_ID, level, textWidth, detail, EpdFontFamily::REGULAR);
+  } else {
+    pokemon::drawPokemonBagItemArt(renderer, POKE_BALL_ITEM_ID, art);
+    fitText(renderer, UI_12_FONT_ID, tr(STR_POKEMON), textWidth, title, EpdFontFamily::BOLD);
+    detail[0] = '\0';
+  }
+  int y = artY + side + 4;
+  renderer.drawText(titleFont, rect.x + (rect.width - renderer.getTextWidth(titleFont, title, EpdFontFamily::BOLD)) / 2,
+                    y, title, true, EpdFontFamily::BOLD);
+  y += lineBold;
+  if (detail[0] != '\0') {
+    renderer.drawText(UI_10_FONT_ID, rect.x + (rect.width - renderer.getTextWidth(UI_10_FONT_ID, detail)) / 2, y,
+                      detail);
+  }
+  if (hasLeader && snapshot->notice != pokemon::DashboardNotice::None) {
+    renderer.drawText(UI_12_FONT_ID, rect.right() - 14, rect.y + 4, "!", true, EpdFontFamily::BOLD);
+  }
+}
+#endif

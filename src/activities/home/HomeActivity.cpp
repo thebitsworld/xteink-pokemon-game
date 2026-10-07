@@ -566,9 +566,10 @@ static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeR
               "kMaxCachedBooks must cover all carousel slots");
 
 int HomeActivity::getMenuItemCount() const {
-  if (coverGridUi) return static_cast<int>(recentBooks.size()) + (hasOpdsServers ? 5 : 4);
+  if (coverGridUi) {
+    return static_cast<int>(recentBooks.size()) + coverGridUi->tileCount() + coverGridUi->tabCount();
+  }
   const auto& metrics = UITheme::getInstance().getMetrics();
-  if (coverGridUi) return static_cast<int>(recentBooks.size()) + (hasOpdsServers ? 5 : 4);
   const bool includeContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
   const auto menuItems =
       buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, includeContinueReading);
@@ -840,7 +841,9 @@ void HomeActivity::onEnter() {
 
 #if defined(CROSSINK_ENABLE_POKEMON)
   pokemonDashboard_ = {};
-  if (SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) {
+  // The cover grid always shows the leader on its Pokemon tile.
+  if ((SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) ||
+      UITheme::hasCoverGridHome()) {
     pokemon::devicePokemonService().loadDashboardSnapshot(pokemonDashboard_);
   }
 #endif
@@ -912,28 +915,32 @@ void HomeActivity::onEnter() {
   updateHighlightedBookContext(false);
 
   if (coverGridUi) {
-    const int base = static_cast<int>(recentBooks.size());
+#if defined(CROSSINK_ENABLE_POKEMON)
+    coverGridUi->setPokemonSnapshot(&pokemonDashboard_);
+#endif
+    coverGridUi->begin(recentBooks, hasOpdsServers, gridHasContinueReading,
+                       gridHasContinueReading ? loadRecentBookProgress(recentBooks.front()) : -1.0f);
+    int tab = -1;
     switch (initialMenuItem) {
       case HomeMenuItem::FILE_BROWSER:
-        selectorIndex = base;
+        tab = coverGridUi->tabIndexOf(CoverGridTab::Files);
         break;
       case HomeMenuItem::LIBRARY:
-        selectorIndex = base + 1;
+        tab = coverGridUi->tabIndexOf(CoverGridTab::Library);
         break;
       case HomeMenuItem::OPDS_BROWSER:
-        selectorIndex = base + 2;
+        tab = coverGridUi->tabIndexOf(CoverGridTab::Opds);
         break;
       case HomeMenuItem::FILE_TRANSFER:
-        selectorIndex = base + (hasOpdsServers ? 3 : 2);
+        tab = coverGridUi->tabIndexOf(CoverGridTab::Transfer);
         break;
       case HomeMenuItem::SETTINGS_MENU:
-        selectorIndex = base + (hasOpdsServers ? 4 : 3);
+        tab = coverGridUi->tabIndexOf(CoverGridTab::Settings);
         break;
       case HomeMenuItem::NONE:
         break;
     }
-    coverGridUi->begin(recentBooks, hasOpdsServers, gridHasContinueReading,
-                       gridHasContinueReading ? loadRecentBookProgress(recentBooks.front()) : -1.0f);
+    if (tab >= 0) selectorIndex = static_cast<int>(recentBooks.size()) + coverGridUi->tileCount() + tab;
   } else if (initialMenuItem != HomeMenuItem::NONE) {
     const bool includeContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
     const auto menuItems = buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings,
@@ -1434,8 +1441,9 @@ void HomeActivity::loop() {
       return;
     }
 
-    const int bookCount = static_cast<int>(recentBooks.size());
-    const int tabCount = hasOpdsServers ? 5 : 4;
+    // Up/Down move through the books and the Pokemon tile, Left/Right through the tabs.
+    const int bookCount = static_cast<int>(recentBooks.size()) + coverGridUi->tileCount();
+    const int tabCount = coverGridUi->tabCount();
     const auto cycleBand = [this](const int base, const int count, const int dir) {
       if (count <= 0) return;
       const int current = selectorIndex - base;
@@ -2062,30 +2070,38 @@ void HomeActivity::activateCoverGridSelection() {
     onSelectBook(recentBooks[selectorIndex].path);
     return;
   }
-  const int tab = selectorIndex - static_cast<int>(recentBooks.size());
-  switch (tab) {
-    case 0:
+  int tab = selectorIndex - static_cast<int>(recentBooks.size());
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (tab < coverGridUi->tileCount()) {
+    onPokemonOpen();
+    return;
+  }
+#endif
+  tab -= coverGridUi->tileCount();
+  if (tab >= coverGridUi->tabCount()) return;
+  switch (coverGridUi->tabAt(tab)) {
+    case CoverGridTab::Files:
       onFileBrowserOpen();
       break;
-    case 1:
+    case CoverGridTab::Library:
       onLibraryOpen();
       break;
-    case 2:
-      if (hasOpdsServers) {
-        onOpdsBrowserOpen();
-      } else {
-        onFileTransferOpen();
-      }
+    case CoverGridTab::Opds:
+      onOpdsBrowserOpen();
       break;
-    case 3:
-      if (hasOpdsServers) {
-        onFileTransferOpen();
-      } else {
-        onSettingsOpen();
-      }
+    case CoverGridTab::Applications:
+#if defined(CROSSINK_ENABLE_POKEMON) && defined(CROSSINK_ENABLE_LUA_APPS)
+      onApplicationsOpen();
+#endif
       break;
-    case 4:
-      if (hasOpdsServers) onSettingsOpen();
+    case CoverGridTab::Slideshow:
+      onSlideshowOpen();
+      break;
+    case CoverGridTab::Transfer:
+      onFileTransferOpen();
+      break;
+    case CoverGridTab::Settings:
+      onSettingsOpen();
       break;
   }
 }
@@ -2475,7 +2491,8 @@ void HomeActivity::onPokemonOpen() {
   }
   startActivityForResult(std::move(pokemon), [this](const ActivityResult&) {
     pokemonDashboard_ = {};
-    if (SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) {
+    if ((SETTINGS.pokemonHomeScreen != 0 && pokemon::pokemonHomeAccessorySupported(SETTINGS.uiTheme)) ||
+        UITheme::hasCoverGridHome()) {
       pokemon::devicePokemonService().loadDashboardSnapshot(pokemonDashboard_);
     }
   });
