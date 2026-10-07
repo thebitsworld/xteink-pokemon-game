@@ -367,6 +367,27 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "whodunit",
+      "name": "Whodunit",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Logic-grid murder mysteries made fresh on the reader: deduce who had what and was where, then accuse",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "gen.lua",
+        "words.lua",
+        "view.lua",
+        "clues.lua",
+        "grid.lua",
+        "accuse.lua",
+        "wmenu.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }

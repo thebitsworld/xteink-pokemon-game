@@ -1,0 +1,8 @@
+{
+  "id": "whodunit",
+  "name": "Whodunit",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Logic-grid murder mysteries made fresh on the reader: deduce who had what and was where, then accuse",
+  "entry": "main.lua"
+}
