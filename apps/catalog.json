@@ -349,6 +349,24 @@
         "sprites/mN.raw",
         "sprites/mP.raw"
       ]
+    },
+    {
+      "id": "bazaar",
+      "name": "Bazaar",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Two-player trading card game against the device: take, exchange and sell goods in sets, keep the most camels",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "view.lua",
+        "bazaarmenu.lua",
+        "save.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
