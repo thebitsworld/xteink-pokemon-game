@@ -388,6 +388,23 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "dungeon",
+      "name": "Dungeon Map",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Wall in a dungeon from the numbers on its edges, the monsters in its dead ends and the treasure in its rooms. Every map has one solution",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "gen.lua",
+        "view.lua",
+        "rules.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
