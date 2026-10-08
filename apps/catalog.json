@@ -510,6 +510,21 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "toyfront",
+      "name": "Toy Front",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Toy armies fight over a board of bases for medals, you against the device: build, reinforce, attack - and keep some strong toys for the end",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
