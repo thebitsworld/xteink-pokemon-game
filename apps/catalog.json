@@ -427,6 +427,104 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "calc",
+      "name": "Calculator",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A calculator with big keys, brackets, the result as you type and the sums you already did",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "eval.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "notes",
+      "name": "Notes",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Lists you tick off with one hand, kept as plain text files on the SD card, with an on-screen keyboard to add to them",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "store.lua",
+        "keyboard.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "dial",
+      "name": "Mind Dial",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A party game for three or more around one reader: give a clue for a hidden spot on a scale between two ideas, and the group guesses where it is",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "cards.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "forehead",
+      "name": "Forehead",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A party game: hold the reader to your forehead and guess the word from your friends' clues before the time runs out",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "words.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "circle",
+      "name": "Inner Circle",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A party game for 4 to 8: find the secret word with yes/no questions, then unmask the Insider who knew it all along",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "words.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "cult",
+      "name": "Cult Ledger",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A solo card game: run a small cult, gather relics, members and an offering, dodge the police - and summon a god before the inspector arrives",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "cards.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "toyfront",
+      "name": "Toy Front",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Toy armies fight over a board of bases for medals, you against the device: build, reinforce, attack - and keep some strong toys for the end",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }

@@ -1,0 +1,8 @@
+{
+  "id": "circle",
+  "name": "Inner Circle",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "A party game for 4 to 8: find the secret word with yes/no questions, then unmask the Insider who knew it all along",
+  "entry": "main.lua"
+}

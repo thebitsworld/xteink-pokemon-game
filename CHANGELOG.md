@@ -2,6 +2,10 @@
 
 ### Added
 
+- Cult Ledger, a solo card game: run a small cult, pick one of three events each turn, gather relics, members and an offering, dodge the police - and summon a god before the inspector arrives (Easy or Hard).
+- Toy Front, a strategy game against the device (Easy or Normal): toy armies fight over a board of bases for medals - build, reinforce, attack, and keep some strong toys for the end. Six boards.
+- Three party games for a group around one reader, with words and cards written for them: Mind Dial (a clue giver hints where a hidden target sits on a scale between two ideas, and the group guesses), Forehead (hold the reader to your forehead and guess the word from your friends' clues against the clock) and Inner Circle (4 to 8 players find a secret word with yes/no questions, then unmask the Insider who knew it all along).
+- Two small tools in the App Store: Calculator (big keys, brackets, the result as you type and the sums you already did) and Notes (lists you tick off with one hand, typed with an on-screen keyboard and kept as plain text files on the SD card).
 - Tide & Paper in the App Store: collect pairs and sets of sea cards against the device (Easy or Normal), play pairs for their effects, then end the round with Stop - or bet on Last chance. First to 40 points wins; four mermaids win at once.
 - Dungeon Map in the App Store: wall in a dungeon from the number of walls in each row and column, the monsters standing in its dead ends and the treasure in its 3x3 rooms. Maps are made fresh on the reader at three levels, each with a single solution; How to play explains the rules.
 - Two more games in the App Store: Bazaar (a two-player trading card game against the device at two levels - take goods from the market, swap them, then sell sets for falling-value tokens; best of three rounds) and Whodunit (logic-grid murder mysteries made fresh on the reader at three levels: read the clues and the case file, mark the grid, then accuse the murderer with their weapon and place; every case has exactly one answer you can reach without guessing).
