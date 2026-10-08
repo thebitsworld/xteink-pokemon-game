@@ -971,3 +971,6 @@ STR_APPS_ERR_APP_FOLDER: "Uygulama klasörü oluşturulamadı.\nSD kartın alan�
 STR_APPS_ERR_FOLDER: "Klasör oluşturulamadı:\n%s"
 STR_APPS_ERR_WRITE: "SD karta yazılamadı:\n%s\nAlanı ve yazma kilidini kontrol edin."
 STR_APPS_ERR_DOWNLOAD: "İndirilemedi:\n%s\nBağlantıyı kontrol edin veya yeniden deneyin."
+STR_POKEMON_CHOOSE_STARTER: "Başlangıç Pokémon'unu seç"
+STR_SYSTEM_FEATURES: "Özellikler"
+STR_POKEMON_SAVE_NOT_RECEIVED: "Pokémon oyunu burada kapalı, bu yüzden kaydı alınmıyor."

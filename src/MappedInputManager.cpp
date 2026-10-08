@@ -1150,7 +1150,22 @@ MappedInputManager::Labels MappedInputManager::mapLabels(const Label back, const
           labelForHardware(HalGPIO::BTN_LEFT), labelForHardware(HalGPIO::BTN_RIGHT)};
 }
 
+#ifdef SIMULATOR
+// Smoke tests inject logical buttons; screens that read the raw front slots
+// (Minimal and Dashboard Home) see them in the default slots.
+namespace {
+constexpr MappedInputManager::Button kSimulatorFrontSlots[] = {
+    MappedInputManager::Button::Back, MappedInputManager::Button::Confirm, MappedInputManager::Button::Left,
+    MappedInputManager::Button::Right};
+}  // namespace
+#endif
+
 int MappedInputManager::getPressedFrontButton() const {
+#ifdef SIMULATOR
+  for (int slot = 0; slot < 4; ++slot) {
+    if (simulatorPressed[buttonIndex(kSimulatorFrontSlots[slot])]) return HalGPIO::BTN_BACK + slot;
+  }
+#endif
   // Scan the raw front buttons in hardware order.
   // This bypasses remapping so the remap activity can capture physical presses.
   if (gpio.wasPressed(HalGPIO::BTN_BACK)) {
@@ -1176,6 +1191,11 @@ int MappedInputManager::getPressedFrontButton() const {
 }
 
 int MappedInputManager::getReleasedFrontButton() const {
+#ifdef SIMULATOR
+  for (int slot = 0; slot < 4; ++slot) {
+    if (simulatorReleased[buttonIndex(kSimulatorFrontSlots[slot])]) return HalGPIO::BTN_BACK + slot;
+  }
+#endif
   // Scan the raw front buttons in hardware order.
   // This bypasses remapping for screens whose labels are fixed to physical slots.
   if (gpio.wasReleased(HalGPIO::BTN_BACK)) {

@@ -192,6 +192,7 @@ class SimulatorSmokeTest {
     AssertReaderMenu,
     AssertSettingsNavigation,
     AssertActivity,
+    AssertPokemonReadingCredited,
     Render
   };
 
@@ -219,6 +220,7 @@ class SimulatorSmokeTest {
   uint64_t carouselScreenHash = 0;
   unsigned frontlightLayoutPass = 0;
   unsigned homeThemePass = 0;
+  bool pokemonReadingCheck = false;
   uint64_t homeThemeScreenHash = 0;
   std::string homeThemeBookPath;
 
@@ -271,6 +273,11 @@ class SimulatorSmokeTest {
   }
 
   static bool homeNavigationMode() { return std::getenv("CROSSINK_SIMULATOR_HOME_NAVIGATION") != nullptr; }
+
+  static bool homeNavigationUsesCoverGrid() {
+    const char* raw = std::getenv("CROSSINK_SIMULATOR_SMOKE_THEME");
+    return raw != nullptr && raw[0] != '\0' && std::atoi(raw) == CrossPointSettings::UI_THEME::COVER_GRID;
+  }
 
   static bool homeNavigationUsesMinimalInteraction() {
     const char* raw = std::getenv("CROSSINK_SIMULATOR_SMOKE_THEME");
@@ -1987,6 +1994,19 @@ class SimulatorSmokeTest {
           SETTINGS.orientation = CrossPointSettings::LANDSCAPE_CCW;
           LOG_INF("SMOKE", "Opening smoke reader in landscape");
         }
+#if defined(CROSSINK_ENABLE_POKEMON)
+        // A starter, so reading earns Pokemon credit the reader route can check
+        // (not on the Pokemon route, which checks the game's first start).
+        if (std::getenv("CROSSINK_SIMULATOR_START_POKEMON") == nullptr) {
+          pokemon::PokemonDashboardSnapshot dashboard;
+          pokemon::devicePokemonService().loadDashboardSnapshot(dashboard);
+          if (dashboard.leader.recordId == 0 &&
+              pokemon::devicePokemonService().createStarter(1, pokemon::Gender::Male, "") != pokemon::ServiceStatus::Ok) {
+            fail("Cannot create a starter for the reading credit check");
+          }
+          pokemonReadingCheck = true;
+        }
+#endif
         activityManager.goToReader(bookPath, true);
         queueStep("Reader", SmokeStep::Reader, 8);
         break;
@@ -2176,7 +2196,7 @@ class SimulatorSmokeTest {
 
       case SmokeStep::Done:
         if (SETTINGS.uiTheme == CrossPointSettings::LYRA_CAROUSEL && carouselCachePass == 0 &&
-            std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK")) {
+            std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK") && !RECENT_BOOKS.getBooks().empty()) {
           const RecentBook book = RECENT_BOOKS.getBooks().front();
           for (const char* path : {"/books/carousel-second.txt", "/books/carousel-third.txt"}) {
             if (!Storage.writeFile(path, "Carousel side cover fixture")) fail("Cannot create carousel fixture");
@@ -2213,6 +2233,10 @@ class SimulatorSmokeTest {
 
   static ScriptAction release(MappedInputManager::Button button) {
     return {ScriptActionType::Release, button, nullptr, 0, 0, 0};
+  }
+
+  static ScriptAction assertPokemonReadingCredited() {
+    return {ScriptActionType::AssertPokemonReadingCredited, MappedInputManager::Button::Back, nullptr, 0, 0, 0};
   }
 
   static ScriptAction homeTap() {
@@ -2325,8 +2349,9 @@ class SimulatorSmokeTest {
 
     // Standard themes render Browse, Recent Books, File Transfer,
     // Applications (with Lua apps), then Settings; the Pokemon band above the
-    // menu replaces the menu's Pokemon entry. Minimal and Dashboard expose
-    // Menu, Browse, and Settings.
+    // menu replaces the menu's Pokemon entry. Minimal and Dashboard map their
+    // four front buttons to Menu, Browse, Settings and Read: Left is Settings.
+    // The Cover Grid keeps its icons in a bar, Settings last.
 #if defined(CROSSINK_ENABLE_LUA_APPS)
     constexpr int applicationsEntries = 1;
 #else
@@ -2334,12 +2359,18 @@ class SimulatorSmokeTest {
 #endif
     if (homeNavigationUsesCarouselInteraction()) {
       for (int index = 0; index < 3 + applicationsEntries; ++index) addTap(MappedInputManager::Button::Right);
+    } else if (homeNavigationUsesMinimalInteraction()) {
+      addTap(MappedInputManager::Button::Left);
+    } else if (homeNavigationUsesCoverGrid()) {
+      // Up lands in the books, wherever Home started; Left then steps into the
+      // icon bar from its end, where Settings is.
+      addTap(MappedInputManager::Button::Up);
+      addTap(MappedInputManager::Button::Left);
     } else {
-      const int downPresses = homeNavigationUsesMinimalInteraction() ? 3 : 3 + applicationsEntries;
-      for (int index = 0; index < downPresses; ++index) addTap(MappedInputManager::Button::Down);
+      for (int index = 0; index < 3 + applicationsEntries; ++index) addTap(MappedInputManager::Button::Down);
     }
     inputScript.push_back(render("Home Settings selected", 3));
-    addTap(MappedInputManager::Button::Confirm);
+    if (!homeNavigationUsesMinimalInteraction()) addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Settings opened from Home", 4));
     inputScript.push_back(assertActivity("Settings"));
     LOG_INF("SMOKE", "Running Home navigation to Settings using theme index %d", static_cast<int>(SETTINGS.uiTheme));
@@ -2378,6 +2409,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchRelease(width * 5 / 6, height / 2));
         inputScript.push_back(render("Reader after touch page forward", 4));
       }
+      if (pokemonReadingCheck && turns > 0) inputScript.push_back(assertPokemonReadingCredited());
 
       // Exercise the TTF edit path that replaces the active scalable font IDs:
       // Auto -> Native, switch tabs, then return to the current page.
@@ -2645,10 +2677,14 @@ class SimulatorSmokeTest {
     const auto menuDown = mappedInputManager.menuButton(MappedInputManager::Button::Down);
     const auto menuLeft = mappedInputManager.menuButton(MappedInputManager::Button::Left);
     const auto menuRight = mappedInputManager.menuButton(MappedInputManager::Button::Right);
+    // The front Right button: a side button reaches the reader as Up/Down
+    // (side-button shortcuts), not as the PageForward this used to send,
+    // which turned no page at all.
     for (int i = 0; i < turns; i++) {
-      addTap(MappedInputManager::Button::PageForward);
+      addTap(MappedInputManager::Button::Right);
       inputScript.push_back(render("Reader after page forward", 4));
     }
+    if (pokemonReadingCheck && turns > 0) inputScript.push_back(assertPokemonReadingCredited());
 
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Reader Menu opened from EPUB", 4));
@@ -3456,6 +3492,24 @@ class SimulatorSmokeTest {
         if (settings->simulatorCategoryIndex() != action.x || settings->simulatorSelectedIndex() != action.y)
           fail("Settings navigation mismatch: category=%d row=%d, expected %d/%d", settings->simulatorCategoryIndex(),
                settings->simulatorSelectedIndex(), action.x, action.y);
+        break;
+      }
+      case ScriptActionType::AssertPokemonReadingCredited: {
+#if defined(CROSSINK_ENABLE_POKEMON)
+        // Turning pages while the reader runs must earn the party leader
+        // reading time; wait up to 4 s for a whole second to be credited.
+        static unsigned long since = 0;
+        if (since == 0) since = millis();
+        if (pokemon::devicePokemonService().sessionCreditedSeconds() > 0) {
+          LOG_INF("SMOKE", "Reading credited %u s of Pokemon time",
+                  static_cast<unsigned>(pokemon::devicePokemonService().sessionCreditedSeconds()));
+          since = 0;
+        } else if (millis() - since > 4000) {
+          fail("Reading the book credited no Pokemon time: is the reader still wired to the game?");
+        } else {
+          --scriptIndex;
+        }
+#endif
         break;
       }
       case ScriptActionType::AssertActivity:

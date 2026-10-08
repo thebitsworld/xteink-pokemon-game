@@ -19,6 +19,8 @@
 
 ### Fixed
 
+- With the Pokémon game switched off, Nearby Sync no longer takes a Pokémon save from another reader: a save alone, or one being moved, is refused, and a sync that also carries stats or a book brings those over without it. Its save transfer screens cannot be opened either.
+- "Choose your starter", "Features" and the new Nearby Sync notice are translated into all 28 languages.
 - Nonogram: a puzzle resumed after reopening the app no longer counts the time since the reader was switched on.
 
 ## [1.8.0-rc.2] - 2026-10-06

@@ -1013,3 +1013,6 @@ STR_APPS_ERR_APP_FOLDER: "No s'ha pogut crear la carpeta de l'app.\nComprova l'e
 STR_APPS_ERR_FOLDER: "No s'ha pogut crear la carpeta:\n%s"
 STR_APPS_ERR_WRITE: "No s'ha pogut escriure en la targeta SD:\n%s\nComprova l'espai i el bloqueig."
 STR_APPS_ERR_DOWNLOAD: "No s'ha pogut descarregar:\n%s\nComprova la connexió o torna-ho a provar."
+STR_POKEMON_CHOOSE_STARTER: "Tria el teu inicial"
+STR_SYSTEM_FEATURES: "Funcions"
+STR_POKEMON_SAVE_NOT_RECEIVED: "El joc Pokémon està desactivat ací, així que no se'n rep la partida guardada."
