@@ -136,7 +136,9 @@ class MappedInputManager {
     suppressNextTouchTap();
     gpio.suppressTouchContact();
 #ifdef SIMULATOR
-    suppressSimulatedTouchContact = true;
+    // Like the device's latch: only a scripted contact still down is ignored.
+    // Set without one (a mouse touch), nothing would ever clear it.
+    if (simulatorTouch.pressed) suppressSimulatedTouchContact = true;
 #endif
   }
   bool wasItemTapped(int& id) const;

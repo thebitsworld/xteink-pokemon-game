@@ -2,6 +2,7 @@
 
 ### Added
 
+- X4 Pro: play original Game Boy games. Open a `.gb` ROM from the file browser; play with touch buttons beside the game or the reader's buttons, and battery saves go next to the ROM as `.sav`. No sound, and the screen updates about four times a second, so turn-based and puzzle games suit it best. See [Game Boy](docs/gameboy.md). Built on the Peanut-GB emulator and the Ink-boy CrossInk fork (both MIT).
 - Cult Ledger, a solo card game: run a small cult, pick one of three events each turn, gather relics, members and an offering, dodge the police - and summon a god before the inspector arrives (Easy or Hard).
 - Toy Front, a strategy game against the device (Easy or Normal): toy armies fight over a board of bases for medals - build, reinforce, attack, and keep some strong toys for the end. Six boards.
 - Three party games for a group around one reader, with words and cards written for them: Mind Dial (a clue giver hints where a hidden target sits on a scale between two ideas, and the group guesses), Forehead (hold the reader to your forehead and guess the word from your friends' clues against the clock) and Inner Circle (4 to 8 players find a secret word with yes/no questions, then unmask the Insider who knew it all along).

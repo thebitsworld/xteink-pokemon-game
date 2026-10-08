@@ -11,6 +11,7 @@ A lightweight, reading-powered Pokémon companion for the Xteink X3, built on Cr
 - [Pokémon Save Transfer](./pokemon-save-transfer.md)
 - [Sync with Nearby Reader](./nearby-sync.md)
 - [Applications (Lua apps)](./applications.md)
+- [Game Boy (X4 Pro)](./gameboy.md)
 - [Installation details](./installation.md)
 - [Project scope](./development/project-scope.md)
 - [Rights and attribution](../RIGHTS_AND_ATTRIBUTION.md)
