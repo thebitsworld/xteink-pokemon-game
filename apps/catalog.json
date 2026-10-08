@@ -427,6 +427,19 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "calc",
+      "name": "Calculator",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A calculator with big keys, brackets, the result as you type and the sums you already did",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "eval.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
