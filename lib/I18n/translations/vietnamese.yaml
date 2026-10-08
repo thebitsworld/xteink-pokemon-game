@@ -1289,3 +1289,7 @@ STR_APPS_ERR_APP_FOLDER: "Không tạo được thư mục ứng dụng.\nKiểm
 STR_APPS_ERR_FOLDER: "Không tạo được thư mục:\n%s"
 STR_APPS_ERR_WRITE: "Không ghi được vào thẻ SD:\n%s\nKiểm tra dung lượng và khoá ghi."
 STR_APPS_ERR_DOWNLOAD: "Không tải được:\n%s\nKiểm tra kết nối hoặc thử lại."
+STR_POKEMON_SAVE_NOT_RECEIVED: "Trò chơi Pokémon đang tắt trên máy này nên không nhận save của nó."
+STR_PERCENTAGE_FORMAT_WHOLE: "10%"
+STR_PERCENTAGE_FORMAT_ONE_DECIMAL: "10.1%"
+STR_PERCENTAGE_FORMAT_TWO_DECIMALS: "10.12%"

@@ -972,3 +972,6 @@ STR_APPS_ERR_APP_FOLDER: "Impossible de créer le dossier de l'appli.\nVérifiez
 STR_APPS_ERR_FOLDER: "Impossible de créer le dossier :\n%s"
 STR_APPS_ERR_WRITE: "Échec d'écriture sur la carte SD :\n%s\nVérifiez l'espace et le verrou."
 STR_APPS_ERR_DOWNLOAD: "Échec du téléchargement :\n%s\nVérifiez la connexion ou réessayez."
+STR_POKEMON_CHOOSE_STARTER: "Choisissez votre starter"
+STR_SYSTEM_FEATURES: "Fonctionnalités"
+STR_POKEMON_SAVE_NOT_RECEIVED: "Le jeu Pokémon est désactivé ici : sa sauvegarde n'est pas reçue."

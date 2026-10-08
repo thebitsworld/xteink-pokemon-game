@@ -1039,3 +1039,6 @@ STR_APPS_ERR_APP_FOLDER: "Не удалось создать папку прил
 STR_APPS_ERR_FOLDER: "Не удалось создать папку:\n%s"
 STR_APPS_ERR_WRITE: "Не удалось записать на SD-карту:\n%s\nПроверьте место и защиту от записи."
 STR_APPS_ERR_DOWNLOAD: "Не удалось загрузить:\n%s\nПроверьте подключение или повторите."
+STR_POKEMON_CHOOSE_STARTER: "Выберите стартового покемона"
+STR_SYSTEM_FEATURES: "Функции"
+STR_POKEMON_SAVE_NOT_RECEIVED: "Игра Pokémon здесь выключена, поэтому её сохранение не принимается."
