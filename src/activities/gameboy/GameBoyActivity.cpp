@@ -89,7 +89,9 @@ void GameBoyActivity::onEnter() {
   error[0] = '\0';
   title[0] = '\0';
 
-  renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
+  portrait = true;
+  rotateRequested = false;
+  renderer.setOrientation(GfxRenderer::Portrait);
   setLayout();
   renderer.clearScreen(0xFF);
 
@@ -162,6 +164,11 @@ void GameBoyActivity::loop() {
     return;
   }
 
+  if (rotateRequested) {
+    rotateRequested = false;
+    rotate();
+  }
+
   const uint64_t nowUs = nowMicros();
   runEmulation(nowUs);
 
@@ -196,7 +203,8 @@ void GameBoyActivity::render(RenderLock&&) {
   const uint8_t claimedFrame = renderFrame.load(std::memory_order_acquire);
   drawControls();
   registerTouchTargets();
-  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  renderer.displayBuffer(fullRefreshDue.exchange(false, std::memory_order_acq_rel) ? HalDisplay::HALF_REFRESH
+                                                                                     : HalDisplay::FAST_REFRESH);
   if (claimedFrame <= 1) {
     uint8_t expected = claimedFrame;
     readyFrame.compare_exchange_strong(expected, static_cast<uint8_t>(0xFF),
@@ -209,16 +217,97 @@ void GameBoyActivity::render(RenderLock&&) {
 void GameBoyActivity::setLayout() {
   const int screenW = renderer.getScreenWidth();
   const int screenH = renderer.getScreenHeight();
-  const int availableW = std::max(GAMEBOY_WIDTH, screenW);
-  const int availableH = std::max(GAMEBOY_HEIGHT, screenH - 48);
-  scale = std::min({MAX_GAME_SCALE, availableW / GAMEBOY_WIDTH, availableH / GAMEBOY_HEIGHT});
-  scale = std::max(1, scale);
+  controlCount = 0;
 
+  if (portrait) {
+    // 480x800: the game fills the width on top (y a multiple of 8 for
+    // drawGameFramePortrait()), the D-pad and B/A below it as on the handheld,
+    // then a row of EXIT, SELECT, START and ROTATE.
+    scale = std::max(1, std::min(MAX_GAME_SCALE, screenW / GAMEBOY_WIDTH));
+    gameW = GAMEBOY_WIDTH * scale;
+    gameH = GAMEBOY_HEIGHT * scale;
+    gameX = (screenW - gameW) / 2;
+    gameY = 40;
+    titleX = 8;
+    titleY = 10;
+
+    const int padY = gameY + gameH + 24;
+    const int pad = 64;
+    const int padX = 14;
+    addControl(TouchControl::Up, padX + pad, padY, pad, pad, "U");
+    addControl(TouchControl::Left, padX, padY + pad, pad, pad, "L");
+    addControl(TouchControl::Right, padX + 2 * pad, padY + pad, pad, pad, "R");
+    addControl(TouchControl::Down, padX + pad, padY + 2 * pad, pad, pad, "D");
+    const int ab = 80;
+    addControl(TouchControl::A, screenW - 20 - ab, padY + 24, ab, ab, "A");
+    addControl(TouchControl::B, screenW - 36 - 2 * ab, padY + 24 + ab * 3 / 4, ab, ab, "B");
+
+    const int rowH = 52;
+    const int rowY = screenH - 12 - rowH;
+    const int rowW = (screenW - 8 - 3 * TOUCH_TARGET_GAP) / 4;
+    const TouchControl row[] = {TouchControl::Exit, TouchControl::Select, TouchControl::Start, TouchControl::Rotate};
+    const char* rowLabels[] = {"EXIT", "SEL", "START", "ROTATE"};
+    for (int i = 0; i < 4; ++i) {
+      addControl(row[i], 4 + i * (rowW + TOUCH_TARGET_GAP), rowY, rowW, rowH, rowLabels[i]);
+    }
+    return;
+  }
+
+  // 800x480: the game in the middle, the D-pad and ROTATE on the left, B/A,
+  // SELECT/START and EXIT on the right.
+  const int availableH = std::max(GAMEBOY_HEIGHT, screenH - 48);
+  scale = std::min({MAX_GAME_SCALE, std::max(GAMEBOY_WIDTH, screenW) / GAMEBOY_WIDTH, availableH / GAMEBOY_HEIGHT});
+  scale = std::max(1, scale);
   gameW = GAMEBOY_WIDTH * scale;
   gameH = GAMEBOY_HEIGHT * scale;
   gameX = (screenW - gameW) / 2;
-  gameY = (screenH - gameH) / 2;
-  if (gameY < 0) gameY = 0;
+  gameY = std::max(0, (screenH - gameH) / 2);
+  titleX = 6;
+  titleY = 18;
+
+  const int leftW = gameX;
+  const int panelY = gameY + 120;
+  const int centerX = leftW / 2;
+  addControl(TouchControl::Up, centerX - 35, panelY, 70, 58, "U");
+  addControl(TouchControl::Down, centerX - 35, panelY + 140, 70, 58, "D");
+  addControl(TouchControl::Left, 10, panelY + 58, 60, 82, "L");
+  addControl(TouchControl::Right, leftW - 70, panelY + 58, 60, 82, "R");
+  addControl(TouchControl::Rotate, 4, gameY + gameH - 52, leftW - 8, 48, "ROTATE");
+
+  const int rightX = gameX + gameW;
+  const int rightW = screenW - rightX;
+  const int buttonW = std::min(70, std::max(48, (rightW - TOUCH_TARGET_GAP) / 2));
+  const int firstX = rightX + 4;
+  const int secondX = firstX + buttonW + TOUCH_TARGET_GAP;
+  addControl(TouchControl::B, firstX, panelY, buttonW, 70, "B");
+  addControl(TouchControl::A, secondX, panelY, buttonW, 70, "A");
+  addControl(TouchControl::Select, firstX, gameY + 275, buttonW, 52, "SEL");
+  addControl(TouchControl::Start, secondX, gameY + 275, buttonW, 52, "START");
+  addControl(TouchControl::Exit, rightX + 4, gameY + gameH - 52, rightW - 8, 48, "EXIT");
+}
+
+void GameBoyActivity::addControl(const TouchControl control, const int x, const int y, const int w, const int h,
+                                 const char* label) {
+  if (controlCount >= MAX_CONTROLS) return;
+  controls[controlCount++] = {control, x, y, w, h, label};
+}
+
+void GameBoyActivity::rotate() {
+  // The buttons move, so the finger on ROTATE must not press whatever lands
+  // under it.
+  mappedInput.suppressCurrentTouchContact();
+  activeTouch = TouchControl::None;
+  touchJoypadMask = 0;
+  applyJoypad();
+  {
+    RenderLock lock(*this);
+    portrait = !portrait;
+    renderer.setOrientation(portrait ? GfxRenderer::Portrait : GfxRenderer::LandscapeCounterClockwise);
+    setLayout();
+  }
+  fullRefreshDue.store(true, std::memory_order_release);
+  displayDue.store(true, std::memory_order_release);
+  requestUpdate();
 }
 
 size_t GameBoyActivity::romBankCountFromCode(const uint8_t code) {
@@ -497,6 +586,10 @@ void GameBoyActivity::updateTouch(const int x, const int y) {
     exitRequested = true;
     return;
   }
+  if (control == TouchControl::Rotate) {
+    rotateRequested = true;
+    return;
+  }
   if (control == activeTouch) return;
   activeTouch = control;
   touchJoypadMask = joypadBitForTouch(control);
@@ -504,28 +597,9 @@ void GameBoyActivity::updateTouch(const int x, const int y) {
 }
 
 GameBoyActivity::TouchControl GameBoyActivity::hitTestTouch(const int x, const int y) const {
-  // Left side D-pad occupies the panel to the left of the game image.
-  const int leftW = std::max(0, gameX);
-  const int panelY = gameY + 120;
-  const int centerX = leftW / 2;
-  if (leftW >= 110) {
-    if (hitRect(x, y, centerX - 35, panelY, 70, 58)) return TouchControl::Up;
-    if (hitRect(x, y, centerX - 35, panelY + 140, 70, 58)) return TouchControl::Down;
-    if (hitRect(x, y, 10, panelY + 58, 60, 82)) return TouchControl::Left;
-    if (hitRect(x, y, leftW - 70, panelY + 58, 60, 82)) return TouchControl::Right;
-  }
-
-  const int rightX = gameX + gameW;
-  const int rightW = std::max(0, renderer.getScreenWidth() - rightX);
-  if (rightW >= TOUCH_EXIT_MIN_WIDTH) {
-    const int buttonW = std::min(70, std::max(48, (rightW - TOUCH_TARGET_GAP) / 2));
-    const int firstX = rightX + 4;
-    const int secondX = firstX + buttonW + TOUCH_TARGET_GAP;
-    if (hitRect(x, y, firstX, panelY, buttonW, 70)) return TouchControl::B;
-    if (hitRect(x, y, secondX, panelY, buttonW, 70)) return TouchControl::A;
-    if (hitRect(x, y, firstX, gameY + 275, buttonW, 52)) return TouchControl::Select;
-    if (hitRect(x, y, secondX, gameY + 275, buttonW, 52)) return TouchControl::Start;
-    if (hitRect(x, y, rightX + 4, gameY + gameH - 52, rightW - 8, 48)) return TouchControl::Exit;
+  for (size_t i = 0; i < controlCount; ++i) {
+    const ControlButton& c = controls[i];
+    if (hitRect(x, y, c.x, c.y, c.w, c.h)) return c.control;
   }
   return TouchControl::None;
 }
@@ -600,6 +674,11 @@ void GameBoyActivity::drawGameFrame() {
   // the display refresh has consumed the CrossInk framebuffer.
   renderFrame.store(frameIndex, std::memory_order_release);
 
+  if (portrait) {
+    if (!drawGameFramePortrait(source, framebuffer)) renderFrame.store(0xFF, std::memory_order_release);
+    return;
+  }
+
   const int panelBytes = renderer.getDisplayWidthBytes();
   const int screenW = renderer.getDisplayWidth();
   if (panelBytes <= 0 || screenW <= 0) {
@@ -636,85 +715,60 @@ void GameBoyActivity::drawGameFrame() {
   }
 }
 
+bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer) {
+  // Portrait turns the panel a quarter: logical (x, y) is panel
+  // (y, panelHeight - 1 - x), so each game column is one panel row with the
+  // game's lines running along it.
+  const int panelBytes = renderer.getDisplayWidthBytes();
+  const int panelW = renderer.getDisplayWidth();
+  const int panelH = renderer.getDisplayHeight();
+  if (panelBytes <= 0 || gameY % 8 != 0 || gameH % 8 != 0 || gameX < 0 || gameX + gameW > panelH ||
+      gameY + gameH > panelW) {
+    return false;
+  }
+
+  for (int gx = 0; gx < GAMEBOY_WIDTH; ++gx) {
+    for (int sx = 0; sx < scale; ++sx) {
+      const int dstX = gx * scale + sx;
+      uint8_t* out = framebuffer + static_cast<size_t>(panelH - 1 - (gameX + dstX)) * panelBytes + gameY / 8;
+      std::memset(out, 0xFF, static_cast<size_t>(gameH / 8));
+      for (int gy = 0; gy < GAMEBOY_HEIGHT; ++gy) {
+        const uint8_t shade = source[gy * GAMEBOY_WIDTH + gx] & 0x03;
+        if (shade == 0) continue;
+        for (int sy = 0; sy < scale; ++sy) {
+          const int dstY = gy * scale + sy;
+          if (shadeIsBlack(shade, dstX, dstY)) out[dstY >> 3] &= static_cast<uint8_t>(~(1u << (7 - (dstY & 7))));
+        }
+      }
+    }
+  }
+  return true;
+}
+
 void GameBoyActivity::drawControls() {
-  const int screenW = renderer.getScreenWidth();
-  const int leftW = std::max(0, gameX);
-  const int rightX = gameX + gameW;
-  const int rightW = std::max(0, screenW - rightX);
   const uint8_t currentMask = static_cast<uint8_t>(physicalJoypadMask | touchJoypadMask);
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
-  if (leftW >= 110) {
-    renderer.drawText(UI_10_FONT_ID, 6, 18, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
 
-    auto dpadButton = [&](int x, int y, int w, int h, const uint8_t bit, const char* label) {
-      const bool active = (currentMask & bit) != 0;
-      renderer.fillRect(x + 1, y + 1, w - 2, h - 2, active);
-      renderer.drawRect(x, y, w, h, true);
-      const int tw = renderer.getTextWidth(UI_10_FONT_ID, label);
-      renderer.drawText(UI_10_FONT_ID, x + (w - tw) / 2, y + h / 2 - 7, label, !active, EpdFontFamily::BOLD);
-    };
-
-    const int panelY = gameY + 120;
-    const int centerX = leftW / 2;
-    dpadButton(centerX - 35, panelY, 70, 58, JOYPAD_UP, "U");
-    dpadButton(centerX - 35, panelY + 140, 70, 58, JOYPAD_DOWN, "D");
-    dpadButton(10, panelY + 58, 60, 82, JOYPAD_LEFT, "L");
-    dpadButton(leftW - 70, panelY + 58, 60, 82, JOYPAD_RIGHT, "R");
-  }
-
-  if (rightW >= TOUCH_EXIT_MIN_WIDTH) {
-    const int buttonW = std::min(70, std::max(48, (rightW - TOUCH_TARGET_GAP) / 2));
-    const int firstX = rightX + 4;
-    const int secondX = firstX + buttonW + TOUCH_TARGET_GAP;
-    const int panelY = gameY + 120;
-
-    auto actionButton = [&](int x, int y, int w, int h, const uint8_t bit, const char* label) {
-      const bool active = bit != 0 && (currentMask & bit) != 0;
-      renderer.fillRect(x + 1, y + 1, w - 2, h - 2, active);
-      renderer.drawRect(x, y, w, h, true);
-      const int tw = renderer.getTextWidth(UI_10_FONT_ID, label);
-      renderer.drawText(UI_10_FONT_ID, x + (w - tw) / 2, y + h / 2 - 7, label, !active, EpdFontFamily::BOLD);
-    };
-
-    actionButton(firstX, panelY, buttonW, 70, JOYPAD_B, "B");
-    actionButton(secondX, panelY, buttonW, 70, JOYPAD_A, "A");
-    actionButton(firstX, gameY + 275, buttonW, 52, JOYPAD_SELECT, "SEL");
-    actionButton(secondX, gameY + 275, buttonW, 52, JOYPAD_START, "START");
-
-    const bool exitActive = activeTouch == TouchControl::Exit;
-    renderer.fillRect(rightX + 5, gameY + gameH - 51, rightW - 10, 46, exitActive);
-    renderer.drawRect(rightX + 4, gameY + gameH - 52, rightW - 8, 48, true);
-    renderer.drawText(UI_10_FONT_ID, rightX + rightW / 2 - renderer.getTextWidth(UI_10_FONT_ID, "EXIT") / 2,
-                      gameY + gameH - 38, "EXIT", !exitActive, EpdFontFamily::BOLD);
+  for (size_t i = 0; i < controlCount; ++i) {
+    const ControlButton& c = controls[i];
+    const uint8_t bit = joypadBitForTouch(c.control);
+    const bool active = bit != 0 ? (currentMask & bit) != 0 : activeTouch == c.control;
+    renderer.fillRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2, active);
+    renderer.drawRect(c.x, c.y, c.w, c.h, true);
+    const int tw = renderer.getTextWidth(UI_10_FONT_ID, c.label);
+    renderer.drawText(UI_10_FONT_ID, c.x + (c.w - tw) / 2, c.y + c.h / 2 - 7, c.label, !active,
+                      EpdFontFamily::BOLD);
   }
 }
 
 void GameBoyActivity::registerTouchTargets() {
 #if CROSSINK_APP_CAP_TOUCH
   auto& registry = TouchRegistry::getInstance();
-  const int leftW = std::max(0, gameX);
-  const int panelY = gameY + 120;
-  if (leftW >= 110) {
-    const int centerX = leftW / 2;
-    registry.add(Rect(centerX - 35, panelY, 70, 58), static_cast<int>(TouchControl::Up), TouchRegistry::Kind::Button);
-    registry.add(Rect(centerX - 35, panelY + 140, 70, 58), static_cast<int>(TouchControl::Down), TouchRegistry::Kind::Button);
-    registry.add(Rect(10, panelY + 58, 60, 82), static_cast<int>(TouchControl::Left), TouchRegistry::Kind::Button);
-    registry.add(Rect(leftW - 70, panelY + 58, 60, 82), static_cast<int>(TouchControl::Right), TouchRegistry::Kind::Button);
-  }
-
-  const int rightX = gameX + gameW;
-  const int rightW = std::max(0, renderer.getScreenWidth() - rightX);
-  if (rightW >= TOUCH_EXIT_MIN_WIDTH) {
-    const int buttonW = std::min(70, std::max(48, (rightW - TOUCH_TARGET_GAP) / 2));
-    const int firstX = rightX + 4;
-    const int secondX = firstX + buttonW + TOUCH_TARGET_GAP;
-    registry.add(Rect(firstX, panelY, buttonW, 70), static_cast<int>(TouchControl::B), TouchRegistry::Kind::Button);
-    registry.add(Rect(secondX, panelY, buttonW, 70), static_cast<int>(TouchControl::A), TouchRegistry::Kind::Button);
-    registry.add(Rect(firstX, gameY + 275, buttonW, 52), static_cast<int>(TouchControl::Select), TouchRegistry::Kind::Button);
-    registry.add(Rect(secondX, gameY + 275, buttonW, 52), static_cast<int>(TouchControl::Start), TouchRegistry::Kind::Button);
-    registry.add(Rect(rightX + 4, gameY + gameH - 52, rightW - 8, 48), static_cast<int>(TouchControl::Exit),
-                  TouchRegistry::Kind::Button);
+  for (size_t i = 0; i < controlCount; ++i) {
+    const ControlButton& c = controls[i];
+    registry.add(Rect(c.x, c.y, c.w, c.h), static_cast<int>(c.control), TouchRegistry::Kind::Button);
   }
 #endif
 }

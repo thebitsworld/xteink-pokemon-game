@@ -51,6 +51,14 @@ class GameBoyActivity final : public Activity {
     Select,
     Start,
     Exit,
+    Rotate,
+  };
+
+  // One on-screen button, in logical coordinates for the current orientation.
+  struct ControlButton {
+    TouchControl control;
+    int x, y, w, h;
+    const char* label;
   };
 
   static constexpr int GAMEBOY_WIDTH = 160;
@@ -62,7 +70,7 @@ class GameBoyActivity final : public Activity {
   static constexpr uint64_t DISPLAY_PERIOD_US = 250000ULL;
   static constexpr uint8_t MAX_CATCH_UP_FRAMES = 4;
   static constexpr size_t EMULATOR_FRAME_BYTES = GAMEBOY_WIDTH * GAMEBOY_HEIGHT;
-  static constexpr int TOUCH_EXIT_MIN_WIDTH = 120;
+  static constexpr size_t MAX_CONTROLS = 10;
   // Battery-backed cartridge RAM is written out this often while it changes,
   // not only on exit, so a flat battery or a crash loses at most this much.
   static constexpr uint64_t AUTOSAVE_PERIOD_US = 60000000ULL;
@@ -99,11 +107,22 @@ class GameBoyActivity final : public Activity {
   int gameW = 480;
   int gameH = 432;
 
+  // Portrait (game on top, controls below like the handheld) is the default;
+  // ROTATE switches to landscape and back.
+  bool portrait = true;
+  ControlButton controls[MAX_CONTROLS] = {};
+  size_t controlCount = 0;
+  int titleX = 0;
+  int titleY = 0;
+
   TouchControl activeTouch = TouchControl::None;
 
   std::atomic<bool> initialized{false};
   std::atomic<bool> displayDue{true};
   bool exitRequested = false;
+  bool rotateRequested = false;
+  // The next refresh is a full one, clearing what the old layout left behind.
+  std::atomic<bool> fullRefreshDue{false};
   bool saveDirty = false;   // cartridge RAM changed since the last save
   uint64_t nextFrameUs = 0;
   uint64_t nextDisplayUs = 0;
@@ -113,6 +132,8 @@ class GameBoyActivity final : public Activity {
   char error[160] = {};
 
   void setLayout();
+  void addControl(TouchControl control, int x, int y, int w, int h, const char* label);
+  void rotate();
   bool loadRom();
   bool buildSavePaths();
   bool initEmulator();
@@ -131,6 +152,7 @@ class GameBoyActivity final : public Activity {
   void runEmulation(uint64_t nowUs);
   void publishCompletedFrame();
   void drawGameFrame();
+  bool drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer);
   void drawControls();
   void registerTouchTargets();
 
