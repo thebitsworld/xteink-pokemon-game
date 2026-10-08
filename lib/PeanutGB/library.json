@@ -1,0 +1,10 @@
+{
+  "name": "PeanutGB",
+  "version": "1.3.0",
+  "description": "Peanut-GB, a single-header Game Boy emulator core (https://github.com/deltabeard/Peanut-GB)",
+  "keywords": ["gameboy", "emulator", "gb"],
+  "license": "MIT",
+  "build": {
+    "srcDir": "src"
+  }
+}

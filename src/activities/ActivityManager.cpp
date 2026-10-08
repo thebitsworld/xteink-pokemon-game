@@ -26,6 +26,9 @@
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/TouchRegistry.h"
+#if CROSSINK_GAMEBOY
+#include "gameboy/GameBoyActivity.h"
+#endif
 #include "home/AlertActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
@@ -1063,6 +1066,18 @@ void ActivityManager::goToReader(std::string path, const bool suppressBackReleas
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path), suppressBackRelease,
                                                    allowFastInitialRefresh, cleanImageBaseOnEntry));
 }
+
+#if CROSSINK_GAMEBOY
+void ActivityManager::goToGameBoy(std::string path) {
+  auto activity = makeUniqueNoThrow<GameBoyActivity>(renderer, mappedInput, std::move(path));
+  if (!activity) {
+    LOG_ERR("ACT", "OOM opening Game Boy activity");
+    return;
+  }
+  // Pushed, so leaving the game returns to the file browser.
+  pushActivity(std::move(activity));
+}
+#endif
 
 void ActivityManager::goToReaderAndRunMenuAction(std::string path, const uint8_t action) {
   pendingReaderMenuAction = action;
