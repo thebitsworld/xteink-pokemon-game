@@ -495,6 +495,21 @@
         "menu.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "cult",
+      "name": "Cult Ledger",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A solo card game: run a small cult, gather relics, members and an offering, dodge the police - and summon a god before the inspector arrives",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "cards.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
