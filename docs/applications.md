@@ -15,7 +15,9 @@ apps written for CrossSmudge run here unchanged. The App Store offers: Minesweep
 device or a friend), Nonogram (picture logic puzzles), Dungeon Map (wall in a dungeon from its clues), Checkers, Sea Battle,
 Hearts, Tide & Paper (a card game of pairs and sets), Hex, Go, Chess,
 Bazaar (a trading card game), Whodunit (logic-grid murder mysteries),
-2048, Blackjack, Sudoku, Tetris, Wordle, Dice and the Codex deckbuilder.
+2048, Blackjack, Sudoku, Tetris, Wordle, Dice and the Codex deckbuilder - and two small tools:
+Calculator, and Notes for tick lists, which keeps each list as a plain text file in
+`/.crosspoint/apps-data/notes/` so you can also write lists on a computer and copy them over.
 
 Each time an app closes, a line is added to `/.crosspoint/apps-memory.txt` on the SD card with the
 memory it had and used. If an app runs out of memory on your reader, that file shows how close it
