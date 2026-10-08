@@ -16,6 +16,7 @@ device or a friend), Nonogram (picture logic puzzles), Dungeon Map (wall in a du
 Hearts, Tide & Paper (a card game of pairs and sets), Hex, Go, Chess,
 Bazaar (a trading card game), Whodunit (logic-grid murder mysteries),
 the party games Mind Dial, Forehead and Inner Circle (for a group around one reader),
+Cult Ledger (a solo card game), Toy Front (a strategy game of toy armies),
 2048, Blackjack, Sudoku, Tetris, Wordle, Dice and the Codex deckbuilder - and two small tools:
 Calculator, and Notes for tick lists, which keeps each list as a plain text file in
 `/.crosspoint/apps-data/notes/` so you can also write lists on a computer and copy them over.
