@@ -2,6 +2,7 @@
 
 ### Added
 
+- Three party games for a group around one reader, with words and cards written for them: Mind Dial (a clue giver hints where a hidden target sits on a scale between two ideas, and the group guesses), Forehead (hold the reader to your forehead and guess the word from your friends' clues against the clock) and Inner Circle (4 to 8 players find a secret word with yes/no questions, then unmask the Insider who knew it all along).
 - Two small tools in the App Store: Calculator (big keys, brackets, the result as you type and the sums you already did) and Notes (lists you tick off with one hand, typed with an on-screen keyboard and kept as plain text files on the SD card).
 - Tide & Paper in the App Store: collect pairs and sets of sea cards against the device (Easy or Normal), play pairs for their effects, then end the round with Stop - or bet on Last chance. First to 40 points wins; four mermaids win at once.
 - Dungeon Map in the App Store: wall in a dungeon from the number of walls in each row and column, the monsters standing in its dead ends and the treasure in its 3x3 rooms. Maps are made fresh on the reader at three levels, each with a single solution; How to play explains the rules.
