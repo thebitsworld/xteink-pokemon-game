@@ -12,16 +12,21 @@ Only play ROMs you own. No games come with the firmware.
 
 ## Controls
 
-The game is shown sideways (landscape), three times its original size.
+The game opens upright, three times its original size, with the controls
+below it as on a Game Boy: the D-pad on the left, B and A on the right, and a
+row of **EXIT**, **SEL**, **START** and **ROTATE** at the bottom. **ROTATE**
+turns the reader sideways, with the D-pad left of the game and the buttons
+right of it; **ROTATE** (bottom left) turns it back. Each game starts upright.
 
 | Game Boy | Touch | Buttons |
 | --- | --- | --- |
-| D-pad | D-pad left of the game | Up / Down / Left / Right |
-| A | **A**, right of the game | Power |
-| B | **B**, right of the game | - |
+| D-pad | D-pad | Up / Down / Left / Right |
+| A | **A** | Power |
+| B | **B** | - |
 | Start | **START** | Confirm |
 | Select | **SEL** | Back |
-| Leave the game | **EXIT**, bottom right | - |
+| Leave the game | **EXIT** | - |
+| Turn the screen | **ROTATE** | - |
 
 Hold a touch button to keep it pressed. If a ROM cannot be opened, the error
 screen closes with Back or a tap.
