@@ -578,10 +578,20 @@ void NearbySyncActivity::handleReceiverPacket(const nearby::EspNowTransport::Eve
     offer_ = offer;
     negotiatedChunkBytes_ = std::clamp<uint16_t>(offer.chunkBytes, nearby::COMPAT_CHUNK_BYTES, nearby::V2_CHUNK_BYTES);
 #if defined(CROSSINK_ENABLE_POKEMON)
-    const bool pokemonUnusable = offer.has(ns::OFFER_HAS_POKEMON) &&
-                                 !pokemon::saveFormatCompatible(versionsFrom(offer.pokemon),
-                                                                pokemon::currentSaveFormatVersions());
-    const char* refusal = tr(STR_POKEMON_TRANSFER_INCOMPATIBLE);
+    bool pokemonUnusable;
+    const char* refusal;
+    if (!features::pokemonGame()) {
+      // The game is switched off here: its save is not taken. Refuse a move
+      // (the sender would lose it) or an offer of nothing else; otherwise
+      // take the rest and leave the save out.
+      const bool onlyPokemon = !offer.has(ns::OFFER_HAS_STATS) && !offer.has(ns::OFFER_HAS_BOOK);
+      pokemonUnusable = offer.has(ns::OFFER_HAS_POKEMON) && (offer.has(ns::OFFER_MOVE_POKEMON) || onlyPokemon);
+      refusal = tr(STR_POKEMON_SAVE_NOT_RECEIVED);
+    } else {
+      pokemonUnusable = offer.has(ns::OFFER_HAS_POKEMON) &&
+                        !pokemon::saveFormatCompatible(versionsFrom(offer.pokemon), pokemon::currentSaveFormatVersions());
+      refusal = tr(STR_POKEMON_TRANSFER_INCOMPATIBLE);
+    }
 #else
     // No Pokemon game here: the save would be dropped, which is only
     // acceptable if the sender keeps its own copy.
@@ -780,7 +790,9 @@ bool NearbySyncActivity::applyReceivedContainer() {
     setError(tr(STR_NEARBY_TRANSFER_VERIFY_FAILED));
     return false;
   }
-  if (header.find(ns::SectionType::PokemonSave) >= 0 && !stagePokemonSection(header)) return false;
+  if (header.find(ns::SectionType::PokemonSave) >= 0 && features::pokemonGame() && !stagePokemonSection(header)) {
+    return false;
+  }
   applyStatsSection(header);
   applyBookFileSection(header);  // before the position, which needs the book in place
   applyBookSection(header);
@@ -1242,7 +1254,10 @@ void NearbySyncActivity::render(RenderLock&&) {
     y += lineHeight + 8;
     note(offer_.senderName.data(), y);
     y += lineHeight + 24;
-    if (offer_.has(ns::OFFER_HAS_POKEMON)) {
+    if (offer_.has(ns::OFFER_HAS_POKEMON) && !features::pokemonGame()) {
+      note(tr(STR_POKEMON_SAVE_NOT_RECEIVED), y, 2);
+      y += 2 * lineHeight + 4;
+    } else if (offer_.has(ns::OFFER_HAS_POKEMON)) {
       note(pokemonLine(), y);
       y += 2 * lineHeight + 4;
 #if defined(CROSSINK_ENABLE_POKEMON)

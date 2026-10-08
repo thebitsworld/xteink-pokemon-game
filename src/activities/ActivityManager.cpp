@@ -18,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SilentRestart.h"
@@ -913,6 +914,8 @@ void ActivityManager::goToNearbySync() {
 
 #if defined(CROSSINK_ENABLE_POKEMON)
 void ActivityManager::goToPokemonSaveTransfer(const bool sendSave) {
+  // Reached from inside the game, which a switched-off game cannot open.
+  if (!features::pokemonGame()) return;
   auto activity = makeUniqueNoThrow<NearbySyncActivity>(
       renderer, mappedInput, sendSave ? NearbySyncActivity::Role::Send : NearbySyncActivity::Role::Receive,
       NearbySyncActivity::Scope::PokemonOnly);
