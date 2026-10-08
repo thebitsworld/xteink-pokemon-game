@@ -17,6 +17,11 @@ One sync carries:
 | **Reading stats** | Exchanged **both ways**: each reader stores the other's all-time totals in `/.crosspoint/synced_stats/`, the same files [Reading Stats Sync](reading-stats-sync.md) uses, so both readers show the combined totals afterwards. |
 | **Book position** | The position in the book that was last open on the sender is written to the same book on the receiver, which then becomes its most recent book. If the receiver does not have that book, the EPUB is copied over too. The book's own reading stats (time, pages, sessions, dates) come along and are combined with the receiver's. |
 
+With the Pokémon game switched off (Settings > System > Features), a reader
+neither sends its save nor takes one: an offer of a save alone, or of a save
+being moved, is refused, and a sync that also carries stats or a book brings
+those over without the save.
+
 Anything the sender does not have (no Pokémon game, no book opened yet) is
 simply left out.
 
