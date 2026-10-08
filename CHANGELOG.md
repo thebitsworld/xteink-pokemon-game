@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Changed
+
+- Game Boy (X4 Pro): games open upright, with the D-pad and buttons below the game like on the handheld. ROTATE switches to the sideways layout and back.
+
 ## [1.8.0-rc.3] - 2026-10-08
 
 ### Added
