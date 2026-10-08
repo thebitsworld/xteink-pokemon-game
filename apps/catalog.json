@@ -454,6 +454,20 @@
         "keyboard.lua",
         "icon.raw"
       ]
+    },
+    {
+      "id": "dial",
+      "name": "Mind Dial",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "A party game for three or more around one reader: give a clue for a hidden spot on a scale between two ideas, and the group guesses where it is",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "cards.lua",
+        "menu.lua",
+        "icon.raw"
+      ]
     }
   ]
 }
