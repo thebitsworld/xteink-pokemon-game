@@ -1,0 +1,8 @@
+{
+  "id": "notes",
+  "name": "Notes",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Lists you tick off with one hand, kept as plain text files on the SD card, with an on-screen keyboard to add to them",
+  "entry": "main.lua"
+}
