@@ -13,6 +13,7 @@
 #include "activities/Activity.h"
 #include "activities/apps/lua/AppPaths.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
@@ -94,7 +95,10 @@ class AppStoreActivity : public Activity {
   }
 
   void loop() override {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    // Touch-only readers have no Back button hint: the header's back arrow
+    // does the same (except mid-download, which has its own Cancel).
+    const bool headerBack = state_ != State::DOWNLOADING && TouchHeaderBackButton::wasTapped(mappedInput, renderer);
+    if (headerBack || mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       if (state_ == State::DOWNLOADING) {
         cancelDownload_ = true;
         return;
@@ -118,17 +122,7 @@ class AppStoreActivity : public Activity {
     switch (state_) {
       case State::CHECK_WIFI: {
         if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-          startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult&) {
-                                   if (isWifiConnected()) {
-                                     state_ = State::FETCHING_CATALOG;
-                                     requestUpdateAndWait();
-                                     fetchCatalog();
-                                   } else {
-                                     state_ = State::CHECK_WIFI;
-                                     requestUpdate();
-                                   }
-                                 });
+          openWifiSelection();
           return;
         }
         int tx = 0, ty = 0;
@@ -136,22 +130,16 @@ class AppStoreActivity : public Activity {
           int w = renderer.getScreenWidth();
           int h = renderer.getScreenHeight();
           const auto& m = UITheme::getInstance().getMetrics();
+          if (actionButtonHit(tx, ty)) {
+            openWifiSelection();
+            return;
+          }
           if (ty > h - m.buttonHintsHeight) {
             if (tx < w / 2) {
               finish();
               return;
             } else {
-              startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                                     [this](const ActivityResult&) {
-                                       if (isWifiConnected()) {
-                                         state_ = State::FETCHING_CATALOG;
-                                         requestUpdateAndWait();
-                                         fetchCatalog();
-                                       } else {
-                                         state_ = State::CHECK_WIFI;
-                                         requestUpdate();
-                                       }
-                                     });
+              openWifiSelection();
               return;
             }
           }
@@ -182,18 +170,7 @@ class AppStoreActivity : public Activity {
 
       case State::ERROR: {
         if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-          if (isWifiConnected()) {
-            if (lastFailedAppIndex_ >= 0 && lastFailedAppIndex_ < static_cast<int>(apps_.size())) {
-              installApp(apps_[lastFailedAppIndex_]);
-            } else {
-              state_ = State::FETCHING_CATALOG;
-              requestUpdateAndWait();
-              fetchCatalog();
-            }
-          } else {
-            state_ = State::CHECK_WIFI;
-            requestUpdate();
-          }
+          retry();
           return;
         }
         int tx = 0, ty = 0;
@@ -201,6 +178,10 @@ class AppStoreActivity : public Activity {
           int w = renderer.getScreenWidth();
           int h = renderer.getScreenHeight();
           const auto& m = UITheme::getInstance().getMetrics();
+          if (actionButtonHit(tx, ty)) {
+            retry();
+            return;
+          }
           if (ty > h - m.buttonHintsHeight) {
             if (tx < w / 2) {
               if (!apps_.empty()) {
@@ -211,18 +192,7 @@ class AppStoreActivity : public Activity {
               }
               return;
             } else {
-              if (isWifiConnected()) {
-                if (lastFailedAppIndex_ >= 0 && lastFailedAppIndex_ < static_cast<int>(apps_.size())) {
-                  installApp(apps_[lastFailedAppIndex_]);
-                } else {
-                  state_ = State::FETCHING_CATALOG;
-                  requestUpdateAndWait();
-                  fetchCatalog();
-                }
-              } else {
-                state_ = State::CHECK_WIFI;
-                requestUpdate();
-              }
+              retry();
               return;
             }
           }
@@ -233,6 +203,67 @@ class AppStoreActivity : public Activity {
   }
 
  private:
+  void openWifiSelection() {
+    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) {
+                             if (isWifiConnected()) {
+                               state_ = State::FETCHING_CATALOG;
+                               requestUpdateAndWait();
+                               fetchCatalog();
+                             } else {
+                               state_ = State::CHECK_WIFI;
+                               requestUpdate();
+                             }
+                           });
+  }
+
+  // Retries what failed: the install, or else the catalog (after Wi-Fi when
+  // it dropped).
+  void retry() {
+    if (!isWifiConnected()) {
+      state_ = State::CHECK_WIFI;
+      requestUpdate();
+    } else if (lastFailedAppIndex_ >= 0 && lastFailedAppIndex_ < static_cast<int>(apps_.size())) {
+      installApp(apps_[lastFailedAppIndex_]);
+    } else {
+      state_ = State::FETCHING_CATALOG;
+      requestUpdateAndWait();
+      fetchCatalog();
+    }
+  }
+
+  int headerHeight() const { return TouchHeaderBackButton::height(UITheme::getInstance().getMetrics(), mappedInput); }
+
+  // The header, with a back arrow on touch readers (they draw no Back hint).
+  void drawStoreHeader(const char* title, const char* subtitle, const bool backButton = true) {
+    const Rect header{0, UITheme::getInstance().getMetrics().topPadding, renderer.getScreenWidth(), headerHeight()};
+    if (backButton && mappedInput.hasTouchHardware()) {
+      TouchHeaderBackButton::draw(renderer, header, title, false, 0, subtitle);
+    } else {
+      GUI.drawHeader(renderer, header, title, subtitle);
+    }
+  }
+
+  // The on-screen button of the no-Wi-Fi and error screens. Touch-only
+  // readers draw no button hints, so without it they had nothing to tap.
+  Rect actionButtonRect() const {
+    const int w = renderer.getScreenWidth();
+    constexpr int bw = 320;
+    return Rect{(w - bw) / 2, renderer.getScreenHeight() / 2 + 110, bw, 50};
+  }
+
+  bool actionButtonHit(const int x, const int y) const {
+    const Rect b = actionButtonRect();
+    return x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height;
+  }
+
+  void drawActionButton(const char* label) {
+    const Rect b = actionButtonRect();
+    renderer.fillRoundedRect(b.x, b.y, b.width, b.height, 8, Color::Black);
+    const int tw = renderer.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
+    renderer.drawText(UI_12_FONT_ID, b.x + (b.width - tw) / 2, b.y + 14, label, false, EpdFontFamily::BOLD);
+  }
+
   enum class State { CHECK_WIFI, FETCHING_CATALOG, CATALOG_READY, APP_DETAIL, DOWNLOADING, ERROR };
 
   struct CatalogApp {
@@ -542,7 +573,7 @@ class AppStoreActivity : public Activity {
         }
       }
 
-      int startY = m.topPadding + m.headerHeight + 6;
+      int startY = m.topPadding + headerHeight() + 6;
       int rowH = 56;
       for (int i = pageStart; i < count && i < pageStart + rowsPerPage; ++i) {
         int ry = startY + (i - pageStart) * rowH;
@@ -562,7 +593,7 @@ class AppStoreActivity : public Activity {
 
   int getDetailActionButtonY() const {
     const auto& m = UITheme::getInstance().getMetrics();
-    int cardY = m.topPadding + m.headerHeight + 12;
+    int cardY = m.topPadding + headerHeight() + 12;
     int cardH = 96;
     int descY = cardY + cardH + 12;
     int descH = 176;
@@ -801,7 +832,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_CONNECTING));
+    drawStoreHeader(tr(STR_APPS_STORE), tr(STR_APPS_CONNECTING));
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 20, msg, true, EpdFontFamily::BOLD);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
@@ -814,11 +845,12 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_OFFLINE));
+    drawStoreHeader(tr(STR_APPS_STORE), tr(STR_APPS_OFFLINE));
 
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_WIFI_NOT_CONNECTED), true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(SMALL_FONT_ID, h / 2 - 10, tr(STR_APPS_CONNECT_WIFI_HINT), true);
 
+    drawActionButton(tr(STR_APPS_CONNECT_WIFI));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_CONNECT_WIFI), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
@@ -831,9 +863,9 @@ class AppStoreActivity : public Activity {
     renderer.clearScreen();
     char subBuf[64];
     snprintf(subBuf, sizeof(subBuf), tr(STR_APPS_AVAILABLE), static_cast<unsigned>(apps_.size()));
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), subBuf);
+    drawStoreHeader(tr(STR_APPS_STORE), subBuf);
 
-    int startY = m.topPadding + m.headerHeight + 6;
+    int startY = m.topPadding + headerHeight() + 6;
     int rowH = 56;
     int count = static_cast<int>(apps_.size());
     const int rowsPerPage = 8;
@@ -910,10 +942,10 @@ class AppStoreActivity : public Activity {
     const auto& app = apps_[selectedIndex_];
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), app.name.c_str());
+    drawStoreHeader(tr(STR_APPS_STORE), app.name.c_str());
 
     // 1. Hero Card at top
-    int cardY = m.topPadding + m.headerHeight + 12;
+    int cardY = m.topPadding + headerHeight() + 12;
     int cardH = 96;
     renderer.drawRoundedRect(16, cardY, w - 32, cardH, 1, 8, true);
 
@@ -1026,7 +1058,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_INSTALLING), appName);
+    drawStoreHeader(tr(STR_APPS_INSTALLING), appName, /*backButton=*/false);
 
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_DOWNLOADING), true, EpdFontFamily::BOLD);
 
@@ -1045,7 +1077,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_ERROR));
+    drawStoreHeader(tr(STR_APPS_STORE), tr(STR_APPS_ERROR));
 
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, errorTitle_.empty() ? tr(STR_APPS_ERROR) : errorTitle_.c_str(), true,
                               EpdFontFamily::BOLD);
@@ -1056,6 +1088,7 @@ class AppStoreActivity : public Activity {
       dy += renderer.getLineHeight(SMALL_FONT_ID) + 2;
     }
 
+    drawActionButton(tr(STR_APPS_RETRY));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
