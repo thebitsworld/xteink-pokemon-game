@@ -92,6 +92,7 @@ The `manifest.json` file describes your application to the firmware, the App Sto
 | `author` | string | Creator name or handle. |
 | `description`| string | One-sentence summary displayed in the App Store / Web Viewer. |
 | `entry` | string | Entry point script filename (default: `"main.lua"`). |
+| `devices` | array of strings | Optional. The readers the app is made for, by the names `smudge.get_device()` returns: `"x3"` (the X3/X4 firmware, 75 KB for Lua), `"x4pro"`, `"x4"`, `"sticky"`. Without it the app runs on every reader. An app that does not fit the X3 lists `["x4pro"]`: the App Store does not offer it elsewhere, and Applications shows it as "Not for this reader". Repeat the list in the app's `catalog.json` entry. |
 
 ---
 
@@ -349,7 +350,7 @@ All shape drawing functions support a customizable line **thickness** (stroke wi
 - **`smudge.get_battery()`** *(or `smudge.battery()`)*  
   Returns the current battery level as an integer percentage (`0`–`100`).
 - **`smudge.get_device()`**  
-  Returns a string identifying the hardware platform (`"Xteink X3"`, `"Seeed reTerminal Sticky"`, `"Xteink X4 Pro"`, or `"Simulator"`).
+  Returns the reader's name as used in a manifest's `devices`: `"x3"` (the X3/X4 firmware), `"x4pro"`, `"x4"` (X4 classic) or `"sticky"`. A simulator answers as the reader it simulates.
 - **`smudge.get_date()`** *(or `smudge.date()`)*  
   Returns a calendar date/time table from the device's hardware RTC clock:
   ```lua
@@ -432,7 +433,7 @@ Any extra assets (like `.txt`, `.json`, `.raw` sprites, or level definitions) pl
 ## Memory Discipline & E-Paper Best Practices
 
 ### The 75 KB Hardware DRAM Ceiling (ESP32-C3)
-Devices like the Xteink X3 and X4 run on a single-core ESP32-C3 microcontroller with **no PSRAM** and only **~75 KB total usable internal DRAM** for Lua applications. Any application intended for the App Store must run comfortably within this ceiling.
+Devices like the Xteink X3 and X4 run on a single-core ESP32-C3 microcontroller with **no PSRAM**. An app for them must stay under **75 KB in the X3 simulator** (`pokemon-simulator-X3`). On a real X3 that is about 50-60 KB: the reader has about 92 KB free when an app opens, and the heap spends roughly another 30% of what Lua uses on its own bookkeeping, so about 65 KB of Lua is the real ceiling. An app that cannot fit is made for the X4 Pro only (`"devices": ["x4pro"]` in its manifest), where Lua has 2 MB of PSRAM.
 
 Follow these proven patterns to ensure your app is rock-solid:
 
@@ -477,7 +478,7 @@ Follow these proven patterns to ensure your app is rock-solid:
     The compiler briefly needs two to three times the memory the code it compiles keeps, which is why apps are compiled into a bytecode cache when they start. Loading a module mid-game is therefore cheap - it costs only the module itself - and a big app can keep each screen in its own file and hold just one at a time. Chess keeps only its game state in `main.lua`; the board screen (`view.lua`), the menu (`chessmenu.lua`) and the computer player (`ai.lua`) are loaded when needed and dropped afterwards, so the search and the drawing code are never in memory together. Whodunit goes further: its case generator (`gen.lua`) works only with numbers and is dropped before `words.lua` turns the case into sentences, and each tab of its case screen (`clues.lua`, `grid.lua`, `accuse.lua`) is a module of its own. Deep recursion costs memory too: the Lua stack grows by doubling, which is why the Checkers and Chess searches cap their depth.
 
 13. **Measure:**  
-    Every app session appends a line to `/.crosspoint/apps-memory.txt` on the SD card: free heap before the app started, the Lua heap limit and peak, the lowest free heap seen and how many allocations were refused. The simulator (`pokemon-simulator-X3`) enforces the 75 KB limit. It runs as a 64-bit program, so its numbers are higher than the same app's on the reader (32-bit), which errs on the safe side.
+    Every app session appends a line to `/.crosspoint/apps-memory.txt` on the SD card: free heap before the app started, the Lua heap limit and peak, the lowest free heap seen and how many allocations were refused. The simulator (`pokemon-simulator-X3`) enforces the 75 KB limit. It runs as a 64-bit program, so its numbers are higher than the same app's on the reader (32-bit), which errs on the safe side: measured on an X3, apps used 65-90% of their simulator peak (Hearts 47 KB against 68 KB, Checkers 40 KB against 61 KB).
 
 ---
 
@@ -617,7 +618,7 @@ Open [`apps/catalog.json`](./catalog.json) and add an entry under the `"apps"` a
   ]
 }
 ```
-*Note: Make sure all files required by your app are listed in `files`. The on-device App Store downloads each file in this list.*
+*Note: Make sure all files required by your app are listed in `files`. The on-device App Store downloads each file in this list. An app made for some readers only also carries its manifest's `"devices"` list here, so the App Store can leave it out on the others.*
 
 ### Step 4: Open a GitHub Pull Request
 1. Fork [https://github.com/thebitsworld/xteink-pokemon-game](https://github.com/thebitsworld/xteink-pokemon-game).
