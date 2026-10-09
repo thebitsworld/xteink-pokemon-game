@@ -17,9 +17,12 @@ Hearts, Tide & Paper (a card game of pairs and sets), Hex, Go, Chess,
 Bazaar (a trading card game), Whodunit (logic-grid murder mysteries),
 the party games Mind Dial, Forehead and Inner Circle (for a group around one reader),
 Cult Ledger (a solo card game), Toy Front (a strategy game of toy armies),
-2048, Blackjack, Sudoku, Tetris, Wordle, Dice and the Codex deckbuilder - and two small tools:
-Calculator, and Notes for tick lists, which keeps each list as a plain text file in
-`/.crosspoint/apps-data/notes/` so you can also write lists on a computer and copy them over.
+2048, Blackjack, Sudoku, Block Drop, Wordle, Dice and the Codex deckbuilder - and some tools:
+Calculator; Notes for tick lists, which keeps each list as a plain text file in
+`/.crosspoint/apps-data/notes/` so you can also write lists on a computer and copy them over;
+Water Tracker (a daily drinking goal); Stopwatch (with laps); Hourglass (a countdown timer); and
+Desk Stand, a desk clock and calendar for a reader standing on a desk (it keeps the reader awake,
+so it is best used on the charger).
 
 Each time an app closes, a line is added to `/.crosspoint/apps-memory.txt` on the SD card with the
 memory it had and used. If an app runs out of memory on your reader, that file shows how close it
