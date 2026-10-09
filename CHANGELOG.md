@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+
+- X4 Pro: the App Store can connect to Wi-Fi again. Without a connection it shows a Connect Wi-Fi button to tap (and a Retry button after an error); before, there was nothing to tap, so no apps could be downloaded.
+
 ## [1.8.0-rc.5] - 2026-10-09
 
 ### Fixed
