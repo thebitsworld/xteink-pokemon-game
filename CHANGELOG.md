@@ -1,113 +1,30 @@
-## [1.8.0-rc.9] - 2026-10-09
+## [1.8.0] - 2026-10-09
 
 ### Added
 
-- Apps can be made for some readers only (for app makers: a `devices` list in `manifest.json` and the catalog). The App Store only offers apps that run on your reader, and Applications marks an app made for another reader as "Not for this reader". All of today's apps run on every reader.
-
-### Changed
-
-- X4 Pro: apps keep their memory in PSRAM, leaving the reader's own memory to the SD card, the screen and Wi-Fi.
-
-### Fixed
-
-- `smudge.get_device()` names the X4 Pro as "x4pro" (it said "x3").
-
-## [1.8.0-rc.8] - 2026-10-09
-
-### Fixed
-
-- X3/X4: apps have much more memory: Home and the Applications list give theirs back while an app runs. Most bigger games stopped with "not enough memory" on an X3, and after a few of them the reader could restart on the way back to Applications.
-
-## [1.8.0-rc.7] - 2026-10-09
-
-### Added
-
-- Four new apps in the App Store, from CrossSmudge: Water Tracker (count the glasses you drink against a daily goal), Stopwatch (with laps), Hourglass (a countdown timer with falling sand) and Desk Stand (a desk clock with the calendar and the year's progress, upright or sideways). Desk Stand keeps the reader awake while it is open, and Stopwatch and Hourglass while they run; with this firmware they can.
-- Apps can keep the reader awake, turn the screen sideways and read part of a file (for app makers: `smudge.prevent_sleep`, `smudge.set_orientation`, and an offset for `smudge.read_file`).
-
-### Changed
-
-- Tetris is now Block Drop (its new name in CrossSmudge, with fixes). Install it from the App Store; Tetris stays on your reader until you remove it.
-- Wordle 1.2.0 keeps a game in progress when you leave and comes back to it.
-
-### Fixed
-
-- Apps no longer show "?" instead of numbers and letters in their large text (2048's tiles, Dice, Sudoku) when the reader font is a font from the SD card.
-
-## [1.8.0-rc.6] - 2026-10-09
-
-### Fixed
-
-- X4 Pro: the App Store can connect to Wi-Fi again. Without a connection it shows a Connect Wi-Fi button to tap (and a Retry button after an error); before, there was nothing to tap, so no apps could be downloaded.
-- X4 Pro: the App Store has a back arrow in its header, so you can leave it without pressing Home.
-
-## [1.8.0-rc.5] - 2026-10-09
-
-### Fixed
-
-- X3/X4: opening an app from Applications no longer crashes and restarts the reader the first time it is opened after installing or updating it.
-
-## [1.8.0-rc.4] - 2026-10-08
-
-### Changed
-
-- Game Boy (X4 Pro): games open upright, with the D-pad and buttons below the game like on the handheld. ROTATE switches to the sideways layout and back.
-
-## [1.8.0-rc.3] - 2026-10-08
-
-### Added
-
-- X4 Pro: play original Game Boy games. Open a `.gb` ROM from the file browser; play with touch buttons beside the game or the reader's buttons, and battery saves go next to the ROM as `.sav`. No sound, and the screen updates about four times a second, so turn-based and puzzle games suit it best. See [Game Boy](docs/gameboy.md). Built on the Peanut-GB emulator and the Ink-boy CrossInk fork (both MIT).
-- Cult Ledger, a solo card game: run a small cult, pick one of three events each turn, gather relics, members and an offering, dodge the police - and summon a god before the inspector arrives (Easy or Hard).
-- Toy Front, a strategy game against the device (Easy or Normal): toy armies fight over a board of bases for medals - build, reinforce, attack, and keep some strong toys for the end. Six boards.
-- Three party games for a group around one reader, with words and cards written for them: Mind Dial (a clue giver hints where a hidden target sits on a scale between two ideas, and the group guesses), Forehead (hold the reader to your forehead and guess the word from your friends' clues against the clock) and Inner Circle (4 to 8 players find a secret word with yes/no questions, then unmask the Insider who knew it all along).
-- Two small tools in the App Store: Calculator (big keys, brackets, the result as you type and the sums you already did) and Notes (lists you tick off with one hand, typed with an on-screen keyboard and kept as plain text files on the SD card).
-- Tide & Paper in the App Store: collect pairs and sets of sea cards against the device (Easy or Normal), play pairs for their effects, then end the round with Stop - or bet on Last chance. First to 40 points wins; four mermaids win at once.
-- Dungeon Map in the App Store: wall in a dungeon from the number of walls in each row and column, the monsters standing in its dead ends and the treasure in its 3x3 rooms. Maps are made fresh on the reader at three levels, each with a single solution; How to play explains the rules.
-- Two more games in the App Store: Bazaar (a two-player trading card game against the device at two levels - take goods from the market, swap them, then sell sets for falling-value tokens; best of three rounds) and Whodunit (logic-grid murder mysteries made fresh on the reader at three levels: read the clues and the case file, mark the grid, then accuse the murderer with their weapon and place; every case has exactly one answer you can reach without guessing).
+- Applications: small Lua games and tools run from the SD card (Home > Applications). Install them from the on-device App Store over Wi-Fi, from the File Transfer web page (drag-and-drop), or by copying them to the SD card - no firmware update needed. The app engine (Lua 5.4) comes from CrossSmudge (github.com/Mumfee/CrossSmudge), and apps written for CrossSmudge run unchanged. Apps can only write inside their own folders, never your books or your Pokémon save, and their data stays in the hidden `/.crosspoint` folder so the Library never lists it. See docs/applications.md.
+- 34 apps in the App Store, playable with the buttons (X3/X4) or touch (X4 Pro):
+  - Board and card games, most against the device or a friend: Chess, Checkers, Go (9x9 or 13x13), Hex, Connect Four, Hearts, Klondike Solitaire, Blackjack, Bazaar (a trading card game), Tide & Paper (pairs and sets of sea cards), Toy Front (toy armies fighting over bases), Sea Battle, Knucklebones and Yacht.
+  - Puzzles: Nonogram, Dungeon Map and Whodunit (logic-grid murder mysteries), made fresh on the reader with a single solution each; Minesweeper, Sudoku, 2048, Block Drop, Wordle and the Codex deckbuilder.
+  - Cult Ledger, a solo card game, and three party games for a group around one reader: Mind Dial, Forehead and Inner Circle.
+  - Tools: Calculator, Notes (tick lists kept as plain text files), Dice, Stopwatch (with laps), Hourglass (a countdown timer), Water Tracker (a daily drinking goal) and Desk Stand (a desk clock and calendar, upright or sideways, that keeps the reader awake).
+  - The board and card games' rules are inspired by the CrossPlay firmware (github.com/ma-r-s/crossplay); Dice, 2048, Sudoku, Blackjack, Block Drop, Wordle, Codex, Stopwatch, Hourglass, Water Tracker and Desk Stand are CrossSmudge's.
+- X4 Pro: play original Game Boy games. Open a `.gb` ROM from the file browser; it opens upright with the D-pad and buttons below the game, and ROTATE turns it sideways. Battery saves go next to the ROM as `.sav`, written on exit and every minute while the game changes them. No sound, and the screen updates about four times a second, so turn-based and puzzle games suit it best. See [Game Boy](docs/gameboy.md). Built on the Peanut-GB emulator and the Ink-boy CrossInk fork (both MIT).
+- Pokémon Save Transfer: send your whole Pokémon game (party, PC Box, Bag, Pokédex, badges, movesets, IVs/EVs, Hall of Fame) straight to another reader nearby over ESP-NOW - no Wi-Fi, internet or computer needed. Choose Copy (both readers keep it) or Move (the sender starts over). The receiver checks a summary and must accept; its previous save is kept in `/.crosspoint/pokemon-backup/`. Every file is checksummed, and the install finishes safely even after a power cut. Find it under Pokémon > Settings, or under the starter Pokémon on a reader with no game yet.
+- Sync with Nearby Reader (File Transfer menu): one sync carries the Pokémon save, exchanges reading stats both ways, and moves the position of the book you were reading - copying the EPUB too if the other reader doesn't have it, along with that book's own reading stats. Save Transfer and Nearby Sync come from the CrossLingua fork of this project (github.com/davide-tonetto-884585/xteink-pokemon-crosslingua), with translations added for every supported language.
+- Settings > System > Features has switches for the Pokémon game, Applications and the Photo Slideshow (all on by default). Switched off, a feature disappears from Home; a switched-off Pokémon game also stops counting reading time and is not offered to nearby readers. Your save is kept, so switching it back on picks up where you left off.
+- For app makers: apps can keep the reader awake (`smudge.prevent_sleep`), turn the screen (`smudge.set_orientation`), read part of a file (an offset for `smudge.read_file`), react to a held finger (`on_touch(x, y, "long_press")`) and be made for some readers only (a `devices` list in `manifest.json`; the App Store only offers apps that run on your reader). `/.crosspoint/apps-memory.txt` gets a line each time an app closes with the memory it had and used. See apps/README.md.
 
 ### Changed
 
 - The Cover Grid Home theme now opens the Pokémon game too: its last cover is a Pokémon tile showing your party leader with its name and level (or a Poké Ball before you pick a starter), and the icon bar gains Applications and Slideshow. The grid shows five recent books instead of six to make room.
-- On every other Home theme, the band showing your party leader opens the Pokémon game: tap it, or select it with the buttons (Up/Down; on Minimal and Dashboard the side buttons, then Open) and press Confirm. It replaces the Home menu's Pokémon entry, which comes back if you hide the band in the game's settings. Applications has a game-controller icon in the Home menu.
-- Before you pick a starter, Home shows a Poké Ball and "Choose your starter" where your party leader goes (tap it to start), and the Cover Grid keeps its Pokémon tile even before you open a book. The Pokémon menu entry has a Poké Ball icon instead of a book.
-- Settings > System > Features has switches for the Pokémon game, Applications and the Photo Slideshow (all on by default). Switched off, a feature disappears from Home; a switched-off Pokémon game also stops counting reading time and is not offered to nearby readers. Your save is kept, so switching it back on picks up where you left off.
-
-### Fixed
-
-- With the Pokémon game switched off, Nearby Sync no longer takes a Pokémon save from another reader: a save alone, or one being moved, is refused, and a sync that also carries stats or a book brings those over without it. Its save transfer screens cannot be opened either.
-- "Choose your starter", "Features" and the new Nearby Sync notice are translated into all 28 languages.
-- Nonogram: a puzzle resumed after reopening the app no longer counts the time since the reader was switched on.
-
-## [1.8.0-rc.2] - 2026-10-06
-
-### Added
-
-- Three new games in the App Store, made for this firmware and playable with the buttons (X3/X4) or touch (X4 Pro): Minesweeper (three sizes, best times, hold to flag), Connect Four (against the device at three levels, or two players on one reader) and Klondike Solitaire (draw one or three, undo, auto-finish, your game kept for next time). Their rules are inspired by the CrossPlay firmware's versions (github.com/ma-r-s/crossplay).
-- Three more: Knucklebones (a dice duel on two 3x3 grids - matching dice multiply, and knock out your opponent's; against the device at three levels or two players), Yacht (five dice, three rolls, thirteen boxes, with the full joker rules; solo for a high score, against the device, or two players) and Nonogram (picture logic puzzles from 5x5 to 12x12, made fresh on the reader, each with a single solution you can reach without guessing).
-- And three more: Checkers (English draughts with compulsory captures and multi-jump chains, against the device at three levels or two players), Sea Battle (sink the hidden fleet before it sinks yours, three levels from random shots to a probability hunter) and Hearts (the trick-taking card game against three computer players, with passing, shooting the moon and a game to 100).
-- And three more: Hex (connect your sides of a rhombus of hexagons, 7x7 to 11x11), Go (9x9 or 13x13, area scoring with komi, capture dead stones then pass) and Chess (all the rules - castling, en passant, promotion, every draw - with take-backs, either colour against the device, or two players).
-- `/.crosspoint/apps-memory.txt` on the SD card gets a line each time an app closes: the free memory before it started and the most it used, to see how much room apps really have on a reader.
-
-### Changed
-
+- On every other Home theme, the band showing your party leader opens the Pokémon game: tap it, or select it with the buttons (Up/Down; on Minimal and Dashboard the side buttons, then Open) and press Confirm. It replaces the Home menu's Pokémon entry, which comes back if you hide the band in the game's settings. Before you pick a starter, it shows a Poké Ball and "Choose your starter". Applications has a game-controller icon in the Home menu, and the Pokémon entry a Poké Ball.
 - Smarter Gym Leaders, Elite Four and Champion. They now pick moves by the damage they would actually do (power, same-type bonus, type matchup, accuracy) and go for a knockout when one is there, instead of only looking at the type matchup - no more Growl when Tackle is the better move. Status moves are only used when they would work: no paralysing a Pokémon that is already paralysed, no Thunder Wave on a Ground type, no Dream Eater on an awake target, no Explosion while still healthy. Early Gym Leaders still make mistakes now and then; the Elite Four and the Champion almost never do. Wild Pokémon fight as before.
 - Trainers heal when your next attack would knock their Pokémon out (and not when it would be knocked out even at full HP), and decide whether to switch from the moves your Pokémon actually has rather than its type.
-- Lua apps are compiled once, when they start, into a bytecode cache on the SD card (`/.crosspoint/cache/apps/bytecode/`), so loading a part of an app while it runs no longer needs the compiler's extra memory - the bigger games fit the X3 because of it - and apps open faster from the second time. An app can no longer load a binary chunk it wrote itself; scripts are loaded as text only.
-- Lua apps load without their debug info, which saves about a quarter of an app's memory on the X3; script errors no longer show line numbers on the device. Touch apps can now react to a held finger (`on_touch(x, y, "long_press")`).
 
 ### Fixed
 
 - A Pokémon a trainer withdrew came back later at full HP. It now comes back with the HP, PP and status it left with.
-
-## [1.8.0-rc.1] - 2026-10-05
-
-### Added
-
-- Pokémon Save Transfer: send your whole Pokémon game (party, PC Box, Bag, Pokédex, badges, movesets, IVs/EVs, Hall of Fame) straight to another reader nearby over ESP-NOW - no Wi-Fi, internet or computer needed. Choose Copy (both readers keep it) or Move (the sender starts over). The receiver checks a summary and must accept; its previous save is kept in `/.crosspoint/pokemon-backup/`. Every file is checksummed, and the install finishes safely even after a power cut. Find it under Pokémon > Settings, or under the starter Pokémon on a reader with no game yet.
-- Sync with Nearby Reader (File Transfer menu): one sync carries the Pokémon save, exchanges reading stats both ways, and moves the position of the book you were reading - copying the EPUB too if the other reader doesn't have it, along with that book's own reading stats.
-- Both features come from the CrossLingua fork of this project (github.com/davide-tonetto-884585/xteink-pokemon-crosslingua), with translations added for every supported language.
-- Applications: run small Lua games and utilities from the SD card (Home > Applications) - 2048, Blackjack, Sudoku, Tetris, Wordle, the Codex deckbuilder and more. Install them from the on-device App Store over Wi-Fi, from the File Transfer web page (drag-and-drop), or by copying them to the SD card; no firmware update needed. The app engine (Lua 5.4) comes from CrossSmudge (github.com/Mumfee/CrossSmudge), and apps written for CrossSmudge run unchanged. Seven of CrossSmudge's apps (2048, Blackjack, Codex, Dice, Sudoku, Tetris, Wordle) live in this repository's `apps/` folder, which the App Store installs from; Wordle's word list grew from 55 to 463 words. Apps can only write or delete files inside their own folders, never your books or your Pokémon save. Apps and their data are kept in the hidden `/.crosspoint` folder (`apps/`, `apps-data/`), so the Library never lists their data files as books. See docs/applications.md.
 
 ## [1.7.0] - 2026-10-04
 
