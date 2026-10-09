@@ -3,6 +3,7 @@
 ### Fixed
 
 - X4 Pro: the App Store can connect to Wi-Fi again. Without a connection it shows a Connect Wi-Fi button to tap (and a Retry button after an error); before, there was nothing to tap, so no apps could be downloaded.
+- X4 Pro: the App Store has a back arrow in its header, so you can leave it without pressing Home.
 
 ## [1.8.0-rc.5] - 2026-10-09
 
