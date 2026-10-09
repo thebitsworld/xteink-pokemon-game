@@ -19,13 +19,14 @@
     {
       "id": "wordle",
       "name": "Wordle",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": "Mumfee",
       "description": "5-letter word deduction game with on-screen keyboard and statistics",
       "files": [
         "manifest.json",
         "main.lua",
-        "icon.raw"
+        "icon.raw",
+        "words.bin"
       ]
     },
     {
@@ -70,9 +71,9 @@
       ]
     },
     {
-      "id": "tetris",
-      "name": "Tetris",
-      "version": "1.0.0",
+      "id": "blockdrop",
+      "name": "Block Drop",
+      "version": "1.0.1",
       "author": "Mumfee",
       "description": "Classic falling block puzzle optimized for e-paper displays",
       "files": [
@@ -145,6 +146,54 @@
         "sprites/relic_9.raw",
         "state.lua",
         "ui_base.lua"
+      ]
+    },
+    {
+      "id": "watertracker",
+      "name": "Water Tracker",
+      "version": "1.0.0",
+      "author": "Mumfee",
+      "description": "Daily hydration tracker with a cute pixel water cup that fills as you drink",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "stopwatch",
+      "name": "Stopwatch",
+      "version": "1.0.0",
+      "author": "Mumfee",
+      "description": "Pixel cartoon stopwatch with digital display and lap split recording",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "hourglass",
+      "name": "Hourglass",
+      "version": "1.0.0",
+      "author": "Mumfee",
+      "description": "Minimalist timer with cute hourglass and customizable increments",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "icon.raw"
+      ]
+    },
+    {
+      "id": "dashboard",
+      "name": "Desk Stand",
+      "version": "1.0.2",
+      "author": "Mumfee",
+      "description": "Ambient e-ink desk clock, calendar, and daily dashboard with ultra-low battery use",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "icon.raw"
       ]
     },
     {
