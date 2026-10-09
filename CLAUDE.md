@@ -5,19 +5,23 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-08)
+## Where things stand (2026-10-09)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
-  levels from real reading time, and Lua apps installed from an App Store. `[crossink] version` 1.6.1,
-  `[pokemon] version` 1.8.0-rc.2 in `platformio.ini`; latest tag `v1.8.0-rc.2`.
-- `main` has a large `[Unreleased]` section: the Pokémon band/tile on every Home theme (selectable with
-  the buttons; the menu's Pokémon entry only appears when the band is hidden), Settings > System >
-  Features switches (Pokémon, Applications, Slideshow), Poké Ball / gamepad icons, and many Lua apps.
+  levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.0; latest release `v1.8.0` (stable). Its
+  release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
+  `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
-  without a firmware release): the 12 CrossPlay-inspired games, Bazaar, Whodunit, Dungeon Map,
-  Tide & Paper, Calculator, Notes, Mind Dial, Forehead, Inner Circle, Cult Ledger, Toy Front, plus the
-  CrossSmudge ones. CrossPlay apps needing data or a network (Trivia, Connections, Wikipedia, HN, xkcd,
-  Instapaper, Study, Wallpapers) were skipped on purpose.
+  without a firmware release): 34 apps - the CrossPlay-inspired games and tools written here plus 11 from
+  CrossSmudge. CrossPlay apps needing data or a network were skipped on purpose.
+- X3 app policy: an app must stay under 75 KB in `pokemon-simulator-X3` (the 64-bit simulator reports
+  15-35% more than a real X3, where ~65 KB of Lua is the measured ceiling). An app that cannot fit lists
+  `"devices": ["x4pro"]` in its manifest and catalog entry instead of losing features. On the X4 Pro the
+  Lua heap is in PSRAM (2 MB limit).
+- Game Boy (X4 Pro only, `CROSSINK_GAMEBOY`): Peanut-GB core in `lib/PeanutGB`, screen in
+  `src/activities/gameboy/`. The simulator needs `CROSSINK_SIMULATOR_PSRAM_TOTAL=8388608` to open a ROM.
+  Never commit ROMs (`game/` is untracked).
 - Open, undecided: a translation mechanism for Lua apps (all English today; the user wants to discuss it
   first). Firmware strings: the fork's own Pokémon strings are untranslated in most languages (fall back
   to English); Vietnamese is complete.
