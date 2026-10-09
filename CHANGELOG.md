@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+
+- X3/X4: apps have much more memory: Home and the Applications list give theirs back while an app runs. Most bigger games stopped with "not enough memory" on an X3, and after a few of them the reader could restart on the way back to Applications.
+
 ## [1.8.0-rc.7] - 2026-10-09
 
 ### Added

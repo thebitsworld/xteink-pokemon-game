@@ -48,7 +48,7 @@ class ApplicationsActivity : public Activity {
       if (!isSetting) {
         SmudgeSettings::getInstance().recordAppLaunch(app.name);
       }
-      startActivityForResult(app.factory(), [this, isSetting](const ActivityResult&) {
+      startActivityForResult(makeActivity(app), [this, isSetting](const ActivityResult&) {
         if (!isSetting) {
           renderer.clearScreen();
           renderer.displayBuffer(HalDisplay::RefreshMode::FULL_REFRESH);
@@ -156,8 +156,9 @@ class ApplicationsActivity : public Activity {
   struct AppEntry {
     std::string name;
     UIIcon icon;
-    std::function<std::unique_ptr<Activity>()> factory;
     bool builtIn = false;  // App Store / App Settings rather than an SD-card app
+    std::string dir;        // SD-card app: its folder and entry script
+    std::string entry;
     bool hasIcon = false;
     uint8_t iconData[128] = {0};
     std::string detail;  // "v1.0.0  •  author" under the name; empty for built-ins
@@ -190,41 +191,53 @@ class ApplicationsActivity : public Activity {
   int selectedIndex = 0;
   std::vector<AppEntry> visibleApps;
 
+  // The list (icons, names, launchers) is rebuilt by refreshMenuList() when
+  // the app returns, so it need not hold heap while the app runs.
+  void releaseHeapWhileCovered() override {
+    visibleApps.clear();
+    visibleApps.shrink_to_fit();
+  }
+
+  std::unique_ptr<Activity> makeActivity(const AppEntry& app) {
+    if (!app.builtIn) return std::make_unique<LuaAppActivity>(renderer, mappedInput, app.dir, app.name, app.entry);
+    if (app.icon == UIIcon::Settings) return std::make_unique<AppSettingsActivity>(renderer, mappedInput);
+    return std::make_unique<AppStoreActivity>(renderer, mappedInput);
+  }
+
+  // Rebuilt after every app, when an X3's heap may be short and fragmented:
+  // one list sized up front, strings moved rather than copied.
   void refreshMenuList() {
     auto& settings = SmudgeSettings::getInstance();
 
-    std::vector<AppEntry> allApps;
+    visibleApps.clear();
+    visibleApps.shrink_to_fit();
 
     // Discover installed packages on the SD card (app_paths::SCAN_DIRS)
     auto installedPackages = AppPackage::scanApplications();
-    for (const auto& pkg : installedPackages) {
-      std::string dir = pkg.path;
-      std::string name = pkg.name;
-      std::string entry = pkg.entryScript;
+    visibleApps.reserve(installedPackages.size() + 2);
+    for (auto& pkg : installedPackages) {
       AppEntry app;
-      app.name = pkg.name;
-
       app.icon = UIIcon::Book;
-
-      app.factory = [this, dir, name, entry]() {
-        return std::make_unique<LuaAppActivity>(renderer, mappedInput, dir, name, entry);
-      };
       app.detail = "v" + pkg.version;
       if (!pkg.author.empty()) app.detail += "  \u00b7  " + pkg.author;
+      app.name = std::move(pkg.name);
+      app.dir = std::move(pkg.path);
+      app.entry = std::move(pkg.entryScript);
       app.hasIcon = pkg.hasIcon;
       if (pkg.hasIcon) {
         std::memcpy(app.iconData, pkg.iconData, sizeof(pkg.iconData));
       }
-      allApps.push_back(std::move(app));
+      visibleApps.push_back(std::move(app));
     }
+    installedPackages.clear();
+    installedPackages.shrink_to_fit();
 
     std::vector<std::string> allNames;
-    for (const auto& a : allApps) {
+    allNames.reserve(visibleApps.size());
+    for (const auto& a : visibleApps) {
       allNames.push_back(a.name);
     }
     settings.registerKnownApps(allNames);
-
-    visibleApps = allApps;
 
     if (settings.sortMode == MenuSortMode::Alphabetical) {
       std::sort(visibleApps.begin(), visibleApps.end(),
@@ -242,10 +255,16 @@ class ApplicationsActivity : public Activity {
     }
 
     // Always append App Store and App Settings at the bottom
-    visibleApps.push_back({tr(STR_APPS_STORE), UIIcon::Library,
-                           [this]() { return std::make_unique<AppStoreActivity>(renderer, mappedInput); }, true});
-    visibleApps.push_back({tr(STR_APPS_SETTINGS), UIIcon::Settings,
-                           [this]() { return std::make_unique<AppSettingsActivity>(renderer, mappedInput); }, true});
+    AppEntry store;
+    store.name = tr(STR_APPS_STORE);
+    store.icon = UIIcon::Library;
+    store.builtIn = true;
+    visibleApps.push_back(std::move(store));
+    AppEntry appSettings;
+    appSettings.name = tr(STR_APPS_SETTINGS);
+    appSettings.icon = UIIcon::Settings;
+    appSettings.builtIn = true;
+    visibleApps.push_back(std::move(appSettings));
 
     if (selectedIndex >= static_cast<int>(visibleApps.size())) {
       selectedIndex = std::max(0, static_cast<int>(visibleApps.size()) - 1);

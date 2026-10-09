@@ -53,6 +53,8 @@ class LuaAppActivity : public Activity {
     requestUpdate();
   }
 
+  bool needsHeapFromCoveredActivities() const override { return true; }
+
   bool preventAutoSleep() override { return runner_ && runner_->preventsSleep(); }
   // A clock or timer keeping the reader awake is otherwise idle: let the main
   // loop still slow the CPU down.

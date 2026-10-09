@@ -93,6 +93,11 @@ class Activity {
   // A backdrop-only render must not make a paused reader count overlay time as
   // reading time. Readers clear that transient render timestamp here.
   virtual void onBackdropRenderedForOverlay() {}
+  // An activity that needs most of the free heap (a Lua app on a reader
+  // without PSRAM) asks the activities beneath it to give back what they
+  // only keep to redraw faster; they rebuild it when they are current again.
+  virtual bool needsHeapFromCoveredActivities() const { return false; }
+  virtual void releaseHeapWhileCovered() {}
   virtual bool allowPowerAsConfirmInReaderMode() const { return false; }
   virtual bool allowGlobalHomeGesture() const { return true; }
   // Activities with a modal can keep global gestures from acting behind it.
