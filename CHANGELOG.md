@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+
+- Apps no longer show "?" instead of numbers and letters in their large text (2048's tiles, Dice, Sudoku) when the reader font is a font from the SD card.
+
 ## [1.8.0-rc.6] - 2026-10-09
 
 ### Fixed
