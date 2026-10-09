@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Added
+
+- Four new apps in the App Store, from CrossSmudge: Water Tracker (count the glasses you drink against a daily goal), Stopwatch (with laps), Hourglass (a countdown timer with falling sand) and Desk Stand (a desk clock with the calendar and the year's progress, upright or sideways). Desk Stand keeps the reader awake while it is open, and Stopwatch and Hourglass while they run; with this firmware they can.
+- Apps can keep the reader awake, turn the screen sideways and read part of a file (for app makers: `smudge.prevent_sleep`, `smudge.set_orientation`, and an offset for `smudge.read_file`).
+
+### Changed
+
+- Tetris is now Block Drop (its new name in CrossSmudge, with fixes). Install it from the App Store; Tetris stays on your reader until you remove it.
+- Wordle 1.2.0 keeps a game in progress when you leave and comes back to it.
+
 ## [1.8.0-rc.6] - 2026-10-09
 
 ### Fixed

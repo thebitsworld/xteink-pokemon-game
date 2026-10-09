@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -52,10 +53,15 @@ class LuaRunner {
   uint32_t minFreeHeapBytes() const { return minFreeHeap_; }
   uint32_t refusedAllocations() const { return refusedAllocations_; }
 
+  // Whether the app asked (smudge.prevent_sleep) to keep the reader awake.
+  // Read on the main task while Lua may run on the render task.
+  bool preventsSleep() const { return preventSleep_.load(std::memory_order_relaxed); }
+
  private:
   GfxRenderer& renderer_;
   MappedInputManager& input_;
   std::string appDir_;
+  std::atomic<bool> preventSleep_{false};
   std::string appId_;
   std::string saveDir_;
 
@@ -130,6 +136,8 @@ class LuaRunner {
   static int l_deleteFile(lua_State* L);
   static int l_popup(lua_State* L);
   static int l_getMemory(lua_State* L);
+  static int l_preventSleep(lua_State* L);
+  static int l_setOrientation(lua_State* L);
 };
 
 }  // namespace ink

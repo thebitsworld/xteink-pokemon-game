@@ -249,6 +249,8 @@ The firmware standardizes button names across all hardware variations:
   Triggers a display refresh. If `full` is `true` or `"full"`, performs a full e-paper flashing refresh to clear ghosting.
 - **`smudge.full_refresh()`**  
   Forces a full hardware e-paper flashing refresh (`HalDisplay::RefreshMode::FULL_REFRESH`) immediately.
+- **`smudge.set_orientation(name)`**  
+  Turns the screen: `"portrait"` (default), `"portrait_inverted"`, `"landscape"` (or `"landscape_cw"`) or `"landscape_ccw"`. `smudge.get_bounds()` then returns the turned size. Safe to call from `on_draw()` every frame (only a change redraws); the reader's own orientation comes back when the app exits.
 - **`smudge.invert_rect(x, y, w, h)`**  
   Inverts the 1-bit pixel buffer inside the specified rectangular region (turns white pixels black and black pixels white).
 - **`smudge.invert()`** *(or `smudge.invert_screen()`)*  
@@ -361,6 +363,8 @@ All shape drawing functions support a customizable line **thickness** (stroke wi
   - `lua_max_kb`: Maximum allowed Lua heap ceiling (e.g. 75 KB on ESP32-C3, 2048 KB on S3).
   - `free_heap`: Total free ESP32 internal DRAM (in bytes).
   - `max_alloc`: Largest contiguous allocatable block in DRAM (in bytes).
+- **`smudge.prevent_sleep(on)`**  
+  While `on` is `true` (the default), the reader does not go to sleep on its own: for a clock or a running timer. Turn it off again when it is no longer needed (a stopped timer), since it costs battery.
 - **`smudge.is_button_down(btn)`**  
   Returns `true` if the specified hardware button (`"back"`, `"confirm"`, `"up"`, `"down"`, `"left"`, `"right"`) is currently pressed/held down.
 
@@ -376,8 +380,8 @@ The firmware provides key-value persistence, full sandboxed file operations, and
   Reads a previously saved string. Returns `default_string` if not found.
 - **`smudge.file_exists(relative_path)`**  
   Returns `true` if a file exists inside the application's directory.
-- **`smudge.read_file(relative_path)`**  
-  Reads and returns the complete contents of a file inside the app folder as a string.
+- **`smudge.read_file(relative_path, [max_bytes], [offset])`**  
+  Reads and returns the contents of a file inside the app folder as a string: at most `max_bytes` (64 KB by default) starting at byte `offset` (0 by default), so one record of a big data file can be read without loading all of it. Returns `""` past the end of the file.
 - **`smudge.write_file(relative_path, content_string, [append])`**  
   Writes `content_string` to a file in the app directory. If `append` is `true`, appends to existing content; otherwise overwrites or creates the file. Returns `true` on success.
 - **`smudge.list_files([dir_relative_path])`**  

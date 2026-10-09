@@ -1,56 +1,53 @@
 -- Wordle game for CrossSmudge (Lua)
 -- Faithful reproduction of WordleActivity.h with on-screen keyboard, reset modal, auto-advance & dithering
 
--- Secret words: common 5-letter English words (any 5 letters are accepted as a guess).
-local words = {
-    "ABOUT", "ABOVE", "ACTOR", "ADMIT", "ADOPT", "ADULT", "AFTER", "AGAIN", "AGENT", "AGREE",
-    "AHEAD", "ALARM", "ALBUM", "ALERT", "ALIKE", "ALIVE", "ALLOW", "ALONE", "ALONG", "ALTER",
-    "AMONG", "ANGER", "ANGLE", "ANGRY", "APART", "APPLE", "APPLY", "ARENA", "ARGUE", "ARISE",
-    "ARMOR", "ARROW", "ASIDE", "ASSET", "AVOID", "AWAKE", "AWARD", "AWARE", "BADGE", "BAKER",
-    "BASIC", "BEACH", "BEGIN", "BEING", "BELOW", "BENCH", "BIRTH", "BLACK", "BLADE", "BLAME",
-    "BLANK", "BLAST", "BLEND", "BLIND", "BLOCK", "BLOOM", "BOARD", "BOOST", "BOUND", "BRAIN",
-    "BRAND", "BRAVE", "BREAD", "BREAK", "BRICK", "BRIDE", "BRIEF", "BRING", "BROAD", "BROWN",
-    "BRUSH", "BUILD", "BUNCH", "BURST", "CABIN", "CABLE", "CANDY", "CARRY", "CATCH", "CAUSE",
-    "CHAIN", "CHAIR", "CHALK", "CHARM", "CHART", "CHASE", "CHEAP", "CHECK", "CHEST", "CHIEF",
-    "CHILD", "CHILL", "CLAIM", "CLASS", "CLEAN", "CLEAR", "CLIFF", "CLIMB", "CLOCK", "CLOSE",
-    "CLOUD", "COACH", "COAST", "COUNT", "COURT", "COVER", "CRAFT", "CRANE", "CRASH", "CRAZY",
-    "CREAM", "CROWD", "CROWN", "CRUSH", "CURVE", "CYCLE", "DAILY", "DANCE", "DEATH", "DELAY",
-    "DEPTH", "DIARY", "DOUBT", "DOZEN", "DRAFT", "DRAMA", "DREAM", "DRESS", "DRINK", "DRIVE",
-    "EAGER", "EAGLE", "EARLY", "EARTH", "EIGHT", "ELBOW", "ELDER", "EMPTY", "ENEMY", "ENJOY",
-    "ENTER", "ENTRY", "EQUAL", "ERROR", "EVENT", "EVERY", "EXACT", "EXIST", "EXTRA", "FAITH",
-    "FALSE", "FANCY", "FAULT", "FEAST", "FENCE", "FIELD", "FIFTY", "FIGHT", "FINAL", "FIRST",
-    "FLAME", "FLASH", "FLEET", "FLOAT", "FLOOR", "FLOUR", "FLUTE", "FOCUS", "FORCE", "FORGE",
-    "FORUM", "FOUND", "FRAME", "FRESH", "FRONT", "FROST", "FRUIT", "GHOST", "GIANT", "GLASS",
-    "GLOBE", "GLORY", "GLOVE", "GRACE", "GRADE", "GRAIN", "GRAND", "GRAPE", "GRASS", "GREAT",
-    "GREEN", "GREET", "GUARD", "GUESS", "GUEST", "GUIDE", "HAPPY", "HEART", "HEAVY", "HONEY",
-    "HORSE", "HOTEL", "HOUSE", "HUMAN", "HUMOR", "IDEAL", "IMAGE", "INDEX", "INNER", "INPUT",
-    "IVORY", "JEWEL", "JOINT", "JUDGE", "JUICE", "KNIFE", "KNOCK", "LABEL", "LARGE", "LASER",
-    "LATER", "LAUGH", "LAYER", "LEARN", "LEAST", "LEMON", "LEVEL", "LIGHT", "LIMIT", "LOCAL",
-    "LOGIC", "LOOSE", "LUCKY", "LUNCH", "MAGIC", "MAJOR", "MAPLE", "MARCH", "MATCH", "MAYOR",
-    "MEDAL", "METAL", "MIGHT", "MINOR", "MODEL", "MONEY", "MONTH", "MORAL", "MOTOR", "MOUNT",
-    "MOUSE", "MOUTH", "MOVIE", "MUSIC", "NERVE", "NEVER", "NIGHT", "NOBLE", "NOISE", "NORTH",
-    "NOVEL", "NURSE", "OCEAN", "OFFER", "OFTEN", "OLIVE", "ORBIT", "ORDER", "OTHER", "OUTER",
-    "OWNER", "PAINT", "PANEL", "PAPER", "PARTY", "PEACE", "PEARL", "PHASE", "PHONE", "PHOTO",
-    "PIANO", "PIECE", "PILOT", "PITCH", "PLACE", "PLAIN", "PLANE", "PLANT", "PLATE", "POINT",
-    "POUND", "POWER", "PRESS", "PRICE", "PRIDE", "PRIME", "PRINT", "PRIZE", "PROOF", "PROUD",
-    "QUEEN", "QUICK", "QUIET", "QUOTE", "RADIO", "RAISE", "RANGE", "RAPID", "RATIO", "REACH",
-    "READY", "RELAX", "REPLY", "RIDER", "RIGHT", "RIVAL", "RIVER", "ROBIN", "ROBOT", "ROUGH",
-    "ROUND", "ROUTE", "ROYAL", "RURAL", "SALAD", "SCALE", "SCENE", "SCOPE", "SCORE", "SENSE",
-    "SERVE", "SEVEN", "SHADE", "SHAPE", "SHARE", "SHARP", "SHEEP", "SHELF", "SHELL", "SHIFT",
-    "SHINE", "SHIRT", "SHOCK", "SHORE", "SHORT", "SHOUT", "SIGHT", "SKILL", "SLEEP", "SLICE",
-    "SLIDE", "SMALL", "SMART", "SMILE", "SMOKE", "SNAKE", "SOLID", "SOLVE", "SOUND", "SOUTH",
-    "SPACE", "SPARE", "SPEAK", "SPEED", "SPEND", "SPICE", "SPINE", "SPORT", "STAFF", "STAGE",
-    "STAIR", "STAMP", "STAND", "START", "STATE", "STEAM", "STEEL", "STICK", "STILL", "STONE",
-    "STORE", "STORM", "STORY", "STOVE", "STRAW", "STUDY", "STYLE", "SUGAR", "SUNNY", "SWEET",
-    "SWIFT", "SWING", "SWORD", "TABLE", "TASTE", "TEACH", "THANK", "THEME", "THICK", "THING",
-    "THINK", "THREE", "THROW", "TIGER", "TIGHT", "TIMER", "TITLE", "TOAST", "TODAY", "TOOTH",
-    "TOPIC", "TORCH", "TOTAL", "TOUCH", "TOWER", "TRACE", "TRACK", "TRADE", "TRAIL", "TRAIN",
-    "TREAT", "TREND", "TRIAL", "TRIBE", "TRICK", "TRUCK", "TRULY", "TRUST", "TRUTH", "TWICE",
-    "UNCLE", "UNDER", "UNION", "UNITY", "UNTIL", "UPPER", "URBAN", "USUAL", "VALUE", "VIDEO",
-    "VISIT", "VITAL", "VOICE", "WAGON", "WASTE", "WATCH", "WATER", "WHALE", "WHEAT", "WHEEL",
-    "WHITE", "WHOLE", "WOMAN", "WORLD", "WORRY", "WORTH", "WOULD", "WOUND", "WRIST", "WRITE",
-    "YOUNG", "YOUTH", "ZEBRA"
-}
+local TOTAL_WORDS = 463  -- words.bin: common 5-letter words, 5 bytes each
+local can_seek = nil
+local cached_words_bin = nil
+
+local function pick_secret_word()
+    if can_seek == nil then
+        if smudge and smudge.read_file then
+            local test_0 = smudge.read_file("words.bin", 5, 0)
+            local test_5 = smudge.read_file("words.bin", 5, 5)
+            if test_0 and test_5 and #test_0 == 5 and #test_5 == 5 and test_0 ~= test_5 then
+                can_seek = true
+            else
+                can_seek = false
+            end
+        else
+            can_seek = false
+        end
+    end
+
+    local idx = math.random(0, TOTAL_WORDS - 1)
+
+    if can_seek then
+        local w = smudge.read_file("words.bin", 5, idx * 5)
+        if w and #w == 5 then
+            return w:upper()
+        end
+    end
+
+    -- Fallback: load full words.bin if seeking is unsupported on older firmware
+    if not cached_words_bin and smudge and smudge.read_file then
+        cached_words_bin = smudge.read_file("words.bin")
+    end
+
+    if cached_words_bin and #cached_words_bin >= 5 then
+        local total = math.floor(#cached_words_bin / 5)
+        if total > 0 then
+            local fallback_idx = math.random(0, total - 1)
+            local pos = fallback_idx * 5 + 1
+            local w = cached_words_bin:sub(pos, pos + 4)
+            if #w == 5 then
+                return w:upper()
+            end
+        end
+    end
+
+    return "CRANE"
+end
 
 local secret = "CRANE"
 local guesses = {} -- array of {guess = "WORDS", check = {2, 0, 1, 0, 2}}
@@ -67,23 +64,6 @@ local k_keys = {
     "A", "S", "D", "F", "G", "H", "J", "K", "L", "<-",
     "Z", "X", "C", "V", "B", "N", "M", "ok", "clear"
 }
-
-local function new_game()
-    secret = words[math.random(1, #words)]
-    guesses = {}
-    current_guess = ""
-    in_game = true
-    game_won = false
-    kb_index = 0
-    show_reset_confirm = false
-    absent_keys = {}
-end
-
-function on_init()
-    w, h = smudge.get_bounds()
-    math.randomseed(os.time())
-    new_game()
-end
 
 local function evaluate_guess(guess_str)
     local check = {0, 0, 0, 0, 0}
@@ -111,12 +91,130 @@ local function evaluate_guess(guess_str)
                 secret_counts[g] = secret_counts[g] - 1
             else
                 check[i] = 0
-                absent_keys[g] = true
+                if not secret:find(g, 1, true) then
+                    absent_keys[g] = true
+                end
             end
         end
     end
 
     return check
+end
+
+local function save_game_state()
+    if not smudge or not smudge.save then return end
+    if not in_game then
+        smudge.save("wordle_state", "")
+        return
+    end
+
+    local guess_list = {}
+    for _, g in ipairs(guesses) do
+        table.insert(guess_list, g.guess)
+    end
+    local guesses_str = table.concat(guess_list, ",")
+    local data = string.format("%s;%s;%s;%d", secret, guesses_str, current_guess, kb_index)
+    smudge.save("wordle_state", data)
+end
+
+local function load_game_state()
+    if not smudge or not smudge.load then return false end
+    local data = smudge.load("wordle_state")
+    if not data or data == "" then return false end
+
+    local parts = {}
+    for part in string.gmatch(data .. ";", "([^;]*);") do
+        table.insert(parts, part)
+    end
+
+    if #parts < 4 then return false end
+
+    local s_secret = parts[1]
+    local s_guesses = parts[2]
+    local s_cur = parts[3]
+    local s_kb = tonumber(parts[4]) or 0
+
+    if #s_secret ~= 5 or not s_secret:match("^[A-Z]+$") then
+        return false
+    end
+
+    secret = s_secret
+    guesses = {}
+    absent_keys = {}
+    in_game = true
+    game_won = false
+
+    if #s_guesses > 0 then
+        for g in string.gmatch(s_guesses .. ",", "([^,]+),") do
+            if #g == 5 and g:match("^[A-Z]+$") then
+                local check = evaluate_guess(g)
+                table.insert(guesses, {guess = g, check = check})
+                if g == secret then
+                    game_won = true
+                    in_game = false
+                elseif #guesses >= 6 then
+                    in_game = false
+                end
+            end
+        end
+    end
+
+    if not in_game then
+        if smudge and smudge.save then
+            smudge.save("wordle_state", "")
+        end
+        return false
+    end
+
+    if #s_cur <= 5 and (s_cur == "" or s_cur:match("^[A-Z]+$")) then
+        current_guess = s_cur
+    else
+        current_guess = ""
+    end
+
+    if s_kb >= 0 and s_kb <= 29 then
+        kb_index = s_kb
+    else
+        kb_index = 0
+    end
+
+    show_reset_confirm = false
+    if smudge and smudge.log then
+        smudge.log(string.format("Wordle: restored game with %d guesses, secret %s", #guesses, secret))
+    end
+    return true
+end
+
+local function new_game()
+    secret = pick_secret_word()
+    if #secret ~= 5 then secret = "CRANE" end
+    if smudge and smudge.log then
+        smudge.log("Wordle secret: " .. secret)
+    end
+    guesses = {}
+    current_guess = ""
+    in_game = true
+    game_won = false
+    kb_index = 0
+    show_reset_confirm = false
+    absent_keys = {}
+    save_game_state()
+end
+
+function on_init()
+    w, h = smudge.get_bounds()
+    math.randomseed(os.time())
+    if not load_game_state() then
+        new_game()
+    end
+    if smudge and smudge.get_memory and smudge.log then
+        local mem = smudge.get_memory()
+        smudge.log(string.format("Wordle Lua memory: %d KB / %d KB", mem.lua_kb or 0, mem.lua_max_kb or 0))
+    end
+end
+
+function on_exit()
+    save_game_state()
 end
 
 local function submit_guess()
@@ -131,6 +229,7 @@ local function submit_guess()
         in_game = false
     end
     current_guess = ""
+    save_game_state()
 end
 
 local function handle_key_action(idx)
@@ -358,6 +457,7 @@ function on_button(btn, pressed)
     end
 
     if btn == "back" then
+        save_game_state()
         smudge.exit()
         return
     end
@@ -454,6 +554,7 @@ function on_tap(x, y)
     local m = smudge.get_metrics()
     if y > h - m.button_hints_height then
         if x < w / 4 then
+            save_game_state()
             smudge.exit()
         elseif x < w / 2 then
             handle_key_action(kb_index)
