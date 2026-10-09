@@ -723,10 +723,13 @@ static int resolveFont(lua_State* L, int idx) {
     if (strcmp(str, "bitter12") == 0 || strcmp(str, "bitter_12") == 0) return LEXENDDECA_12_FONT_ID;  // Bitter is not built into this firmware
     if (strcmp(str, "bitter14") == 0 || strcmp(str, "bitter_14") == 0) return LEXENDDECA_14_FONT_ID;  // Bitter is not built into this firmware
     if (strcmp(str, "bitter16") == 0 || strcmp(str, "bitter_16") == 0) return LEXENDDECA_16_FONT_ID;  // Bitter is not built into this firmware
-    if (strcmp(str, "reader") == 0) return SETTINGS.getReaderFontId();
+    if (strcmp(str, "reader") == 0) return SETTINGS.getBuiltInReaderFontId();
   }
+  // Large text (0 or 18 and up) is the biggest built-in font. It used to be
+  // the reader's font, but an SD-card reader font only has its glyphs loaded
+  // in the reader, so apps drew "?" for every character.
   int size = getOptInt(L, idx, 10);
-  if (size == 0 || size >= 18) return SETTINGS.getReaderFontId();
+  if (size == 0 || size >= 18) return LEXENDDECA_16_FONT_ID;
   if (size <= 8) return SMALL_FONT_ID;
   if (size <= 10) return UI_10_FONT_ID;
   if (size <= 12) return UI_12_FONT_ID;

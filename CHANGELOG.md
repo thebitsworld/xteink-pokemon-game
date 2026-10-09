@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.8.0-rc.7] - 2026-10-09
 
 ### Added
 
@@ -9,6 +9,10 @@
 
 - Tetris is now Block Drop (its new name in CrossSmudge, with fixes). Install it from the App Store; Tetris stays on your reader until you remove it.
 - Wordle 1.2.0 keeps a game in progress when you leave and comes back to it.
+
+### Fixed
+
+- Apps no longer show "?" instead of numbers and letters in their large text (2048's tiles, Dice, Sudoku) when the reader font is a font from the SD card.
 
 ## [1.8.0-rc.6] - 2026-10-09
 
