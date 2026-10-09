@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+
+- X3/X4: opening an app from Applications no longer crashes and restarts the reader the first time it is opened after installing or updating it.
+
 ## [1.8.0-rc.4] - 2026-10-08
 
 ### Changed
