@@ -44,6 +44,7 @@ class ApplicationsActivity : public Activity {
 
     auto launchSelectedApp = [this]() {
       const auto& app = visibleApps[selectedIndex];
+      if (!app.supported) return;  // made for another reader: its row says so
       const bool isSetting = app.builtIn;
       if (!isSetting) {
         SmudgeSettings::getInstance().recordAppLaunch(app.name);
@@ -159,6 +160,7 @@ class ApplicationsActivity : public Activity {
     bool builtIn = false;  // App Store / App Settings rather than an SD-card app
     std::string dir;        // SD-card app: its folder and entry script
     std::string entry;
+    bool supported = true;  // false: its manifest lists other readers only
     bool hasIcon = false;
     uint8_t iconData[128] = {0};
     std::string detail;  // "v1.0.0  •  author" under the name; empty for built-ins
@@ -218,8 +220,13 @@ class ApplicationsActivity : public Activity {
     for (auto& pkg : installedPackages) {
       AppEntry app;
       app.icon = UIIcon::Book;
-      app.detail = "v" + pkg.version;
-      if (!pkg.author.empty()) app.detail += "  \u00b7  " + pkg.author;
+      app.supported = app_paths::supportsThisDevice(pkg.devices);
+      if (app.supported) {
+        app.detail = "v" + pkg.version;
+        if (!pkg.author.empty()) app.detail += "  \u00b7  " + pkg.author;
+      } else {
+        app.detail = tr(STR_APPS_NOT_FOR_DEVICE);
+      }
       app.name = std::move(pkg.name);
       app.dir = std::move(pkg.path);
       app.entry = std::move(pkg.entryScript);

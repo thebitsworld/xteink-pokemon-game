@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Added
+
+- Apps can be made for some readers only (for app makers: a `devices` list in `manifest.json` and the catalog). The App Store only offers apps that run on your reader, and Applications marks an app made for another reader as "Not for this reader". All of today's apps run on every reader.
+
+### Changed
+
+- X4 Pro: apps keep their memory in PSRAM, leaving the reader's own memory to the SD card, the screen and Wi-Fi.
+
+### Fixed
+
+- `smudge.get_device()` names the X4 Pro as "x4pro" (it said "x3").
+
 ## [1.8.0-rc.8] - 2026-10-09
 
 ### Fixed

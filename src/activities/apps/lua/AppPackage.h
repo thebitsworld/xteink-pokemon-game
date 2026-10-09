@@ -20,6 +20,7 @@ struct AppPackage {
   std::string description; // e.g. "Simple e-ink tally counter"
   std::string entryScript; // default "main.lua"
   std::string path;        // e.g. "/.crosspoint/apps/counter"
+  std::vector<std::string> devices;  // readers it is made for; empty = all (app_paths::deviceId())
 
   // 32x32 1-bit icon (32 * 32 / 8 = 128 bytes)
   bool hasIcon = false;
@@ -98,6 +99,9 @@ struct AppPackage {
             if (doc["author"].is<const char*>()) pkg.author = doc["author"].as<const char*>();
             if (doc["description"].is<const char*>()) pkg.description = doc["description"].as<const char*>();
             if (doc["entry"].is<const char*>()) pkg.entryScript = doc["entry"].as<const char*>();
+            for (const char* d : doc["devices"].as<JsonArrayConst>()) {
+              if (d) pkg.devices.emplace_back(d);
+            }
           } else {
             LOG_ERR("APP", "Failed to parse manifest for %s: %s", folderName, err.c_str());
           }
