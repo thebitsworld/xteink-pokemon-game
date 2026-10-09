@@ -32,6 +32,7 @@ class LuaAppActivity : public Activity {
   void onEnter() override {
     Activity::onEnter();
     openMemory_ = app_memory_log::takeOpenSnapshot();
+    orientationOnEnter_ = renderer.getOrientation();
     runner_ = std::make_unique<ink::LuaRunner>(renderer, mappedInput, appDir_, appId_);
 
     if (!runner_->init()) {
@@ -51,6 +52,11 @@ class LuaAppActivity : public Activity {
     }
     requestUpdate();
   }
+
+  bool preventAutoSleep() override { return runner_ && runner_->preventsSleep(); }
+  // A clock or timer keeping the reader awake is otherwise idle: let the main
+  // loop still slow the CPU down.
+  bool needsFullPowerWhilePreventingSleep() override { return false; }
 
   void loop() override {
     if (!runner_ || runner_->shouldExit()) {
@@ -184,6 +190,7 @@ class LuaAppActivity : public Activity {
         runner_.reset();
       }
     }
+    renderer.setOrientation(orientationOnEnter_);  // smudge.set_orientation() may have turned it
     Activity::onExit();
   }
 
@@ -195,6 +202,7 @@ class LuaAppActivity : public Activity {
   std::unique_ptr<ink::LuaRunner> runner_;
   app_memory_log::OpenSnapshot openMemory_;
   std::mutex luaMutex_;
+  GfxRenderer::Orientation orientationOnEnter_ = GfxRenderer::Orientation::Portrait;
 
   void renderError(const char* msg) {
     int w = renderer.getScreenWidth();

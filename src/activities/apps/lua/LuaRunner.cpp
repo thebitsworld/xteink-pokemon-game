@@ -678,6 +678,12 @@ void LuaRunner::registerSmudgeApi() {
 
   lua_pushcfunction(L, l_getMemory);
   lua_setfield(L, -2, "get_memory");
+
+  lua_pushcfunction(L, l_preventSleep);
+  lua_setfield(L, -2, "prevent_sleep");
+
+  lua_pushcfunction(L, l_setOrientation);
+  lua_setfield(L, -2, "set_orientation");
   lua_pushcfunction(L, l_getMemory);
   lua_setfield(L, -2, "memory");
 
@@ -1299,6 +1305,10 @@ int LuaRunner::l_readFile(lua_State* L) {
   }
   const char* path = luaL_checkstring(L, 1);
   size_t maxBytes = (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) ? static_cast<size_t>(lua_tointeger(L, 2)) : 65536;
+  // Optional byte offset, so an app can read one record of a big data file
+  // without loading all of it.
+  const lua_Integer offsetArg = (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) ? lua_tointeger(L, 3) : 0;
+  const size_t offset = offsetArg > 0 ? static_cast<size_t>(offsetArg) : 0;
 
   std::string fullPath = path;
   if (path[0] != '/') {
@@ -1315,6 +1325,12 @@ int LuaRunner::l_readFile(lua_State* L) {
   }
 
   size_t sz = file.size();
+  if (offset >= sz || (offset > 0 && !file.seekSet(offset))) {
+    file.close();
+    lua_pushliteral(L, "");
+    return 1;
+  }
+  sz -= offset;
   if (sz > maxBytes) sz = maxBytes;
 #if !defined(SIMULATOR) && !defined(BOARD_HAS_PSRAM)
   // Ensure we don't exhaust ESP32-C3 internal DRAM reading huge files
@@ -1336,6 +1352,36 @@ int LuaRunner::l_readFile(lua_State* L) {
   file.close();
   luaL_pushresultsize(&b, bytesRead);
   return 1;
+}
+
+// smudge.prevent_sleep(on): keeps the reader from going to sleep while on
+// (a clock or a running timer); true when called without an argument.
+int LuaRunner::l_preventSleep(lua_State* L) {
+  if (!s_activeRunner) return 0;
+  const bool prevent = lua_gettop(L) < 1 || lua_toboolean(L, 1);
+  s_activeRunner->preventSleep_.store(prevent, std::memory_order_relaxed);
+  return 0;
+}
+
+// smudge.set_orientation(name): "portrait" (default), "portrait_inverted",
+// "landscape" (or "landscape_cw") or "landscape_ccw". get_bounds() follows;
+// LuaAppActivity puts the reader's orientation back when the app exits.
+int LuaRunner::l_setOrientation(lua_State* L) {
+  if (!s_activeRunner) return 0;
+  const char* name = luaL_checkstring(L, 1);
+  GfxRenderer::Orientation orientation = GfxRenderer::Orientation::Portrait;
+  if (strcmp(name, "landscape") == 0 || strcmp(name, "landscape_cw") == 0) {
+    orientation = GfxRenderer::Orientation::LandscapeClockwise;
+  } else if (strcmp(name, "landscape_ccw") == 0) {
+    orientation = GfxRenderer::Orientation::LandscapeCounterClockwise;
+  } else if (strcmp(name, "portrait_inverted") == 0) {
+    orientation = GfxRenderer::Orientation::PortraitInverted;
+  }
+  // Apps may call this from on_draw on every frame: only a change redraws.
+  if (s_activeRunner->renderer_.getOrientation() == orientation) return 0;
+  s_activeRunner->renderer_.setOrientation(orientation);
+  s_activeRunner->redrawRequested_ = true;
+  return 0;
 }
 
 int LuaRunner::l_getMemory(lua_State* L) {
