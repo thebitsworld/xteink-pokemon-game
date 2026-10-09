@@ -87,6 +87,20 @@ whether you're on an X3, X4, or X4 Pro. See
 [Third-party assets](third-party-assets.md) for where this artwork comes from and how to
 request a correction or removal.
 
+## Step 2.6 — Add apps without Wi-Fi (optional)
+
+Applications (Home > Applications) can install its games and tools from the App Store over
+Wi-Fi. To add them all at once without Wi-Fi instead:
+
+1. Download `xteink-pokemon-apps.zip` from the same release.
+2. Extract it to the **root** of the SD card. It holds a `.crosspoint/apps` folder - one
+   folder per app - and merges into the hidden `.crosspoint` folder already there. (On a
+   Mac or Windows the `.crosspoint` folder may be hidden; the extraction still works.)
+3. The apps show up in Applications. The App Store keeps them up to date afterwards.
+
+The same ZIP works on every reader. An app made for another reader shows as "Not for this
+reader" and does not open.
+
 ## Your saves are safe
 
 An update never touches your books, reading statistics, or Pokémon save — those live in

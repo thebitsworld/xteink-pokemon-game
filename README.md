@@ -18,6 +18,12 @@ Once your team is strong enough, challenge the eight Gym Leaders, the Elite Four
 
 Only active reading counts — leaving a book open without turning pages does not train your Pokémon.
 
+## More on the reader
+
+- **Applications:** 34 small games and tools (Chess, Go, Hearts, Sudoku, Nonogram, a calculator, a desk clock and more), installed from the on-device App Store over Wi-Fi or from the `xteink-pokemon-apps.zip` attached to each release. See [Applications](docs/applications.md).
+- **Game Boy (X4 Pro only):** open a `.gb` ROM you own from the file browser and play it. See [Game Boy](docs/gameboy.md).
+- **Nearby Sync:** send your Pokémon save, reading stats and the book you are reading to another reader nearby, without Wi-Fi.
+
 ## Screenshots
 
 These are current X3 simulator captures using the artwork from `xteink-pokemon-sd-card-assets.zip`.
