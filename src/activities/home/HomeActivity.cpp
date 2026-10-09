@@ -1130,6 +1130,19 @@ void HomeActivity::onExit() {
   carouselWarmupPending = false;
 }
 
+// The cover snapshot and carousel frames only speed up redraws, and on Dashboard
+// or Carousel themes they hold up to ~100 KB: give them back to a Lua app
+// opened over Home. render() redraws the covers, and the carousel warms up
+// again, once Home is current.
+void HomeActivity::releaseHeapWhileCovered() {
+  freeCoverBuffer();
+  coverRendered = false;
+  const bool hadCarouselFrames = carouselFramesReady;
+  gCarouselCache.invalidate();
+  freeCarouselFrames();
+  if (hadCarouselFrames) carouselWarmupPending = true;
+}
+
 bool HomeActivity::storeCoverBuffer() {
   // render() must have already set the cover rect; without it we'd be back to
   // cloning the whole framebuffer.

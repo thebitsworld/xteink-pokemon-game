@@ -683,6 +683,9 @@ void ActivityManager::loop() {
       } else if (pendingAction == PendingAction::Push) {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));
+        if (pendingActivity->needsHeapFromCoveredActivities()) {
+          for (auto& covered : stackActivities) covered->releaseHeapWhileCovered();
+        }
       }
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
