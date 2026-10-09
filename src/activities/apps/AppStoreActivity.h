@@ -118,17 +118,7 @@ class AppStoreActivity : public Activity {
     switch (state_) {
       case State::CHECK_WIFI: {
         if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-          startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult&) {
-                                   if (isWifiConnected()) {
-                                     state_ = State::FETCHING_CATALOG;
-                                     requestUpdateAndWait();
-                                     fetchCatalog();
-                                   } else {
-                                     state_ = State::CHECK_WIFI;
-                                     requestUpdate();
-                                   }
-                                 });
+          openWifiSelection();
           return;
         }
         int tx = 0, ty = 0;
@@ -136,22 +126,16 @@ class AppStoreActivity : public Activity {
           int w = renderer.getScreenWidth();
           int h = renderer.getScreenHeight();
           const auto& m = UITheme::getInstance().getMetrics();
+          if (actionButtonHit(tx, ty)) {
+            openWifiSelection();
+            return;
+          }
           if (ty > h - m.buttonHintsHeight) {
             if (tx < w / 2) {
               finish();
               return;
             } else {
-              startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                                     [this](const ActivityResult&) {
-                                       if (isWifiConnected()) {
-                                         state_ = State::FETCHING_CATALOG;
-                                         requestUpdateAndWait();
-                                         fetchCatalog();
-                                       } else {
-                                         state_ = State::CHECK_WIFI;
-                                         requestUpdate();
-                                       }
-                                     });
+              openWifiSelection();
               return;
             }
           }
@@ -182,18 +166,7 @@ class AppStoreActivity : public Activity {
 
       case State::ERROR: {
         if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-          if (isWifiConnected()) {
-            if (lastFailedAppIndex_ >= 0 && lastFailedAppIndex_ < static_cast<int>(apps_.size())) {
-              installApp(apps_[lastFailedAppIndex_]);
-            } else {
-              state_ = State::FETCHING_CATALOG;
-              requestUpdateAndWait();
-              fetchCatalog();
-            }
-          } else {
-            state_ = State::CHECK_WIFI;
-            requestUpdate();
-          }
+          retry();
           return;
         }
         int tx = 0, ty = 0;
@@ -201,6 +174,10 @@ class AppStoreActivity : public Activity {
           int w = renderer.getScreenWidth();
           int h = renderer.getScreenHeight();
           const auto& m = UITheme::getInstance().getMetrics();
+          if (actionButtonHit(tx, ty)) {
+            retry();
+            return;
+          }
           if (ty > h - m.buttonHintsHeight) {
             if (tx < w / 2) {
               if (!apps_.empty()) {
@@ -211,18 +188,7 @@ class AppStoreActivity : public Activity {
               }
               return;
             } else {
-              if (isWifiConnected()) {
-                if (lastFailedAppIndex_ >= 0 && lastFailedAppIndex_ < static_cast<int>(apps_.size())) {
-                  installApp(apps_[lastFailedAppIndex_]);
-                } else {
-                  state_ = State::FETCHING_CATALOG;
-                  requestUpdateAndWait();
-                  fetchCatalog();
-                }
-              } else {
-                state_ = State::CHECK_WIFI;
-                requestUpdate();
-              }
+              retry();
               return;
             }
           }
@@ -233,6 +199,55 @@ class AppStoreActivity : public Activity {
   }
 
  private:
+  void openWifiSelection() {
+    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) {
+                             if (isWifiConnected()) {
+                               state_ = State::FETCHING_CATALOG;
+                               requestUpdateAndWait();
+                               fetchCatalog();
+                             } else {
+                               state_ = State::CHECK_WIFI;
+                               requestUpdate();
+                             }
+                           });
+  }
+
+  // Retries what failed: the install, or else the catalog (after Wi-Fi when
+  // it dropped).
+  void retry() {
+    if (!isWifiConnected()) {
+      state_ = State::CHECK_WIFI;
+      requestUpdate();
+    } else if (lastFailedAppIndex_ >= 0 && lastFailedAppIndex_ < static_cast<int>(apps_.size())) {
+      installApp(apps_[lastFailedAppIndex_]);
+    } else {
+      state_ = State::FETCHING_CATALOG;
+      requestUpdateAndWait();
+      fetchCatalog();
+    }
+  }
+
+  // The on-screen button of the no-Wi-Fi and error screens. Touch-only
+  // readers draw no button hints, so without it they had nothing to tap.
+  Rect actionButtonRect() const {
+    const int w = renderer.getScreenWidth();
+    constexpr int bw = 320;
+    return Rect{(w - bw) / 2, renderer.getScreenHeight() / 2 + 110, bw, 50};
+  }
+
+  bool actionButtonHit(const int x, const int y) const {
+    const Rect b = actionButtonRect();
+    return x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height;
+  }
+
+  void drawActionButton(const char* label) {
+    const Rect b = actionButtonRect();
+    renderer.fillRoundedRect(b.x, b.y, b.width, b.height, 8, Color::Black);
+    const int tw = renderer.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
+    renderer.drawText(UI_12_FONT_ID, b.x + (b.width - tw) / 2, b.y + 14, label, false, EpdFontFamily::BOLD);
+  }
+
   enum class State { CHECK_WIFI, FETCHING_CATALOG, CATALOG_READY, APP_DETAIL, DOWNLOADING, ERROR };
 
   struct CatalogApp {
@@ -819,6 +834,7 @@ class AppStoreActivity : public Activity {
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_WIFI_NOT_CONNECTED), true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(SMALL_FONT_ID, h / 2 - 10, tr(STR_APPS_CONNECT_WIFI_HINT), true);
 
+    drawActionButton(tr(STR_APPS_CONNECT_WIFI));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_CONNECT_WIFI), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
@@ -1056,6 +1072,7 @@ class AppStoreActivity : public Activity {
       dy += renderer.getLineHeight(SMALL_FONT_ID) + 2;
     }
 
+    drawActionButton(tr(STR_APPS_RETRY));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_APPS_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
