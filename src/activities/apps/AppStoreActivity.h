@@ -13,6 +13,7 @@
 #include "activities/Activity.h"
 #include "activities/apps/lua/AppPaths.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
@@ -94,7 +95,10 @@ class AppStoreActivity : public Activity {
   }
 
   void loop() override {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    // Touch-only readers have no Back button hint: the header's back arrow
+    // does the same (except mid-download, which has its own Cancel).
+    const bool headerBack = state_ != State::DOWNLOADING && TouchHeaderBackButton::wasTapped(mappedInput, renderer);
+    if (headerBack || mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       if (state_ == State::DOWNLOADING) {
         cancelDownload_ = true;
         return;
@@ -225,6 +229,18 @@ class AppStoreActivity : public Activity {
       state_ = State::FETCHING_CATALOG;
       requestUpdateAndWait();
       fetchCatalog();
+    }
+  }
+
+  int headerHeight() const { return TouchHeaderBackButton::height(UITheme::getInstance().getMetrics(), mappedInput); }
+
+  // The header, with a back arrow on touch readers (they draw no Back hint).
+  void drawStoreHeader(const char* title, const char* subtitle, const bool backButton = true) {
+    const Rect header{0, UITheme::getInstance().getMetrics().topPadding, renderer.getScreenWidth(), headerHeight()};
+    if (backButton && mappedInput.hasTouchHardware()) {
+      TouchHeaderBackButton::draw(renderer, header, title, false, 0, subtitle);
+    } else {
+      GUI.drawHeader(renderer, header, title, subtitle);
     }
   }
 
@@ -557,7 +573,7 @@ class AppStoreActivity : public Activity {
         }
       }
 
-      int startY = m.topPadding + m.headerHeight + 6;
+      int startY = m.topPadding + headerHeight() + 6;
       int rowH = 56;
       for (int i = pageStart; i < count && i < pageStart + rowsPerPage; ++i) {
         int ry = startY + (i - pageStart) * rowH;
@@ -577,7 +593,7 @@ class AppStoreActivity : public Activity {
 
   int getDetailActionButtonY() const {
     const auto& m = UITheme::getInstance().getMetrics();
-    int cardY = m.topPadding + m.headerHeight + 12;
+    int cardY = m.topPadding + headerHeight() + 12;
     int cardH = 96;
     int descY = cardY + cardH + 12;
     int descH = 176;
@@ -816,7 +832,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_CONNECTING));
+    drawStoreHeader(tr(STR_APPS_STORE), tr(STR_APPS_CONNECTING));
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 20, msg, true, EpdFontFamily::BOLD);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
@@ -829,7 +845,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_OFFLINE));
+    drawStoreHeader(tr(STR_APPS_STORE), tr(STR_APPS_OFFLINE));
 
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_WIFI_NOT_CONNECTED), true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(SMALL_FONT_ID, h / 2 - 10, tr(STR_APPS_CONNECT_WIFI_HINT), true);
@@ -847,9 +863,9 @@ class AppStoreActivity : public Activity {
     renderer.clearScreen();
     char subBuf[64];
     snprintf(subBuf, sizeof(subBuf), tr(STR_APPS_AVAILABLE), static_cast<unsigned>(apps_.size()));
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), subBuf);
+    drawStoreHeader(tr(STR_APPS_STORE), subBuf);
 
-    int startY = m.topPadding + m.headerHeight + 6;
+    int startY = m.topPadding + headerHeight() + 6;
     int rowH = 56;
     int count = static_cast<int>(apps_.size());
     const int rowsPerPage = 8;
@@ -926,10 +942,10 @@ class AppStoreActivity : public Activity {
     const auto& app = apps_[selectedIndex_];
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), app.name.c_str());
+    drawStoreHeader(tr(STR_APPS_STORE), app.name.c_str());
 
     // 1. Hero Card at top
-    int cardY = m.topPadding + m.headerHeight + 12;
+    int cardY = m.topPadding + headerHeight() + 12;
     int cardH = 96;
     renderer.drawRoundedRect(16, cardY, w - 32, cardH, 1, 8, true);
 
@@ -1042,7 +1058,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_INSTALLING), appName);
+    drawStoreHeader(tr(STR_APPS_INSTALLING), appName, /*backButton=*/false);
 
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, tr(STR_APPS_DOWNLOADING), true, EpdFontFamily::BOLD);
 
@@ -1061,7 +1077,7 @@ class AppStoreActivity : public Activity {
     const auto& m = UITheme::getInstance().getMetrics();
 
     renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, m.topPadding, w, m.headerHeight}, tr(STR_APPS_STORE), tr(STR_APPS_ERROR));
+    drawStoreHeader(tr(STR_APPS_STORE), tr(STR_APPS_ERROR));
 
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, errorTitle_.empty() ? tr(STR_APPS_ERROR) : errorTitle_.c_str(), true,
                               EpdFontFamily::BOLD);
