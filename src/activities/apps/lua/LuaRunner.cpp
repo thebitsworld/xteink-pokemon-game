@@ -56,16 +56,6 @@ static bool keepDebugInfo() {
 #endif
 }
 
-// The chunk on top of the stack as bytecode without debug info. The bytes go
-// to a buffer outside the Lua heap.
-static bool dumpStripped(lua_State* L, std::string& out) {
-  const auto writer = [](lua_State*, const void* data, const size_t size, void* ud) -> int {
-    static_cast<std::string*>(ud)->append(static_cast<const char*>(data), size);
-    return 0;
-  };
-  return lua_dump(L, writer, &out, /*strip=*/1) == 0 && !out.empty();
-}
-
 // Compiled-chunk cache --------------------------------------------------------
 // Compiling a script briefly needs two to three times the memory its code
 // keeps, so a module compiled while an app is running is often the app's
@@ -100,18 +90,26 @@ static bool cacheIsCurrent(HalFile& file, uint32_t hash) {
   return stored == hash;
 }
 
-static void writeCache(const std::string& cachePath, uint32_t hash, const std::string& bytecode) {
+// Writes the chunk on top of the stack, without debug info, to the cache file
+// piece by piece as lua_dump() produces it. Building the whole bytecode in
+// memory first needed one block as big as it, which a fragmented X3 heap could
+// not always give (std::bad_alloc, then abort()).
+static bool writeCache(lua_State* L, const std::string& cachePath, uint32_t hash) {
   const size_t slash = cachePath.rfind('/');
   if (slash != std::string::npos) Storage.ensureDirectoryExists(cachePath.substr(0, slash).c_str());
   HalFile file = Storage.open(cachePath.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
-  if (!file) return;
+  if (!file) return false;
   uint8_t header[kCacheHeaderSize];
   memcpy(header, kCacheTag, sizeof(kCacheTag));
   for (int i = 0; i < 4; i++) header[4 + i] = static_cast<uint8_t>(hash >> (8 * i));
-  bool ok = file.write(header, sizeof(header)) == sizeof(header) &&
-            file.write(bytecode.data(), bytecode.size()) == bytecode.size();
+  const auto writer = [](lua_State*, const void* data, const size_t size, void* ud) -> int {
+    return static_cast<HalFile*>(ud)->write(data, size) == size ? 0 : 1;
+  };
+  const bool ok = file.write(header, sizeof(header)) == sizeof(header) &&
+                  lua_dump(L, writer, &file, /*strip=*/1) == 0;
   file.close();
   if (!ok) Storage.remove(cachePath.c_str());  // a torn file would only be rejected later
+  return ok;
 }
 }  // namespace
 
@@ -284,16 +282,29 @@ int LuaRunner::loadChunk(const std::string& scriptPath) {
   }
   int status = lua_load(L, sdFileReader, &ctx, scriptPath.c_str(), "t");
   ctx.file.close();
-  if (status != LUA_OK || keepDebugInfo()) return status;
+  if (status != LUA_OK || !hashed || !writeCache(L, cachePath, hash)) return status;  // keep it as compiled
 
-  std::string bytecode;
-  if (!dumpStripped(L, bytecode)) return LUA_OK;  // keep it as compiled
-  if (hashed) writeCache(cachePath, hash, bytecode);
-  // Swap in the stripped copy; the original is collected first, so both are
-  // never in the heap at once.
+  // Swap in the stripped copy from the cache; the original is collected
+  // first, so both are never in the heap at once.
   lua_pop(L, 1);
   lua_gc(L, LUA_GCCOLLECT, 0);
-  return luaL_loadbufferx(L, bytecode.data(), bytecode.size(), scriptPath.c_str(), "b");
+  FileReaderContext cached;
+  if (Storage.openFileForRead("LUA", cachePath.c_str(), cached.file) && cacheIsCurrent(cached.file, hash)) {
+    status = lua_load(L, sdFileReader, &cached, scriptPath.c_str(), "b");
+    cached.file.close();
+    if (status == LUA_OK) return LUA_OK;
+    lua_pop(L, 1);
+  } else if (cached.file) {
+    cached.file.close();
+  }
+  // The cache did not read back: compile the source again.
+  if (!Storage.openFileForRead("LUA", scriptPath.c_str(), ctx.file)) {
+    lua_pushfstring(L, "cannot open %s", scriptPath.c_str());
+    return LUA_ERRFILE;
+  }
+  status = lua_load(L, sdFileReader, &ctx, scriptPath.c_str(), "t");
+  ctx.file.close();
+  return status;
 }
 
 // Compiles every .lua file of the app whose cached bytecode is missing or
