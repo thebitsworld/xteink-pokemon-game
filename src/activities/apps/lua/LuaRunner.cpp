@@ -4,6 +4,9 @@
 
 #include <HalClock.h>
 #include <HalStorage.h>
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR)
+#include <esp_heap_caps.h>
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -156,7 +159,16 @@ void* LuaRunner::customLuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize)
   }
 #endif
 
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR)
+  // Small blocks would otherwise land in internal RAM first (malloc keeps
+  // anything under 4 KB there), and a big app could take the internal RAM the
+  // SD card, display and Wi-Fi need. Lua lives in PSRAM; internal RAM is only
+  // a fallback.
+  void* newPtr = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!newPtr) newPtr = realloc(ptr, nsize);
+#else
   void* newPtr = realloc(ptr, nsize);
+#endif
   if (newPtr) {
     if (ptr == nullptr) {
       self->currentAllocatedBytes_ += nsize;
@@ -1945,17 +1957,7 @@ int LuaRunner::l_getBattery(lua_State* L) {
 }
 
 int LuaRunner::l_getDevice(lua_State* L) {
-#if defined(SIMULATOR)
-  lua_pushstring(L, "simulator");
-#elif defined(CROSSINK_APP_DEVICE_STICKY)
-  lua_pushstring(L, "sticky");
-#elif defined(CROSSINK_APP_DEVICE_X4PRO)
-  lua_pushstring(L, "x4pro");
-#elif defined(CROSSINK_APP_DEVICE_X4CLASSIC)
-  lua_pushstring(L, "x4");
-#else
-  lua_pushstring(L, "x3");
-#endif
+  lua_pushstring(L, app_paths::deviceId());
   return 1;
 }
 

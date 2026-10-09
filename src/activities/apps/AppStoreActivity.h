@@ -469,6 +469,14 @@ class AppStoreActivity : public Activity {
       app.author = obj["author"] | "Unknown";
       app.description = obj["description"] | "";
 
+      // Apps made for other readers (a "devices" list without this one) are
+      // not offered here.
+      std::vector<std::string> devices;
+      for (const char* d : obj["devices"].as<JsonArrayConst>()) {
+        if (d) devices.emplace_back(d);
+      }
+      if (!app_paths::supportsThisDevice(devices)) continue;
+
       JsonArray files = obj["files"].as<JsonArray>();
       for (const char* f : files) {
         if (f) app.files.push_back(f);

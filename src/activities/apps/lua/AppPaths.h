@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <string>
+#include <vector>
 
 // Where the Lua app platform keeps its files on the SD card. Everything lives
 // under the hidden /.crosspoint folder, so the Library and the file browser
@@ -26,6 +27,32 @@ constexpr const char* SCAN_DIRS[] = {
     INSTALL_DIR, "/.crosspoint/applications", "/.crosssmudge/applications", "/apps", "/applications",
     "/.smudge/applications",
 };
+
+// This reader as an app's "devices" list (manifest.json, catalog.json) and
+// smudge.get_device() name it: "x3" for the X3/X4 firmware (ESP32-C3, no
+// PSRAM, the 75 KB app budget), "x4pro", "x4" (X4 classic) or "sticky". A
+// simulator answers as the reader it simulates.
+inline const char* deviceId() {
+#if defined(FREEINK_DEVICE_X4PRO) || defined(SIMULATOR_DEVICE_X4_PRO)
+  return "x4pro";
+#elif defined(FREEINK_DEVICE_STICKY)
+  return "sticky";
+#elif defined(FREEINK_DEVICE_X4CLASSIC)
+  return "x4";
+#else
+  return "x3";
+#endif
+}
+
+// Whether an app whose "devices" list is `devices` runs here; an app without
+// the list runs everywhere.
+inline bool supportsThisDevice(const std::vector<std::string>& devices) {
+  if (devices.empty()) return true;
+  for (const auto& d : devices) {
+    if (d == deviceId()) return true;
+  }
+  return false;
+}
 
 inline std::string installDirFor(const std::string& appId) { return std::string(INSTALL_DIR) + "/" + appId; }
 
