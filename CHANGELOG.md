@@ -1,4 +1,10 @@
-## [Unreleased]
+## [1.8.1-beta.1] - 2026-10-12
+
+A test build for the X4 Pro's Game Boy, which is choppy on the reader. It is not a release: install it only to help measure the Game Boy's speed. Play a game for a few minutes, leave it with EXIT, and send `/.crosspoint/gameboy-perf.txt` from the SD card (or a photo of the line under the game's title).
+
+### Added
+
+- Game Boy (X4 Pro): a line under the game's title shows how fast the emulator runs against the real Game Boy, how long one frame takes, how long each screen refresh takes and how often the game loop runs. Each game session adds the same figures to `/.crosspoint/gameboy-perf.txt`.
 
 ### Changed
 
@@ -7,6 +13,7 @@
 ### Fixed
 
 - Blackjack on the X4 Pro: betting, dealing, hitting, standing and doubling now have buttons to tap; before, the game could not be played by touch.
+- Game Boy (X4 Pro): the emulator no longer waits for the e-ink refresh to finish before it may reuse the picture it handed to the screen.
 - The other apps from CrossSmudge on the X4 Pro: 2048, Dice, Codex, Block Drop, Wordle, Water Tracker, Stopwatch, Hourglass and Desk Stand show their actions as buttons to tap (Exit, New game, the die to roll, Split and Reset, the timer and water steps, the clock style...). Before, those actions had nothing to tap.
 
 ## [1.8.0] - 2026-10-09
