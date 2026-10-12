@@ -121,6 +121,8 @@ class HalDisplay {
   // The last refresh's phases in microseconds (copy, new plane, setup,
   // waveform, old plane); false where the driver does not measure them.
   bool lastRefreshTimings(uint32_t out[5]) const { return einkDisplay.lastRefreshTimings(out); }
+  // The display SPI clock for a game (0 = the driver default); no refresh may run.
+  void setDisplaySpiHz(uint32_t hz) { einkDisplay.setDisplaySpiHz(hz); }
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

@@ -38,6 +38,11 @@ class EpdBus {
   // coCs: a co-resident chip-select (e.g. the SD card sharing the SPI bus on
   // M5 PaperColor) that must be held de-asserted during panel transactions.
   void begin(const EpdPins& pins, uint32_t spiHz, BusyPolarity busy, int8_t spiMiso = -1, int8_t coCs = -1);
+  // xteink-pokemon: change the SPI clock after begin() (no transfer may run).
+  void setSpiHz(uint32_t spiHz) {
+    _spiHz = spiHz;
+    _spi = SPISettings(spiHz, MSBFIRST, SPI_MODE0);
+  }
 
   // Hardware reset pulse; extraSettleMs adds a post-reset settle (X3 needs 50 ms).
   void reset(uint16_t extraSettleMs = 0);

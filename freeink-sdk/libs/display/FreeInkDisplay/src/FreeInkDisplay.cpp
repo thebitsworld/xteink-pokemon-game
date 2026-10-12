@@ -1032,6 +1032,12 @@ bool FreeInkDisplay::lastRefreshTimings(uint32_t out[5]) const {
   return true;
 }
 
+// xteink-pokemon: a game's display SPI clock; 0 restores the driver default.
+void FreeInkDisplay::setDisplaySpiHz(uint32_t hz) {
+  if (!_driver) return;
+  _bus.setSpiHz(hz ? hz : _driver->spiHz());
+}
+
 // xteink-pokemon: forwards the game-mode DU waveform scale to the driver.
 void FreeInkDisplay::setFastRefreshDuScale(uint8_t percent) {
   if (_driver) _driver->setFastRefreshDuScale(percent);
