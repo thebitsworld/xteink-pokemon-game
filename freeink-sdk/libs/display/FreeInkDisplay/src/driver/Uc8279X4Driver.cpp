@@ -415,6 +415,7 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
     if (!findChangedWindow(fb)) {
       _grayBaseValid = true;  // the snapshot is this frame already
       _timings.copyUs = phaseUs();
+      ++_lastTimings.skipped;
       _pendingRefresh = false;
       return false;
     }
@@ -677,6 +678,9 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
     _diffRefValid = keepRef;
   }
   _timings.oldPlaneUs = phaseUs();  // xteink-pokemon
+  _timings.refreshes = _lastTimings.refreshes + 1;
+  _timings.skipped = _lastTimings.skipped;
+  _lastTimings = _timings;
   _oldPlaneValid = true;
   _needFullClear = false;
 

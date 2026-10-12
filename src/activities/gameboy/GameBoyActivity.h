@@ -176,6 +176,10 @@ class GameBoyActivity final : public Activity {
   std::atomic<uint32_t> perfCleanRefreshes{0}, perfUnchanged{0};
   std::atomic<uint32_t> perfPhaseUs[6] = {};
   uint64_t perfTotalCleanRefreshes = 0, perfTotalUnchanged = 0;
+  // The driver's running counts of completed and skipped refreshes as last
+  // seen (render task only): with an overlapped refresh, a call completes the
+  // previous refresh and starts (or skips) the next.
+  uint32_t perfSeenRefreshes = 0, perfSeenSkipped = 0;
   uint64_t perfTotalPhaseUs[6] = {};
 
   // The screen refresh the game uses: 0 = stock, 1 = the faster one on readers

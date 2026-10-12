@@ -177,6 +177,7 @@ class Uc8279X4Driver : public PanelDriver {
   // xteink-pokemon: the last refresh's phases (lastRefreshTimings) and the
   // clock the next phase is measured from.
   RefreshTimings _timings{};
+  RefreshTimings _lastTimings{};  // the last completed refresh, with the counts
   uint32_t _phaseStartUs = 0;
   uint32_t phaseUs() {
     const uint32_t now = micros();
@@ -208,7 +209,7 @@ class Uc8279X4Driver : public PanelDriver {
     _diffRefValid = false;
   }
   bool lastRefreshTimings(RefreshTimings& out) const override {
-    out = _timings;
+    out = _lastTimings;
     return true;
   }
 

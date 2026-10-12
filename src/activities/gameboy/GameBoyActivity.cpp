@@ -175,6 +175,15 @@ void GameBoyActivity::onEnter() {
 
   initialized.store(true, std::memory_order_release);
   applyJoypad();
+#ifndef SIMULATOR
+  {
+    uint32_t phases[8];
+    if (display.lastRefreshTimings(phases)) {
+      perfSeenRefreshes = phases[6];
+      perfSeenSkipped = phases[7];
+    }
+  }
+#endif
   requestUpdate(true);
 
   const uint64_t nowUs = nowMicros();
@@ -202,6 +211,7 @@ void GameBoyActivity::onExit() {
   if (refreshPreset != 0) {
     refreshPreset = 0;
 #ifndef SIMULATOR
+    display.finishOverlapped();  // the last picture's refresh may still run
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
     display.setFastRefreshDuScale(0);
     display.setFastRefreshDiffWindow(false);
@@ -349,24 +359,44 @@ void GameBoyActivity::render(RenderLock&&) {
   }
   registerTouchTargets();
   const uint64_t refreshStartUs = nowMicros();
-  renderer.displayBuffer(cleaning ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  // On the fast refresh the call returns while the waveform runs, and the next
+  // picture is drawn meanwhile: the driver keeps its own copy of the frame for
+  // the rest of the refresh (setFastRefreshDiffWindow). The call first
+  // finishes the refresh before. The stock refresh blocks until it is done.
+#ifdef SIMULATOR
+  const bool overlap = false;
+#else
+  const bool overlap = !cleaning && refreshPreset != 0 && renderer.supportsAsyncRefresh();
+#endif
+  if (overlap) {
+#ifndef SIMULATOR
+    display.displayBufferOverlapped(HalDisplay::FAST_REFRESH);
+#endif
+  } else {
+    renderer.displayBuffer(cleaning ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  }
   const uint64_t doneUs = nowMicros();
+#ifndef SIMULATOR
+  uint32_t phases[8];
+  if (display.lastRefreshTimings(phases)) {
+    const uint32_t completed = phases[6] - perfSeenRefreshes;
+    const uint32_t skipped = phases[7] - perfSeenSkipped;
+    perfSeenRefreshes = phases[6];
+    perfSeenSkipped = phases[7];
+    if (!cleaning) {
+      // Pictures that had not changed, which the driver did not refresh.
+      if (skipped != 0) perfUnchanged.fetch_add(skipped, std::memory_order_relaxed);
+      // The figures below are those of the refresh this call completed.
+      if (completed == 0) return;
+      for (int i = 0; i < 6; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
+    }
+  }
+#endif
   if (cleaning) {
     // A cleaning refresh takes ~1.6 s: kept out of the Fast refresh figures.
     perfCleanRefreshes.fetch_add(1, std::memory_order_relaxed);
     return;
   }
-#ifndef SIMULATOR
-  uint32_t phases[6];
-  if (display.lastRefreshTimings(phases)) {
-    if (phases[5] == 0) {
-      // The picture had not changed, so the driver did not refresh.
-      perfUnchanged.fetch_add(1, std::memory_order_relaxed);
-      return;
-    }
-    for (int i = 0; i < 6; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
-  }
-#endif
   perfDisplays.fetch_add(1, std::memory_order_relaxed);
   perfDrawUs.fetch_add(static_cast<uint32_t>(refreshStartUs - drawStartUs), std::memory_order_relaxed);
   const uint32_t refreshUs = static_cast<uint32_t>(doneUs - refreshStartUs);
@@ -575,6 +605,7 @@ void GameBoyActivity::applyRefreshPreset() {
   {
     RenderLock lock(*this);
 #ifndef SIMULATOR
+    display.finishOverlapped();
     display.setFastRefreshTuning(p.tsset, p.pll);
     display.setFastRefreshDuScale(p.duPct);
     display.setFastRefreshDiffWindow(p.diffWindow);

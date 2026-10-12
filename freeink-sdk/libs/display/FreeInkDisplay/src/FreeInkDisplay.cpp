@@ -1021,7 +1021,7 @@ void FreeInkDisplay::setFastRefreshTuning(uint8_t tsset, uint8_t pll) {
 }
 
 // xteink-pokemon: the last refresh's phases, from the driver.
-bool FreeInkDisplay::lastRefreshTimings(uint32_t out[6]) const {
+bool FreeInkDisplay::lastRefreshTimings(uint32_t out[8]) const {
   PanelDriver::RefreshTimings t{};
   if (!_driver || !_driver->lastRefreshTimings(t)) return false;
   out[0] = t.copyUs;
@@ -1030,6 +1030,8 @@ bool FreeInkDisplay::lastRefreshTimings(uint32_t out[6]) const {
   out[3] = t.waveformUs;
   out[4] = t.oldPlaneUs;
   out[5] = t.planeBytes;
+  out[6] = t.refreshes;
+  out[7] = t.skipped;
   return true;
 }
 
