@@ -1,77 +1,15 @@
-## [1.8.1-beta.7] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs it drives the X4 Pro's e-ink screen with a host-loaded, shortened waveform at a raised frame rate, and one preset also runs the screen's data link at twice its usual speed; none of this has been validated on this panel. It can leave ghost images, faint, noisy or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
-
-For the tester only (X4 Pro with a UC8279 screen): the screen no longer waits after each refresh, so updates should come noticeably faster. Open a Game Boy game and tap the title strip to cycle the presets: P0 (stock), D40 PLL0F (beta.6's pick) and D40 0F SPI20 (the same with the screen's data link at 20 MHz instead of 10). Play about 30 seconds per preset, watch for noise or garbage on the screen with SPI20, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
+## [1.8.1] - 2026-10-12
 
 ### Changed
 
-- Game Boy (X4 Pro, test only): a screen update requested during a refresh now starts right after it instead of being dropped; the presets are stock, D40 PLL0F and D40 PLL0F with a 20 MHz display link.
-
-## [1.8.1-beta.6] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs it drives the X4 Pro's e-ink screen with a host-loaded, shortened waveform at a raised frame rate that has not been validated on this panel. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
-
-For the tester only (X4 Pro with a UC8279 screen): the Game Boy emulator now runs on the reader's other CPU core, which should make every screen refresh faster. Open a Game Boy game and tap the title strip to cycle the presets: P0 (stock), D50, then D40, D30 and D20 at the faster frame rate (PLL0F). Play about 30 seconds per preset, note how the picture looks and how smooth the game feels, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with those notes.
-
-### Changed
-
-- Game Boy (X4 Pro, test only): the emulator runs on its own CPU core, leaving the other to the screen; the presets go down to 20% of the DU waveform at the faster frame rate.
-
-## [1.8.1-beta.5] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs it drives the X4 Pro's e-ink screen with a host-loaded, shortened waveform at a raised frame rate that has not been validated on this panel. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
-
-For the tester only (X4 Pro with a UC8279 screen): open a Game Boy game and tap the title strip to cycle the presets: P0 (stock), D50, then D40, D50, D60 and D70 at the faster frame rate (PLL0F). The third figures line shows where each refresh goes (copy, new frame, setup, waveform, old frame, in ms). Play about 30 seconds per preset, note how clean and dark the picture looks, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with those notes.
-
-### Changed
-
-- Game Boy (X4 Pro, test only): a third line of figures breaks each screen refresh into its phases, cleaning refreshes no longer count in the refresh average, and the presets now try 40-70% of the DU waveform at the faster frame rate.
-
-## [1.8.1-beta.4] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs it drives the X4 Pro's e-ink screen with a host-loaded, shortened waveform that has not been validated on this panel. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
-
-For the tester only (X4 Pro with a UC8279 screen): open a Game Boy game and tap the title strip at the top to cycle the presets: P0 (stock), D100 (should look like stock), D75, D50, D35, D20 (shorter and shorter waveforms) and D50 PLL0F. Each preset change and every minute on a non-stock preset gets a cleaning refresh, and leaving the game restores the stock refresh. Play about 30 seconds per preset, note the LCD time on the figures line and how clean and dark the picture looks, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with those notes.
-
-### Changed
-
-- Game Boy (X4 Pro, test only): the refresh presets now try a shortened DU waveform loaded by the reader (75% down to 20% of the stock frames) instead of the forced temperatures of beta.3, which slowed or flashed the screen.
-
-## [1.8.1-beta.3] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. It changes how the X4 Pro's e-ink screen is driven while a Game Boy game runs, with timings that have not been validated. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
-
-For the tester only (X4 Pro): open a Game Boy game and tap the title strip at the top to cycle six refresh presets (P0 = stock ... P5). Each preset change and every minute on a non-stock preset gets a cleaning refresh, and leaving the game restores the stock refresh. Play about 30 seconds per preset, note how clean and dark the picture looks, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` (one line per preset tried) with those notes.
-
-### Added
-
-- Game Boy (X4 Pro, test only): six experimental e-ink refresh presets (forced temperature and frame rate of the Fast refresh) to find a faster screen for games, with the panel and preset shown at the top right and recorded in `gameboy-perf.txt`.
-
-## [1.8.1-beta.2] - 2026-10-12
-
-A test build for the X4 Pro's Game Boy, like beta.1: not a release. It also shows which e-ink controller your X4 Pro has (X4 Pro batches use an SSD1677, UC8179 or UC8279), which decides how a faster screen refresh could be tried. Open any Game Boy game for a few seconds: the second line under the title starts with the controller's name (for example `SSD1677-00`). Send a photo of that line, or `/.crosspoint/gameboy-perf.txt` after leaving the game with EXIT.
-
-### Added
-
-- Game Boy (X4 Pro): the speed figures show the reader's e-ink controller, and `gameboy-perf.txt` has a `panel` column with it.
-
-## [1.8.1-beta.1] - 2026-10-12
-
-A test build for the X4 Pro's Game Boy, which is choppy on the reader. It is not a release: install it only to help measure the Game Boy's speed. Play a game for a few minutes, leave it with EXIT, and send `/.crosspoint/gameboy-perf.txt` from the SD card (or a photo of the line under the game's title).
-
-### Added
-
-- Game Boy (X4 Pro): a line under the game's title shows how fast the emulator runs against the real Game Boy, how long one frame takes, how long each screen refresh takes and how often the game loop runs. Each game session adds the same figures to `/.crosspoint/gameboy-perf.txt`.
-
-### Changed
-
+- Game Boy (X4 Pro): the screen updates about twice as fast on X4 Pros with a UC8279 e-ink controller, about three times a second instead of about 1.4, using a shorter screen waveform at a higher frame rate and a faster link to the screen. A full cleaning refresh every minute clears any ghosting. Other X4 Pro screens keep the standard refresh until they have been tested. The emulator also runs on its own CPU core, leaving the other to the screen.
+- Game Boy (X4 Pro): each game session adds a line to `/.crosspoint/gameboy-perf.txt` with the emulator's speed, how often the screen updated and the screen controller, to help with speed reports.
 - Sudoku: a number pad under the grid. Tap a cell and then a digit (or X to erase); with the buttons, Confirm on a cell moves to the pad, Left/Right pick a digit and Confirm enters it. Digits already used nine times are greyed.
 
 ### Fixed
 
+- Game Boy (X4 Pro): a screen update the game asked for during a refresh was sometimes dropped; it now follows right after.
 - Blackjack on the X4 Pro: betting, dealing, hitting, standing and doubling now have buttons to tap; before, the game could not be played by touch.
-- Game Boy (X4 Pro): the emulator no longer waits for the e-ink refresh to finish before it may reuse the picture it handed to the screen.
 - The other apps from CrossSmudge on the X4 Pro: 2048, Dice, Codex, Block Drop, Wordle, Water Tracker, Stopwatch, Hourglass and Desk Stand show their actions as buttons to tap (Exit, New game, the die to roll, Split and Reset, the timer and water steps, the clock style...). Before, those actions had nothing to tap.
 
 ## [1.8.0] - 2026-10-09
