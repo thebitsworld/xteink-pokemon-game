@@ -10,7 +10,7 @@ end
 function screen.draw()
     local m = smudge.get_metrics()
     local ty = m.top_padding + m.header_height + 2
-    local by = h - m.button_hints_height - 2
+    local by = h - hints_height() - 2
     draw_page_frame(ty, by)
 
     local y = draw_combat_header(ty)
@@ -36,7 +36,7 @@ function screen.draw()
         smudge.centered_text(hy + 60, "(Hand empty - press End Turn)", "ui12", "regular", true)
     end
 
-    smudge.button_hints("End Turn", "Play", "<", ">")
+    button_hints("End Turn", "Play", "<", ">")
 end
 
 function screen.on_button(btn, pressed)
@@ -69,7 +69,7 @@ function screen.on_tap(x, y)
     local n = #state.hand
     if n == 0 then return end
     local m = smudge.get_metrics()
-    local by = h - m.button_hints_height - 2
+    local by = h - hints_height() - 2
     local cw = math.min(110, math.floor((w - 36) / n))
     local sx = math.floor((w - (cw * n)) / 2)
     local hy = by - 224

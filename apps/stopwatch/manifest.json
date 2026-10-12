@@ -1,7 +1,7 @@
 {
   "id": "stopwatch",
   "name": "Stopwatch",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Mumfee",
   "description": "Pixel cartoon stopwatch with digital display and lap split recording",
   "entry": "main.lua",

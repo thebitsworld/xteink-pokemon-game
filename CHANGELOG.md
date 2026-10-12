@@ -7,6 +7,7 @@
 ### Fixed
 
 - Blackjack on the X4 Pro: betting, dealing, hitting, standing and doubling now have buttons to tap; before, the game could not be played by touch.
+- The other apps from CrossSmudge on the X4 Pro: 2048, Dice, Codex, Block Drop, Wordle, Water Tracker, Stopwatch, Hourglass and Desk Stand show their actions as buttons to tap (Exit, New game, the die to roll, Split and Reset, the timer and water steps, the clock style...). Before, those actions had nothing to tap.
 
 ## [1.8.0] - 2026-10-09
 

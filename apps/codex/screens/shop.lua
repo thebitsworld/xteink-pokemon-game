@@ -34,7 +34,7 @@ function screen.draw()
     local m = smudge.get_metrics()
     smudge.header("Scriptorium", "Ch.1 Pg " .. state.floor .. "/15")
     local ty = m.top_padding + m.header_height + 2
-    draw_page_frame(ty, h - m.button_hints_height - 2)
+    draw_page_frame(ty, h - hints_height() - 2)
 
     ty = draw_codex_stats(ty + 6)
     draw_miniature_frame(330, ty + 10, 136, 136)
@@ -64,7 +64,7 @@ function screen.draw()
         smudge.text(26, iy + 2, it, "small", sel and "bold" or "regular", "left", not sel)
         iy = iy + 30
     end
-    smudge.button_hints("Leave", "Buy", "Prev", "Next")
+    button_hints("Leave", "Buy", "Prev", "Next")
 end
 
 function screen.on_button(btn, pressed)

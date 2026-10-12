@@ -1,3 +1,30 @@
+
+-- The bottom strip's height: touch themes report 0 (they draw no hints), so
+-- 44 px there, for the buttons below.
+local function hints_height()
+    local bh = smudge.get_metrics().button_hints_height
+    return bh > 0 and bh or 44
+end
+
+-- Touch readers draw no button hints, but this app reads taps on them (the
+-- four quarters of the bottom strip): draw them there as buttons.
+local function button_hints(b1, b2, b3, b4)
+    if not (smudge.has_touch and smudge.has_touch()) then
+        smudge.button_hints(b1, b2, b3, b4)
+        return
+    end
+    local sw, sh = smudge.get_bounds()
+    local bh = hints_height()
+    local qw = sw // 4
+    for i, label in ipairs({b1 or "", b2 or "", b3 or "", b4 or ""}) do
+        if label ~= "" then
+            local x = (i - 1) * qw + 3
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, true, false)
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, false, 2)
+            smudge.text(x + (qw - 6) // 2, sh - bh + 10, label, "ui10", "bold", "center", true)
+        end
+    end
+end
 local w, h = 480, 800
 if smudge.get_bounds then
     w, h = smudge.get_bounds()
@@ -353,7 +380,7 @@ local function draw_today()
         draw_btn(cx - 90, 690, 180, 46, "+ " .. fmt(step_amount, true), true, 11)
     end
 
-    smudge.button_hints("Exit", "Settings", "-" .. fmt(step_amount, true), "+" .. fmt(step_amount, true))
+    button_hints("Exit", "Settings", "-" .. fmt(step_amount, true), "+" .. fmt(step_amount, true))
 end
 
 local function draw_history()
@@ -424,7 +451,7 @@ local function draw_history()
         end
     end
 
-    smudge.button_hints("Back", "Settings", nil, nil)
+    button_hints("Back", "Settings", nil, nil)
 end
 
 local function draw_settings()
@@ -478,7 +505,7 @@ local function draw_settings()
     smudge.text(lx, infoy + 152, "• Confirm / Select (Button 2):", 10, true, "left", true)
     smudge.text(lx + 20, infoy + 174, "Activate row or open history", 10, false, "left", true)
 
-    smudge.button_hints("Back", "Select", "Up", "Down")
+    button_hints("Back", "Select", "Up", "Down")
 end
 
 function on_draw()
@@ -598,6 +625,12 @@ end
 
 function on_touch(tx, ty, action)  -- the engine passes (x, y, kind)
     if action ~= "tap" and action ~= "click" then return end
+    -- The bottom strip holds the four button hints (drawn as buttons on touch).
+    local bh = hints_height()
+    if ty > h - bh then
+        on_button("btn" .. math.min(4, math.floor(tx / (w / 4)) + 1), true)
+        return
+    end
     if show_history then
         if ty > 700 or ty < 80 then
             show_history, in_settings = false, true

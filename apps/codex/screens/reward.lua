@@ -7,7 +7,7 @@ end
 function screen.draw()
     local m = smudge.get_metrics()
     local ty = m.top_padding + m.header_height + 2
-    local by = h - m.button_hints_height - 2
+    local by = h - hints_height() - 2
     draw_page_frame(ty, by)
 
     smudge.header("Codex Delve", "Victory")
@@ -33,7 +33,7 @@ function screen.draw()
         draw_card_item(sx + (i - 1) * cw, (sel == i) and (y - 6) or y, cw - 4, ch, kCards[state.cardRewards[i] + 1], (sel == i))
     end
 
-    smudge.button_hints("Skip", "Take", "<", ">")
+    button_hints("Skip", "Take", "<", ">")
 end
 
 function screen.on_button(btn, pressed)

@@ -1,6 +1,33 @@
 -- 2048 game for CrossSmudge (Lua)
 -- Faithful reproduction of TwoZeroFourEightActivity.h
 
+-- The bottom strip's height: touch themes report 0 (they draw no hints), so
+-- 44 px there, for the buttons below.
+local function hints_height()
+    local bh = smudge.get_metrics().button_hints_height
+    return bh > 0 and bh or 44
+end
+
+-- Touch readers draw no button hints, but this app reads taps on them (the
+-- four quarters of the bottom strip): draw them there as buttons.
+local function button_hints(b1, b2, b3, b4)
+    if not (smudge.has_touch and smudge.has_touch()) then
+        smudge.button_hints(b1, b2, b3, b4)
+        return
+    end
+    local sw, sh = smudge.get_bounds()
+    local bh = hints_height()
+    local qw = sw // 4
+    for i, label in ipairs({b1 or "", b2 or "", b3 or "", b4 or ""}) do
+        if label ~= "" then
+            local x = (i - 1) * qw + 3
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, true, false)
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, false, 2)
+            smudge.text(x + (qw - 6) // 2, sh - bh + 10, label, "ui10", "bold", "center", true)
+        end
+    end
+end
+
 local board = {}
 local score = 0
 local gameOver = false
@@ -257,9 +284,9 @@ function on_draw()
         smudge.rect(modalX + 2, modalY + 2, modalW - 4, modalH - 4, false)
         smudge.centered_text(modalY + math.floor(modalH / 2) - fontYOffset, "RESET GAME?", 0, true, false)
 
-        smudge.button_hints("Cancel", "Confirm", "", "")
+        button_hints("Cancel", "Confirm", "", "")
     else
-        smudge.button_hints("Back", "Reset", "Up", "Down")
+        button_hints("Back", "Reset", "Up", "Down")
     end
 end
 
@@ -307,11 +334,12 @@ end
 
 function on_tap(x, y)
     local m = smudge.get_metrics()
-    if y > h - m.button_hints_height then
+    if y > h - hints_height() then
         if showResetConfirm then
-            if x < w / 2 then
+            -- The hints are Cancel and Confirm, in the first two quarters.
+            if x < w / 4 then
                 showResetConfirm = false
-            else
+            elseif x < w / 2 then
                 reset_game()
                 showResetConfirm = false
                 save_state()
