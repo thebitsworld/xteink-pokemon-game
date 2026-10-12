@@ -131,6 +131,27 @@ class GameBoyActivity final : public Activity {
   char title[32] = {};
   char error[160] = {};
 
+  // Performance counters, shown as a line on screen and appended to
+  // /.crosspoint/gameboy-perf.txt on exit: the emulator's speed against real
+  // time, the time one Game Boy frame takes, how often it waited for a buffer
+  // the display held, and how long drawing and the e-ink refresh take. The
+  // main task owns the emulator counters; the render task adds to the atomics.
+  static constexpr uint64_t PERF_WINDOW_US = 2000000ULL;
+  uint64_t perfWindowStartUs = 0;
+  uint64_t perfSessionStartUs = 0;
+  uint32_t perfFrames = 0, perfWaits = 0, perfEmuUs = 0, perfEmuMaxUs = 0;
+  uint64_t perfTotalFrames = 0, perfTotalWaits = 0, perfTotalEmuUs = 0;
+  uint32_t perfTotalEmuMaxUs = 0;
+  std::atomic<uint32_t> perfDisplays{0}, perfDrawUs{0}, perfRefreshUs{0}, perfRefreshMaxUs{0};
+  uint64_t perfTotalDisplays = 0, perfTotalDrawUs = 0, perfTotalRefreshUs = 0;
+  uint32_t perfTotalRefreshMaxUs = 0;
+  // How often loop() runs and its longest gap: a gap as long as a refresh
+  // means the display starved the emulator of CPU.
+  uint64_t perfLastLoopUs = 0, perfTotalLoops = 0;
+  uint32_t perfLoops = 0, perfLoopMaxGapUs = 0, perfTotalLoopMaxGapUs = 0;
+  char perfText[2][2][64] = {};  // [buffer][line]: emulator, display
+  std::atomic<uint8_t> perfTextIdx{0};
+
   void setLayout();
   void addControl(TouchControl control, int x, int y, int w, int h, const char* label);
   void rotate();
@@ -150,6 +171,9 @@ class GameBoyActivity final : public Activity {
   void applyJoypad();
 
   void runEmulation(uint64_t nowUs);
+  void updatePerf(uint64_t nowUs);
+  void writePerfLog();
+  void releaseRenderedFrame();
   void publishCompletedFrame();
   void drawGameFrame();
   bool drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer);

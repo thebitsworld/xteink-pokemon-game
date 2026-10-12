@@ -2,6 +2,7 @@
 
 #if CROSSINK_GAMEBOY
 
+#include <AppVersion.h>
 #include <Arduino.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
@@ -125,6 +126,7 @@ void GameBoyActivity::onEnter() {
   nextFrameUs = nowUs;
   nextDisplayUs = nowUs + DISPLAY_PERIOD_US;
   nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
+  perfWindowStartUs = perfSessionStartUs = nowUs;
   LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes)", title, static_cast<unsigned>(romSize),
           static_cast<unsigned>(cartRamSize));
 }
@@ -132,6 +134,7 @@ void GameBoyActivity::onEnter() {
 void GameBoyActivity::onExit() {
   if (initialized.load(std::memory_order_acquire)) {
     if (!saveCartRam()) LOG_ERR(TAG, "Save failed during Game Boy exit: %s", savePath.c_str());
+    writePerfLog();
   }
   TouchRegistry::getInstance().clear();
   cleanup();
@@ -170,7 +173,11 @@ void GameBoyActivity::loop() {
   }
 
   const uint64_t nowUs = nowMicros();
+  if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
+  perfLastLoopUs = nowUs;
+  ++perfLoops;
   runEmulation(nowUs);
+  updatePerf(nowUs);
 
   if (nowUs >= nextAutosaveUs) {
     nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
@@ -199,19 +206,105 @@ void GameBoyActivity::render(RenderLock&&) {
     return;
   }
 
+  const uint64_t drawStartUs = nowMicros();
   drawGameFrame();
-  const uint8_t claimedFrame = renderFrame.load(std::memory_order_acquire);
+  // The picture is in the display's framebuffer now: hand the Game Boy frame
+  // back before the e-ink refresh (hundreds of ms), or the emulator, with
+  // both of its buffers held, would stand still for the whole refresh.
+  releaseRenderedFrame();
   drawControls();
   registerTouchTargets();
+  const uint64_t refreshStartUs = nowMicros();
   renderer.displayBuffer(fullRefreshDue.exchange(false, std::memory_order_acq_rel) ? HalDisplay::HALF_REFRESH
                                                                                      : HalDisplay::FAST_REFRESH);
-  if (claimedFrame <= 1) {
-    uint8_t expected = claimedFrame;
-    readyFrame.compare_exchange_strong(expected, static_cast<uint8_t>(0xFF),
-                                       std::memory_order_acq_rel, std::memory_order_acquire);
-    renderFrame.store(0xFF, std::memory_order_release);
+  const uint64_t doneUs = nowMicros();
+  perfDisplays.fetch_add(1, std::memory_order_relaxed);
+  perfDrawUs.fetch_add(static_cast<uint32_t>(refreshStartUs - drawStartUs), std::memory_order_relaxed);
+  const uint32_t refreshUs = static_cast<uint32_t>(doneUs - refreshStartUs);
+  perfRefreshUs.fetch_add(refreshUs, std::memory_order_relaxed);
+  uint32_t seenMax = perfRefreshMaxUs.load(std::memory_order_relaxed);
+  while (refreshUs > seenMax && !perfRefreshMaxUs.compare_exchange_weak(seenMax, refreshUs)) {
   }
   displayDue.store(false, std::memory_order_release);
+}
+
+// Marks the frame drawGameFrame() copied as consumed and lets the emulator
+// write into it again.
+void GameBoyActivity::releaseRenderedFrame() {
+  const uint8_t claimedFrame = renderFrame.load(std::memory_order_acquire);
+  if (claimedFrame > 1) return;
+  uint8_t expected = claimedFrame;
+  readyFrame.compare_exchange_strong(expected, static_cast<uint8_t>(0xFF), std::memory_order_acq_rel,
+                                     std::memory_order_acquire);
+  renderFrame.store(0xFF, std::memory_order_release);
+}
+
+// Every PERF_WINDOW_US: turns the counters into the two lines on screen and
+// the log, and adds them to the session totals.
+void GameBoyActivity::updatePerf(const uint64_t nowUs) {
+  const uint64_t elapsedUs = nowUs - perfWindowStartUs;
+  if (elapsedUs < PERF_WINDOW_US) return;
+  const uint32_t displays = perfDisplays.exchange(0, std::memory_order_relaxed);
+  const uint32_t drawUs = perfDrawUs.exchange(0, std::memory_order_relaxed);
+  const uint32_t refreshUs = perfRefreshUs.exchange(0, std::memory_order_relaxed);
+  const uint32_t refreshMaxUs = perfRefreshMaxUs.exchange(0, std::memory_order_relaxed);
+  const float seconds = static_cast<float>(elapsedUs) / 1e6f;
+  const float fps = static_cast<float>(perfFrames) / seconds;
+  const unsigned speed = static_cast<unsigned>(fps * 100.0f / 59.73f + 0.5f);
+  const float emuMs = perfFrames ? static_cast<float>(perfEmuUs) / perfFrames / 1000.0f : 0.0f;
+  const float refreshMs = displays ? static_cast<float>(refreshUs) / displays / 1000.0f : 0.0f;
+
+  const uint8_t next = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
+  snprintf(perfText[next][0], sizeof(perfText[next][0]), "%.0ffps %u%% %.1f/%.0fms w%u", fps, speed, emuMs,
+           perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits));
+  snprintf(perfText[next][1], sizeof(perfText[next][1]), "LCD %.1f/s %.0fms loop %.0f/s %ums", displays / seconds,
+           refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
+  perfTextIdx.store(next, std::memory_order_release);
+  LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
+          "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
+          fps, speed, emuMs, perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits), displays / seconds,
+          displays ? drawUs / 1000.0f / displays : 0.0f, refreshMs, refreshMaxUs / 1000.0f, perfLoops / seconds,
+          static_cast<unsigned>(perfLoopMaxGapUs / 1000));
+  perfTotalLoopMaxGapUs = std::max(perfTotalLoopMaxGapUs, perfLoopMaxGapUs);
+  perfTotalLoops += perfLoops;
+  perfLoops = 0;
+  perfLoopMaxGapUs = 0;
+
+  perfTotalFrames += perfFrames;
+  perfTotalWaits += perfWaits;
+  perfTotalEmuUs += perfEmuUs;
+  perfTotalEmuMaxUs = std::max(perfTotalEmuMaxUs, perfEmuMaxUs);
+  perfTotalDisplays += displays;
+  perfTotalDrawUs += drawUs;
+  perfTotalRefreshUs += refreshUs;
+  perfTotalRefreshMaxUs = std::max(perfTotalRefreshMaxUs, refreshMaxUs);
+  perfFrames = perfWaits = perfEmuUs = perfEmuMaxUs = 0;
+  perfWindowStartUs = nowUs;
+}
+
+// One line per game session, for comparing readers and builds.
+void GameBoyActivity::writePerfLog() {
+  const float seconds = static_cast<float>(perfWindowStartUs - perfSessionStartUs) / 1e6f;
+  if (seconds < 4.0f || perfTotalFrames == 0) return;
+  const float fps = perfTotalFrames / seconds;
+  char line[200];
+  const int len = snprintf(
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s\n", AppVersion::version(), title,
+      seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
+      perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
+      perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
+      perfTotalDisplays ? perfTotalRefreshUs / 1000.0f / perfTotalDisplays : 0.0f, perfTotalRefreshMaxUs / 1000.0f,
+      perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape");
+  if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
+  static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
+  static constexpr char kHeader[] =
+      "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation\n";
+  HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return;
+  if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
+  if (file.size() < 64 * 1024) file.write(line, static_cast<size_t>(len));
+  file.close();
 }
 
 void GameBoyActivity::setLayout() {
@@ -229,7 +322,7 @@ void GameBoyActivity::setLayout() {
     gameX = (screenW - gameW) / 2;
     gameY = 40;
     titleX = 8;
-    titleY = 10;
+    titleY = 2;
 
     const int padY = gameY + gameH + 24;
     const int pad = 64;
@@ -645,9 +738,17 @@ void GameBoyActivity::runEmulation(const uint64_t nowUs) {
     // been consumed. With two buffers this gives a simple, lock-free handoff.
     const uint8_t pending = readyFrame.load(std::memory_order_acquire);
     const uint8_t rendering = renderFrame.load(std::memory_order_acquire);
-    if (writeFrame == pending || writeFrame == rendering) break;
+    if (writeFrame == pending || writeFrame == rendering) {
+      ++perfWaits;
+      break;
+    }
 
+    const uint64_t frameStartUs = nowMicros();
     gb_run_frame(gb);
+    const uint32_t frameUs = static_cast<uint32_t>(nowMicros() - frameStartUs);
+    perfEmuUs += frameUs;
+    perfEmuMaxUs = std::max(perfEmuMaxUs, frameUs);
+    ++perfFrames;
     publishCompletedFrame();
     nextFrameUs += EMULATION_FRAME_PERIOD_US;
     ++ran;
@@ -750,6 +851,16 @@ void GameBoyActivity::drawControls() {
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
+  // Speed and display figures (updatePerf()), a line under the title.
+  const uint8_t perfIdx = perfTextIdx.load(std::memory_order_acquire);
+  if (portrait) {
+    char both[100];
+    snprintf(both, sizeof(both), "%s | %s", perfText[perfIdx][0], perfText[perfIdx][1]);
+    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 20, both, true);
+  } else {
+    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 24, perfText[perfIdx][0], true);
+    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 40, perfText[perfIdx][1], true);
+  }
 
   for (size_t i = 0; i < controlCount; ++i) {
     const ControlButton& c = controls[i];
