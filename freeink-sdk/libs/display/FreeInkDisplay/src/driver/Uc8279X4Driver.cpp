@@ -404,10 +404,12 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   // pure B/W paints — it's just a memcpy that the next AA page consumes.
   _grayBaseValid = false;
   _absoluteGrayPlanes = false;
+  _phaseStartUs = micros();  // xteink-pokemon: refresh phase timings
   if (_grayBase != nullptr && fb != nullptr) {
     memcpy(_grayBase, fb, _bufferSize);
     _grayBaseValid = true;
   }
+  _timings.copyUs = phaseUs();  // xteink-pokemon
   // Same differential model as the UC8179 sibling: only an EXPLICIT Fast request
   // uses the PTIN/PTOUT DU partial (OLD plane = previous displayed frame). Full
   // AND Half both run the clearing OTP GC waveform — but they seed the OLD plane
@@ -450,7 +452,9 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   // post-AA gray residue for this frame.
   _redriveAfterGray = false;
 
+  _timings.newPlaneUs = phaseUs();  // xteink-pokemon: DTM2 (and DTM1 seeds)
   startBwRefresh(bus, fast);
+  _timings.setupUs = phaseUs();  // xteink-pokemon: through the waveform's start
   _pendingPartial = fast;
   _pendingTurnOff = turnOff;
   _pendingRefresh = true;
@@ -557,11 +561,13 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
   _pendingRefresh = false;
 
   bus.waitRefreshComplete(" 8279x4_DRF");
+  _timings.waveformUs = phaseUs();  // xteink-pokemon
   if (_pendingPartial) bus.cmd(CMD_PARTIAL_OUT);
 
   // Sync the OLD plane (0x10) with the just-displayed frame so the NEXT partial
   // diffs against it (same ghosting management as the UC8179 sibling).
   streamPlane(bus, CMD_DTM1, fb);
+  _timings.oldPlaneUs = phaseUs();  // xteink-pokemon
   _oldPlaneValid = true;
   _needFullClear = false;
 

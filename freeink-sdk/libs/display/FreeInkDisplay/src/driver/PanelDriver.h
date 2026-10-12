@@ -263,6 +263,19 @@ class PanelDriver {
   // xteink-pokemon: game-mode Fast refreshes with a host-loaded DU waveform whose
   // frame counts are scaled to `percent` (0 = the panel's built-in waveform).
   virtual void setFastRefreshDuScale(uint8_t percent) { (void)percent; }
+  // xteink-pokemon: where the last refresh spent its time, in microseconds
+  // (false where the driver does not measure it).
+  struct RefreshTimings {
+    uint32_t copyUs;      // snapshot of the frame for a later grayscale pass
+    uint32_t newPlaneUs;  // streaming the new frame (DTM2)
+    uint32_t setupUs;     // LUT load, registers, power on, until the waveform starts
+    uint32_t waveformUs;  // the waveform itself (DRF until BUSY releases)
+    uint32_t oldPlaneUs;  // streaming the frame back as the next diff's OLD plane
+  };
+  virtual bool lastRefreshTimings(RefreshTimings& out) const {
+    (void)out;
+    return false;
+  }
   virtual uint16_t fastRefreshCutoffMs() const { return 0; }
   // Hold the periodic anti-ghost full refresh through a continuous interaction
   // (e.g. a live slider drag): while set, fast refreshes are never promoted to a
