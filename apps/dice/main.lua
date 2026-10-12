@@ -1,6 +1,33 @@
 -- Dice Roller application for CrossSmudge (Lua)
 -- Faithful reproduction of DiceSimActivity.h
 
+-- The bottom strip's height: touch themes report 0 (they draw no hints), so
+-- 44 px there, for the buttons below.
+local function hints_height()
+    local bh = smudge.get_metrics().button_hints_height
+    return bh > 0 and bh or 44
+end
+
+-- Touch readers draw no button hints, but this app reads taps on them (the
+-- four quarters of the bottom strip): draw them there as buttons.
+local function button_hints(b1, b2, b3, b4)
+    if not (smudge.has_touch and smudge.has_touch()) then
+        smudge.button_hints(b1, b2, b3, b4)
+        return
+    end
+    local sw, sh = smudge.get_bounds()
+    local bh = hints_height()
+    local qw = sw // 4
+    for i, label in ipairs({b1 or "", b2 or "", b3 or "", b4 or ""}) do
+        if label ~= "" then
+            local x = (i - 1) * qw + 3
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, true, false)
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, false, 2)
+            smudge.text(x + (qw - 6) // 2, sh - bh + 10, label, "ui10", "bold", "center", true)
+        end
+    end
+end
+
 local dice_types = {
     {name = "Coin", sides = 2},
     {name = "D4", sides = 4},
@@ -179,7 +206,7 @@ function on_draw()
     end
 
     -- 6. Footer Button Hints (matching DiceSimActivity.h exactly)
-    smudge.button_hints("Back", "Reset", "Dice", "Roll")
+    button_hints("Back", "Reset", "Dice", "Roll")
 end
 
 function on_button(btn, pressed)
@@ -202,7 +229,7 @@ end
 
 function on_tap(x, y)
     local m = smudge.get_metrics()
-    if y > h - m.button_hints_height then
+    if y > h - hints_height() then
         if x < w / 4 then
             smudge.save("selected_die", tostring(selected_die))
             smudge.exit()

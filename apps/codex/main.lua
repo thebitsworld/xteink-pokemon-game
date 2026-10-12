@@ -101,7 +101,7 @@ end
 
 function on_tap(x, y)
     local m = smudge.get_metrics()
-    if y > h - m.button_hints_height then
+    if y > h - hints_height() then
         if x < w / 4 then
             on_button("back", true)
         elseif x < w / 2 then

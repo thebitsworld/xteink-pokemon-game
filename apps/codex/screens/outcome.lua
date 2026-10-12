@@ -30,7 +30,7 @@ function screen.draw()
     local m = smudge.get_metrics()
     smudge.header("Scriptorium", "Consequence")
     local ty = m.top_padding + m.header_height + 2
-    draw_page_frame(ty, h - m.button_hints_height - 2)
+    draw_page_frame(ty, h - hints_height() - 2)
 
     ty = draw_codex_stats(ty + 6) + 30
     draw_miniature_frame(22, ty, w - 44, 160)
@@ -46,7 +46,7 @@ function screen.draw()
     local bx, by = math.floor((w - 200) / 2), ty + 190
     smudge.rect(bx, by, 200, 42, true)
     smudge.text(bx + 100, by + 13, "Continue", "small", "bold", "center", false)
-    smudge.button_hints("Continue", "Continue", "", "")
+    button_hints("Continue", "Continue", "", "")
 end
 
 function screen.on_button(btn, pressed)

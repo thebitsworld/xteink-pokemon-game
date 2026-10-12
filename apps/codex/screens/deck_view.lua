@@ -27,7 +27,7 @@ local function draw_menu(y, by)
         smudge.text(240, iy + 12, OPTS[i], 'ui12', sel and 'bold' or 'regular', 'center', not sel)
     end
     smudge.centered_text(by - 26, 'Auto-saved', 'small', 'regular', true)
-    smudge.button_hints('Back', 'Confirm', 'Up', 'Down')
+    button_hints('Back', 'Confirm', 'Up', 'Down')
 end
 
 local function draw_list(y, by)
@@ -65,13 +65,13 @@ local function draw_list(y, by)
             smudge.centered_text(by - 22, (page + 1) .. '/' .. (maxP + 1), 'small', 'bold', true)
         end
     end
-    smudge.button_hints('Back', 'Tab', '<', '>')
+    button_hints('Back', 'Tab', '<', '>')
 end
 
 function screen.draw()
     local m = smudge.get_metrics()
     local ty = m.top_padding + m.header_height + 2
-    local by = h - m.button_hints_height - 2
+    local by = h - hints_height() - 2
     draw_page_frame(ty, by)
     smudge.header(TABS[tab])
 

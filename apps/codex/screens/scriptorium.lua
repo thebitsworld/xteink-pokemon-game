@@ -47,7 +47,7 @@ function screen.draw()
     smudge.header(cur.title, cur.sub)
 
     local ty = m.top_padding + m.header_height + 2
-    draw_page_frame(ty, h - m.button_hints_height - 2)
+    draw_page_frame(ty, h - hints_height() - 2)
 
     ty = draw_codex_stats(ty + 6)
     draw_miniature_frame(172, ty, 136, 136)
@@ -72,7 +72,7 @@ function screen.draw()
         smudge.text(36, iy + 8, c[1], "ui12", "bold", "left", not sel)
         smudge.text(36, iy + 36, canAfford and c[2] or ("[Requires " .. (-c[5]) .. " Gold]"), "small", "regular", "left", not sel)
     end
-    smudge.button_hints("", "Select", "<", ">")
+    button_hints("", "Select", "<", ">")
 end
 
 function screen.on_button(btn, pressed)

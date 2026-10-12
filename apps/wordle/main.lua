@@ -1,6 +1,33 @@
 -- Wordle game for CrossSmudge (Lua)
 -- Faithful reproduction of WordleActivity.h with on-screen keyboard, reset modal, auto-advance & dithering
 
+-- The bottom strip's height: touch themes report 0 (they draw no hints), so
+-- 44 px there, for the buttons below.
+local function hints_height()
+    local bh = smudge.get_metrics().button_hints_height
+    return bh > 0 and bh or 44
+end
+
+-- Touch readers draw no button hints, but this app reads taps on them (the
+-- four quarters of the bottom strip): draw them there as buttons.
+local function button_hints(b1, b2, b3, b4)
+    if not (smudge.has_touch and smudge.has_touch()) then
+        smudge.button_hints(b1, b2, b3, b4)
+        return
+    end
+    local sw, sh = smudge.get_bounds()
+    local bh = hints_height()
+    local qw = sw // 4
+    for i, label in ipairs({b1 or "", b2 or "", b3 or "", b4 or ""}) do
+        if label ~= "" then
+            local x = (i - 1) * qw + 3
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, true, false)
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, false, 2)
+            smudge.text(x + (qw - 6) // 2, sh - bh + 10, label, "ui10", "bold", "center", true)
+        end
+    end
+end
+
 local TOTAL_WORDS = 463  -- words.bin: common 5-letter words, 5 bytes each
 local can_seek = nil
 local cached_words_bin = nil
@@ -435,11 +462,11 @@ function on_draw()
 
     -- 3. Footer Hints
     if show_reset_confirm then
-        smudge.button_hints("Cancel", "Confirm", "", "")
+        button_hints("Cancel", "Confirm", "", "")
     elseif in_game then
-        smudge.button_hints("Back", "Select", "Up", "Down")
+        button_hints("Back", "Select", "Up", "Down")
     else
-        smudge.button_hints("Back", "Play", "", "")
+        button_hints("Back", "Play", "", "")
     end
 end
 
@@ -545,19 +572,23 @@ function on_button(btn, pressed)
 end
 
 function on_tap(x, y)
+    local m = smudge.get_metrics()
     if show_reset_confirm then
-        -- Tap anywhere to cancel, or top/bottom
-        show_reset_confirm = false
+        -- Cancel or Confirm on the bottom strip; a tap elsewhere cancels.
+        if y > h - hints_height() and x >= w / 4 and x < w / 2 then
+            on_button("confirm", true)
+        else
+            show_reset_confirm = false
+        end
         return
     end
 
-    local m = smudge.get_metrics()
-    if y > h - m.button_hints_height then
+    if y > h - hints_height() then
         if x < w / 4 then
             save_game_state()
             smudge.exit()
         elseif x < w / 2 then
-            handle_key_action(kb_index)
+            on_button("confirm", true) -- Select in a game, Play after one
         elseif x < 3 * w / 4 then
             on_button("up", true)
         else

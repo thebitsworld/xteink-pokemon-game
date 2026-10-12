@@ -11,7 +11,7 @@ function screen.draw()
     smudge.header("Codex", "Ink & Iron")
     local m = smudge.get_metrics()
     local topY = m.top_padding + m.header_height + 2
-    local bottomY = h - m.button_hints_height - 2
+    local bottomY = h - hints_height() - 2
     draw_page_frame(topY, bottomY)
 
     local y = topY + 12
@@ -60,7 +60,7 @@ function screen.draw()
         end
     end
 
-    smudge.button_hints("Back", "Select", "Up", "Down")
+    button_hints("Back", "Select", "Up", "Down")
 end
 
 function screen.on_button(btn, pressed)

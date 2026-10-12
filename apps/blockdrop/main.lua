@@ -1,6 +1,33 @@
 -- Block Drop game for CrossSmudge (Lua)
 -- Classic falling block game with real-time gravity, 7 piece patterns, dithering & background render
 
+-- The bottom strip's height: touch themes report 0 (they draw no hints), so
+-- 44 px there, for the buttons below.
+local function hints_height()
+    local bh = smudge.get_metrics().button_hints_height
+    return bh > 0 and bh or 44
+end
+
+-- Touch readers draw no button hints, but this app reads taps on them (the
+-- four quarters of the bottom strip): draw them there as buttons.
+local function button_hints(b1, b2, b3, b4)
+    if not (smudge.has_touch and smudge.has_touch()) then
+        smudge.button_hints(b1, b2, b3, b4)
+        return
+    end
+    local sw, sh = smudge.get_bounds()
+    local bh = hints_height()
+    local qw = sw // 4
+    for i, label in ipairs({b1 or "", b2 or "", b3 or "", b4 or ""}) do
+        if label ~= "" then
+            local x = (i - 1) * qw + 3
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, true, false)
+            smudge.rounded_rect(x, sh - bh + 2, qw - 6, bh - 4, 6, false, 2)
+            smudge.text(x + (qw - 6) // 2, sh - bh + 10, label, "ui10", "bold", "center", true)
+        end
+    end
+end
+
 local kGridWidth = 10
 local kGridHeight = 20
 local grid = {}
@@ -385,7 +412,7 @@ function on_draw()
 
     local m = smudge.get_metrics()
     local topBound = m.top_padding + m.header_height
-    local bottomBound = h - m.button_hints_height
+    local bottomBound = h - hints_height()
     local availableHeight = bottomBound - topBound - 12
 
     -- 1. Fill Main Background with Light Gray Dither (Classic look restored!)
@@ -516,11 +543,11 @@ function on_draw()
 
     -- 8. Footer Button Hints
     if show_reset_confirm then
-        smudge.button_hints("Cancel", "Confirm", "", "")
+        button_hints("Cancel", "Confirm", "", "")
     elseif is_game_over then
-        smudge.button_hints("Back", "Restart", "", "")
+        button_hints("Back", "Restart", "", "")
     else
-        smudge.button_hints("Back", "Drop", "Left", "Right")
+        button_hints("Back", "Drop", "Left", "Right")
     end
 end
 
@@ -607,19 +634,12 @@ end
 -- Touch handling for touchscreen devices
 function on_tap(x, y)
     local m = smudge.get_metrics()
-    if y > h - m.button_hints_height then
-        if show_reset_confirm then
-            if x < w / 2 then
+    if y > h - hints_height() then
+        -- While asking or after a game, the hints are in the first two quarters.
+        if show_reset_confirm or is_game_over then
+            if x < w / 4 then
                 on_button("back", true)
-            else
-                on_button("confirm", true)
-            end
-            return
-        end
-        if is_game_over then
-            if x < w / 2 then
-                on_button("back", true)
-            else
+            elseif x < w / 2 then
                 on_button("confirm", true)
             end
             return
