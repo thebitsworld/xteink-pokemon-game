@@ -63,9 +63,10 @@ uint64_t nowMicros() {
 // these run a host-loaded DU waveform (the stock X3 UC8279 bank) with its
 // frame counts scaled to `duPct` percent. beta.4 measured ~282 ms of fixed
 // cost plus ~20.5 ms a frame, ~11.5 ms with PLL 0x0F (lighter, slight ghost),
-// and found D50 clean; these try more frames at the faster PLL to win the
-// darkness back. `pll` 0 keeps the driver's frame rate (0x0E). Drive levels
-// stay the bank's and the voltages the panel's.
+// and found D50 clean; beta.5 found the darkness barely changing from D40 to
+// D70 at PLL 0x0F, so these go shorter at that frame rate. `pll` 0 keeps the
+// driver's frame rate (0x0E). Drive levels stay the bank's and the voltages
+// the panel's.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
@@ -74,7 +75,7 @@ struct RefreshPreset {
 };
 constexpr RefreshPreset kRefreshPresets[] = {
     {"P0 stock", 0, 0, 0},        {"D50", 0, 0, 50},          {"D40 PLL0F", 0, 0x0F, 40},
-    {"D50 PLL0F", 0, 0x0F, 50},   {"D60 PLL0F", 0, 0x0F, 60}, {"D70 PLL0F", 0, 0x0F, 70},
+    {"D30 PLL0F", 0, 0x0F, 30},   {"D20 PLL0F", 0, 0x0F, 20},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 
@@ -168,11 +169,13 @@ void GameBoyActivity::onEnter() {
   nextDisplayUs = nowUs + DISPLAY_PERIOD_US;
   nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
   perfWindowStartUs = perfSessionStartUs = nowUs;
+  startEmuTask();
   LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes)", title, static_cast<unsigned>(romSize),
           static_cast<unsigned>(cartRamSize));
 }
 
 void GameBoyActivity::onExit() {
+  stopEmuTask();  // before the save and cleanup touch its state
   if (initialized.load(std::memory_order_acquire)) {
     if (!saveCartRam()) LOG_ERR(TAG, "Save failed during Game Boy exit: %s", savePath.c_str());
     writePerfLog();
@@ -219,38 +222,83 @@ void GameBoyActivity::loop() {
     rotateRequested = false;
     rotate();
   }
-  if (presetRequested) {
-    presetRequested = false;
-    // One gameboy-perf.txt line per preset tried: close this one's figures.
-    writePerfLog();
-    resetPerfTotals(nowMicros());
-    refreshPreset = static_cast<uint8_t>((refreshPreset + 1) % kRefreshPresetCount);
-    applyRefreshPreset();
-  }
-
   const uint64_t nowUs = nowMicros();
-  if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
-  perfLastLoopUs = nowUs;
-  ++perfLoops;
-  runEmulation(nowUs);
-  updatePerf(nowUs);
-
-  if (refreshPreset != 0 && nowUs >= nextCleanUs) {
-    nextCleanUs = nowUs + CLEAN_PERIOD_US;
-    fullRefreshDue.store(true, std::memory_order_release);
-  }
-
-  if (nowUs >= nextAutosaveUs) {
-    nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
-    if (saveDirty && !saveCartRam()) LOG_ERR(TAG, "Autosave failed: %s", savePath.c_str());
-  }
-
   if (nowUs >= nextDisplayUs) {
     displayDue.store(true, std::memory_order_release);
     // Do not accumulate an unbounded display backlog when an e-ink refresh or
     // a long emulation stretch takes longer than one target period.
     nextDisplayUs = nowUs + DISPLAY_PERIOD_US;
     requestUpdate();
+  }
+
+  // The emulator has its own task; leave CPU 1 to the render task between
+  // input polls (this activity skips the main loop's own delay).
+  delay(2);
+}
+
+void GameBoyActivity::startEmuTask() {
+  emuRun.store(true, std::memory_order_release);
+  emuStopped.store(false, std::memory_order_release);
+  if (xTaskCreatePinnedToCore(&GameBoyActivity::emuTaskEntry, "GameBoyEmu", 12288, this, 1, &emuTask, 0) != pdPASS) {
+    LOG_ERR(TAG, "Could not start the emulator task");
+    emuTask = nullptr;
+    emuRun.store(false, std::memory_order_release);
+    emuStopped.store(true, std::memory_order_release);
+    showError("Could not start the emulator");
+  }
+}
+
+// Asks the emulator task to finish its frame and waits for it (bounded).
+void GameBoyActivity::stopEmuTask() {
+  if (!emuTask) return;
+  emuRun.store(false, std::memory_order_release);
+  const unsigned long start = millis();
+  while (!emuStopped.load(std::memory_order_acquire) && millis() - start < 1000) delay(1);
+  if (!emuStopped.load(std::memory_order_acquire)) LOG_ERR(TAG, "Emulator task did not stop in time");
+#ifdef SIMULATOR
+  vTaskDelete(emuTask);  // the host thread has returned; release its handle
+#endif
+  emuTask = nullptr;
+}
+
+void GameBoyActivity::emuTaskEntry(void* arg) {
+  auto* self = static_cast<GameBoyActivity*>(arg);
+  self->emuTaskLoop();
+  self->emuStopped.store(true, std::memory_order_release);
+#ifndef SIMULATOR
+  vTaskDelete(nullptr);
+#endif
+}
+
+void GameBoyActivity::emuTaskLoop() {
+  while (emuRun.load(std::memory_order_acquire)) {
+    if (presetRequested.exchange(false, std::memory_order_acq_rel)) {
+      // One gameboy-perf.txt line per preset tried: close this one's figures.
+      writePerfLog();
+      resetPerfTotals(nowMicros());
+      refreshPreset = static_cast<uint8_t>((refreshPreset + 1) % kRefreshPresetCount);
+      applyRefreshPreset();
+    }
+
+    const uint64_t nowUs = nowMicros();
+    if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
+    perfLastLoopUs = nowUs;
+    ++perfLoops;
+    runEmulation(nowUs);
+    updatePerf(nowUs);
+
+    if (refreshPreset != 0 && nowUs >= nextCleanUs) {
+      nextCleanUs = nowUs + CLEAN_PERIOD_US;
+      fullRefreshDue.store(true, std::memory_order_release);
+    }
+
+    if (nowUs >= nextAutosaveUs) {
+      nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
+      if (saveDirty && !saveCartRam()) LOG_ERR(TAG, "Autosave failed: %s", savePath.c_str());
+    }
+
+    // Let CPU 0's idle task (and its watchdog) run between frames.
+    delay(1);
   }
 }
 

@@ -6,6 +6,9 @@
 // second, with touch controls beside the picture. Started from the Ink-boy
 // fork of CrossInk (https://github.com/hellominecraft913-dev/Ink-boy, MIT).
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -120,6 +123,18 @@ class GameBoyActivity final : public Activity {
   std::atomic<bool> initialized{false};
   std::atomic<bool> displayDue{true};
   bool exitRequested = false;
+
+  // The emulator runs in its own task on CPU 0: sharing CPU 1 with the render
+  // task (and the main loop) slowed the e-ink SPI streaming roughly threefold.
+  // It owns the emulator state, its speed counters, autosave and preset
+  // switches; the main loop keeps input, the layout and display scheduling.
+  TaskHandle_t emuTask = nullptr;
+  std::atomic<bool> emuRun{false};
+  std::atomic<bool> emuStopped{true};
+  static void emuTaskEntry(void* arg);
+  void emuTaskLoop();
+  void startEmuTask();
+  void stopEmuTask();
   bool rotateRequested = false;
   // The next refresh is a full one, clearing what the old layout left behind.
   std::atomic<bool> fullRefreshDue{false};
@@ -164,7 +179,7 @@ class GameBoyActivity final : public Activity {
   // stock gets a cleaning refresh every CLEAN_PERIOD_US against ghosting.
   static constexpr uint64_t CLEAN_PERIOD_US = 60000000ULL;
   uint8_t refreshPreset = 0;
-  bool presetRequested = false;
+  std::atomic<bool> presetRequested{false};
   uint64_t nextCleanUs = 0;
   std::atomic<uint8_t> perfTextIdx{0};
 
