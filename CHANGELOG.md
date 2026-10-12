@@ -1,3 +1,13 @@
+## [1.8.1-beta.3] - 2026-10-12
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. It changes how the X4 Pro's e-ink screen is driven while a Game Boy game runs, with timings that have not been validated. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
+
+For the tester only (X4 Pro): open a Game Boy game and tap the title strip at the top to cycle six refresh presets (P0 = stock ... P5). Each preset change and every minute on a non-stock preset gets a cleaning refresh, and leaving the game restores the stock refresh. Play about 30 seconds per preset, note how clean and dark the picture looks, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` (one line per preset tried) with those notes.
+
+### Added
+
+- Game Boy (X4 Pro, test only): six experimental e-ink refresh presets (forced temperature and frame rate of the Fast refresh) to find a faster screen for games, with the panel and preset shown at the top right and recorded in `gameboy-perf.txt`.
+
 ## [1.8.1-beta.2] - 2026-10-12
 
 A test build for the X4 Pro's Game Boy, like beta.1: not a release. It also shows which e-ink controller your X4 Pro has (X4 Pro batches use an SSD1677, UC8179 or UC8279), which decides how a faster screen refresh could be tried. Open any Game Boy game for a few seconds: the second line under the title starts with the controller's name (for example `SSD1677-00`). Send a photo of that line, or `/.crosspoint/gameboy-perf.txt` after leaving the game with EXIT.
