@@ -48,6 +48,8 @@ is in git history (before 2026-10-08).
 - Mark every local SDK edit with a `// xteink-pokemon:` comment and list it here:
   - `setFastRefreshTuning(tsset, pll)` in `PanelDriver.h`, `FreeInkDisplay.h/.cpp`, acted on by
     `Uc8279X4Driver` (forced temperature and PLL for Fast refreshes; the Game Boy's refresh presets).
+  - `setFastRefreshDuScale(percent)` (same files, plus `Uc8279X4Driver::loadScaledDuLut`): Fast
+    refreshes on the X3 UC8279 DU bank with its frame counts scaled.
 
 ## Constraints that still bite
 
