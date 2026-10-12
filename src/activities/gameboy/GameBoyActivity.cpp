@@ -57,19 +57,22 @@ uint64_t nowMicros() {
 #endif
 }
 
-// Fast refresh presets to try on the reader (GameBoyActivity::refreshPreset):
-// the forced temperature (TSSET) picks a shorter built-in waveform, the PLL
-// value the frame rate the waveform runs at. 0 means the driver's own value
-// (TSSET 0x5A, PLL 0x0E on the X4 Pro's UC8279). Only timing changes; the
-// drive voltages stay the panel's.
+// Fast refresh presets to try on the reader (GameBoyActivity::refreshPreset).
+// beta.3 found the built-in waveform at its limit (~680 ms): a higher forced
+// temperature picked longer, flashing waveforms and PLL changed nothing. So
+// these run a host-loaded DU waveform (the stock X3 UC8279 bank) with its
+// frame counts scaled to `duPct` percent; D100 should look like the stock DU.
+// `pll` 0 keeps the driver's frame rate (0x0E). Drive levels stay the bank's
+// and the voltages the panel's.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
   uint8_t pll;
+  uint8_t duPct;
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"P0 stock", 0, 0},          {"P1 T64", 0x64, 0},         {"P2 T7F", 0x7F, 0},
-    {"P3 PLL0F", 0, 0x0F},       {"P4 PLL0D", 0, 0x0D},       {"P5 T7F+0F", 0x7F, 0x0F},
+    {"P0 stock", 0, 0, 0}, {"D100", 0, 0, 100}, {"D75", 0, 0, 75},         {"D50", 0, 0, 50},
+    {"D35", 0, 0, 35},     {"D20", 0, 0, 20},   {"D50 PLL0F", 0, 0x0F, 50},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 
@@ -178,6 +181,7 @@ void GameBoyActivity::onExit() {
     refreshPreset = 0;
 #ifndef SIMULATOR
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
+    display.setFastRefreshDuScale(0);
 #endif
   }
   renderer.setOrientation(GfxRenderer::Portrait);
@@ -475,6 +479,7 @@ void GameBoyActivity::applyRefreshPreset() {
     RenderLock lock(*this);
 #ifndef SIMULATOR
     display.setFastRefreshTuning(p.tsset, p.pll);
+    display.setFastRefreshDuScale(p.duPct);
 #else
     (void)p;
 #endif
