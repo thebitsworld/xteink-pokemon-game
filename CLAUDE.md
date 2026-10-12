@@ -52,6 +52,7 @@ is in git history (before 2026-10-08).
     refreshes on the X3 UC8279 DU bank with its frame counts scaled.
   - `lastRefreshTimings()` (same files; `RefreshTimings` in `PanelDriver.h`, phase clock in
     `Uc8279X4Driver`): where the last refresh spent its time.
+  - `EpdBus::setSpiHz`, `FreeInkDisplay::setDisplaySpiHz`: change the display SPI clock at runtime.
 
 ## Constraints that still bite
 
