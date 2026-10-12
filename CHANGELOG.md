@@ -1,3 +1,11 @@
+## [1.8.1-beta.2] - 2026-10-12
+
+A test build for the X4 Pro's Game Boy, like beta.1: not a release. It also shows which e-ink controller your X4 Pro has (X4 Pro batches use an SSD1677, UC8179 or UC8279), which decides how a faster screen refresh could be tried. Open any Game Boy game for a few seconds: the second line under the title starts with the controller's name (for example `SSD1677-00`). Send a photo of that line, or `/.crosspoint/gameboy-perf.txt` after leaving the game with EXIT.
+
+### Added
+
+- Game Boy (X4 Pro): the speed figures show the reader's e-ink controller, and `gameboy-perf.txt` has a `panel` column with it.
+
 ## [1.8.1-beta.1] - 2026-10-12
 
 A test build for the X4 Pro's Game Boy, which is choppy on the reader. It is not a release: install it only to help measure the Game Boy's speed. Play a game for a few minutes, leave it with EXIT, and send `/.crosspoint/gameboy-perf.txt` from the SD card (or a photo of the line under the game's title).
