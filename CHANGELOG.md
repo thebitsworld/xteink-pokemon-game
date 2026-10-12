@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Changed
+
+- Sudoku: a number pad under the grid. Tap a cell and then a digit (or X to erase); with the buttons, Confirm on a cell moves to the pad, Left/Right pick a digit and Confirm enters it. Digits already used nine times are greyed.
+
+### Fixed
+
+- Blackjack on the X4 Pro: betting, dealing, hitting, standing and doubling now have buttons to tap; before, the game could not be played by touch.
+
 ## [1.8.0] - 2026-10-09
 
 ### Added

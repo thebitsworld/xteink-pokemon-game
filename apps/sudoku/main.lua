@@ -21,6 +21,10 @@ local picker = false
 local pick_diff = 1
 local diff_names = {"EASY", "MEDIUM", "HARD"}
 local w, h = 480, 800
+-- Number pad under the grid: keys 1-9 and 10 = erase. With buttons, Confirm
+-- on a cell moves the cursor onto the pad (pad_sel); touch taps it directly.
+local pad_sel = nil
+local PAD_COLS = 5
 
 local function check_win()
     for i = 1, 81 do
@@ -98,6 +102,51 @@ local function load_state()
     return true
 end
 
+-- Grid, number pad and action buttons, from the top down. The grid shrinks on
+-- short screens so the pad always fits.
+local function layout()
+    local m = smudge.get_metrics()
+    local topY = m.top_padding + m.header_height
+    local padKey = 50
+    local reserve = 2 * padKey + 8 + 36 + 36 + m.button_hints_height
+    local cSize = math.min(math.floor((w - 16) / 9), math.floor((h - topY - reserve) / 9))
+    local gSize = cSize * 9
+    local gx = math.floor((w - gSize) / 2)
+    local gy = topY + 4
+    local padY = gy + gSize + 10
+    local keyW = math.floor((gSize - (PAD_COLS - 1) * 6) / PAD_COLS)
+    return {cSize = cSize, gSize = gSize, gx = gx, gy = gy, padY = padY, keyW = keyW, keyH = padKey,
+            by = padY + 2 * padKey + 6 + 10}
+end
+
+local function pad_key_rect(L, k)
+    local r = math.floor((k - 1) / PAD_COLS)
+    local c = (k - 1) % PAD_COLS
+    return L.gx + c * (L.keyW + 6), L.padY + r * (L.keyH + 6), L.keyW, L.keyH
+end
+
+local function editable(idx)
+    return not init_b[idx] and not hint_b[idx]
+end
+
+-- Puts digit k (10 = erase) in the selected cell.
+local function enter_digit(k)
+    if row > 9 or solved or picker then return end
+    local idx = (row - 1) * 9 + col
+    if not editable(idx) then return end
+    b[idx] = (k == 10) and 0 or k
+    check_win()
+end
+
+-- How many times digit d is on the board (a full digit is greyed on the pad).
+local function digit_count(d)
+    local n = 0
+    for i = 1, 81 do
+        if b[i] == d then n = n + 1 end
+    end
+    return n
+end
+
 function on_init()
     w, h = smudge.get_bounds()
     math.randomseed(os.time())
@@ -108,17 +157,11 @@ end
 
 function on_draw()
     smudge.clear()
-    local m = smudge.get_metrics()
-    local topY = m.top_padding + m.header_height
-
     -- Header
     smudge.header("Sudoku", solved and "SOLVED!" or diff_names[diff])
 
-    -- Grid metrics
-    local cSize = math.min(math.floor((w - 16) / 9), math.floor((h - topY - 98) / 9))
-    local gSize = cSize * 9
-    local gx = math.floor((w - gSize) / 2)
-    local gy = topY + 4
+    local L = layout()
+    local cSize, gSize, gx, gy = L.cSize, L.gSize, L.gx, L.gy
 
     -- Cells
     for r = 1, 9 do
@@ -149,8 +192,25 @@ function on_draw()
         smudge.thick_line(lx, gy, lx, gy + gSize, 3)
     end
 
+    -- Number pad: 1-9 and erase
+    local selIdx = (row <= 9) and ((row - 1) * 9 + col) or nil
+    local padLive = selIdx and editable(selIdx) and not solved and not picker
+    for k = 1, 10 do
+        local x, y, kw, kh = pad_key_rect(L, k)
+        local focused = (pad_sel == k)
+        if focused then
+            smudge.rounded_rect(x, y, kw, kh, 6, true, true)
+        else
+            smudge.rounded_rect(x, y, kw, kh, 6, false, padLive and 2 or 1)
+        end
+        local full = (k <= 9 and digit_count(k) >= 9)
+        if full and not focused then smudge.rect_dither(x + 3, y + 3, kw - 6, kh - 6, false) end
+        local label = (k == 10) and "X" or tostring(k)
+        smudge.text(x + math.floor(kw / 2), y + math.floor(kh / 2) - 14, label, 0, true, "center", not focused)
+    end
+
     -- Action buttons: New Game (row 10), Hint (row 11)
-    local by = gy + gSize + 12
+    local by = L.by
     local bw = 140
     local bh = 36
     local ngx = gx + 20
@@ -185,7 +245,9 @@ function on_draw()
     end
 
     -- Button hints
-    if picker then
+    if pad_sel then
+        smudge.button_hints("Cancel", "Enter", "<", ">")
+    elseif picker then
         smudge.button_hints("Cancel", "Select", "<-", "->")
     elseif solved then
         smudge.button_hints("Back", "New Game", "", "")
@@ -214,6 +276,20 @@ function on_button(btn, pressed)
         return
     end
 
+    if pad_sel then
+        if btn == "confirm" then
+            enter_digit(pad_sel)
+            pad_sel = nil
+        elseif btn == "back" then
+            pad_sel = nil
+        elseif btn == "left" or btn == "up" or btn == "page_back" then
+            pad_sel = (pad_sel == 1) and 10 or (pad_sel - 1)
+        elseif btn == "right" or btn == "down" or btn == "page_forward" then
+            pad_sel = (pad_sel % 10) + 1
+        end
+        return
+    end
+
     if btn == "back" then
         save_state()
         smudge.exit()
@@ -224,9 +300,9 @@ function on_button(btn, pressed)
             apply_hint()
         else
             local idx = (row - 1) * 9 + col
-            if not init_b[idx] and not hint_b[idx] then
-                b[idx] = (b[idx] + 1) % 10
-                check_win()
+            if editable(idx) then
+                -- Onto the pad, at the cell's digit (or 1 when it is empty).
+                pad_sel = (b[idx] > 0) and b[idx] or 1
             end
         end
     elseif btn == "left" then
@@ -286,12 +362,6 @@ function on_tap(x, y)
         elseif x < w / 2 then
             if solved or row == 10 then picker = true
             elseif row == 11 then apply_hint()
-            else
-                local idx = (row - 1) * 9 + col
-                if not init_b[idx] and not hint_b[idx] then
-                    b[idx] = (b[idx] + 1) % 10
-                    check_win()
-                end
             end
         elseif x < 3 * w / 4 then
             if row >= 10 then row = 9; col = 5
@@ -305,31 +375,29 @@ function on_tap(x, y)
         return
     end
 
-    local topY = m.top_padding + m.header_height
-    local cSize = math.min(math.floor((w - 16) / 9), math.floor((h - topY - 98) / 9))
-    local gSize = cSize * 9
-    local gx = math.floor((w - gSize) / 2)
-    local gy = topY + 4
+    local L = layout()
+    local cSize, gSize, gx, gy = L.cSize, L.gSize, L.gx, L.gy
+    pad_sel = nil
 
     if x >= gx and x < gx + gSize and y >= gy and y < gy + gSize then
         local c = math.floor((x - gx) / cSize) + 1
         local r = math.floor((y - gy) / cSize) + 1
         if r >= 1 and r <= 9 and c >= 1 and c <= 9 then
-            if row == r and col == c then
-                local idx = (r - 1) * 9 + c
-                if not init_b[idx] and not hint_b[idx] then
-                    b[idx] = (b[idx] + 1) % 10
-                    check_win()
-                end
-            else
-                row = r
-                col = c
-            end
+            row = r
+            col = c
         end
         return
     end
 
-    local by = gy + gSize + 12
+    for k = 1, 10 do
+        local kx, ky, kw, kh = pad_key_rect(L, k)
+        if smudge.in_rect(x, y, kx, ky, kw, kh) then
+            enter_digit(k)
+            return
+        end
+    end
+
+    local by = L.by
     local bw = 140
     local bh = 36
     local ngx = gx + 20

@@ -44,7 +44,7 @@
     {
       "id": "sudoku",
       "name": "Sudoku",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": "Mumfee",
       "description": "Classic 9x9 Sudoku logic puzzle with puzzle generator",
       "files": [
@@ -57,7 +57,7 @@
     {
       "id": "blackjack",
       "name": "Blackjack",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "Mumfee",
       "description": "Classic 21 card game with betting chips, hit, stand, and dealer rules",
       "files": [
