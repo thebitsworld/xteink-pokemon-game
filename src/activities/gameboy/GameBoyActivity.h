@@ -6,6 +6,9 @@
 // second, with touch controls beside the picture. Started from the Ink-boy
 // fork of CrossInk (https://github.com/hellominecraft913-dev/Ink-boy, MIT).
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -120,6 +123,18 @@ class GameBoyActivity final : public Activity {
   std::atomic<bool> initialized{false};
   std::atomic<bool> displayDue{true};
   bool exitRequested = false;
+
+  // The emulator runs in its own task on CPU 0: sharing CPU 1 with the render
+  // task (and the main loop) slowed the e-ink SPI streaming roughly threefold.
+  // It owns the emulator state, its speed counters, autosave and preset
+  // switches; the main loop keeps input, the layout and display scheduling.
+  TaskHandle_t emuTask = nullptr;
+  std::atomic<bool> emuRun{false};
+  std::atomic<bool> emuStopped{true};
+  static void emuTaskEntry(void* arg);
+  void emuTaskLoop();
+  void startEmuTask();
+  void stopEmuTask();
   bool rotateRequested = false;
   // The next refresh is a full one, clearing what the old layout left behind.
   std::atomic<bool> fullRefreshDue{false};
@@ -131,9 +146,43 @@ class GameBoyActivity final : public Activity {
   char title[32] = {};
   char error[160] = {};
 
+  // Performance counters, logged every 2 s and appended to
+  // /.crosspoint/gameboy-perf.txt on exit: the emulator's speed against real
+  // time, the time one Game Boy frame takes, how often it waited for a buffer
+  // the display held, and how long drawing and the e-ink refresh take. The
+  // emulator task owns its counters; the render task adds to the atomics.
+  static constexpr uint64_t PERF_WINDOW_US = 2000000ULL;
+  uint64_t perfWindowStartUs = 0;
+  uint64_t perfSessionStartUs = 0;
+  uint32_t perfFrames = 0, perfWaits = 0, perfEmuUs = 0, perfEmuMaxUs = 0;
+  uint64_t perfTotalFrames = 0, perfTotalWaits = 0, perfTotalEmuUs = 0;
+  uint32_t perfTotalEmuMaxUs = 0;
+  std::atomic<uint32_t> perfDisplays{0}, perfDrawUs{0}, perfRefreshUs{0}, perfRefreshMaxUs{0};
+  uint64_t perfTotalDisplays = 0, perfTotalDrawUs = 0, perfTotalRefreshUs = 0;
+  uint32_t perfTotalRefreshMaxUs = 0;
+  // How often loop() runs and its longest gap: a gap as long as a refresh
+  // means the display starved the emulator of CPU.
+  uint64_t perfLastLoopUs = 0, perfTotalLoops = 0;
+  uint32_t perfLoops = 0, perfLoopMaxGapUs = 0, perfTotalLoopMaxGapUs = 0;
+  // Cleaning (Half) refreshes are counted apart, so the averages are the Fast
+  // refreshes alone; perfPhaseUs adds up the driver's phases of each Fast one
+  // (copy, new plane, setup, waveform, old plane - HalDisplay::lastRefreshTimings).
+  std::atomic<uint32_t> perfCleanRefreshes{0};
+  std::atomic<uint32_t> perfPhaseUs[5] = {};
+  uint64_t perfTotalCleanRefreshes = 0;
+  uint64_t perfTotalPhaseUs[5] = {};
+
+  // The screen refresh the game uses: 0 = stock, 1 = the faster one on readers
+  // it was validated on (see kRefreshPresets). The faster one gets a cleaning
+  // refresh every CLEAN_PERIOD_US against ghosting.
+  static constexpr uint64_t CLEAN_PERIOD_US = 60000000ULL;
+  uint8_t refreshPreset = 0;
+  uint64_t nextCleanUs = 0;
+
   void setLayout();
   void addControl(TouchControl control, int x, int y, int w, int h, const char* label);
   void rotate();
+  void applyRefreshPreset();
   bool loadRom();
   bool buildSavePaths();
   bool initEmulator();
@@ -150,6 +199,10 @@ class GameBoyActivity final : public Activity {
   void applyJoypad();
 
   void runEmulation(uint64_t nowUs);
+  void updatePerf(uint64_t nowUs);
+  void writePerfLog();
+  void resetPerfTotals(uint64_t nowUs);
+  void releaseRenderedFrame();
   void publishCompletedFrame();
   void drawGameFrame();
   bool drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer);

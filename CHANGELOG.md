@@ -1,11 +1,14 @@
-## [Unreleased]
+## [1.8.1] - 2026-10-12
 
 ### Changed
 
+- Game Boy (X4 Pro): the screen updates about twice as fast on X4 Pros with a UC8279 e-ink controller, about three times a second instead of about 1.4, using a shorter screen waveform at a higher frame rate and a faster link to the screen. A full cleaning refresh every minute clears any ghosting. Other X4 Pro screens keep the standard refresh until they have been tested. The emulator also runs on its own CPU core, leaving the other to the screen.
+- Game Boy (X4 Pro): each game session adds a line to `/.crosspoint/gameboy-perf.txt` with the emulator's speed, how often the screen updated and the screen controller, to help with speed reports.
 - Sudoku: a number pad under the grid. Tap a cell and then a digit (or X to erase); with the buttons, Confirm on a cell moves to the pad, Left/Right pick a digit and Confirm enters it. Digits already used nine times are greyed.
 
 ### Fixed
 
+- Game Boy (X4 Pro): a screen update the game asked for during a refresh was sometimes dropped; it now follows right after.
 - Blackjack on the X4 Pro: betting, dealing, hitting, standing and doubling now have buttons to tap; before, the game could not be played by touch.
 - The other apps from CrossSmudge on the X4 Pro: 2048, Dice, Codex, Block Drop, Wordle, Water Tracker, Stopwatch, Hourglass and Desk Stand show their actions as buttons to tap (Exit, New game, the die to roll, Split and Reset, the timer and water steps, the clock style...). Before, those actions had nothing to tap.
 

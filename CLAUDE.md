@@ -36,6 +36,24 @@ is in git history (before 2026-10-08).
 - Never `git add` `images/`, `books/` or Bookerly fonts; no `custom_sdkconfig` on X4 Pro.
 - The user writes Vietnamese; reply in Vietnamese.
 
+## freeink-sdk is vendored (git subtree)
+
+- `freeink-sdk/` is a copy of github.com/Free-Ink/freeink-sdk added with `git subtree --squash` (at
+  `69937018`, 2026-10-12), not a submodule, so its drivers can be changed here. Only its Lucide icons
+  stay a submodule (`freeink-sdk-lucide`, used by `scripts/generate_icons.py` only).
+- Take upstream changes with
+  `git subtree pull --prefix=freeink-sdk https://github.com/Free-Ink/freeink-sdk.git main --squash`
+  and resolve conflicts with our own edits like any merge. Keep the subtree's squash commits as git
+  made them (their `git-subtree-*` lines are what the next pull reads).
+- Mark every local SDK edit with a `// xteink-pokemon:` comment and list it here:
+  - `setFastRefreshTuning(tsset, pll)` in `PanelDriver.h`, `FreeInkDisplay.h/.cpp`, acted on by
+    `Uc8279X4Driver` (forced temperature and PLL for Fast refreshes; the Game Boy's refresh presets).
+  - `setFastRefreshDuScale(percent)` (same files, plus `Uc8279X4Driver::loadScaledDuLut`): Fast
+    refreshes on the X3 UC8279 DU bank with its frame counts scaled.
+  - `lastRefreshTimings()` (same files; `RefreshTimings` in `PanelDriver.h`, phase clock in
+    `Uc8279X4Driver`): where the last refresh spent its time.
+  - `EpdBus::setSpiHz`, `FreeInkDisplay::setDisplaySpiHz`: change the display SPI clock at runtime.
+
 ## Constraints that still bite
 
 - **Lua app memory**: the X3 simulator caps a Lua app at 75 KB (76800 B); kept as the limit until someone

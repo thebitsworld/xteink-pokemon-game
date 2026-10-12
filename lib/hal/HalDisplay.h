@@ -112,6 +112,18 @@ class HalDisplay {
   bool shouldSkipImageBlanking() const;
   bool supportsStripGrayscale() const;
 
+  // Game-mode tuning of Fast refreshes: forced temperature and frame rate
+  // (0, 0 = stock). See FreeInkDisplay::setFastRefreshTuning.
+  void setFastRefreshTuning(uint8_t tsset, uint8_t pll) { einkDisplay.setFastRefreshTuning(tsset, pll); }
+  // Game-mode Fast refreshes on a host-loaded DU waveform scaled to `percent`
+  // of its frames (0 = the panel's own). See FreeInkDisplay::setFastRefreshDuScale.
+  void setFastRefreshDuScale(uint8_t percent) { einkDisplay.setFastRefreshDuScale(percent); }
+  // The last refresh's phases in microseconds (copy, new plane, setup,
+  // waveform, old plane); false where the driver does not measure them.
+  bool lastRefreshTimings(uint32_t out[5]) const { return einkDisplay.lastRefreshTimings(out); }
+  // The display SPI clock for a game (0 = the driver default); no refresh may run.
+  void setDisplaySpiHz(uint32_t hz) { einkDisplay.setDisplaySpiHz(hz); }
+
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;
