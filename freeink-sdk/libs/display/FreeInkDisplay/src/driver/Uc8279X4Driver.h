@@ -171,12 +171,17 @@ class Uc8279X4Driver : public PanelDriver {
   uint8_t _tuneTsset = 0;
   uint8_t _tunePll = 0;
   uint8_t _pllWritten = 0;
+  // xteink-pokemon: Fast refreshes run the stock X3 UC8279 DU bank with every
+  // phase's frame count scaled to this percentage (0 = the OTP waveform).
+  uint8_t _duScalePct = 0;
+  void loadScaledDuLut(EpdBus& bus, uint8_t percent);
 
  public:
   void setFastRefreshTuning(uint8_t tsset, uint8_t pll) override {
     _tuneTsset = tsset;
     _tunePll = pll;
   }
+  void setFastRefreshDuScale(uint8_t percent) override { _duScalePct = percent; }
 
  private:
 };

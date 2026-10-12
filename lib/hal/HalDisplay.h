@@ -115,6 +115,9 @@ class HalDisplay {
   // Game-mode tuning of Fast refreshes: forced temperature and frame rate
   // (0, 0 = stock). See FreeInkDisplay::setFastRefreshTuning.
   void setFastRefreshTuning(uint8_t tsset, uint8_t pll) { einkDisplay.setFastRefreshTuning(tsset, pll); }
+  // Game-mode Fast refreshes on a host-loaded DU waveform scaled to `percent`
+  // of its frames (0 = the panel's own). See FreeInkDisplay::setFastRefreshDuScale.
+  void setFastRefreshDuScale(uint8_t percent) { einkDisplay.setFastRefreshDuScale(percent); }
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

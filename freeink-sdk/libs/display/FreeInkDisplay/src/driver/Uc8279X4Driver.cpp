@@ -486,6 +486,11 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
     bus.data(_cfg.gateScan);  // 0xE1 <- 0x02
   }
 
+  // xteink-pokemon: a game may run Fast refreshes on a host-loaded, shortened
+  // DU waveform (REG=1 below) instead of the panel's built-in one.
+  const bool externalDu = fast && _duScalePct != 0;
+  if (externalDu) loadScaledDuLut(bus, _duScalePct);
+
   powerOnIfNeeded(bus, " 8279x4_PON");
 
   if (fast) {
@@ -508,7 +513,8 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
     bus.data(0x01);
   }
   bus.cmd(CMD_PANEL_SETTING);
-  bus.data(static_cast<uint8_t>(_cfg.psr0 & 0xDF));  // REG cleared -> OTP (0x13)
+  // REG cleared -> OTP (0x13); xteink-pokemon: REG kept for an external DU.
+  bus.data(externalDu ? _cfg.psr0 : static_cast<uint8_t>(_cfg.psr0 & 0xDF));
   bus.data(_cfg.psr1);
   bus.cmd(CMD_DISPLAY_REFRESH);
   // Confirm the waveform started (BUSY dropped) before returning, so
@@ -517,6 +523,32 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
     const int8_t busyPin = bus.pins().busy;
     const unsigned long t0 = millis();
     while (digitalRead(busyPin) == HIGH && millis() - t0 < 50) delay(1);
+  }
+}
+
+// xteink-pokemon: loads the stock X3 UC8279 B/W DU bank (kUc8279X3_BwDu, the
+// same controller family) into the LUT registers with the frame count of every
+// phase scaled to `percent`. A table is groups of 7 bytes - repeat, four phase
+// bytes (bits 7-6 the drive level, bits 5-0 the frames), two trailing bytes -
+// and only phase bytes longer than one frame are scaled; the drive levels and
+// so the voltages stay as they are.
+void Uc8279X4Driver::loadScaledDuLut(EpdBus& bus, const uint8_t percent) {
+  constexpr size_t kTableLen = 42;
+  for (size_t t = 0; t < 5; ++t) {
+    uint8_t table[kTableLen];
+    memcpy(table, &kUc8279X3_BwDu[t][1], kTableLen);
+    for (size_t i = 0; i < kTableLen; ++i) {
+      const size_t pos = i % 7;
+      if (pos < 1 || pos > 4) continue;
+      const uint8_t frames = table[i] & 0x3F;
+      if (frames <= 1) continue;
+      int scaled = (frames * percent + 50) / 100;
+      if (scaled < 1) scaled = 1;
+      if (scaled > 0x3F) scaled = 0x3F;
+      table[i] = static_cast<uint8_t>((table[i] & 0xC0) | scaled);
+    }
+    bus.cmd(kUc8279X3_BwDu[t][0]);
+    bus.data(table, kTableLen);
   }
 }
 

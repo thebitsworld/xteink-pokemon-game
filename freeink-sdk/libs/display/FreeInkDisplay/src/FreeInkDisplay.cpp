@@ -1020,6 +1020,11 @@ void FreeInkDisplay::setFastRefreshTuning(uint8_t tsset, uint8_t pll) {
   if (_driver) _driver->setFastRefreshTuning(tsset, pll);
 }
 
+// xteink-pokemon: forwards the game-mode DU waveform scale to the driver.
+void FreeInkDisplay::setFastRefreshDuScale(uint8_t percent) {
+  if (_driver) _driver->setFastRefreshDuScale(percent);
+}
+
 void FreeInkDisplay::setFastRefreshCutoffMs(uint16_t ms) {
   if (_driver) _driver->setFastRefreshCutoffMs(ms);
 }

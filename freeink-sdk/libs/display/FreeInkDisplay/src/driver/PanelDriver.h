@@ -260,6 +260,9 @@ class PanelDriver {
     (void)tsset;
     (void)pll;
   }
+  // xteink-pokemon: game-mode Fast refreshes with a host-loaded DU waveform whose
+  // frame counts are scaled to `percent` (0 = the panel's built-in waveform).
+  virtual void setFastRefreshDuScale(uint8_t percent) { (void)percent; }
   virtual uint16_t fastRefreshCutoffMs() const { return 0; }
   // Hold the periodic anti-ghost full refresh through a continuous interaction
   // (e.g. a live slider drag): while set, fast refreshes are never promoted to a
