@@ -21,6 +21,8 @@ local deck = {}
 local deck_top = 0
 local status_message = ""
 local w, h = 480, 800
+local touch = false -- touch readers draw no button hints: the actions are a bar of buttons
+local TOUCH_BAR_H = 56
 
 local kCardWidth = 84
 local kCardHeight = 120
@@ -275,8 +277,37 @@ local function perform_split()
     table.insert(player_hands, active_hand_idx + 1, newHand)
 end
 
+-- Shared by the buttons, the hint taps and the touch bar.
+local function player_hit()
+    local hand = player_hands[active_hand_idx]
+    table.insert(hand.cards, draw_card())
+    local score = hand_score(hand.cards)
+    if score >= 21 then
+        if score > 21 then hand.busted = true end
+        advance_player_turn()
+    end
+end
+
+local function next_round()
+    if #player_hands > 1 and review_hand_idx < #player_hands then
+        review_hand_idx = review_hand_idx + 1
+        return
+    end
+    if bankroll <= 0 then
+        bankroll = 50
+    end
+    current_bet = math.min(current_bet, bankroll)
+    if current_bet <= 0 then current_bet = 1 end
+    clear_table(dealer_hand)
+    clear_table(player_hands)
+    insurance_bet = 0
+    status_message = ""
+    phase = "betting"
+end
+
 function on_init()
     w, h = smudge.get_bounds()
+    touch = smudge.has_touch and smudge.has_touch() or false
     math.randomseed(os.time())
     bankroll = tonumber(smudge.load("bankroll", "50")) or 50
     current_bet = math.min(5, bankroll)
@@ -287,6 +318,67 @@ end
 
 local function save_state()
     smudge.save("bankroll", tostring(bankroll))
+end
+
+-- Bottom of the table: above the button hints, or above the touch bar.
+local function bottom_bound(m)
+    if touch then return h - TOUCH_BAR_H - 16 end
+    return h - m.button_hints_height
+end
+
+-- The touch bar's buttons for this phase: {label, action}; a nil action is
+-- drawn but disabled. The insurance question has its own buttons.
+local function touch_buttons()
+    if phase == "betting" then
+        local chip = "$" .. chip_values[chip_idx]
+        return {{"Exit", "exit"}, {"- " .. chip, "minus"}, {"+ " .. chip, "plus"}, {"Deal", "deal"}}
+    elseif phase == "player_turn" then
+        return {{"Exit", "exit"}, {"Hit", "hit"}, {"Stand", "stand"}, {"Double", can_double_down() and "double" or nil}}
+    elseif phase == "round_over" then
+        local nextLabel = (#player_hands > 1 and review_hand_idx < #player_hands) and "Next Hand" or "Next"
+        return {{"Exit", "exit"}, {nextLabel, "next"}}
+    end
+    return {}
+end
+
+local function touch_button_rect(i, n)
+    local gap = 8
+    local bw = math.floor((w - 24 - gap * (n - 1)) / n)
+    return 12 + (i - 1) * (bw + gap), h - TOUCH_BAR_H - 8, bw, TOUCH_BAR_H
+end
+
+local function draw_touch_bar()
+    local btns = touch_buttons()
+    for i, b in ipairs(btns) do
+        local x, y, bw, bh = touch_button_rect(i, #btns)
+        smudge.rounded_rect(x, y, bw, bh, 8, false, b[2] and 2 or 1)
+        smudge.text(x + math.floor(bw / 2), y + math.floor(bh / 2) - 10, b[1], "ui12",
+                    b[2] and "bold" or "regular", "center", true)
+    end
+end
+
+local function touch_action(a)
+    if a == "exit" then
+        save_state()
+        smudge.exit()
+    elseif a == "minus" then
+        current_bet = math.max(1, current_bet - chip_values[chip_idx])
+    elseif a == "plus" then
+        current_bet = math.min(bankroll, current_bet + chip_values[chip_idx])
+    elseif a == "deal" then
+        deal_round()
+    elseif a == "hit" then
+        player_hit()
+        save_state()
+    elseif a == "stand" then
+        advance_player_turn()
+        save_state()
+    elseif a == "double" then
+        perform_double_down()
+        save_state()
+    elseif a == "next" then
+        next_round()
+    end
 end
 
 local function draw_empty_card_slot(x, y)
@@ -353,7 +445,7 @@ function on_draw()
 
     local m = smudge.get_metrics()
     local topBound = m.top_padding + m.header_height
-    local bottomBound = h - m.button_hints_height
+    local bottomBound = bottom_bound(m)
     local availableHeight = bottomBound - topBound
 
     -- 1. Header
@@ -416,7 +508,7 @@ function on_draw()
         local splitX = math.floor((w - splitBoxW) / 2)
         local splitY = playerCardY + kCardHeight + 16
         smudge.rounded_rect(splitX, splitY, splitBoxW, splitBoxH, 6, true, true)
-        smudge.centered_text(splitY + 10, "SPLIT (Side Button / Tap)", "ui10", "bold", false)
+        smudge.centered_text(splitY + 10, touch and "SPLIT" or "SPLIT (Side Button / Tap)", "ui10", "bold", false)
     end
 
     -- 4. STATUS & BET READOUT
@@ -447,8 +539,10 @@ function on_draw()
         smudge.centered_text(modalY + 96, "[ Insure ]           [ Decline ]", "ui10", "bold", false)
     end
 
-    -- 6. FOOTER HINTS
-    if phase == "betting" then
+    -- 6. FOOTER: the touch bar, or the button hints
+    if touch then
+        draw_touch_bar()
+    elseif phase == "betting" then
         smudge.button_hints("Back", "Deal", "- Bet", "+ Bet")
     elseif phase == "insurance" then
         smudge.button_hints("Decline", "Insure", "Insure", "Decline")
@@ -498,15 +592,8 @@ function on_button(btn, pressed)
                 save_state()
             end
         elseif btn == "left" then
-            -- Hit
-            local h = player_hands[active_hand_idx]
-            table.insert(h.cards, draw_card())
-            local score = hand_score(h.cards)
-            if score >= 21 then
-                if score > 21 then h.busted = true end
-                advance_player_turn()
-                save_state()
-            end
+            player_hit()
+            save_state()
         elseif btn == "right" then
             -- Stand
             advance_player_turn()
@@ -514,27 +601,24 @@ function on_button(btn, pressed)
         end
     elseif phase == "round_over" then
         if btn == "confirm" then
-            if #player_hands > 1 and review_hand_idx < #player_hands then
-                review_hand_idx = review_hand_idx + 1
-                return
-            end
-
-            if bankroll <= 0 then
-                bankroll = 50
-            end
-            current_bet = math.min(current_bet, bankroll)
-            if current_bet <= 0 then current_bet = 1 end
-            clear_table(dealer_hand)
-            clear_table(player_hands)
-            insurance_bet = 0
-            status_message = ""
-            phase = "betting"
+            next_round()
         end
     end
 end
 
 function on_tap(x, y)
     local m = smudge.get_metrics()
+
+    if touch and phase ~= "insurance" then
+        local btns = touch_buttons()
+        for i, b in ipairs(btns) do
+            local bx, by, bw, bh = touch_button_rect(i, #btns)
+            if b[2] and smudge.in_rect(x, y, bx, by, bw, bh) then
+                touch_action(b[2])
+                return
+            end
+        end
+    end
 
     -- 1. Tap on Insurance Modal
     if phase == "insurance" then
@@ -563,7 +647,7 @@ function on_tap(x, y)
     -- 2. Tap on Split Box
     if phase == "player_turn" and can_split_hand() then
         local topBound = m.top_padding + m.header_height
-        local bottomBound = h - m.button_hints_height
+        local bottomBound = bottom_bound(m)
         local availableHeight = bottomBound - topBound
         local playerTextY = topBound + math.floor(availableHeight * 0.38)
         local playerCardY = playerTextY + 36
@@ -577,8 +661,8 @@ function on_tap(x, y)
         end
     end
 
-    -- 3. Bottom Button Hints Tap
-    if y > h - m.button_hints_height then
+    -- 3. Bottom Button Hints Tap (readers with buttons)
+    if not touch and y > h - m.button_hints_height then
         if x < w / 4 then
             save_state()
             smudge.exit()
@@ -598,15 +682,8 @@ function on_tap(x, y)
                     save_state()
                 end
             elseif x >= w / 2 and x < 3 * w / 4 then
-                -- Hit
-                local h = player_hands[active_hand_idx]
-                table.insert(h.cards, draw_card())
-                local score = hand_score(h.cards)
-                if score >= 21 then
-                    if score > 21 then h.busted = true end
-                    advance_player_turn()
-                    save_state()
-                end
+                player_hit()
+                save_state()
             elseif x >= 3 * w / 4 then
                 -- Stand
                 advance_player_turn()
@@ -614,20 +691,7 @@ function on_tap(x, y)
             end
         elseif phase == "round_over" then
             if x >= w / 4 and x < w / 2 then
-                if #player_hands > 1 and review_hand_idx < #player_hands then
-                    review_hand_idx = review_hand_idx + 1
-                    return
-                end
-                if bankroll <= 0 then
-                    bankroll = 50
-                end
-                current_bet = math.min(current_bet, bankroll)
-                if current_bet <= 0 then current_bet = 1 end
-                clear_table(dealer_hand)
-                clear_table(player_hands)
-                insurance_bet = 0
-                status_message = ""
-                phase = "betting"
+                next_round()
             end
         end
     end
