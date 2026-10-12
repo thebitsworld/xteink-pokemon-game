@@ -50,6 +50,8 @@ is in git history (before 2026-10-08).
     `Uc8279X4Driver` (forced temperature and PLL for Fast refreshes; the Game Boy's refresh presets).
   - `setFastRefreshDuScale(percent)` (same files, plus `Uc8279X4Driver::loadScaledDuLut`): Fast
     refreshes on the X3 UC8279 DU bank with its frame counts scaled.
+  - `lastRefreshTimings()` (same files; `RefreshTimings` in `PanelDriver.h`, phase clock in
+    `Uc8279X4Driver`): where the last refresh spent its time.
 
 ## Constraints that still bite
 
