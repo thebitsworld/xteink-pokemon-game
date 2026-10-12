@@ -1,3 +1,13 @@
+## [1.8.2-beta.1] - 2026-10-12
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, in a way not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen): play a Game Boy game for a few minutes, both walking around (the whole picture moves) and in menus or text (a small part changes). Watch for scrambled or misplaced parts of the picture and for ghosting that the one-minute cleaning refresh does not clear, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes. Its new columns `unchanged` (pictures skipped because nothing changed) and `plane_kb` (data sent per update) show what the change does.
+
+### Changed
+
+- Game Boy (X4 Pro, UC8279-68 screens, test only): each screen update sends and refreshes only the rectangle that changed since the last one, and a picture that did not change is not refreshed at all.
+
 ## [1.8.1] - 2026-10-12
 
 ### Changed
