@@ -68,9 +68,13 @@ class GameBoyActivity final : public Activity {
   static constexpr int GAMEBOY_HEIGHT = 144;
   static constexpr int MAX_GAME_SCALE = 3;
   static constexpr uint64_t EMULATION_FRAME_PERIOD_US = 16743ULL;
-  // Four complete screen refreshes per second is the target. The emulator
-  // itself continues to run at the Game Boy's ~59.73 Hz frame cadence.
+  // At most four screen refreshes a second on the stock refresh. The faster
+  // one asks for the next picture as soon as the last is on screen (the short
+  // period only paces the redraws of a picture that did not change, which the
+  // driver skips). The emulator itself continues to run at the Game Boy's
+  // ~59.73 Hz frame cadence.
   static constexpr uint64_t DISPLAY_PERIOD_US = 250000ULL;
+  static constexpr uint64_t FAST_DISPLAY_PERIOD_US = 50000ULL;
   static constexpr uint8_t MAX_CATCH_UP_FRAMES = 4;
   static constexpr size_t EMULATOR_FRAME_BYTES = GAMEBOY_WIDTH * GAMEBOY_HEIGHT;
   static constexpr size_t MAX_CONTROLS = 10;
@@ -207,8 +211,14 @@ class GameBoyActivity final : public Activity {
   void releaseRenderedFrame();
   void publishCompletedFrame();
   void drawGameFrame();
+  bool drawGameFrameLandscape(const uint8_t* source, uint8_t* framebuffer);
   bool drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer);
   void drawControls();
+  // What the title and buttons were last drawn with (joypad mask, active touch
+  // control, orientation); the framebuffer keeps them between pictures, so
+  // they are redrawn only when this changes. CHROME_NONE forces a redraw.
+  static constexpr uint32_t CHROME_NONE = 0xFFFFFFFFu;
+  uint32_t chromeKey = CHROME_NONE;
   void registerTouchTargets();
 
   static uint8_t romRead(gb_s* gb, uint_fast32_t addr);
