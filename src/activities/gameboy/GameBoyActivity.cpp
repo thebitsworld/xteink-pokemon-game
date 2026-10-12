@@ -66,16 +66,20 @@ uint64_t nowMicros() {
 // and found D50 clean; beta.5 found the darkness barely changing from D40 to
 // D70 at PLL 0x0F, so these go shorter at that frame rate. `pll` 0 keeps the
 // driver's frame rate (0x0E). Drive levels stay the bank's and the voltages
-// the panel's.
+// the panel's. beta.6 settled on D40 PLL0F (D30/D20 only ghosted more) and
+// measured a 60 KB frame at ~64 ms each way at the 10 MHz SPI the board sets,
+// though the UC8279 is rated to 20 MHz: "SPI20" tries that, game only.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
   uint8_t pll;
   uint8_t duPct;
+  uint32_t spiHz;  // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"P0 stock", 0, 0, 0},        {"D50", 0, 0, 50},          {"D40 PLL0F", 0, 0x0F, 40},
-    {"D30 PLL0F", 0, 0x0F, 30},   {"D20 PLL0F", 0, 0x0F, 20},
+    {"P0 stock", 0, 0, 0, 0},
+    {"D40 PLL0F", 0, 0x0F, 40, 0},
+    {"D40 0F SPI20", 0, 0x0F, 40, 20000000},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 
@@ -187,6 +191,7 @@ void GameBoyActivity::onExit() {
 #ifndef SIMULATOR
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
     display.setFastRefreshDuScale(0);
+    display.setDisplaySpiHz(0);
 #endif
   }
   renderer.setOrientation(GfxRenderer::Portrait);
@@ -303,7 +308,10 @@ void GameBoyActivity::emuTaskLoop() {
 }
 
 void GameBoyActivity::render(RenderLock&&) {
-  if (!displayDue.load(std::memory_order_acquire)) return;
+  // Taken at the start: a request made while this refresh runs then starts the
+  // next one right away. (Cleared at the end, it was lost, and the screen
+  // waited up to a display period for the next request.)
+  if (!displayDue.exchange(false, std::memory_order_acq_rel)) return;
 
   renderer.clearScreen(0xFF);
   if (!initialized.load(std::memory_order_acquire)) {
@@ -311,7 +319,6 @@ void GameBoyActivity::render(RenderLock&&) {
     if (error[0]) renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2 + 8, error, true);
     renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2 + 70, "Touch screen to exit", true);
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    displayDue.store(false, std::memory_order_release);
     return;
   }
 
@@ -330,7 +337,6 @@ void GameBoyActivity::render(RenderLock&&) {
   if (cleaning) {
     // A cleaning refresh takes ~1.6 s: kept out of the Fast refresh figures.
     perfCleanRefreshes.fetch_add(1, std::memory_order_relaxed);
-    displayDue.store(false, std::memory_order_release);
     return;
   }
 #ifndef SIMULATOR
@@ -346,7 +352,6 @@ void GameBoyActivity::render(RenderLock&&) {
   uint32_t seenMax = perfRefreshMaxUs.load(std::memory_order_relaxed);
   while (refreshUs > seenMax && !perfRefreshMaxUs.compare_exchange_weak(seenMax, refreshUs)) {
   }
-  displayDue.store(false, std::memory_order_release);
 }
 
 // Marks the frame drawGameFrame() copied as consumed and lets the emulator
@@ -561,6 +566,7 @@ void GameBoyActivity::applyRefreshPreset() {
 #ifndef SIMULATOR
     display.setFastRefreshTuning(p.tsset, p.pll);
     display.setFastRefreshDuScale(p.duPct);
+    display.setDisplaySpiHz(p.spiHz);
 #else
     (void)p;
 #endif
