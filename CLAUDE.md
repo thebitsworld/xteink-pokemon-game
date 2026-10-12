@@ -45,7 +45,9 @@ is in git history (before 2026-10-08).
   `git subtree pull --prefix=freeink-sdk https://github.com/Free-Ink/freeink-sdk.git main --squash`
   and resolve conflicts with our own edits like any merge. Keep the subtree's squash commits as git
   made them (their `git-subtree-*` lines are what the next pull reads).
-- Mark every local SDK edit with a `// xteink-pokemon:` comment and list it here. None yet.
+- Mark every local SDK edit with a `// xteink-pokemon:` comment and list it here:
+  - `setFastRefreshTuning(tsset, pll)` in `PanelDriver.h`, `FreeInkDisplay.h/.cpp`, acted on by
+    `Uc8279X4Driver` (forced temperature and PLL for Fast refreshes; the Game Boy's refresh presets).
 
 ## Constraints that still bite
 
