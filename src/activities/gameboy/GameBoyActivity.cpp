@@ -57,6 +57,22 @@ uint64_t nowMicros() {
 #endif
 }
 
+// Fast refresh presets to try on the reader (GameBoyActivity::refreshPreset):
+// the forced temperature (TSSET) picks a shorter built-in waveform, the PLL
+// value the frame rate the waveform runs at. 0 means the driver's own value
+// (TSSET 0x5A, PLL 0x0E on the X4 Pro's UC8279). Only timing changes; the
+// drive voltages stay the panel's.
+struct RefreshPreset {
+  const char* label;
+  uint8_t tsset;
+  uint8_t pll;
+};
+constexpr RefreshPreset kRefreshPresets[] = {
+    {"P0 stock", 0, 0},          {"P1 T64", 0x64, 0},         {"P2 T7F", 0x7F, 0},
+    {"P3 PLL0F", 0, 0x0F},       {"P4 PLL0D", 0, 0x0D},       {"P5 T7F+0F", 0x7F, 0x0F},
+};
+constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
+
 // The e-ink controller the reader detected at boot (X4 Pro batches differ:
 // SSD1677, UC8179 or UC8279) and its variant byte, for the speed figures:
 // how fast a refresh can be depends on it.
@@ -158,6 +174,12 @@ void GameBoyActivity::onExit() {
   }
   TouchRegistry::getInstance().clear();
   cleanup();
+  if (refreshPreset != 0) {
+    refreshPreset = 0;
+#ifndef SIMULATOR
+    display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
+#endif
+  }
   renderer.setOrientation(GfxRenderer::Portrait);
   Activity::onExit();
 }
@@ -191,6 +213,14 @@ void GameBoyActivity::loop() {
     rotateRequested = false;
     rotate();
   }
+  if (presetRequested) {
+    presetRequested = false;
+    // One gameboy-perf.txt line per preset tried: close this one's figures.
+    writePerfLog();
+    resetPerfTotals(nowMicros());
+    refreshPreset = static_cast<uint8_t>((refreshPreset + 1) % kRefreshPresetCount);
+    applyRefreshPreset();
+  }
 
   const uint64_t nowUs = nowMicros();
   if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
@@ -198,6 +228,11 @@ void GameBoyActivity::loop() {
   ++perfLoops;
   runEmulation(nowUs);
   updatePerf(nowUs);
+
+  if (refreshPreset != 0 && nowUs >= nextCleanUs) {
+    nextCleanUs = nowUs + CLEAN_PERIOD_US;
+    fullRefreshDue.store(true, std::memory_order_release);
+  }
 
   if (nowUs >= nextAutosaveUs) {
     nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
@@ -277,10 +312,7 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint8_t next = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
   snprintf(perfText[next][0], sizeof(perfText[next][0]), "%.0ffps %u%% %.1f/%.0fms w%u", fps, speed, emuMs,
            perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits));
-  char panel[24];
-  panelName(panel, sizeof(panel));
-  snprintf(perfText[next][1], sizeof(perfText[next][1]), "%s %.1f/s %.0fms loop %.0f/s %ums", panel,
-           displays / seconds, refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
+  snprintf(perfText[next][1], sizeof(perfText[next][1]), "LCD %.1f/s %.0fms loop %.0f/s %ums", displays / seconds, refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
   perfTextIdx.store(next, std::memory_order_release);
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
           "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
@@ -304,7 +336,25 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   perfWindowStartUs = nowUs;
 }
 
-// One line per game session, for comparing readers and builds.
+// Starts a new stretch of figures for gameboy-perf.txt (a new preset).
+void GameBoyActivity::resetPerfTotals(const uint64_t nowUs) {
+  perfSessionStartUs = perfWindowStartUs = nowUs;
+  perfFrames = perfWaits = perfEmuUs = perfEmuMaxUs = 0;
+  perfLoops = perfLoopMaxGapUs = 0;
+  perfDisplays.store(0);
+  perfDrawUs.store(0);
+  perfRefreshUs.store(0);
+  perfRefreshMaxUs.store(0);
+  perfTotalFrames = perfTotalWaits = perfTotalEmuUs = 0;
+  perfTotalEmuMaxUs = 0;
+  perfTotalDisplays = perfTotalDrawUs = perfTotalRefreshUs = 0;
+  perfTotalRefreshMaxUs = 0;
+  perfTotalLoops = 0;
+  perfTotalLoopMaxGapUs = 0;
+}
+
+// One line per game session (and per refresh preset tried in it), for
+// comparing readers, builds and presets.
 void GameBoyActivity::writePerfLog() {
   const float seconds = static_cast<float>(perfWindowStartUs - perfSessionStartUs) / 1e6f;
   if (seconds < 4.0f || perfTotalFrames == 0) return;
@@ -313,18 +363,18 @@ void GameBoyActivity::writePerfLog() {
   panelName(panel, sizeof(panel));
   char line[220];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
       perfTotalDisplays ? perfTotalRefreshUs / 1000.0f / perfTotalDisplays : 0.0f, perfTotalRefreshMaxUs / 1000.0f,
       perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
-      panel);
+      panel, kRefreshPresets[refreshPreset].label);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -408,6 +458,31 @@ void GameBoyActivity::addControl(const TouchControl control, const int x, const 
                                  const char* label) {
   if (controlCount >= MAX_CONTROLS) return;
   controls[controlCount++] = {control, x, y, w, h, label};
+}
+
+// Above the game in portrait; the top of the left panel, above the D-pad, in
+// landscape.
+bool GameBoyActivity::inTitleStrip(const int x, const int y) const {
+  if (portrait) return y < gameY;
+  return x < gameX && y < gameY + 100;
+}
+
+// Hands the current preset to the display driver (under the render lock: a
+// refresh may be running) and asks for a cleaning refresh next.
+void GameBoyActivity::applyRefreshPreset() {
+  const RefreshPreset& p = kRefreshPresets[refreshPreset];
+  {
+    RenderLock lock(*this);
+#ifndef SIMULATOR
+    display.setFastRefreshTuning(p.tsset, p.pll);
+#else
+    (void)p;
+#endif
+  }
+  nextCleanUs = nowMicros() + CLEAN_PERIOD_US;
+  fullRefreshDue.store(true, std::memory_order_release);
+  displayDue.store(true, std::memory_order_release);
+  requestUpdate();
 }
 
 void GameBoyActivity::rotate() {
@@ -685,6 +760,8 @@ void GameBoyActivity::handleInput() {
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTouchDown(x, y)) {
+    // The title strip cycles the refresh presets, once per touch.
+    if (inTitleStrip(x, y)) presetRequested = true;
     updateTouch(x, y);
   }
 
@@ -699,6 +776,7 @@ void GameBoyActivity::handleInput() {
 }
 
 void GameBoyActivity::updateTouch(const int x, const int y) {
+  if (inTitleStrip(x, y)) return;
   const TouchControl control = hitTestTouch(x, y);
   if (control == TouchControl::Exit) {
     exitRequested = true;
@@ -876,15 +954,42 @@ void GameBoyActivity::drawControls() {
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
-  // Speed and display figures (updatePerf()), a line under the title.
+  // The e-ink controller and the refresh preset (tap here for the next one),
+  // then the speed figures (updatePerf()).
+  char panel[24];
+  panelName(panel, sizeof(panel));
+  const char* preset = kRefreshPresets[refreshPreset].label;
   const uint8_t perfIdx = perfTextIdx.load(std::memory_order_acquire);
   if (portrait) {
-    char both[100];
+    char panelLine[48];
+    snprintf(panelLine, sizeof(panelLine), "%s  %s", panel, preset);
+    const int pw = renderer.getTextWidth(SMALL_FONT_ID, panelLine);
+    renderer.drawText(SMALL_FONT_ID, renderer.getScreenWidth() - 8 - pw, titleY + 2, panelLine, true);
+    char both[170];
     snprintf(both, sizeof(both), "%s | %s", perfText[perfIdx][0], perfText[perfIdx][1]);
     renderer.drawText(SMALL_FONT_ID, titleX, titleY + 20, both, true);
   } else {
-    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 24, perfText[perfIdx][0], true);
-    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 40, perfText[perfIdx][1], true);
+    // The left panel is narrow: each figures line in two halves, split at the
+    // second and third space ("60fps 100%" / "0.2/1ms w0", "LCD 1.3/s 680ms" /
+    // "loop 78/s 349ms").
+    int y = titleY + 24;
+    const int splitAt[2] = {2, 3};
+    for (int line = 0; line < 2; ++line) {
+      char buf[80];
+      snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][line]);
+      char* rest = buf;
+      for (int spaces = 0; *rest; ++rest) {
+        if (*rest == ' ' && ++spaces == splitAt[line]) {
+          *rest++ = '\0';
+          break;
+        }
+      }
+      renderer.drawText(SMALL_FONT_ID, titleX, y, buf, true);
+      renderer.drawText(SMALL_FONT_ID, titleX, y + 16, rest, true);
+      y += 32;
+    }
+    renderer.drawText(SMALL_FONT_ID, titleX, y, panel, true);
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 16, preset, true);
   }
 
   for (size_t i = 0; i < controlCount; ++i) {

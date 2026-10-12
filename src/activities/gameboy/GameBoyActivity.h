@@ -149,12 +149,23 @@ class GameBoyActivity final : public Activity {
   // means the display starved the emulator of CPU.
   uint64_t perfLastLoopUs = 0, perfTotalLoops = 0;
   uint32_t perfLoops = 0, perfLoopMaxGapUs = 0, perfTotalLoopMaxGapUs = 0;
-  char perfText[2][2][64] = {};  // [buffer][line]: emulator, display
+  char perfText[2][2][80] = {};  // [buffer][line]: emulator, display
+
+  // Experimental Fast refresh presets (forced temperature, frame rate) for the
+  // X4 Pro's e-ink while a game runs; tapping the title strip cycles them, and
+  // the speed figures show which one is on. 0 = stock. A preset other than
+  // stock gets a cleaning refresh every CLEAN_PERIOD_US against ghosting.
+  static constexpr uint64_t CLEAN_PERIOD_US = 60000000ULL;
+  uint8_t refreshPreset = 0;
+  bool presetRequested = false;
+  uint64_t nextCleanUs = 0;
   std::atomic<uint8_t> perfTextIdx{0};
 
   void setLayout();
   void addControl(TouchControl control, int x, int y, int w, int h, const char* label);
   void rotate();
+  void applyRefreshPreset();
+  bool inTitleStrip(int x, int y) const;
   bool loadRom();
   bool buildSavePaths();
   bool initEmulator();
@@ -173,6 +184,7 @@ class GameBoyActivity final : public Activity {
   void runEmulation(uint64_t nowUs);
   void updatePerf(uint64_t nowUs);
   void writePerfLog();
+  void resetPerfTotals(uint64_t nowUs);
   void releaseRenderedFrame();
   void publishCompletedFrame();
   void drawGameFrame();
