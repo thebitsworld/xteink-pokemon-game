@@ -185,6 +185,17 @@ class Uc8279X4Driver : public PanelDriver {
     return d;
   }
   void loadScaledDuLut(EpdBus& bus, uint8_t percent);
+  // xteink-pokemon: game-mode changed-rectangle refreshes. `_grayBase` doubles
+  // as the copy of what both RAM planes hold; `_diffRefValid` says it does.
+  // The window is in visible rows and bytes; `_windowActive` makes
+  // startBwRefresh send it instead of the full screen.
+  bool _diffWindow = false;
+  bool _diffRefValid = false;
+  bool _windowActive = false;
+  uint16_t _winRow0 = 0, _winRow1 = 0, _winByte0 = 0, _winByte1 = 0;
+  bool findChangedWindow(const uint8_t* fb);
+  void sendPartialWindow(EpdBus& bus);
+  void streamWindow(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb);
 
  public:
   void setFastRefreshTuning(uint8_t tsset, uint8_t pll) override {
@@ -192,6 +203,10 @@ class Uc8279X4Driver : public PanelDriver {
     _tunePll = pll;
   }
   void setFastRefreshDuScale(uint8_t percent) override { _duScalePct = percent; }
+  void setFastRefreshDiffWindow(bool on) override {
+    _diffWindow = on;
+    _diffRefValid = false;
+  }
   bool lastRefreshTimings(RefreshTimings& out) const override {
     out = _timings;
     return true;

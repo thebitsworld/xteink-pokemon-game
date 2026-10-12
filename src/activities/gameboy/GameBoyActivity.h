@@ -166,11 +166,13 @@ class GameBoyActivity final : public Activity {
   uint32_t perfLoops = 0, perfLoopMaxGapUs = 0, perfTotalLoopMaxGapUs = 0;
   // Cleaning (Half) refreshes are counted apart, so the averages are the Fast
   // refreshes alone; perfPhaseUs adds up the driver's phases of each Fast one
-  // (copy, new plane, setup, waveform, old plane - HalDisplay::lastRefreshTimings).
-  std::atomic<uint32_t> perfCleanRefreshes{0};
-  std::atomic<uint32_t> perfPhaseUs[5] = {};
-  uint64_t perfTotalCleanRefreshes = 0;
-  uint64_t perfTotalPhaseUs[5] = {};
+  // (copy, new plane, setup, waveform, old plane - HalDisplay::lastRefreshTimings)
+  // and, last, the bytes sent per plane. Pictures the driver skipped because
+  // nothing changed count apart too (perfUnchanged).
+  std::atomic<uint32_t> perfCleanRefreshes{0}, perfUnchanged{0};
+  std::atomic<uint32_t> perfPhaseUs[6] = {};
+  uint64_t perfTotalCleanRefreshes = 0, perfTotalUnchanged = 0;
+  uint64_t perfTotalPhaseUs[6] = {};
 
   // The screen refresh the game uses: 0 = stock, 1 = the faster one on readers
   // it was validated on (see kRefreshPresets). The faster one gets a cleaning

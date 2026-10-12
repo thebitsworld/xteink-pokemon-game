@@ -118,9 +118,13 @@ class HalDisplay {
   // Game-mode Fast refreshes on a host-loaded DU waveform scaled to `percent`
   // of its frames (0 = the panel's own). See FreeInkDisplay::setFastRefreshDuScale.
   void setFastRefreshDuScale(uint8_t percent) { einkDisplay.setFastRefreshDuScale(percent); }
+  // Game-mode Fast refreshes that send and drive only the changed rectangle and
+  // skip an unchanged frame. See FreeInkDisplay::setFastRefreshDiffWindow.
+  void setFastRefreshDiffWindow(bool on) { einkDisplay.setFastRefreshDiffWindow(on); }
   // The last refresh's phases in microseconds (copy, new plane, setup,
-  // waveform, old plane); false where the driver does not measure them.
-  bool lastRefreshTimings(uint32_t out[5]) const { return einkDisplay.lastRefreshTimings(out); }
+  // waveform, old plane), then the bytes sent per plane (0: unchanged frame);
+  // false where the driver does not measure them.
+  bool lastRefreshTimings(uint32_t out[6]) const { return einkDisplay.lastRefreshTimings(out); }
   // The display SPI clock for a game (0 = the driver default); no refresh may run.
   void setDisplaySpiHz(uint32_t hz) { einkDisplay.setDisplaySpiHz(hz); }
 

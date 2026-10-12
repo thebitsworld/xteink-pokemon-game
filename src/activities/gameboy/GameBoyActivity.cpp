@@ -66,16 +66,19 @@ uint64_t nowMicros() {
 // ~276 ms, about 3 pictures a second, with the darkness of stock and a little
 // ghosting that the periodic cleaning refresh clears. Drive levels stay the
 // bank's and voltages the panel's. Other controllers and variants keep stock.
+// It also sends and drives only the rectangle that changed since the last
+// picture, and skips a picture that did not change at all.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
   uint8_t pll;
   uint8_t duPct;
-  uint32_t spiHz;  // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
+  uint32_t spiHz;   // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
+  bool diffWindow;  // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"stock", 0, 0, 0, 0},
-    {"fast", 0, 0x0F, 40, 20000000},
+    {"stock", 0, 0, 0, 0, false},
+    {"fast-window", 0, 0x0F, 40, 20000000, true},
 };
 
 // Whether this reader's screen is one the fast refresh was validated on.
@@ -200,6 +203,7 @@ void GameBoyActivity::onExit() {
 #ifndef SIMULATOR
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
     display.setFastRefreshDuScale(0);
+    display.setFastRefreshDiffWindow(false);
     display.setDisplaySpiHz(0);
 #endif
   }
@@ -341,9 +345,14 @@ void GameBoyActivity::render(RenderLock&&) {
     return;
   }
 #ifndef SIMULATOR
-  uint32_t phases[5];
+  uint32_t phases[6];
   if (display.lastRefreshTimings(phases)) {
-    for (int i = 0; i < 5; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
+    if (phases[5] == 0) {
+      // The picture had not changed, so the driver did not refresh.
+      perfUnchanged.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    for (int i = 0; i < 6; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
   }
 #endif
   perfDisplays.fetch_add(1, std::memory_order_relaxed);
@@ -380,9 +389,10 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const float emuMs = perfFrames ? static_cast<float>(perfEmuUs) / perfFrames / 1000.0f : 0.0f;
   const float refreshMs = displays ? static_cast<float>(refreshUs) / displays / 1000.0f : 0.0f;
 
-  uint32_t phaseUs[5];
-  for (int i = 0; i < 5; ++i) phaseUs[i] = perfPhaseUs[i].exchange(0, std::memory_order_relaxed);
+  uint32_t phaseUs[6];
+  for (int i = 0; i < 6; ++i) phaseUs[i] = perfPhaseUs[i].exchange(0, std::memory_order_relaxed);
   const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
+  const uint32_t unchanged = perfUnchanged.exchange(0, std::memory_order_relaxed);
   const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
 
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
@@ -404,7 +414,8 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   perfTotalRefreshUs += refreshUs;
   perfTotalRefreshMaxUs = std::max(perfTotalRefreshMaxUs, refreshMaxUs);
   perfTotalCleanRefreshes += cleanRefreshes;
-  for (int i = 0; i < 5; ++i) perfTotalPhaseUs[i] += phaseUs[i];
+  perfTotalUnchanged += unchanged;
+  for (int i = 0; i < 6; ++i) perfTotalPhaseUs[i] += phaseUs[i];
   perfFrames = perfWaits = perfEmuUs = perfEmuMaxUs = 0;
   perfWindowStartUs = nowUs;
 }
@@ -426,7 +437,9 @@ void GameBoyActivity::resetPerfTotals(const uint64_t nowUs) {
   perfTotalLoopMaxGapUs = 0;
   perfCleanRefreshes.store(0);
   perfTotalCleanRefreshes = 0;
-  for (int i = 0; i < 5; ++i) {
+  perfUnchanged.store(0);
+  perfTotalUnchanged = 0;
+  for (int i = 0; i < 6; ++i) {
     perfPhaseUs[i].store(0);
     perfTotalPhaseUs[i] = 0;
   }
@@ -441,9 +454,9 @@ void GameBoyActivity::writePerfLog() {
   char panel[24];
   panelName(panel, sizeof(panel));
   const float phaseDiv = perfTotalDisplays ? 1000.0f * perfTotalDisplays : 1.0f;
-  char line[300];
+  char line[340];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
@@ -451,12 +464,13 @@ void GameBoyActivity::writePerfLog() {
       perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
       panel, kRefreshPresets[refreshPreset].label, static_cast<unsigned long long>(perfTotalCleanRefreshes),
       perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
-      perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv);
+      perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv,
+      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -551,6 +565,7 @@ void GameBoyActivity::applyRefreshPreset() {
 #ifndef SIMULATOR
     display.setFastRefreshTuning(p.tsset, p.pll);
     display.setFastRefreshDuScale(p.duPct);
+    display.setFastRefreshDiffWindow(p.diffWindow);
     display.setDisplaySpiHz(p.spiHz);
 #else
     (void)p;

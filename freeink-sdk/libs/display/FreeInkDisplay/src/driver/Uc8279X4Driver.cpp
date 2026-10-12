@@ -285,6 +285,7 @@ void Uc8279X4Driver::initController(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::begin(EpdBus& bus) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _directGrayOnPanel = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -405,6 +406,40 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   _grayBaseValid = false;
   _absoluteGrayPlanes = false;
   _phaseStartUs = micros();  // xteink-pokemon: refresh phase timings
+  _timings = {};
+  // xteink-pokemon: a game's Fast refresh sends and drives only the rectangle
+  // that changed, or nothing at all when the frame is the same.
+  if (_diffWindow && _diffRefValid && mode == RefreshMode::Fast && !_needFullClear && _oldPlaneValid &&
+      !paintDestination && !_redriveAfterGray && fb != nullptr && !FREEINK_UC8279X4_ROWREV &&
+      !FREEINK_UC8279X4_XMIRROR) {
+    if (!findChangedWindow(fb)) {
+      _grayBaseValid = true;  // the snapshot is this frame already
+      _timings.copyUs = phaseUs();
+      _pendingRefresh = false;
+      return false;
+    }
+    const uint16_t bytes = _winByte1 - _winByte0 + 1;
+    for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
+      const uint32_t at = static_cast<uint32_t>(r) * _wb + _winByte0;
+      memcpy(_grayBase + at, fb + at, bytes);
+    }
+    _grayBaseValid = true;
+    _timings.copyUs = phaseUs();
+    _windowActive = true;
+    bus.cmd(CMD_PARTIAL_IN);
+    sendPartialWindow(bus);
+    streamWindow(bus, CMD_DTM2, fb);
+    bus.cmd(CMD_PARTIAL_OUT);
+    _timings.newPlaneUs = phaseUs();
+    _timings.planeBytes = static_cast<uint32_t>(_winRow1 - _winRow0 + 1) * bytes;
+    startBwRefresh(bus, true);
+    _timings.setupUs = phaseUs();
+    _pendingPartial = true;
+    _pendingTurnOff = turnOff;
+    _pendingRefresh = true;
+    return true;
+  }
+  _timings.planeBytes = static_cast<uint32_t>(_tresH) * _wb;
   if (_grayBase != nullptr && fb != nullptr) {
     memcpy(_grayBase, fb, _bufferSize);
     _grayBaseValid = true;
@@ -500,21 +535,8 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
   if (fast) {
     // Stock NEVER issues PTIN without a PTL (0x90) window — with PTL unset the
     // DU scans but develops nothing (first field unit: 443 ms DRF, no image).
-    // Full-screen window; gate coords carry the 120-gate visible offset.
-    const uint16_t xEnd = _w - 1;
-    const uint16_t yStart = _cfg.gateOffset;
-    const uint16_t yEnd = _cfg.gateOffset + _h - 1;
     bus.cmd(CMD_PARTIAL_IN);
-    bus.cmd(CMD_PARTIAL_WINDOW);
-    bus.data(0x00);
-    bus.data(0x00);  // x start, byte-aligned (& 0xF8)
-    bus.data(static_cast<uint8_t>(xEnd >> 8));
-    bus.data(static_cast<uint8_t>(xEnd | 0x07));
-    bus.data(static_cast<uint8_t>(yStart >> 8));
-    bus.data(static_cast<uint8_t>(yStart & 0xFF));
-    bus.data(static_cast<uint8_t>(yEnd >> 8));
-    bus.data(static_cast<uint8_t>(yEnd & 0xFF));
-    bus.data(0x01);
+    sendPartialWindow(bus);
   }
   bus.cmd(CMD_PANEL_SETTING);
   // REG cleared -> OTP (0x13); xteink-pokemon: REG kept for an external DU.
@@ -556,17 +578,104 @@ void Uc8279X4Driver::loadScaledDuLut(EpdBus& bus, const uint8_t percent) {
   }
 }
 
+// PTL (0x90): the full screen, or a game's changed rectangle while
+// `_windowActive`. Gate coords carry the 120-gate visible offset; x is
+// byte-aligned.
+void Uc8279X4Driver::sendPartialWindow(EpdBus& bus) {
+  uint16_t xStart = 0;
+  uint16_t xEnd = _w - 1;
+  uint16_t yStart = _cfg.gateOffset;
+  uint16_t yEnd = _cfg.gateOffset + _h - 1;
+  if (_windowActive) {  // xteink-pokemon
+    xStart = _winByte0 * 8;
+    xEnd = _winByte1 * 8 + 7;
+    yStart = _cfg.gateOffset + _winRow0;
+    yEnd = _cfg.gateOffset + _winRow1;
+  }
+  bus.cmd(CMD_PARTIAL_WINDOW);
+  bus.data(static_cast<uint8_t>(xStart >> 8));
+  bus.data(static_cast<uint8_t>(xStart & 0xF8));
+  bus.data(static_cast<uint8_t>(xEnd >> 8));
+  bus.data(static_cast<uint8_t>(xEnd | 0x07));
+  bus.data(static_cast<uint8_t>(yStart >> 8));
+  bus.data(static_cast<uint8_t>(yStart & 0xFF));
+  bus.data(static_cast<uint8_t>(yEnd >> 8));
+  bus.data(static_cast<uint8_t>(yEnd & 0xFF));
+  bus.data(0x01);
+}
+
+// xteink-pokemon: the bounding rectangle (visible rows, bytes) where `fb`
+// differs from `_grayBase`, the frame both RAM planes hold; false if none.
+bool Uc8279X4Driver::findChangedWindow(const uint8_t* fb) {
+  int row0 = -1;
+  int row1 = -1;
+  int byte0 = _wb;
+  int byte1 = -1;
+  for (uint16_t r = 0; r < _h; ++r) {
+    const uint8_t* a = fb + static_cast<uint32_t>(r) * _wb;
+    const uint8_t* b = _grayBase + static_cast<uint32_t>(r) * _wb;
+    if (memcmp(a, b, _wb) == 0) continue;
+    if (row0 < 0) row0 = r;
+    row1 = r;
+    for (int i = 0; i < byte0; ++i) {
+      if (a[i] != b[i]) {
+        byte0 = i;
+        break;
+      }
+    }
+    for (int i = _wb - 1; i > byte1; --i) {
+      if (a[i] != b[i]) {
+        byte1 = i;
+        break;
+      }
+    }
+  }
+  if (row0 < 0) return false;
+  _winRow0 = static_cast<uint16_t>(row0);
+  _winRow1 = static_cast<uint16_t>(row1);
+  _winByte0 = static_cast<uint16_t>(byte0);
+  _winByte1 = static_cast<uint16_t>(byte1);
+  return true;
+}
+
+// xteink-pokemon: streams the changed rectangle of `fb` into a RAM plane; the
+// controller must be in partial mode with that window set.
+void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb) {
+  uint8_t row[128];
+  const uint16_t bytes = _winByte1 - _winByte0 + 1;
+  bus.cmd(ramCmd);
+  bus.beginTxn();
+  for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
+    memcpy(row, fb + static_cast<uint32_t>(r) * _wb + _winByte0, bytes);
+    bus.rawWriteBytes(row, bytes);
+  }
+  bus.endTxn();
+}
+
 void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
   if (!_pendingRefresh) return;
   _pendingRefresh = false;
 
   bus.waitRefreshComplete(" 8279x4_DRF");
   _timings.waveformUs = phaseUs();  // xteink-pokemon
-  if (_pendingPartial) bus.cmd(CMD_PARTIAL_OUT);
+  if (_windowActive) {
+    // xteink-pokemon: a changed-rectangle refresh syncs only that rectangle,
+    // still in partial mode.
+    sendPartialWindow(bus);
+    streamWindow(bus, CMD_DTM1, _grayBase);
+    bus.cmd(CMD_PARTIAL_OUT);
+    _windowActive = false;
+  } else {
+    if (_pendingPartial) bus.cmd(CMD_PARTIAL_OUT);
 
-  // Sync the OLD plane (0x10) with the just-displayed frame so the NEXT partial
-  // diffs against it (same ghosting management as the UC8179 sibling).
-  streamPlane(bus, CMD_DTM1, fb);
+    // Sync the OLD plane (0x10) with the just-displayed frame so the NEXT partial
+    // diffs against it (same ghosting management as the UC8179 sibling).
+    // xteink-pokemon: in game mode from the frame's snapshot, which DTM2 got too,
+    // so that both planes match `_grayBase` for the next changed rectangle.
+    const bool keepRef = _diffWindow && _grayBaseValid && _grayBase != nullptr;
+    streamPlane(bus, CMD_DTM1, keepRef ? _grayBase : fb);
+    _diffRefValid = keepRef;
+  }
   _timings.oldPlaneUs = phaseUs();  // xteink-pokemon
   _oldPlaneValid = true;
   _needFullClear = false;
@@ -579,6 +688,7 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
 }
 
 void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
@@ -589,6 +699,7 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _directGrayOnPanel = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -624,6 +735,7 @@ GrayscaleCapabilities Uc8279X4Driver::grayscaleCapabilities(GrayscaleMode mode) 
 
 void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback,
                                     bool turnOff) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
@@ -642,6 +754,7 @@ void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMod
 }
 
 void Uc8279X4Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   if (!lsb) return;
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
@@ -670,6 +783,7 @@ void Uc8279X4Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
 #endif
 
 void Uc8279X4Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   if (!msb) return;
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
@@ -698,6 +812,7 @@ void Uc8279X4Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
 
 void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
                                  bool factoryMode) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   (void)lut;
 
   // Vendor AA sequence: PSR (REG=1) -> [planes already in RAM via
@@ -770,6 +885,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
 }
 
 void Uc8279X4Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   if (!fb) return;
   // Match the UC8179 sibling: an explicit Full/Half clean, or a
   // state that can't run the non-flashing transition (first AA page / no valid
@@ -783,6 +899,7 @@ void Uc8279X4Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, Refres
 }
 
 void Uc8279X4Driver::transitionGrayscaleBase(EpdBus& bus, const uint8_t* fb, bool turnOff) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   if (!fb) return;
   // Snapshot the new B/W base for the AA fold that follows.
   _grayBaseValid = false;
@@ -858,6 +975,7 @@ void Uc8279X4Driver::runGrayscalePrecondition(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
+  _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
