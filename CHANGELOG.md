@@ -1,3 +1,13 @@
+## [1.8.2-beta.4] - 2026-10-12
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, as often as it can, while drawing the next picture, and now also tells the screen to scan only the rows of the part that changed, in ways not yet validated on this panel. It can leave scrambled, ghosted, striped or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen): play as for beta.3, in menus and text boxes as well as walking around, and also a minute turned sideways with ROTATE (the game covers fewer of the screen's rows that way). Send `/.crosspoint/gameboy-perf.txt` with your notes. Compare `wave_ms` with beta.3: it should drop when only a small part changes. Watch for stripes, rows that are not updated, or ghosting outside the part that changed. If the picture breaks, go back to beta.3.
+
+### Changed
+
+- Game Boy (X4 Pro, UC8279-68 screens, test only): a screen update scans only the screen rows of the part that changed.
+
 ## [1.8.2-beta.3] - 2026-10-12
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, as often as it can, and now draws the next picture while the screen is still changing, in ways not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
