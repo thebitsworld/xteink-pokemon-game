@@ -1,3 +1,13 @@
+## [1.8.1-beta.6] - 2026-10-12
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs it drives the X4 Pro's e-ink screen with a host-loaded, shortened waveform at a raised frame rate that has not been validated on this panel. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
+
+For the tester only (X4 Pro with a UC8279 screen): the Game Boy emulator now runs on the reader's other CPU core, which should make every screen refresh faster. Open a Game Boy game and tap the title strip to cycle the presets: P0 (stock), D50, then D40, D30 and D20 at the faster frame rate (PLL0F). Play about 30 seconds per preset, note how the picture looks and how smooth the game feels, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with those notes.
+
+### Changed
+
+- Game Boy (X4 Pro, test only): the emulator runs on its own CPU core, leaving the other to the screen; the presets go down to 20% of the DU waveform at the faster frame rate.
+
 ## [1.8.1-beta.5] - 2026-10-12
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs it drives the X4 Pro's e-ink screen with a host-loaded, shortened waveform at a raised frame rate that has not been validated on this panel. It can leave ghost images, faint or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.0](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.0). Install it at your own risk.
