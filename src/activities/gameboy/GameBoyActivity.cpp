@@ -9,6 +9,7 @@
 #include <Logging.h>
 #include <esp_heap_caps.h>
 #ifndef SIMULATOR
+#include <BoardConfig.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #endif
@@ -53,6 +54,25 @@ uint64_t nowMicros() {
   return static_cast<uint64_t>(micros());
 #else
   return static_cast<uint64_t>(esp_timer_get_time());
+#endif
+}
+
+// The e-ink controller the reader detected at boot (X4 Pro batches differ:
+// SSD1677, UC8179 or UC8279) and its variant byte, for the speed figures:
+// how fast a refresh can be depends on it.
+void panelName(char* out, const size_t size) {
+#ifdef SIMULATOR
+  snprintf(out, size, "simulator");
+#else
+  const char* name = "other";
+  switch (BoardConfig::ACTIVE.displayController) {
+    case BoardConfig::DisplayController::SSD1677: name = "SSD1677"; break;
+    case BoardConfig::DisplayController::UC8179: name = "UC8179"; break;
+    case BoardConfig::DisplayController::UC8279: name = "UC8279"; break;
+    case BoardConfig::DisplayController::UC8253: name = "UC8253"; break;
+    default: break;
+  }
+  snprintf(out, size, "%s-%02X", name, BoardConfig::ACTIVE.displayControllerVariant);
 #endif
 }
 
@@ -257,8 +277,10 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint8_t next = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
   snprintf(perfText[next][0], sizeof(perfText[next][0]), "%.0ffps %u%% %.1f/%.0fms w%u", fps, speed, emuMs,
            perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits));
-  snprintf(perfText[next][1], sizeof(perfText[next][1]), "LCD %.1f/s %.0fms loop %.0f/s %ums", displays / seconds,
-           refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
+  char panel[24];
+  panelName(panel, sizeof(panel));
+  snprintf(perfText[next][1], sizeof(perfText[next][1]), "%s %.1f/s %.0fms loop %.0f/s %ums", panel,
+           displays / seconds, refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
   perfTextIdx.store(next, std::memory_order_release);
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
           "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
@@ -287,19 +309,22 @@ void GameBoyActivity::writePerfLog() {
   const float seconds = static_cast<float>(perfWindowStartUs - perfSessionStartUs) / 1e6f;
   if (seconds < 4.0f || perfTotalFrames == 0) return;
   const float fps = perfTotalFrames / seconds;
-  char line[200];
+  char panel[24];
+  panelName(panel, sizeof(panel));
+  char line[220];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
       perfTotalDisplays ? perfTotalRefreshUs / 1000.0f / perfTotalDisplays : 0.0f, perfTotalRefreshMaxUs / 1000.0f,
-      perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape");
+      perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
+      panel);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
