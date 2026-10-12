@@ -57,18 +57,15 @@ uint64_t nowMicros() {
 #endif
 }
 
-// Fast refresh presets to try on the reader (GameBoyActivity::refreshPreset).
-// beta.3 found the built-in waveform at its limit (~680 ms): a higher forced
-// temperature picked longer, flashing waveforms and PLL changed nothing. So
-// these run a host-loaded DU waveform (the stock X3 UC8279 bank) with its
-// frame counts scaled to `duPct` percent. beta.4 measured ~282 ms of fixed
-// cost plus ~20.5 ms a frame, ~11.5 ms with PLL 0x0F (lighter, slight ghost),
-// and found D50 clean; beta.5 found the darkness barely changing from D40 to
-// D70 at PLL 0x0F, so these go shorter at that frame rate. `pll` 0 keeps the
-// driver's frame rate (0x0E). Drive levels stay the bank's and the voltages
-// the panel's. beta.6 settled on D40 PLL0F (D30/D20 only ghosted more) and
-// measured a 60 KB frame at ~64 ms each way at the 10 MHz SPI the board sets,
-// though the UC8279 is rated to 20 MHz: "SPI20" tries that, game only.
+// The screen refresh a game uses (GameBoyActivity::refreshPreset). The panel's
+// built-in Fast waveform takes ~680 ms on the X4 Pro's UC8279, about 1.3
+// pictures a second. Measured on a UC8279 (variant 0x68) unit across the
+// 1.8.1 betas, "fast" runs a host-loaded DU waveform (the stock X3 UC8279
+// bank) at 40% of its frames, the PLL frame rate at 0x0F and the display SPI
+// at 20 MHz (the controller's rating; 10 MHz otherwise): a refresh takes
+// ~276 ms, about 3 pictures a second, with the darkness of stock and a little
+// ghosting that the periodic cleaning refresh clears. Drive levels stay the
+// bank's and voltages the panel's. Other controllers and variants keep stock.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
@@ -77,14 +74,22 @@ struct RefreshPreset {
   uint32_t spiHz;  // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"P0 stock", 0, 0, 0, 0},
-    {"D40 PLL0F", 0, 0x0F, 40, 0},
-    {"D40 0F SPI20", 0, 0x0F, 40, 20000000},
+    {"stock", 0, 0, 0, 0},
+    {"fast", 0, 0x0F, 40, 20000000},
 };
-constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
+
+// Whether this reader's screen is one the fast refresh was validated on.
+bool fastRefreshValidated() {
+#ifdef SIMULATOR
+  return false;
+#else
+  return BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279 &&
+         BoardConfig::ACTIVE.displayControllerVariant == 0x68;
+#endif
+}
 
 // The e-ink controller the reader detected at boot (X4 Pro batches differ:
-// SSD1677, UC8179 or UC8279) and its variant byte, for the speed figures:
+// SSD1677, UC8179 or UC8279) and its variant byte, for the speed log:
 // how fast a refresh can be depends on it.
 void panelName(char* out, const size_t size) {
 #ifdef SIMULATOR
@@ -173,6 +178,10 @@ void GameBoyActivity::onEnter() {
   nextDisplayUs = nowUs + DISPLAY_PERIOD_US;
   nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
   perfWindowStartUs = perfSessionStartUs = nowUs;
+  if (fastRefreshValidated()) {
+    refreshPreset = 1;
+    applyRefreshPreset();
+  }
   startEmuTask();
   LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes)", title, static_cast<unsigned>(romSize),
           static_cast<unsigned>(cartRamSize));
@@ -277,14 +286,6 @@ void GameBoyActivity::emuTaskEntry(void* arg) {
 
 void GameBoyActivity::emuTaskLoop() {
   while (emuRun.load(std::memory_order_acquire)) {
-    if (presetRequested.exchange(false, std::memory_order_acq_rel)) {
-      // One gameboy-perf.txt line per preset tried: close this one's figures.
-      writePerfLog();
-      resetPerfTotals(nowMicros());
-      refreshPreset = static_cast<uint8_t>((refreshPreset + 1) % kRefreshPresetCount);
-      applyRefreshPreset();
-    }
-
     const uint64_t nowUs = nowMicros();
     if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
     perfLastLoopUs = nowUs;
@@ -365,8 +366,7 @@ void GameBoyActivity::releaseRenderedFrame() {
   renderFrame.store(0xFF, std::memory_order_release);
 }
 
-// Every PERF_WINDOW_US: turns the counters into the two lines on screen and
-// the log, and adds them to the session totals.
+// Every PERF_WINDOW_US: logs the counters and adds them to the session totals.
 void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint64_t elapsedUs = nowUs - perfWindowStartUs;
   if (elapsedUs < PERF_WINDOW_US) return;
@@ -385,14 +385,6 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
   const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
 
-  const uint8_t next = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
-  snprintf(perfText[next][0], sizeof(perfText[next][0]), "%.0ffps %u%% %.1f/%.0fms w%u", fps, speed, emuMs,
-           perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits));
-  snprintf(perfText[next][1], sizeof(perfText[next][1]), "LCD %.1f/s %.0fms loop %.0f/s %ums", displays / seconds, refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
-  snprintf(perfText[next][2], sizeof(perfText[next][2]), "copy %.0f new %.0f setup %.0f wave %.0f old %.0f",
-           phaseUs[0] * perDisplayMs, phaseUs[1] * perDisplayMs, phaseUs[2] * perDisplayMs, phaseUs[3] * perDisplayMs,
-           phaseUs[4] * perDisplayMs);
-  perfTextIdx.store(next, std::memory_order_release);
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
           "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
           fps, speed, emuMs, perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits), displays / seconds,
@@ -485,9 +477,9 @@ void GameBoyActivity::setLayout() {
     gameW = GAMEBOY_WIDTH * scale;
     gameH = GAMEBOY_HEIGHT * scale;
     gameX = (screenW - gameW) / 2;
-    gameY = 56;  // room for the title and two lines of speed figures
+    gameY = 40;
     titleX = 8;
-    titleY = 2;
+    titleY = 10;
 
     const int padY = gameY + gameH + 24;
     const int pad = 64;
@@ -550,14 +542,7 @@ void GameBoyActivity::addControl(const TouchControl control, const int x, const 
   controls[controlCount++] = {control, x, y, w, h, label};
 }
 
-// Above the game in portrait; the top of the left panel, above the D-pad, in
-// landscape.
-bool GameBoyActivity::inTitleStrip(const int x, const int y) const {
-  if (portrait) return y < gameY;
-  return x < gameX && y < gameY + 100;
-}
-
-// Hands the current preset to the display driver (under the render lock: a
+// Hands the refresh preset to the display driver (under the render lock: a
 // refresh may be running) and asks for a cleaning refresh next.
 void GameBoyActivity::applyRefreshPreset() {
   const RefreshPreset& p = kRefreshPresets[refreshPreset];
@@ -852,8 +837,6 @@ void GameBoyActivity::handleInput() {
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTouchDown(x, y)) {
-    // The title strip cycles the refresh presets, once per touch.
-    if (inTitleStrip(x, y)) presetRequested = true;
     updateTouch(x, y);
   }
 
@@ -868,7 +851,6 @@ void GameBoyActivity::handleInput() {
 }
 
 void GameBoyActivity::updateTouch(const int x, const int y) {
-  if (inTitleStrip(x, y)) return;
   const TouchControl control = hitTestTouch(x, y);
   if (control == TouchControl::Exit) {
     exitRequested = true;
@@ -1046,55 +1028,6 @@ void GameBoyActivity::drawControls() {
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
-  // The e-ink controller and the refresh preset (tap here for the next one),
-  // then the speed figures (updatePerf()).
-  char panel[24];
-  panelName(panel, sizeof(panel));
-  const char* preset = kRefreshPresets[refreshPreset].label;
-  const uint8_t perfIdx = perfTextIdx.load(std::memory_order_acquire);
-  if (portrait) {
-    char panelLine[48];
-    snprintf(panelLine, sizeof(panelLine), "%s  %s", panel, preset);
-    const int pw = renderer.getTextWidth(SMALL_FONT_ID, panelLine);
-    renderer.drawText(SMALL_FONT_ID, renderer.getScreenWidth() - 8 - pw, titleY + 2, panelLine, true);
-    char both[170];
-    snprintf(both, sizeof(both), "%s | %s", perfText[perfIdx][0], perfText[perfIdx][1]);
-    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 20, both, true);
-    char phases[96];
-    snprintf(phases, sizeof(phases), "refresh ms: %s", perfText[perfIdx][2]);
-    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 36, phases, true);
-  } else {
-    // The left panel is narrow, above the D-pad: short lines 14 px apart -
-    // "60fps 100%" / "0.2/1ms w0", "LCD 1.3/s 680ms" (its "loop" figures are only
-    // in the log), "copy 1 new 40" / "setup 30 wave 280" / "old 40", the preset.
-    const auto splitAfter = [](char* text, const int spaces) {
-      int seen = 0;
-      for (char* c = text; *c; ++c) {
-        if (*c == ' ' && ++seen == spaces) {
-          *c = '\0';
-          return c + 1;
-        }
-      }
-      return text + std::strlen(text);
-    };
-    int y = titleY + 24;
-    char buf[80];
-    snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][0]);
-    const char* rest = splitAfter(buf, 2);
-    renderer.drawText(SMALL_FONT_ID, titleX, y, buf, true);
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 14, rest, true);
-    snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][1]);
-    splitAfter(buf, 3);
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 28, buf, true);
-    snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][2]);
-    char* wave = splitAfter(buf, 4);         // "copy 1 new 40"
-    const char* old = splitAfter(wave, 4);   // "setup 30 wave 280" / "old 40"
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 42, buf, true);
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 56, wave, true);
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 70, old, true);
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 84, preset, true);
-  }
-
   for (size_t i = 0; i < controlCount; ++i) {
     const ControlButton& c = controls[i];
     const uint8_t bit = joypadBitForTouch(c.control);

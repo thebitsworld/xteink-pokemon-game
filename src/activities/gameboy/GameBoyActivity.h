@@ -146,11 +146,11 @@ class GameBoyActivity final : public Activity {
   char title[32] = {};
   char error[160] = {};
 
-  // Performance counters, shown as a line on screen and appended to
+  // Performance counters, logged every 2 s and appended to
   // /.crosspoint/gameboy-perf.txt on exit: the emulator's speed against real
   // time, the time one Game Boy frame takes, how often it waited for a buffer
   // the display held, and how long drawing and the e-ink refresh take. The
-  // main task owns the emulator counters; the render task adds to the atomics.
+  // emulator task owns its counters; the render task adds to the atomics.
   static constexpr uint64_t PERF_WINDOW_US = 2000000ULL;
   uint64_t perfWindowStartUs = 0;
   uint64_t perfSessionStartUs = 0;
@@ -171,23 +171,18 @@ class GameBoyActivity final : public Activity {
   std::atomic<uint32_t> perfPhaseUs[5] = {};
   uint64_t perfTotalCleanRefreshes = 0;
   uint64_t perfTotalPhaseUs[5] = {};
-  char perfText[2][3][80] = {};  // [buffer][line]: emulator, display, refresh phases
 
-  // Experimental Fast refresh presets (forced temperature, frame rate) for the
-  // X4 Pro's e-ink while a game runs; tapping the title strip cycles them, and
-  // the speed figures show which one is on. 0 = stock. A preset other than
-  // stock gets a cleaning refresh every CLEAN_PERIOD_US against ghosting.
+  // The screen refresh the game uses: 0 = stock, 1 = the faster one on readers
+  // it was validated on (see kRefreshPresets). The faster one gets a cleaning
+  // refresh every CLEAN_PERIOD_US against ghosting.
   static constexpr uint64_t CLEAN_PERIOD_US = 60000000ULL;
   uint8_t refreshPreset = 0;
-  std::atomic<bool> presetRequested{false};
   uint64_t nextCleanUs = 0;
-  std::atomic<uint8_t> perfTextIdx{0};
 
   void setLayout();
   void addControl(TouchControl control, int x, int y, int w, int h, const char* label);
   void rotate();
   void applyRefreshPreset();
-  bool inTitleStrip(int x, int y) const;
   bool loadRom();
   bool buildSavePaths();
   bool initEmulator();
