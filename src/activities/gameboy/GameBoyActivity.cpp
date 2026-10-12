@@ -61,9 +61,11 @@ uint64_t nowMicros() {
 // beta.3 found the built-in waveform at its limit (~680 ms): a higher forced
 // temperature picked longer, flashing waveforms and PLL changed nothing. So
 // these run a host-loaded DU waveform (the stock X3 UC8279 bank) with its
-// frame counts scaled to `duPct` percent; D100 should look like the stock DU.
-// `pll` 0 keeps the driver's frame rate (0x0E). Drive levels stay the bank's
-// and the voltages the panel's.
+// frame counts scaled to `duPct` percent. beta.4 measured ~282 ms of fixed
+// cost plus ~20.5 ms a frame, ~11.5 ms with PLL 0x0F (lighter, slight ghost),
+// and found D50 clean; these try more frames at the faster PLL to win the
+// darkness back. `pll` 0 keeps the driver's frame rate (0x0E). Drive levels
+// stay the bank's and the voltages the panel's.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
@@ -71,8 +73,8 @@ struct RefreshPreset {
   uint8_t duPct;
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"P0 stock", 0, 0, 0}, {"D100", 0, 0, 100}, {"D75", 0, 0, 75},         {"D50", 0, 0, 50},
-    {"D35", 0, 0, 35},     {"D20", 0, 0, 20},   {"D50 PLL0F", 0, 0x0F, 50},
+    {"P0 stock", 0, 0, 0},        {"D50", 0, 0, 50},          {"D40 PLL0F", 0, 0x0F, 40},
+    {"D50 PLL0F", 0, 0x0F, 50},   {"D60 PLL0F", 0, 0x0F, 60}, {"D70 PLL0F", 0, 0x0F, 70},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 
@@ -274,9 +276,21 @@ void GameBoyActivity::render(RenderLock&&) {
   drawControls();
   registerTouchTargets();
   const uint64_t refreshStartUs = nowMicros();
-  renderer.displayBuffer(fullRefreshDue.exchange(false, std::memory_order_acq_rel) ? HalDisplay::HALF_REFRESH
-                                                                                     : HalDisplay::FAST_REFRESH);
+  const bool cleaning = fullRefreshDue.exchange(false, std::memory_order_acq_rel);
+  renderer.displayBuffer(cleaning ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
   const uint64_t doneUs = nowMicros();
+  if (cleaning) {
+    // A cleaning refresh takes ~1.6 s: kept out of the Fast refresh figures.
+    perfCleanRefreshes.fetch_add(1, std::memory_order_relaxed);
+    displayDue.store(false, std::memory_order_release);
+    return;
+  }
+#ifndef SIMULATOR
+  uint32_t phases[5];
+  if (display.lastRefreshTimings(phases)) {
+    for (int i = 0; i < 5; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
+  }
+#endif
   perfDisplays.fetch_add(1, std::memory_order_relaxed);
   perfDrawUs.fetch_add(static_cast<uint32_t>(refreshStartUs - drawStartUs), std::memory_order_relaxed);
   const uint32_t refreshUs = static_cast<uint32_t>(doneUs - refreshStartUs);
@@ -313,10 +327,18 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const float emuMs = perfFrames ? static_cast<float>(perfEmuUs) / perfFrames / 1000.0f : 0.0f;
   const float refreshMs = displays ? static_cast<float>(refreshUs) / displays / 1000.0f : 0.0f;
 
+  uint32_t phaseUs[5];
+  for (int i = 0; i < 5; ++i) phaseUs[i] = perfPhaseUs[i].exchange(0, std::memory_order_relaxed);
+  const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
+  const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
+
   const uint8_t next = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
   snprintf(perfText[next][0], sizeof(perfText[next][0]), "%.0ffps %u%% %.1f/%.0fms w%u", fps, speed, emuMs,
            perfEmuMaxUs / 1000.0f, static_cast<unsigned>(perfWaits));
   snprintf(perfText[next][1], sizeof(perfText[next][1]), "LCD %.1f/s %.0fms loop %.0f/s %ums", displays / seconds, refreshMs, perfLoops / seconds, static_cast<unsigned>(perfLoopMaxGapUs / 1000));
+  snprintf(perfText[next][2], sizeof(perfText[next][2]), "copy %.0f new %.0f setup %.0f wave %.0f old %.0f",
+           phaseUs[0] * perDisplayMs, phaseUs[1] * perDisplayMs, phaseUs[2] * perDisplayMs, phaseUs[3] * perDisplayMs,
+           phaseUs[4] * perDisplayMs);
   perfTextIdx.store(next, std::memory_order_release);
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
           "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
@@ -336,6 +358,8 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   perfTotalDrawUs += drawUs;
   perfTotalRefreshUs += refreshUs;
   perfTotalRefreshMaxUs = std::max(perfTotalRefreshMaxUs, refreshMaxUs);
+  perfTotalCleanRefreshes += cleanRefreshes;
+  for (int i = 0; i < 5; ++i) perfTotalPhaseUs[i] += phaseUs[i];
   perfFrames = perfWaits = perfEmuUs = perfEmuMaxUs = 0;
   perfWindowStartUs = nowUs;
 }
@@ -355,6 +379,12 @@ void GameBoyActivity::resetPerfTotals(const uint64_t nowUs) {
   perfTotalRefreshMaxUs = 0;
   perfTotalLoops = 0;
   perfTotalLoopMaxGapUs = 0;
+  perfCleanRefreshes.store(0);
+  perfTotalCleanRefreshes = 0;
+  for (int i = 0; i < 5; ++i) {
+    perfPhaseUs[i].store(0);
+    perfTotalPhaseUs[i] = 0;
+  }
 }
 
 // One line per game session (and per refresh preset tried in it), for
@@ -365,20 +395,23 @@ void GameBoyActivity::writePerfLog() {
   const float fps = perfTotalFrames / seconds;
   char panel[24];
   panelName(panel, sizeof(panel));
-  char line[220];
+  const float phaseDiv = perfTotalDisplays ? 1000.0f * perfTotalDisplays : 1.0f;
+  char line[300];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
       perfTotalDisplays ? perfTotalRefreshUs / 1000.0f / perfTotalDisplays : 0.0f, perfTotalRefreshMaxUs / 1000.0f,
       perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
-      panel, kRefreshPresets[refreshPreset].label);
+      panel, kRefreshPresets[refreshPreset].label, static_cast<unsigned long long>(perfTotalCleanRefreshes),
+      perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
+      perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -399,7 +432,7 @@ void GameBoyActivity::setLayout() {
     gameW = GAMEBOY_WIDTH * scale;
     gameH = GAMEBOY_HEIGHT * scale;
     gameX = (screenW - gameW) / 2;
-    gameY = 40;
+    gameY = 56;  // room for the title and two lines of speed figures
     titleX = 8;
     titleY = 2;
 
@@ -973,28 +1006,39 @@ void GameBoyActivity::drawControls() {
     char both[170];
     snprintf(both, sizeof(both), "%s | %s", perfText[perfIdx][0], perfText[perfIdx][1]);
     renderer.drawText(SMALL_FONT_ID, titleX, titleY + 20, both, true);
+    char phases[96];
+    snprintf(phases, sizeof(phases), "refresh ms: %s", perfText[perfIdx][2]);
+    renderer.drawText(SMALL_FONT_ID, titleX, titleY + 36, phases, true);
   } else {
-    // The left panel is narrow: each figures line in two halves, split at the
-    // second and third space ("60fps 100%" / "0.2/1ms w0", "LCD 1.3/s 680ms" /
-    // "loop 78/s 349ms").
-    int y = titleY + 24;
-    const int splitAt[2] = {2, 3};
-    for (int line = 0; line < 2; ++line) {
-      char buf[80];
-      snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][line]);
-      char* rest = buf;
-      for (int spaces = 0; *rest; ++rest) {
-        if (*rest == ' ' && ++spaces == splitAt[line]) {
-          *rest++ = '\0';
-          break;
+    // The left panel is narrow, above the D-pad: short lines 14 px apart -
+    // "60fps 100%" / "0.2/1ms w0", "LCD 1.3/s 680ms" (its "loop" figures are only
+    // in the log), "copy 1 new 40" / "setup 30 wave 280" / "old 40", the preset.
+    const auto splitAfter = [](char* text, const int spaces) {
+      int seen = 0;
+      for (char* c = text; *c; ++c) {
+        if (*c == ' ' && ++seen == spaces) {
+          *c = '\0';
+          return c + 1;
         }
       }
-      renderer.drawText(SMALL_FONT_ID, titleX, y, buf, true);
-      renderer.drawText(SMALL_FONT_ID, titleX, y + 16, rest, true);
-      y += 32;
-    }
-    renderer.drawText(SMALL_FONT_ID, titleX, y, panel, true);
-    renderer.drawText(SMALL_FONT_ID, titleX, y + 16, preset, true);
+      return text + std::strlen(text);
+    };
+    int y = titleY + 24;
+    char buf[80];
+    snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][0]);
+    const char* rest = splitAfter(buf, 2);
+    renderer.drawText(SMALL_FONT_ID, titleX, y, buf, true);
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 14, rest, true);
+    snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][1]);
+    splitAfter(buf, 3);
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 28, buf, true);
+    snprintf(buf, sizeof(buf), "%s", perfText[perfIdx][2]);
+    char* wave = splitAfter(buf, 4);         // "copy 1 new 40"
+    const char* old = splitAfter(wave, 4);   // "setup 30 wave 280" / "old 40"
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 42, buf, true);
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 56, wave, true);
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 70, old, true);
+    renderer.drawText(SMALL_FONT_ID, titleX, y + 84, preset, true);
   }
 
   for (size_t i = 0; i < controlCount; ++i) {

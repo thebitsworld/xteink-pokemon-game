@@ -149,7 +149,14 @@ class GameBoyActivity final : public Activity {
   // means the display starved the emulator of CPU.
   uint64_t perfLastLoopUs = 0, perfTotalLoops = 0;
   uint32_t perfLoops = 0, perfLoopMaxGapUs = 0, perfTotalLoopMaxGapUs = 0;
-  char perfText[2][2][80] = {};  // [buffer][line]: emulator, display
+  // Cleaning (Half) refreshes are counted apart, so the averages are the Fast
+  // refreshes alone; perfPhaseUs adds up the driver's phases of each Fast one
+  // (copy, new plane, setup, waveform, old plane - HalDisplay::lastRefreshTimings).
+  std::atomic<uint32_t> perfCleanRefreshes{0};
+  std::atomic<uint32_t> perfPhaseUs[5] = {};
+  uint64_t perfTotalCleanRefreshes = 0;
+  uint64_t perfTotalPhaseUs[5] = {};
+  char perfText[2][3][80] = {};  // [buffer][line]: emulator, display, refresh phases
 
   // Experimental Fast refresh presets (forced temperature, frame rate) for the
   // X4 Pro's e-ink while a game runs; tapping the title strip cycles them, and
