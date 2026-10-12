@@ -112,6 +112,10 @@ class HalDisplay {
   bool shouldSkipImageBlanking() const;
   bool supportsStripGrayscale() const;
 
+  // Game-mode tuning of Fast refreshes: forced temperature and frame rate
+  // (0, 0 = stock). See FreeInkDisplay::setFastRefreshTuning.
+  void setFastRefreshTuning(uint8_t tsset, uint8_t pll) { einkDisplay.setFastRefreshTuning(tsset, pll); }
+
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;

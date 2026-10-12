@@ -1015,6 +1015,11 @@ void FreeInkDisplay::setAccentPlaneSlot(uint8_t slot, const uint8_t* plane, uint
   if (_driver) _driver->setAccentPlaneSlot(slot, plane, colorCode);
 }
 
+// xteink-pokemon: forwards game-mode Fast refresh tuning to the driver.
+void FreeInkDisplay::setFastRefreshTuning(uint8_t tsset, uint8_t pll) {
+  if (_driver) _driver->setFastRefreshTuning(tsset, pll);
+}
+
 void FreeInkDisplay::setFastRefreshCutoffMs(uint16_t ms) {
   if (_driver) _driver->setFastRefreshCutoffMs(ms);
 }

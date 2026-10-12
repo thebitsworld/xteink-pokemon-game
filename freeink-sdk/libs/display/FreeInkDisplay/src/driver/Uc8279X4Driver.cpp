@@ -274,6 +274,7 @@ void Uc8279X4Driver::initController(EpdBus& bus) {
   if (!BoardConfig::isX4Classic()) {
     bus.cmd(CMD_PLL);
     bus.data(_cfg.pll);
+    _pllWritten = _cfg.pll;  // xteink-pokemon: see startBwRefresh
   }
 
   bus.cmd(CMD_GATE_SCAN);
@@ -467,7 +468,17 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
   bus.cmd(CMD_CCSET);
   bus.data(_cfg.ccset);  // 0x02
   bus.cmd(CMD_TSSET);
-  bus.data(fast ? _cfg.tssetFast : _cfg.tsset);  // DU 0x5A / GC 0x1E
+  // xteink-pokemon: a game may force another temperature for Fast refreshes.
+  bus.data(fast ? (_tuneTsset ? _tuneTsset : _cfg.tssetFast) : _cfg.tsset);  // DU 0x5A / GC 0x1E
+  // xteink-pokemon: and another frame rate, restored for every other refresh.
+  if (!BoardConfig::isX4Classic()) {
+    const uint8_t pll = (fast && _tunePll) ? _tunePll : _cfg.pll;
+    if (pll != _pllWritten) {
+      bus.cmd(CMD_PLL);
+      bus.data(pll);
+      _pllWritten = pll;
+    }
+  }
   if (fast) {
     bus.cmd(CMD_PFS);
     bus.data(_cfg.pfs);  // 0x03 <- 0x20

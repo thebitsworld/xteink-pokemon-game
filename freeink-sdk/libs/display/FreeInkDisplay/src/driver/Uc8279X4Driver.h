@@ -166,6 +166,19 @@ class Uc8279X4Driver : public PanelDriver {
   bool _pendingRefresh = false;
   bool _pendingTurnOff = false;
   bool _pendingPartial = false;
+  // xteink-pokemon: game-mode Fast tuning (0 = the config's value), and the PLL
+  // value last written, so the stock one comes back for other refreshes.
+  uint8_t _tuneTsset = 0;
+  uint8_t _tunePll = 0;
+  uint8_t _pllWritten = 0;
+
+ public:
+  void setFastRefreshTuning(uint8_t tsset, uint8_t pll) override {
+    _tuneTsset = tsset;
+    _tunePll = pll;
+  }
+
+ private:
 };
 
 PanelDriver& uc8279X4Driver();

@@ -253,6 +253,13 @@ class PanelDriver {
   }
   // Interrupted-refresh cutoff tuning (ED2208: where the gate scan freezes).
   virtual void setFastRefreshCutoffMs(uint16_t ms) { (void)ms; }
+  // xteink-pokemon: game-mode tuning of Fast refreshes - the forced temperature
+  // (TSSET) and frame rate (PLL) to use instead of the driver's own (0 = own).
+  // Applies to Fast refreshes only; drivers without the registers ignore it.
+  virtual void setFastRefreshTuning(uint8_t tsset, uint8_t pll) {
+    (void)tsset;
+    (void)pll;
+  }
   virtual uint16_t fastRefreshCutoffMs() const { return 0; }
   // Hold the periodic anti-ghost full refresh through a continuous interaction
   // (e.g. a live slider drag): while set, fast refreshes are never promoted to a
