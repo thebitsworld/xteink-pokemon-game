@@ -1,7 +1,6 @@
-[submodule "freeink-sdk"]
-	path = freeink-sdk
-	url = https://github.com/Free-Ink/freeink-sdk.git
-	branch = main
 [submodule "assets/tabler-icons"]
 	path = assets/tabler-icons
 	url = https://github.com/tabler/tabler-icons.git
+[submodule "freeink-sdk-lucide"]
+	path = freeink-sdk/libs/assets/Icons/lucide
+	url = https://github.com/lucide-icons/lucide
