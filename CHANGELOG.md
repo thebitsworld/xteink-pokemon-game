@@ -1,3 +1,14 @@
+## [1.8.2-beta.2] - 2026-10-12
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed and now refreshes it as often as it can, in ways not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen): like beta.1, play a Game Boy game for a few minutes, walking around and in menus or text, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes. The screen should update more often than beta.1 (`displays_per_s`, about 2.9 there) and `draw_ms_avg` should drop from about 34 ms to a few. Watch for more ghosting than beta.1 and for buttons that do not show as pressed.
+
+### Changed
+
+- Game Boy (X4 Pro, UC8279-68 screens, test only): the screen no longer waits a quarter second between updates; the next picture starts as soon as the last one is on screen.
+- Game Boy (X4 Pro): the game picture is drawn several times faster, and the title and buttons are only redrawn when they change.
+
 ## [1.8.2-beta.1] - 2026-10-12
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, in a way not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
