@@ -1021,7 +1021,7 @@ void FreeInkDisplay::setFastRefreshTuning(uint8_t tsset, uint8_t pll) {
 }
 
 // xteink-pokemon: the last refresh's phases, from the driver.
-bool FreeInkDisplay::lastRefreshTimings(uint32_t out[5]) const {
+bool FreeInkDisplay::lastRefreshTimings(uint32_t out[8]) const {
   PanelDriver::RefreshTimings t{};
   if (!_driver || !_driver->lastRefreshTimings(t)) return false;
   out[0] = t.copyUs;
@@ -1029,6 +1029,9 @@ bool FreeInkDisplay::lastRefreshTimings(uint32_t out[5]) const {
   out[2] = t.setupUs;
   out[3] = t.waveformUs;
   out[4] = t.oldPlaneUs;
+  out[5] = t.planeBytes;
+  out[6] = t.refreshes;
+  out[7] = t.skipped;
   return true;
 }
 
@@ -1041,6 +1044,11 @@ void FreeInkDisplay::setDisplaySpiHz(uint32_t hz) {
 // xteink-pokemon: forwards the game-mode DU waveform scale to the driver.
 void FreeInkDisplay::setFastRefreshDuScale(uint8_t percent) {
   if (_driver) _driver->setFastRefreshDuScale(percent);
+}
+
+// xteink-pokemon: forwards game-mode changed-rectangle refreshes to the driver.
+void FreeInkDisplay::setFastRefreshDiffWindow(bool on) {
+  if (_driver) _driver->setFastRefreshDiffWindow(on);
 }
 
 void FreeInkDisplay::setFastRefreshCutoffMs(uint16_t ms) {

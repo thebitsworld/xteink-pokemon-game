@@ -69,12 +69,16 @@ class FreeInkDisplay {
   void setFastRefreshTuning(uint8_t tsset, uint8_t pll);
   // xteink-pokemon: see PanelDriver::setFastRefreshDuScale (0 = built-in DU).
   void setFastRefreshDuScale(uint8_t percent);
+  // xteink-pokemon: see PanelDriver::setFastRefreshDiffWindow.
+  void setFastRefreshDiffWindow(bool on);
   // xteink-pokemon: the display SPI clock for a game (0 = the driver's default).
   // Call it with no refresh running.
   void setDisplaySpiHz(uint32_t hz);
-  // xteink-pokemon: the last refresh's phases in microseconds: copy, new plane,
-  // setup, waveform, old plane (false where the driver does not measure them).
-  bool lastRefreshTimings(uint32_t out[5]) const;
+  // xteink-pokemon: the last completed refresh's phases in microseconds: copy,
+  // new plane, setup, waveform, old plane; then the bytes sent per plane and
+  // the running counts of completed and skipped (unchanged) refreshes. False
+  // where the driver does not measure them.
+  bool lastRefreshTimings(uint32_t out[8]) const;
   uint16_t fastRefreshCutoffMs() const;
 
   // Hold the periodic anti-ghost full refresh through a live interaction (slider

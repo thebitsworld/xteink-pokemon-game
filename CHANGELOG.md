@@ -1,3 +1,11 @@
+## [1.8.2] - 2026-10-13
+
+### Changed
+
+- Game Boy (X4 Pro, UC8279 screens): the screen updates about four to five times a second instead of about three. Each update redraws only the part of the picture that changed, a picture that did not change is not refreshed at all, the next picture starts as soon as the last one is on screen and is drawn while the screen is still refreshing. Ghosting stays light, and the full cleaning refresh every minute clears it.
+- Game Boy (X4 Pro): the game picture is drawn several times faster, and the title and buttons are only redrawn when they change.
+- Game Boy (X4 Pro): `gameboy-perf.txt` also records how many pictures were skipped because nothing had changed and how much picture data each update sent.
+
 ## [1.8.1] - 2026-10-12
 
 ### Changed

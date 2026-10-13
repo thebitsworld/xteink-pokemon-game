@@ -66,16 +66,19 @@ uint64_t nowMicros() {
 // ~276 ms, about 3 pictures a second, with the darkness of stock and a little
 // ghosting that the periodic cleaning refresh clears. Drive levels stay the
 // bank's and voltages the panel's. Other controllers and variants keep stock.
+// It also sends and drives only the rectangle that changed since the last
+// picture, and skips a picture that did not change at all.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
   uint8_t pll;
   uint8_t duPct;
-  uint32_t spiHz;  // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
+  uint32_t spiHz;   // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
+  bool diffWindow;  // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"stock", 0, 0, 0, 0},
-    {"fast", 0, 0x0F, 40, 20000000},
+    {"stock", 0, 0, 0, 0, false},
+    {"fast-window", 0, 0x0F, 40, 20000000, true},
 };
 
 // Whether this reader's screen is one the fast refresh was validated on.
@@ -146,6 +149,7 @@ void GameBoyActivity::onEnter() {
   renderer.setOrientation(GfxRenderer::Portrait);
   setLayout();
   renderer.clearScreen(0xFF);
+  chromeKey = CHROME_NONE;
 
   if (romPath.empty()) {
     showError("No Game Boy ROM selected");
@@ -171,6 +175,15 @@ void GameBoyActivity::onEnter() {
 
   initialized.store(true, std::memory_order_release);
   applyJoypad();
+#ifndef SIMULATOR
+  {
+    uint32_t phases[8];
+    if (display.lastRefreshTimings(phases)) {
+      perfSeenRefreshes = phases[6];
+      perfSeenSkipped = phases[7];
+    }
+  }
+#endif
   requestUpdate(true);
 
   const uint64_t nowUs = nowMicros();
@@ -198,8 +211,10 @@ void GameBoyActivity::onExit() {
   if (refreshPreset != 0) {
     refreshPreset = 0;
 #ifndef SIMULATOR
+    display.finishOverlapped();  // the last picture's refresh may still run
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
     display.setFastRefreshDuScale(0);
+    display.setFastRefreshDiffWindow(false);
     display.setDisplaySpiHz(0);
 #endif
   }
@@ -241,7 +256,7 @@ void GameBoyActivity::loop() {
     displayDue.store(true, std::memory_order_release);
     // Do not accumulate an unbounded display backlog when an e-ink refresh or
     // a long emulation stretch takes longer than one target period.
-    nextDisplayUs = nowUs + DISPLAY_PERIOD_US;
+    nextDisplayUs = nowUs + (refreshPreset != 0 ? FAST_DISPLAY_PERIOD_US : DISPLAY_PERIOD_US);
     requestUpdate();
   }
 
@@ -314,8 +329,9 @@ void GameBoyActivity::render(RenderLock&&) {
   // waited up to a display period for the next request.)
   if (!displayDue.exchange(false, std::memory_order_acq_rel)) return;
 
-  renderer.clearScreen(0xFF);
   if (!initialized.load(std::memory_order_acquire)) {
+    chromeKey = CHROME_NONE;
+    renderer.clearScreen(0xFF);
     renderer.drawCenteredText(UI_12_FONT_ID, renderer.getScreenHeight() / 2 - 32, "GAME BOY", true, EpdFontFamily::BOLD);
     if (error[0]) renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2 + 8, error, true);
     renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2 + 70, "Touch screen to exit", true);
@@ -324,28 +340,63 @@ void GameBoyActivity::render(RenderLock&&) {
   }
 
   const uint64_t drawStartUs = nowMicros();
+  const bool cleaning = fullRefreshDue.exchange(false, std::memory_order_acq_rel);
+  // The framebuffer keeps the title and buttons from the last picture (the
+  // display is single-buffered): clear and redraw them only when they change,
+  // and with every cleaning refresh in case anything else drew on the screen.
+  const uint32_t chrome = static_cast<uint32_t>(physicalJoypadMask | touchJoypadMask) |
+                          (static_cast<uint32_t>(activeTouch) << 8) | (portrait ? 0x10000u : 0u);
+  const bool redrawChrome = cleaning || chrome != chromeKey;
+  if (redrawChrome) renderer.clearScreen(0xFF);
   drawGameFrame();
   // The picture is in the display's framebuffer now: hand the Game Boy frame
   // back before the e-ink refresh (hundreds of ms), or the emulator, with
   // both of its buffers held, would stand still for the whole refresh.
   releaseRenderedFrame();
-  drawControls();
+  if (redrawChrome) {
+    drawControls();
+    chromeKey = chrome;
+  }
   registerTouchTargets();
   const uint64_t refreshStartUs = nowMicros();
-  const bool cleaning = fullRefreshDue.exchange(false, std::memory_order_acq_rel);
-  renderer.displayBuffer(cleaning ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  // On the fast refresh the call returns while the waveform runs, and the next
+  // picture is drawn meanwhile: the driver keeps its own copy of the frame for
+  // the rest of the refresh (setFastRefreshDiffWindow). The call first
+  // finishes the refresh before. The stock refresh blocks until it is done.
+#ifdef SIMULATOR
+  const bool overlap = false;
+#else
+  const bool overlap = !cleaning && refreshPreset != 0 && renderer.supportsAsyncRefresh();
+#endif
+  if (overlap) {
+#ifndef SIMULATOR
+    display.displayBufferOverlapped(HalDisplay::FAST_REFRESH);
+#endif
+  } else {
+    renderer.displayBuffer(cleaning ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  }
   const uint64_t doneUs = nowMicros();
+#ifndef SIMULATOR
+  uint32_t phases[8];
+  if (display.lastRefreshTimings(phases)) {
+    const uint32_t completed = phases[6] - perfSeenRefreshes;
+    const uint32_t skipped = phases[7] - perfSeenSkipped;
+    perfSeenRefreshes = phases[6];
+    perfSeenSkipped = phases[7];
+    if (!cleaning) {
+      // Pictures that had not changed, which the driver did not refresh.
+      if (skipped != 0) perfUnchanged.fetch_add(skipped, std::memory_order_relaxed);
+      // The figures below are those of the refresh this call completed.
+      if (completed == 0) return;
+      for (int i = 0; i < 6; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
+    }
+  }
+#endif
   if (cleaning) {
     // A cleaning refresh takes ~1.6 s: kept out of the Fast refresh figures.
     perfCleanRefreshes.fetch_add(1, std::memory_order_relaxed);
     return;
   }
-#ifndef SIMULATOR
-  uint32_t phases[5];
-  if (display.lastRefreshTimings(phases)) {
-    for (int i = 0; i < 5; ++i) perfPhaseUs[i].fetch_add(phases[i], std::memory_order_relaxed);
-  }
-#endif
   perfDisplays.fetch_add(1, std::memory_order_relaxed);
   perfDrawUs.fetch_add(static_cast<uint32_t>(refreshStartUs - drawStartUs), std::memory_order_relaxed);
   const uint32_t refreshUs = static_cast<uint32_t>(doneUs - refreshStartUs);
@@ -380,9 +431,10 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const float emuMs = perfFrames ? static_cast<float>(perfEmuUs) / perfFrames / 1000.0f : 0.0f;
   const float refreshMs = displays ? static_cast<float>(refreshUs) / displays / 1000.0f : 0.0f;
 
-  uint32_t phaseUs[5];
-  for (int i = 0; i < 5; ++i) phaseUs[i] = perfPhaseUs[i].exchange(0, std::memory_order_relaxed);
+  uint32_t phaseUs[6];
+  for (int i = 0; i < 6; ++i) phaseUs[i] = perfPhaseUs[i].exchange(0, std::memory_order_relaxed);
   const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
+  const uint32_t unchanged = perfUnchanged.exchange(0, std::memory_order_relaxed);
   const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
 
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
@@ -404,7 +456,8 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   perfTotalRefreshUs += refreshUs;
   perfTotalRefreshMaxUs = std::max(perfTotalRefreshMaxUs, refreshMaxUs);
   perfTotalCleanRefreshes += cleanRefreshes;
-  for (int i = 0; i < 5; ++i) perfTotalPhaseUs[i] += phaseUs[i];
+  perfTotalUnchanged += unchanged;
+  for (int i = 0; i < 6; ++i) perfTotalPhaseUs[i] += phaseUs[i];
   perfFrames = perfWaits = perfEmuUs = perfEmuMaxUs = 0;
   perfWindowStartUs = nowUs;
 }
@@ -426,7 +479,9 @@ void GameBoyActivity::resetPerfTotals(const uint64_t nowUs) {
   perfTotalLoopMaxGapUs = 0;
   perfCleanRefreshes.store(0);
   perfTotalCleanRefreshes = 0;
-  for (int i = 0; i < 5; ++i) {
+  perfUnchanged.store(0);
+  perfTotalUnchanged = 0;
+  for (int i = 0; i < 6; ++i) {
     perfPhaseUs[i].store(0);
     perfTotalPhaseUs[i] = 0;
   }
@@ -441,9 +496,9 @@ void GameBoyActivity::writePerfLog() {
   char panel[24];
   panelName(panel, sizeof(panel));
   const float phaseDiv = perfTotalDisplays ? 1000.0f * perfTotalDisplays : 1.0f;
-  char line[300];
+  char line[340];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
@@ -451,12 +506,13 @@ void GameBoyActivity::writePerfLog() {
       perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
       panel, kRefreshPresets[refreshPreset].label, static_cast<unsigned long long>(perfTotalCleanRefreshes),
       perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
-      perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv);
+      perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv,
+      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -549,8 +605,10 @@ void GameBoyActivity::applyRefreshPreset() {
   {
     RenderLock lock(*this);
 #ifndef SIMULATOR
+    display.finishOverlapped();
     display.setFastRefreshTuning(p.tsset, p.pll);
     display.setFastRefreshDuScale(p.duPct);
+    display.setFastRefreshDiffWindow(p.diffWindow);
     display.setDisplaySpiHz(p.spiHz);
 #else
     (void)p;
@@ -952,72 +1010,107 @@ void GameBoyActivity::drawGameFrame() {
   // the display refresh has consumed the CrossInk framebuffer.
   renderFrame.store(frameIndex, std::memory_order_release);
 
-  if (portrait) {
-    if (!drawGameFramePortrait(source, framebuffer)) renderFrame.store(0xFF, std::memory_order_release);
-    return;
+  const bool drawn =
+      portrait ? drawGameFramePortrait(source, framebuffer) : drawGameFrameLandscape(source, framebuffer);
+  if (!drawn) renderFrame.store(0xFF, std::memory_order_release);
+}
+
+namespace {
+
+// Builds one panel row of the game a byte at a time: `count` game pixels read
+// from `src` every `step` bytes, each `scale` panel pixels long. A game pixel
+// becomes the bits patterns[shade][first panel pixel's parity] (1 = black,
+// most significant first), so the row is about count table lookups.
+constexpr int MAX_GAME_ROW_BYTES = 64;
+void buildGameRow(uint8_t* out, const uint8_t* src, const int step, const int count, const int scale,
+                  const uint8_t (&patterns)[4][2]) {
+  uint32_t acc = 0;
+  int bits = 0;
+  for (int g = 0; g < count; ++g) {
+    acc = (acc << scale) | patterns[src[g * step] & 0x03][(g * scale) & 1];
+    bits += scale;
+    if (bits >= 8) {
+      bits -= 8;
+      *out++ = static_cast<uint8_t>(~(acc >> bits));  // the framebuffer's 1 is white
+      acc &= (1u << bits) - 1u;
+    }
   }
+}
 
-  const int panelBytes = renderer.getDisplayWidthBytes();
-  const int screenW = renderer.getDisplayWidth();
-  if (panelBytes <= 0 || screenW <= 0) {
-    renderFrame.store(0xFF, std::memory_order_release);
-    return;
-  }
-
-  // LandscapeCounterClockwise is the native X4 Pro framebuffer orientation,
-  // so logical (x,y) maps directly to physical (x,y). Peanut-GB's four shades
-  // become black, two dithered greys and white (shadeIsBlack()).
-  const int startByte = gameX / 8;
-  if (gameX < 0 || startByte < 0 || gameX + gameW > screenW) {
-    renderFrame.store(0xFF, std::memory_order_release);
-    return;
-  }
-
-  for (int gy = 0; gy < GAMEBOY_HEIGHT; ++gy) {
-    for (int sy = 0; sy < scale; ++sy) {
-      uint8_t* out = framebuffer + static_cast<size_t>(gameY + gy * scale + sy) * panelBytes + startByte;
-      const int outByteCount = gameW / 8;
-      std::memset(out, 0xFF, static_cast<size_t>(outByteCount));
-
-      const int panelY = gy * scale + sy;
-      for (int gx = 0; gx < GAMEBOY_WIDTH; ++gx) {
-        const uint8_t shade = source[gy * GAMEBOY_WIDTH + gx] & 0x03;
-        if (shade == 0) continue;
-        const int baseX = gx * scale;
-        for (int sx = 0; sx < scale; ++sx) {
-          const int dstX = baseX + sx;
-          if (shadeIsBlack(shade, dstX, panelY)) out[dstX >> 3] &= static_cast<uint8_t>(~(1u << (7 - (dstX & 7))));
+// patterns[fixedParity][shade][alongParity] for buildGameRow: the dither of
+// shadeIsBlack() for a panel row whose fixed coordinate has parity
+// fixedParity. alongIsX says whether the row runs along the dither's x.
+void gamePatterns(uint8_t (&patterns)[2][4][2], const int scale, const bool alongIsX) {
+  for (int fixed = 0; fixed < 2; ++fixed) {
+    for (int shade = 0; shade < 4; ++shade) {
+      for (int along0 = 0; along0 < 2; ++along0) {
+        uint8_t pattern = 0;
+        for (int k = 0; k < scale; ++k) {
+          const int along = along0 + k;
+          const bool black = alongIsX ? shadeIsBlack(shade, along, fixed) : shadeIsBlack(shade, fixed, along);
+          pattern = static_cast<uint8_t>((pattern << 1) | (black ? 1 : 0));
         }
+        patterns[fixed][shade][along0] = pattern;
       }
     }
   }
 }
 
+}  // namespace
+
+bool GameBoyActivity::drawGameFrameLandscape(const uint8_t* source, uint8_t* framebuffer) {
+  // LandscapeCounterClockwise is the native X4 Pro framebuffer orientation,
+  // so logical (x,y) maps directly to physical (x,y). Peanut-GB's four shades
+  // become black, two dithered greys and white (shadeIsBlack()). A game line's
+  // panel rows differ only by their y parity: two are built, the rest copied.
+  const int panelBytes = renderer.getDisplayWidthBytes();
+  const int screenW = renderer.getDisplayWidth();
+  const int rowBytes = gameW / 8;
+  if (panelBytes <= 0 || screenW <= 0 || gameX < 0 || gameX % 8 != 0 || gameX + gameW > screenW ||
+      rowBytes > MAX_GAME_ROW_BYTES) {
+    return false;
+  }
+  uint8_t patterns[2][4][2];
+  gamePatterns(patterns, scale, /*alongIsX=*/true);
+  uint8_t rows[2][MAX_GAME_ROW_BYTES];
+  for (int gy = 0; gy < GAMEBOY_HEIGHT; ++gy) {
+    const uint8_t* line = source + gy * GAMEBOY_WIDTH;
+    for (int parity = 0; parity < 2; ++parity) {
+      buildGameRow(rows[parity], line, 1, GAMEBOY_WIDTH, scale, patterns[parity]);
+    }
+    for (int sy = 0; sy < scale; ++sy) {
+      const int panelY = gy * scale + sy;
+      uint8_t* out = framebuffer + static_cast<size_t>(gameY + panelY) * panelBytes + gameX / 8;
+      std::memcpy(out, rows[panelY & 1], static_cast<size_t>(rowBytes));
+    }
+  }
+  return true;
+}
+
 bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer) {
   // Portrait turns the panel a quarter: logical (x, y) is panel
   // (y, panelHeight - 1 - x), so each game column is one panel row with the
-  // game's lines running along it.
+  // game's lines running along it. A column's panel rows differ only by their
+  // x parity: two are built, the rest copied.
   const int panelBytes = renderer.getDisplayWidthBytes();
   const int panelW = renderer.getDisplayWidth();
   const int panelH = renderer.getDisplayHeight();
+  const int rowBytes = gameH / 8;
   if (panelBytes <= 0 || gameY % 8 != 0 || gameH % 8 != 0 || gameX < 0 || gameX + gameW > panelH ||
-      gameY + gameH > panelW) {
+      gameY + gameH > panelW || rowBytes > MAX_GAME_ROW_BYTES) {
     return false;
   }
-
+  uint8_t patterns[2][4][2];
+  gamePatterns(patterns, scale, /*alongIsX=*/false);
+  uint8_t rows[2][MAX_GAME_ROW_BYTES];
   for (int gx = 0; gx < GAMEBOY_WIDTH; ++gx) {
+    for (int parity = 0; parity < 2; ++parity) {
+      buildGameRow(rows[parity], source + gx, GAMEBOY_WIDTH, GAMEBOY_HEIGHT, scale, patterns[parity]);
+    }
     for (int sx = 0; sx < scale; ++sx) {
       const int dstX = gx * scale + sx;
       uint8_t* out = framebuffer + static_cast<size_t>(panelH - 1 - (gameX + dstX)) * panelBytes + gameY / 8;
-      std::memset(out, 0xFF, static_cast<size_t>(gameH / 8));
-      for (int gy = 0; gy < GAMEBOY_HEIGHT; ++gy) {
-        const uint8_t shade = source[gy * GAMEBOY_WIDTH + gx] & 0x03;
-        if (shade == 0) continue;
-        for (int sy = 0; sy < scale; ++sy) {
-          const int dstY = gy * scale + sy;
-          if (shadeIsBlack(shade, dstX, dstY)) out[dstY >> 3] &= static_cast<uint8_t>(~(1u << (7 - (dstY & 7))));
-        }
-      }
+      std::memcpy(out, rows[dstX & 1], static_cast<size_t>(rowBytes));
     }
   }
   return true;
