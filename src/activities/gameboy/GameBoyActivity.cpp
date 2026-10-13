@@ -198,6 +198,14 @@ void GameBoyActivity::onEnter() {
   menuMessage[0] = '\0';
   settingsDirty = false;
   loadSettings();
+  {
+    const size_t slash = romPath.find_last_of('/');
+    const std::string folder = slash == std::string::npos || slash == 0 ? "/" : romPath.substr(0, slash);
+    if (!romPath.empty() && folder != romFolder && folder.size() < 600) {
+      romFolder = folder;
+      settingsDirty = true;  // saved on exit, for the ROM picker
+    }
+  }
   portrait = kOrientations[orientation].portrait;
   renderer.setOrientation(kOrientations[orientation].orientation);
   setLayout();
@@ -933,10 +941,11 @@ void GameBoyActivity::applyOrientation(const uint8_t value) {
 void GameBoyActivity::loadSettings() {
   orientation = 0;
   fastPreset = kDefaultFastPreset;
+  romFolder.clear();
   bool status = false;
   HalFile file;
   if (Storage.openFileForRead(TAG, kSettingsPath, file)) {
-    char text[160] = {};
+    char text[768] = {};
     const int got = file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
     file.close();
     if (got > 0) {
@@ -949,6 +958,8 @@ void GameBoyActivity::loadSettings() {
           fastPreset = static_cast<uint8_t>(value);
         } else if (std::sscanf(line, "status=%u", &value) == 1) {
           status = value != 0;
+        } else if (std::strncmp(line, "romdir=", 7) == 0) {
+          romFolder = line + 7;
         }
       }
     }
@@ -956,12 +967,29 @@ void GameBoyActivity::loadSettings() {
   statusLineShown.store(status, std::memory_order_release);
 }
 
-void GameBoyActivity::saveSettings() {
-  char text[96];
-  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%u\nstatus=%u\n", orientation, fastPreset,
-                           statusLineShown.load(std::memory_order_acquire) ? 1u : 0u);
+std::string GameBoyActivity::lastRomFolder() {
   HalFile file;
-  if (len <= 0 || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
+  if (!Storage.openFileForRead(TAG, kSettingsPath, file)) return "/";
+  char text[768] = {};
+  const int got = file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
+  file.close();
+  if (got <= 0) return "/";
+  text[got] = '\0';
+  for (char* line = std::strtok(text, "\n"); line; line = std::strtok(nullptr, "\n")) {
+    if (std::strncmp(line, "romdir=", 7) == 0 && line[7] == '/') {
+      const std::string folder = line + 7;
+      return Storage.exists(folder.c_str()) ? folder : "/";
+    }
+  }
+  return "/";
+}
+
+void GameBoyActivity::saveSettings() {
+  char text[768];
+  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%u\nstatus=%u\nromdir=%s\n", orientation,
+                           fastPreset, statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, romFolder.c_str());
+  HalFile file;
+  if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
     LOG_ERR(TAG, "Could not save %s", kSettingsPath);
     return;
   }

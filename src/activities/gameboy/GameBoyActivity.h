@@ -39,6 +39,10 @@ class GameBoyActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 
+  // The folder of the last game played ("/" before any): where Applications >
+  // Game Boy opens its ROM picker.
+  static std::string lastRomFolder();
+
   bool skipLoopDelay() override { return true; }
   uint8_t inputPollDelayMs() const override { return 2; }
   bool preventAutoSleep() override { return true; }
@@ -160,6 +164,7 @@ class GameBoyActivity final : public Activity {
   bool loadArmed = false;
   char menuMessage[48] = {};
   bool settingsDirty = false;
+  std::string romFolder;  // saved as romdir= with the settings
   bool stateExists = false;  // a quick save is there to load
   // An orientation chosen in SETTINGS, applied once the finger lifts: turning
   // the screen mid-tap makes the tap's two ends read as a Back swipe.

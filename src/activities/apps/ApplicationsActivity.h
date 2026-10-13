@@ -13,7 +13,12 @@
 #include "activities/apps/lua/AppPackage.h"
 #include "activities/apps/lua/LuaAppActivity.h"
 #include "components/UiAppHelpers.h"
+#include "components/icons/homeExtraIcons.h"
 #include "components/icons/listIcons.h"
+#if CROSSINK_GAMEBOY
+#include "activities/gameboy/GameBoyActivity.h"
+#include "activities/home/FileBrowserActivity.h"
+#endif
 #include "fontIds.h"
 
 class ApplicationsActivity : public Activity {
@@ -45,6 +50,25 @@ class ApplicationsActivity : public Activity {
     auto launchSelectedApp = [this]() {
       const auto& app = visibleApps[selectedIndex];
       if (!app.supported) return;  // made for another reader: its row says so
+#if CROSSINK_GAMEBOY
+      if (app.gameBoy) {
+        // Built in: pick a ROM (starting where the last game was) and play it;
+        // leaving the game comes back here.
+        startActivityForResult(
+            std::make_unique<FileBrowserActivity>(renderer, mappedInput, GameBoyActivity::lastRomFolder(),
+                                                  FileBrowserActivity::Mode::PickGameBoyRom),
+            [this](const ActivityResult& result) {
+              const auto* picked = std::get_if<FilePathResult>(&result.data);
+              if (!result.isCancelled && picked && !picked->path.empty()) {
+                onSelectBook(picked->path);
+                return;
+              }
+              refreshMenuList();
+              requestUpdate();
+            });
+        return;
+      }
+#endif
       const bool isSetting = app.builtIn;
       if (!isSetting) {
         SmudgeSettings::getInstance().recordAppLaunch(app.name);
@@ -128,8 +152,9 @@ class ApplicationsActivity : public Activity {
       if (app.hasIcon) {
         renderer.drawIcon(app.iconData, iconX, iconY, ICON_SIZE, ICON_SIZE);
       } else {
-        const freeink::Icon& icon = app.builtIn ? (app.icon == UIIcon::Settings ? icon_cog_32 : icon_lyra_library_32)
-                                                : icon_book_32;
+        const freeink::Icon& icon = app.gameBoy ? icon_gamepad_32
+                                    : app.builtIn ? (app.icon == UIIcon::Settings ? icon_cog_32 : icon_lyra_library_32)
+                                                  : icon_book_32;
         target.bitmap(freeink::ui::Rect{static_cast<int16_t>(iconX), static_cast<int16_t>(iconY),
                                         static_cast<int16_t>(ICON_SIZE), static_cast<int16_t>(ICON_SIZE)},
                       freeink::ui::bitmapFromIcon(icon), freeink::ui::BitmapMode::Center);
@@ -158,6 +183,7 @@ class ApplicationsActivity : public Activity {
     std::string name;
     UIIcon icon;
     bool builtIn = false;  // App Store / App Settings rather than an SD-card app
+    bool gameBoy = false;  // the built-in Game Boy launcher (X4 Pro)
     std::string dir;        // SD-card app: its folder and entry script
     std::string entry;
     bool supported = true;  // false: its manifest lists other readers only
@@ -272,6 +298,17 @@ class ApplicationsActivity : public Activity {
     appSettings.icon = UIIcon::Settings;
     appSettings.builtIn = true;
     visibleApps.push_back(std::move(appSettings));
+
+#if CROSSINK_GAMEBOY
+    // The Game Boy emulator is built in: offered first, so it is easy to find.
+    AppEntry gameBoy;
+    gameBoy.name = tr(STR_GAMEBOY_APP);
+    gameBoy.detail = tr(STR_GAMEBOY_APP_DETAIL);
+    gameBoy.icon = UIIcon::Library;
+    gameBoy.builtIn = true;
+    gameBoy.gameBoy = true;
+    visibleApps.insert(visibleApps.begin(), std::move(gameBoy));
+#endif
 
     if (selectedIndex >= static_cast<int>(visibleApps.size())) {
       selectedIndex = std::max(0, static_cast<int>(visibleApps.size()) - 1);
