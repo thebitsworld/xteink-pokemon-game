@@ -128,9 +128,14 @@ static unsigned luma565(const uint16_t rgb) {
   return (r * 299u * 255u / 31u + g * 587u * 255u / 63u + b * 114u * 255u / 31u) / 1000u;
 }
 
-// The shade of a brightness: quarters of 0..255, 0 white to 3 black.
-static uint8_t shadeOfLuma(const unsigned luma) {
-  return (uint8_t)(luma >= 192u ? 0 : luma >= 128u ? 1 : luma >= 64u ? 2 : 3);
+// The reader's grey levels (GameBoyActivity's shadeIsBlack()): 0 white, 1 a
+// quarter black, 2 half, 3 three quarters, 4 black. A brightness falls into a
+// quarter of 0..255; by day the quarters take the Game Boy's own four greys
+// (0, 1, 3, 4), and in a night scene the four darker ones (1 to 4).
+static const uint8_t kDayLevel[4] = {0, 1, 3, 4};
+static const uint8_t kNightLevel[4] = {1, 2, 3, 4};
+static unsigned quarterOfLuma(const unsigned luma) {
+  return luma >= 192u ? 0u : luma >= 128u ? 1u : luma >= 64u ? 2u : 3u;
 }
 
 // The median of eight values (the mean of the middle two).
@@ -151,22 +156,24 @@ static unsigned median8(unsigned* v) {
 #define WALNUT_MIN_SPAN 32u
 #define WALNUT_FULL_SPAN 200u
 
-// The shades of all 64 palette colours (8 background and 8 sprite palettes of
-// 4; a sprite palette's colour 0 is transparent). Brightness mode gives each
-// colour the shade of its brightness. Contrast mode first stretches the
-// brightness of every colour by one rule: from the black point (the median of
-// the 8 background palettes' darkest colours) to the white point (the median
-// of their lightest) over 0..255, when that span is narrow. By day the
-// palettes span most of 0..255 and nothing changes; when the game dims them
-// all for the night - by
-// brightness its grass fell into black - the stretch brings their colours
-// apart again, while a palette the game keeps bright (a text box) only clips
-// to white. One colour always gets one shade, whichever palette holds it.
+// The grey levels of all 64 palette colours (8 background and 8 sprite
+// palettes of 4; a sprite palette's colour 0 is transparent). Brightness mode
+// gives each colour the day grey of its brightness. Contrast mode first
+// stretches the brightness of every colour by one rule: from the black point
+// (the median of the 8 background palettes' darkest colours) to the white
+// point (the median of their lightest) over 0..255, when that span is narrow.
+// By day the palettes span most of 0..255 and nothing changes; when the game
+// dims them all for the night - by brightness its grass fell into black - the
+// stretch brings their colours apart again, onto the night greys, which leave
+// out white so the scene stays dark (stretched onto all four day greys it was
+// glaring). A palette the game keeps bright (a text box) only clips to the
+// lightest. One colour always gets one grey, whichever palette holds it.
 static void buildShades(struct WalnutCgb* c, const uint16_t* palette) {
   unsigned luma[0x40];
   for (unsigned i = 0; i < 0x40; ++i) luma[i] = luma565(palette[i]);
   unsigned black = 0;
   unsigned white = 255;
+  int night = 0;
   if (!c->brightnessMode) {
     unsigned darkest[8];
     unsigned lightest[8];
@@ -181,17 +188,16 @@ static void buildShades(struct WalnutCgb* c, const uint16_t* palette) {
     }
     black = median8(darkest);
     white = median8(lightest);
-    if (white < black + WALNUT_MIN_SPAN || white >= black + WALNUT_FULL_SPAN) {
-      black = 0;
-      white = 255;
-    }
+    night = white >= black + WALNUT_MIN_SPAN && white < black + WALNUT_FULL_SPAN;
   }
   for (unsigned i = 0; i < 0x40; ++i) {
     unsigned l = luma[i];
-    if (black != 0 || white != 255) {
+    if (night) {
       l = l <= black ? 0 : l >= white ? 255 : (l - black) * 255u / (white - black);
+      c->shadeOf[i] = kNightLevel[quarterOfLuma(l)];
+    } else {
+      c->shadeOf[i] = kDayLevel[quarterOfLuma(l)];
     }
-    c->shadeOf[i] = shadeOfLuma(l);
   }
   for (unsigned i = 0x20; i < 0x40; i += 4) c->shadeOf[i] = 0;  // transparent
   memcpy(c->paletteSeen, palette, sizeof(c->paletteSeen));
@@ -199,9 +205,9 @@ static void buildShades(struct WalnutCgb* c, const uint16_t* palette) {
 }
 
 // Game Boy Color pixels index the colour palettes (RGB565 in fixPalette);
-// each colour becomes a shade, 0 white to 3 black (buildShades()), so the
-// reader's dot-pattern greys show it. Game Boy (DMG) games on this core pass
-// their shade through as Peanut-GB does (0 white).
+// each colour becomes one of the reader's grey levels (buildShades()). Game
+// Boy (DMG) games on this core take the Game Boy's four greys, as Peanut-GB's
+// do.
 static void drawLine(struct gb_s* gb, const uint8_t* pixels, const uint_fast8_t line) {
   struct WalnutCgb* c = owner(gb);
   if (gb->cgb.cgbMode) {
@@ -210,7 +216,7 @@ static void drawLine(struct gb_s* gb, const uint8_t* pixels, const uint_fast8_t 
     }
     for (unsigned x = 0; x < LCD_WIDTH; ++x) c->shades[x] = c->shadeOf[pixels[x] & 0x3F];
   } else {
-    for (unsigned x = 0; x < LCD_WIDTH; ++x) c->shades[x] = (uint8_t)(pixels[x] & 0x03);
+    for (unsigned x = 0; x < LCD_WIDTH; ++x) c->shades[x] = kDayLevel[pixels[x] & 0x03];
   }
   if (c->line) c->line(c->user, c->shades, line);
 }

@@ -15,8 +15,9 @@ extern "C" {
 
 typedef struct WalnutCgb WalnutCgb;
 
-// One finished line of 160 pixels as Game Boy shades, 0 white to 3 black
-// (Game Boy Color colours are turned into shades by brightness).
+// One finished line of 160 pixels as the reader's grey levels: 0 white, 1 a
+// quarter black, 2 half, 3 three quarters, 4 black (Game Boy shades use 0, 1,
+// 3 and 4; Game Boy Color colours are turned into levels in walnut_cgb_impl.c).
 typedef void (*WalnutCgbLineFn)(void* user, const uint8_t* shades, uint_fast8_t line);
 // The core hit an error it cannot run past (gb_error_e code, address).
 typedef void (*WalnutCgbErrorFn)(void* user, int error, uint16_t addr);
@@ -35,9 +36,9 @@ void walnut_cgb_set_cart_ram(WalnutCgb* cgb, uint8_t* ram, size_t size);
 void walnut_cgb_set_ram_written(WalnutCgb* cgb, void (*written)(void* user));
 
 void walnut_cgb_run_frame(WalnutCgb* cgb);
-// How Game Boy Color colours become shades: contrast (default) ranks each
-// palette's colours from light to dark so they stay apart even when the game
-// dims them (night); otherwise each colour takes the shade of its brightness.
+// How Game Boy Color colours become greys: contrast (default) stretches a
+// scene the game dims (night) onto the darker greys so its colours stay
+// apart; otherwise each colour takes the grey of its brightness.
 void walnut_cgb_set_contrast(WalnutCgb* cgb, int contrast);
 // Whether the next frame's lines are drawn (sent to the line callback); a
 // frame that is not drawn still runs in full.
