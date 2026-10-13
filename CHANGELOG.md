@@ -1,3 +1,14 @@
+## [1.8.3-beta.3] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. It also brings new save files that could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only (X4 Pro): in a Game Boy game, try SETTINGS (where ROTATE was): every orientation, every screen speed, the status line, Quick save and Quick load (in different places of a game). Put the reader to sleep with Power in the middle of a game and turn it on again: the game should come back where it was. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Added
+
+- Game Boy (X4 Pro): SETTINGS replaces ROTATE. It pauses the game and offers the orientation (all four ways round), the screen speed (UC8279 screens: D40, D30 or D25, with a cleaning refresh every 30 or 60 s), the status line, and quick save and load (one saved state per game, `<game>.state`). The settings are shared by every game.
+- Game Boy (X4 Pro): putting the reader to sleep during a game saves it, and turning the reader on again reopens the game where it was. Hold Back while it starts to go to the home screen instead.
+
 ## [1.8.3-beta.2] - 2026-10-13
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with a shorter waveform than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
