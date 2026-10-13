@@ -101,6 +101,18 @@ constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
 // before D50 was added: D40/30, D40/60, D30/30, D30/60, D25/30, D25/60.
 constexpr const char* kOldSpeedKeys[] = {"", "D40-30", "D40-60", "D30-30", "D30-60", "D25-30", "D25-60"};
 
+// SETTINGS > Colours, in the order of WALNUT_COLOURS_* (walnut_cgb_port.h).
+struct ColourModeChoice {
+  const char* label;
+  const char* key;  // how gameboy.cfg names it (colours=)
+};
+constexpr ColourModeChoice kColourModes[] = {
+    {"Smooth", "smooth"},
+    {"Contrast", "contrast"},
+    {"Brightness", "brightness"},
+};
+constexpr uint8_t kColourModeCount = sizeof(kColourModes) / sizeof(kColourModes[0]);
+
 // The orientations SETTINGS offers, in its order.
 struct OrientationChoice {
   const char* label;
@@ -168,22 +180,16 @@ void panelName(char* out, const size_t size) {
 // Whether panel pixel (x, y) is black for Game Boy shade 0 (white, the
 // lightest) to 3 (black). The panel here is black and white only, so the two
 // greys are dithered: one dot in four for light grey, three in four for dark.
-// The picture's greys, as dot patterns: 0 white, 1 a quarter black, 2 half
-// (a checkerboard), 3 three quarters, 4 black. A Game Boy's four shades use
-// 0, 1, 3 and 4 (kDmgLevel); Game Boy Color games darkened for the night use
-// 1 to 4 (src/walnut_cgb_impl.c).
-constexpr int kGreyLevels = 5;
-constexpr uint8_t kDmgLevel[4] = {0, 1, 3, 4};
+// The picture's greys: 17 levels of darkness, 0 white to 16 black, drawn as an
+// ordered (4x4 Bayer) dither - a dot is black where its threshold is below the
+// level. Levels 4, 8 and 12 are the quarter, half (checkerboard) and
+// three-quarter patterns; a Game Boy's four shades use 0, 4, 12 and 16
+// (kDmgLevel), and Game Boy Color colours any level (src/walnut_cgb_impl.c).
+constexpr int kGreyLevels = 17;
+constexpr uint8_t kDmgLevel[4] = {0, 4, 12, 16};
+constexpr uint8_t kBayer4[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
 
-bool shadeIsBlack(const uint8_t level, const int x, const int y) {
-  switch (level) {
-    case 4: return true;
-    case 3: return ((x ^ y) & 1) == 0 || (x & 1) == 0;
-    case 2: return ((x ^ y) & 1) == 0;
-    case 1: return (x & 1) == 0 && (y & 1) == 0;
-    default: return false;
-  }
-}
+bool shadeIsBlack(const uint8_t level, const int x, const int y) { return kBayer4[y & 3][x & 3] < level; }
 
 }  // namespace
 
@@ -853,8 +859,8 @@ void GameBoyActivity::menuActivate(const MenuItem item) {
       }
       break;
     case MenuItem::Colours:
-      colourContrast = !colourContrast;
-      if (cgb) walnut_cgb_set_contrast(cgb, colourContrast ? 1 : 0);
+      colourMode = static_cast<uint8_t>((colourMode + 1) % kColourModeCount);
+      if (cgb) walnut_cgb_set_colours(cgb, colourMode);
       settingsDirty = true;
       break;
     case MenuItem::Status:
@@ -935,9 +941,9 @@ void GameBoyActivity::drawMenu() {
         value = fastRefreshValidated() ? kRefreshPresets[fastPreset].label : kRefreshPresets[0].label;
         break;
       case MenuItem::Colours:
-        // Game Boy Color games only: see colourContrast.
+        // Game Boy Color games only: see colourMode.
         label = "Colours";
-        value = colourContrast ? "Contrast" : "Brightness";
+        value = kColourModes[colourMode].label;
         break;
       case MenuItem::Status:
         label = "Status line";
@@ -992,7 +998,7 @@ void GameBoyActivity::loadSettings() {
   orientation = 0;
   fastPreset = kDefaultFastPreset;
   romFolder.clear();
-  colourContrast = true;
+  colourMode = WALNUT_COLOURS_SMOOTH;
   bool status = false;
   HalFile file;
   if (Storage.exists(kSettingsPath) && Storage.openFileForRead(TAG, kSettingsPath, file)) {
@@ -1017,7 +1023,9 @@ void GameBoyActivity::loadSettings() {
         } else if (std::sscanf(line, "status=%u", &value) == 1) {
           status = value != 0;
         } else if (std::strncmp(line, "colours=", 8) == 0) {
-          colourContrast = std::strcmp(line + 8, "brightness") != 0;
+          for (uint8_t i = 0; i < kColourModeCount; ++i) {
+            if (std::strcmp(line + 8, kColourModes[i].key) == 0) colourMode = i;
+          }
         } else if (std::strncmp(line, "romdir=", 7) == 0) {
           romFolder = line + 7;
         }
@@ -1047,7 +1055,7 @@ std::string GameBoyActivity::lastRomFolder() {
 void GameBoyActivity::saveSettings() {
   char text[768];
   const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nromdir=%s\n",
-                           orientation, kRefreshPresets[fastPreset].key, colourContrast ? "contrast" : "brightness",
+                           orientation, kRefreshPresets[fastPreset].key, kColourModes[colourMode].key,
                            statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, romFolder.c_str());
   HalFile file;
   if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
@@ -1256,7 +1264,7 @@ bool GameBoyActivity::initEmulator() {
       return false;
     }
     walnut_cgb_set_ram_written(cgb, &GameBoyActivity::cgbRamWritten);
-    walnut_cgb_set_contrast(cgb, colourContrast ? 1 : 0);
+    walnut_cgb_set_colours(cgb, colourMode);
     if (walnut_cgb_save_size(cgb, &saveSize) < 0) {
       showError("Unknown cartridge RAM size");
       return false;
@@ -1618,15 +1626,15 @@ namespace {
 
 // Builds one panel row of the game a byte at a time: `count` game pixels read
 // from `src` every `step` bytes, each `scale` panel pixels long. A game pixel
-// becomes the bits patterns[grey level][first panel pixel's parity] (1 =
-// black, most significant first), so the row is about count table lookups.
+// becomes the bits patterns[grey level][first panel pixel's phase, mod 4] (1
+// = black, most significant first), so the row is about count table lookups.
 constexpr int MAX_GAME_ROW_BYTES = 64;
 void buildGameRow(uint8_t* out, const uint8_t* src, const int step, const int count, const int scale,
-                  const uint8_t (&patterns)[kGreyLevels][2]) {
+                  const uint8_t (&patterns)[kGreyLevels][4]) {
   uint32_t acc = 0;
   int bits = 0;
   for (int g = 0; g < count; ++g) {
-    acc = (acc << scale) | patterns[src[g * step]][(g * scale) & 1];
+    acc = (acc << scale) | patterns[src[g * step]][(g * scale) & 3];
     bits += scale;
     if (bits >= 8) {
       bits -= 8;
@@ -1636,13 +1644,13 @@ void buildGameRow(uint8_t* out, const uint8_t* src, const int step, const int co
   }
 }
 
-// patterns[fixedParity][level][alongParity] for buildGameRow: the dither of
-// shadeIsBlack() for a panel row whose fixed coordinate has parity
-// fixedParity. alongIsX says whether the row runs along the dither's x.
-void gamePatterns(uint8_t (&patterns)[2][kGreyLevels][2], const int scale, const bool alongIsX) {
-  for (int fixed = 0; fixed < 2; ++fixed) {
+// patterns[fixedPhase][level][alongPhase] for buildGameRow: the dither of
+// shadeIsBlack() for a panel row whose fixed coordinate is fixedPhase mod 4.
+// alongIsX says whether the row runs along the dither's x.
+void gamePatterns(uint8_t (&patterns)[4][kGreyLevels][4], const int scale, const bool alongIsX) {
+  for (int fixed = 0; fixed < 4; ++fixed) {
     for (int shade = 0; shade < kGreyLevels; ++shade) {
-      for (int along0 = 0; along0 < 2; ++along0) {
+      for (int along0 = 0; along0 < 4; ++along0) {
         uint8_t pattern = 0;
         for (int k = 0; k < scale; ++k) {
           const int along = along0 + k;
@@ -1681,8 +1689,8 @@ bool GameBoyActivity::drawGameFrameLandscape(const uint8_t* source, uint8_t* fra
   // LandscapeCounterClockwise is the native X4 Pro framebuffer orientation,
   // so logical (x,y) maps directly to physical (x,y); LandscapeClockwise turns
   // it half round: physical (W-1-x, H-1-y). Peanut-GB's four shades become
-  // black, two dithered greys and white (shadeIsBlack()). A game line's panel
-  // rows differ only by their y parity: two are built, the rest copied.
+  // greys (shadeIsBlack()). A game line's panel rows differ only by their y
+  // phase in the 4x4 dither: four are built, the rest copied.
   const int panelBytes = renderer.getDisplayWidthBytes();
   const int screenW = renderer.getDisplayWidth();
   const int screenH = renderer.getDisplayHeight();
@@ -1692,18 +1700,18 @@ bool GameBoyActivity::drawGameFrameLandscape(const uint8_t* source, uint8_t* fra
       gameY + gameH > screenH || rowBytes > MAX_GAME_ROW_BYTES) {
     return false;
   }
-  uint8_t patterns[2][kGreyLevels][2];
+  uint8_t patterns[4][kGreyLevels][4];
   gamePatterns(patterns, scale, /*alongIsX=*/true);
-  uint8_t rows[2][MAX_GAME_ROW_BYTES];
+  uint8_t rows[4][MAX_GAME_ROW_BYTES];
   for (int gy = 0; gy < GAMEBOY_HEIGHT; ++gy) {
     const uint8_t* line = source + gy * GAMEBOY_WIDTH;
-    for (int parity = 0; parity < 2; ++parity) {
+    for (int parity = 0; parity < 4; ++parity) {
       buildGameRow(rows[parity], line, 1, GAMEBOY_WIDTH, scale, patterns[parity]);
     }
     for (int sy = 0; sy < scale; ++sy) {
       const int panelY = gy * scale + sy;
       const int row = flipped ? screenH - 1 - (gameY + panelY) : gameY + panelY;
-      putGameRow(framebuffer + static_cast<size_t>(row) * panelBytes + startX / 8, rows[panelY & 1], rowBytes,
+      putGameRow(framebuffer + static_cast<size_t>(row) * panelBytes + startX / 8, rows[panelY & 3], rowBytes,
                  flipped);
     }
   }
@@ -1714,8 +1722,8 @@ bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* fram
   // Portrait turns the panel a quarter: logical (x, y) is panel
   // (y, panelHeight - 1 - x), and PortraitInverted (panelWidth - 1 - y, x).
   // Each game column is one panel row with the game's lines running along it.
-  // A column's panel rows differ only by their x parity: two are built, the
-  // rest copied.
+  // A column's panel rows differ only by their x phase in the 4x4 dither:
+  // four are built, the rest copied.
   const int panelBytes = renderer.getDisplayWidthBytes();
   const int panelW = renderer.getDisplayWidth();
   const int panelH = renderer.getDisplayHeight();
@@ -1725,17 +1733,17 @@ bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* fram
       gameY + gameH > panelW || rowBytes > MAX_GAME_ROW_BYTES) {
     return false;
   }
-  uint8_t patterns[2][kGreyLevels][2];
+  uint8_t patterns[4][kGreyLevels][4];
   gamePatterns(patterns, scale, /*alongIsX=*/false);
-  uint8_t rows[2][MAX_GAME_ROW_BYTES];
+  uint8_t rows[4][MAX_GAME_ROW_BYTES];
   for (int gx = 0; gx < GAMEBOY_WIDTH; ++gx) {
-    for (int parity = 0; parity < 2; ++parity) {
+    for (int parity = 0; parity < 4; ++parity) {
       buildGameRow(rows[parity], source + gx, GAMEBOY_WIDTH, GAMEBOY_HEIGHT, scale, patterns[parity]);
     }
     for (int sx = 0; sx < scale; ++sx) {
       const int dstX = gx * scale + sx;
       const int row = flipped ? gameX + dstX : panelH - 1 - (gameX + dstX);
-      putGameRow(framebuffer + static_cast<size_t>(row) * panelBytes + startY / 8, rows[dstX & 1], rowBytes,
+      putGameRow(framebuffer + static_cast<size_t>(row) * panelBytes + startY / 8, rows[dstX & 3], rowBytes,
                  flipped);
     }
   }
@@ -1838,7 +1846,7 @@ void GameBoyActivity::emergencyRestart(const int error, const uint16_t addr) {
   while (true) delay(1000);
 }
 
-// Walnut-CGB hands over grey levels already (0..4, see shadeIsBlack()).
+// Walnut-CGB hands over grey levels already (0..16, see shadeIsBlack()).
 void GameBoyActivity::cgbLine(void* user, const uint8_t* levels, const uint_fast8_t line) {
   auto* self = static_cast<GameBoyActivity*>(user);
   if (!self || line >= GAMEBOY_HEIGHT || !self->frameBuffers[self->writeFrame]) return;

@@ -84,7 +84,7 @@ struct WalnutCgb {
   uint16_t paletteSeen[0x40];
   uint8_t shadeOf[0x40];
   uint8_t shadesValid;
-  uint8_t brightnessMode;  // 0: contrast within each palette, 1: by brightness
+  uint8_t colourMode;  // WALNUT_COLOURS_* (walnut_cgb_port.h)
 };
 
 static struct WalnutCgb* owner(struct gb_s* gb) { return (struct WalnutCgb*)gb->direct.priv; }
@@ -128,12 +128,13 @@ static unsigned luma565(const uint16_t rgb) {
   return (r * 299u * 255u / 31u + g * 587u * 255u / 63u + b * 114u * 255u / 31u) / 1000u;
 }
 
-// The reader's grey levels (GameBoyActivity's shadeIsBlack()): 0 white, 1 a
-// quarter black, 2 half, 3 three quarters, 4 black. A brightness falls into a
-// quarter of 0..255; by day the quarters take the Game Boy's own four greys
-// (0, 1, 3, 4), and in a night scene the four darker ones (1 to 4).
-static const uint8_t kDayLevel[4] = {0, 1, 3, 4};
-static const uint8_t kNightLevel[4] = {1, 2, 3, 4};
+// The reader's grey levels (GameBoyActivity's shadeIsBlack()): darkness 0
+// white to 16 black, an ordered dither. In the Contrast and Brightness modes a
+// brightness falls into a quarter of 0..255; by day the quarters take the
+// Game Boy's own four greys (levels 0, 4, 12, 16), and in a night scene the
+// four darker ones (4, 8, 12, 16). Smooth uses all 17 levels.
+static const uint8_t kDayLevel[4] = {0, 4, 12, 16};
+static const uint8_t kNightLevel[4] = {4, 8, 12, 16};
 static unsigned quarterOfLuma(const unsigned luma) {
   return luma >= 192u ? 0u : luma >= 128u ? 1u : luma >= 64u ? 2u : 3u;
 }
@@ -158,7 +159,9 @@ static unsigned median8(unsigned* v) {
 
 // The grey levels of all 64 palette colours (8 background and 8 sprite
 // palettes of 4; a sprite palette's colour 0 is transparent). Brightness mode
-// gives each colour the day grey of its brightness. Contrast mode first
+// gives each colour the day grey of its brightness. Smooth gives it the level
+// of its brightness among all 17, and in a night scene (below) stretches it
+// onto levels 4 to 16. Contrast mode first
 // stretches the brightness of every colour by one rule: from the black point
 // (the median of the 8 background palettes' darkest colours) to the white
 // point (the median of their lightest) over 0..255, when that span is narrow.
@@ -174,7 +177,7 @@ static void buildShades(struct WalnutCgb* c, const uint16_t* palette) {
   unsigned black = 0;
   unsigned white = 255;
   int night = 0;
-  if (!c->brightnessMode) {
+  if (c->colourMode != WALNUT_COLOURS_BRIGHTNESS) {
     unsigned darkest[8];
     unsigned lightest[8];
     for (unsigned p = 0; p < 8; ++p) {
@@ -190,13 +193,14 @@ static void buildShades(struct WalnutCgb* c, const uint16_t* palette) {
     white = median8(lightest);
     night = white >= black + WALNUT_MIN_SPAN && white < black + WALNUT_FULL_SPAN;
   }
+  const int smooth = c->colourMode == WALNUT_COLOURS_SMOOTH;
   for (unsigned i = 0; i < 0x40; ++i) {
     unsigned l = luma[i];
     if (night) {
       l = l <= black ? 0 : l >= white ? 255 : (l - black) * 255u / (white - black);
-      c->shadeOf[i] = kNightLevel[quarterOfLuma(l)];
+      c->shadeOf[i] = smooth ? (uint8_t)(16u - (l * 12u + 127u) / 255u) : kNightLevel[quarterOfLuma(l)];
     } else {
-      c->shadeOf[i] = kDayLevel[quarterOfLuma(l)];
+      c->shadeOf[i] = smooth ? (uint8_t)(16u - (l * 16u + 127u) / 255u) : kDayLevel[quarterOfLuma(l)];
     }
   }
   for (unsigned i = 0x20; i < 0x40; i += 4) c->shadeOf[i] = 0;  // transparent
@@ -266,8 +270,8 @@ void walnut_cgb_run_frame(WalnutCgb* c) { gb_run_frame_dualfetch(&c->gb); }
 // The core's own frame skip, steered from outside: its line drawing runs while
 // frame_skip_count is set (it flips the count at each VBlank; this sets it
 // again before every frame).
-void walnut_cgb_set_contrast(WalnutCgb* c, const int contrast) {
-  c->brightnessMode = contrast ? 0 : 1;
+void walnut_cgb_set_colours(WalnutCgb* c, const int mode) {
+  c->colourMode = (uint8_t)mode;
   c->shadesValid = 0;
 }
 
