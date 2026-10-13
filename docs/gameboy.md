@@ -53,8 +53,9 @@ Up/Down and Confirm), and **Back to game** or Back returns to the game.
 - **Colours** (Game Boy Color games): how colours become greys. **Contrast**
   (the default) keeps them apart when the game darkens the whole picture, as
   at night in Pokémon Gold and Silver, where the grass would otherwise turn
-  into one dark patch; by day it looks the same as **Brightness**, which gives
-  each colour the grey of its own brightness.
+  into one dark patch: such a scene uses the darker greys, so it stays dark.
+  By day it looks the same as **Brightness**, which gives each colour the
+  grey of its own brightness.
 - **Status line**: the same as tapping the title strip.
 - **Quick save** and **Quick load**: see below.
 
