@@ -28,6 +28,11 @@ right of it; **ROTATE** (bottom left) turns it back. Each game starts upright.
 | Leave the game | **EXIT** | - |
 | Turn the screen | **ROTATE** | - |
 
+Tap the title strip above the game (in landscape, the panel above the D-pad)
+to show or hide a status line: how many times a second the screen updates and
+how fast the game runs against a real Game Boy. It stays as you left it until
+the reader restarts.
+
 Hold a touch button to keep it pressed. If a ROM cannot be opened, the error
 screen closes with Back or a tap.
 
