@@ -2,9 +2,10 @@
 
 // The Game Boy screen (X4 Pro builds with CROSSINK_GAMEBOY): runs a DMG ROM
 // opened from the file browser on the Peanut-GB core (lib/PeanutGB) at the
-// Game Boy's own pace, showing a frame on the e-ink panel four times a
-// second, with touch controls beside the picture. Started from the Ink-boy
-// fork of CrossInk (https://github.com/hellominecraft913-dev/Ink-boy, MIT).
+// Game Boy's own pace, showing a frame on the e-ink panel as often as the
+// panel allows, with touch controls beside the picture and a SETTINGS screen
+// (orientation, screen speed, status line, quick save and load). Started from
+// the Ink-boy fork of CrossInk (https://github.com/hellominecraft913-dev/Ink-boy, MIT).
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -29,7 +30,8 @@ extern "C" {
 
 class GameBoyActivity final : public Activity {
  public:
-  GameBoyActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string romPath);
+  // `resume` loads the state saved when the reader went to sleep in this game.
+  GameBoyActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string romPath, bool resume = false);
   ~GameBoyActivity() override;
 
   void onEnter() override;
@@ -54,8 +56,11 @@ class GameBoyActivity final : public Activity {
     Select,
     Start,
     Exit,
-    Rotate,
+    Settings,
   };
+
+  // The SETTINGS screen's rows, top to bottom.
+  enum class MenuItem : uint8_t { Orientation, Speed, Status, Save, Load, Back, Count };
 
   // One on-screen button, in logical coordinates for the current orientation.
   struct ControlButton {
@@ -83,7 +88,10 @@ class GameBoyActivity final : public Activity {
   static constexpr uint64_t AUTOSAVE_PERIOD_US = 60000000ULL;
 
   std::string romPath;
+  bool resumeRequested = false;
   std::string savePath;
+  std::string statePath;   // quick save: <rom>.state
+  std::string resumePath;  // saved on sleep, loaded on wake: <rom>.resume
   std::string tempSavePath;
   std::string backupSavePath;
 
@@ -114,8 +122,10 @@ class GameBoyActivity final : public Activity {
   int gameW = 480;
   int gameH = 432;
 
-  // Portrait (game on top, controls below like the handheld) is the default;
-  // ROTATE switches to landscape and back.
+  // The screen orientation (0 portrait, 1 landscape, 2 portrait flipped, 3
+  // landscape flipped; see kOrientations), chosen in SETTINGS. The portrait
+  // ones put the game on top and the controls below like the handheld.
+  uint8_t orientation = 0;
   bool portrait = true;
   ControlButton controls[MAX_CONTROLS] = {};
   size_t controlCount = 0;
@@ -139,7 +149,34 @@ class GameBoyActivity final : public Activity {
   void emuTaskLoop();
   void startEmuTask();
   void stopEmuTask();
-  bool rotateRequested = false;
+  // SETTINGS: while it is open the emulator pauses (emuIdle confirms it) and
+  // the screen shows the menu instead of the game. menuSel is the row the
+  // buttons act on; loadArmed asks for a second Load tap before progress is
+  // replaced; menuMessage reports the last action.
+  std::atomic<bool> menuOpen{false};
+  std::atomic<bool> emuIdle{false};
+  uint64_t pauseStartUs = 0;  // emulator task: when the pause began (0 = running)
+  int menuSel = 0;
+  bool loadArmed = false;
+  char menuMessage[48] = {};
+  bool settingsDirty = false;
+  bool stateExists = false;  // a quick save is there to load
+  // An orientation chosen in SETTINGS, applied once the finger lifts: turning
+  // the screen mid-tap makes the tap's two ends read as a Back swipe.
+  bool orientationPending = false;
+  void openMenu();
+  void closeMenu();
+  void menuActivate(MenuItem item);
+  void menuChanged();
+  bool waitEmuIdle();
+  void drawMenu();
+  int menuRowAt(int x, int y) const;
+  void menuRowRect(int row, int& x, int& y, int& w, int& h) const;
+  void applyOrientation(uint8_t value);
+  void loadSettings();
+  void saveSettings();
+  bool writeState(const std::string& path);
+  bool readState(const std::string& path);
   // The next refresh is a full one, clearing what the old layout left behind.
   std::atomic<bool> fullRefreshDue{false};
   bool saveDirty = false;   // cartridge RAM changed since the last save
@@ -188,6 +225,7 @@ class GameBoyActivity final : public Activity {
   // strip shows (statusLineShown), double-buffered between the emulator task
   // that writes it and the render task.
   uint8_t refreshPreset = 0;
+  uint8_t fastPreset = 0;  // the fast preset chosen in SETTINGS (0 = the default)
   char perfText[2][48] = {};
   std::atomic<uint8_t> perfTextIdx{0};
   bool inTitleStrip(int x, int y) const;
@@ -195,7 +233,6 @@ class GameBoyActivity final : public Activity {
 
   void setLayout();
   void addControl(TouchControl control, int x, int y, int w, int h, const char* label);
-  void rotate();
   void applyRefreshPreset();
   bool loadRom();
   bool buildSavePaths();
@@ -219,8 +256,8 @@ class GameBoyActivity final : public Activity {
   void releaseRenderedFrame();
   void publishCompletedFrame();
   void drawGameFrame();
-  bool drawGameFrameLandscape(const uint8_t* source, uint8_t* framebuffer);
-  bool drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer);
+  bool drawGameFrameLandscape(const uint8_t* source, uint8_t* framebuffer, bool flipped);
+  bool drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer, bool flipped);
   void drawControls();
   // What the title and buttons were last drawn with (joypad mask, active touch
   // control, orientation); the framebuffer keeps them between pictures, so

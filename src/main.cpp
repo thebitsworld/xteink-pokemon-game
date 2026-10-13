@@ -1070,6 +1070,9 @@ void mirrorWakeShortPressToNvs() {
 void enterDeepSleep(bool fromTimeout) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  // Read by the Game Boy activity's onExit() (run by goToSleep() below), which
+  // then saves the game for the next wake.
+  APP_STATE.lastSleepFromGameBoy = activityManager.isGameBoyActivity();
 
   const bool isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
@@ -1544,6 +1547,18 @@ void setup() {
     // by network screens. Keep X3's existing full refresh behavior unchanged.
     const auto homeRefreshMode = gpio.deviceIsX3() ? HalDisplay::FULL_REFRESH : HalDisplay::HALF_REFRESH;
     activityManager.goHome(HomeMenuItem::NONE, homeRefreshMode);
+#if CROSSINK_GAMEBOY
+  } else if (APP_STATE.lastSleepFromGameBoy && !APP_STATE.gameBoyResumePath.empty() &&
+             !mappedInputManager.isPressed(MappedInputManager::Button::Back) &&
+             Storage.exists(APP_STATE.gameBoyResumePath.c_str())) {
+    // Went to sleep in a Game Boy game: reopen it where it was. Cleared first,
+    // so a game that fails to start cannot trap the reader in a boot loop.
+    const auto path = APP_STATE.gameBoyResumePath;
+    APP_STATE.lastSleepFromGameBoy = false;
+    APP_STATE.gameBoyResumePath.clear();
+    APP_STATE.saveToFile();
+    activityManager.goToGameBoy(path, true);
+#endif
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
@@ -1561,6 +1576,12 @@ void setup() {
     APP_STATE.readerActivityLoadCount++;
     APP_STATE.saveToFile();
     activityManager.goToReader(path, false, allowFastInitialReaderRefresh);
+  }
+  // Not resumed into the game (or already cleared there): the flag must not
+  // make a later, ordinary exit from a game save a wake state.
+  if (APP_STATE.lastSleepFromGameBoy) {
+    APP_STATE.lastSleepFromGameBoy = false;
+    APP_STATE.saveToFile();
   }
 
   if (resume == BootResume::Silent || resume == BootResume::Network) {
