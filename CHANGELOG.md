@@ -1,3 +1,13 @@
+## [1.8.3-beta.8] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only: play Pokémon Gold at night again: the scene should now stay dark (no white) while the grass still shows its shades. Check that day scenes and Game Boy games look as before. Then send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Fixed
+
+- Game Boy (X4 Pro): with SETTINGS > Colours on Contrast, night scenes in Game Boy Color games came out glaring white. They now use darker greys - a new half-tone grey between the light and dark ones - so they stay dark while their colours stay apart.
+
 ## [1.8.3-beta.7] - 2026-10-13
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
