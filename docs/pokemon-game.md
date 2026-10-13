@@ -70,6 +70,9 @@ A few things worth knowing:
 
 ## Getting started
 
+Open the game from the band showing your party leader on Home (or the Pokémon tile on the
+Cover Grid Home), or from **Applications > Pokémon**.
+
 The very first time you open the Pokémon menu, you'll be asked to choose your starter,
 its gender, and an optional nickname. After that, the Pokémon menu becomes your home base:
 Party, Pokédex, PC Box, Bag, Gym Battle, and your Trainer Card.
