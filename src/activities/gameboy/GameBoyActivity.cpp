@@ -70,11 +70,13 @@ uint64_t nowMicros() {
 // second, with the darkness of stock and a little ghosting that the cleaning
 // refresh every minute clears. 40% looked the same and 25% runs the same
 // frames (phases of one frame do not shrink); PLL 0x1F and 0x3F were faster
-// but faint, 0x10 no different. SETTINGS offers 40/30/25% with a cleaning
-// refresh every 30 or 60 s. Drive levels stay the bank's and voltages the
-// panel's. Other controllers and variants keep stock.
+// but faint, 0x10 no different. SETTINGS offers 50/40/30/25% (50% slower but
+// sharper, with less ghosting) with a cleaning refresh every 30 or 60 s; D40
+// with a cleaning refresh every minute is the default. Drive levels stay the
+// bank's and voltages the panel's. Other controllers and variants keep stock.
 struct RefreshPreset {
   const char* label;
+  const char* key;  // how gameboy.cfg names it (speed=)
   uint8_t tsset;
   uint8_t pll;
   uint8_t duPct;
@@ -83,16 +85,21 @@ struct RefreshPreset {
   uint8_t cleanSec;  // seconds between cleaning refreshes (0 = none)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"Standard", 0, 0, 0, 0, false, 0},
-    {"D40, clean 30 s", 0, 0x0F, 40, 20000000, true, 30},
-    {"D40, clean 60 s", 0, 0x0F, 40, 20000000, true, 60},
-    {"D30, clean 30 s", 0, 0x0F, 30, 20000000, true, 30},
-    {"D30, clean 60 s", 0, 0x0F, 30, 20000000, true, 60},
-    {"D25, clean 30 s", 0, 0x0F, 25, 20000000, true, 30},
-    {"D25, clean 60 s", 0, 0x0F, 25, 20000000, true, 60},
+    {"Standard", "standard", 0, 0, 0, 0, false, 0},
+    {"D50, clean 30 s", "D50-30", 0, 0x0F, 50, 20000000, true, 30},
+    {"D50, clean 60 s", "D50-60", 0, 0x0F, 50, 20000000, true, 60},
+    {"D40, clean 30 s", "D40-30", 0, 0x0F, 40, 20000000, true, 30},
+    {"D40, clean 60 s", "D40-60", 0, 0x0F, 40, 20000000, true, 60},
+    {"D30, clean 30 s", "D30-30", 0, 0x0F, 30, 20000000, true, 30},
+    {"D30, clean 60 s", "D30-60", 0, 0x0F, 30, 20000000, true, 60},
+    {"D25, clean 30 s", "D25-30", 0, 0x0F, 25, 20000000, true, 30},
+    {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
-constexpr uint8_t kDefaultFastPreset = 4;  // D30, clean 60 s
+constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
+// gameboy.cfg from 1.8.3-beta.3/4 stored speed= as an index into the list
+// before D50 was added: D40/30, D40/60, D30/30, D30/60, D25/30, D25/60.
+constexpr const char* kOldSpeedKeys[] = {"", "D40-30", "D40-60", "D30-30", "D30-60", "D25-30", "D25-60"};
 
 // The orientations SETTINGS offers, in its order.
 struct OrientationChoice {
@@ -978,8 +985,15 @@ void GameBoyActivity::loadSettings() {
         unsigned value = 0;
         if (std::sscanf(line, "orientation=%u", &value) == 1 && value < kOrientationCount) {
           orientation = static_cast<uint8_t>(value);
-        } else if (std::sscanf(line, "speed=%u", &value) == 1 && value >= 1 && value < kRefreshPresetCount) {
-          fastPreset = static_cast<uint8_t>(value);
+        } else if (std::strncmp(line, "speed=", 6) == 0) {
+          const char* key = line + 6;
+          constexpr unsigned kOldSpeedCount = sizeof(kOldSpeedKeys) / sizeof(kOldSpeedKeys[0]);
+          if (std::sscanf(key, "%u", &value) == 1 && value >= 1 && value < kOldSpeedCount) {
+            key = kOldSpeedKeys[value];
+          }
+          for (uint8_t i = 1; i < kRefreshPresetCount; ++i) {
+            if (std::strcmp(key, kRefreshPresets[i].key) == 0) fastPreset = i;
+          }
         } else if (std::sscanf(line, "status=%u", &value) == 1) {
           status = value != 0;
         } else if (std::strncmp(line, "romdir=", 7) == 0) {
@@ -1010,8 +1024,9 @@ std::string GameBoyActivity::lastRomFolder() {
 
 void GameBoyActivity::saveSettings() {
   char text[768];
-  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%u\nstatus=%u\nromdir=%s\n", orientation,
-                           fastPreset, statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, romFolder.c_str());
+  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%s\nstatus=%u\nromdir=%s\n", orientation,
+                           kRefreshPresets[fastPreset].key, statusLineShown.load(std::memory_order_acquire) ? 1u : 0u,
+                           romFolder.c_str());
   HalFile file;
   if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
     LOG_ERR(TAG, "Could not save %s", kSettingsPath);
