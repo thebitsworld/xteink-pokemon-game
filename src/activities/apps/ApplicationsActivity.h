@@ -15,6 +15,8 @@
 #include "components/UiAppHelpers.h"
 #include "components/icons/homeExtraIcons.h"
 #include "components/icons/listIcons.h"
+#include "activities/util/SlideshowActivity.h"
+#include "FeatureToggles.h"
 #if CROSSINK_GAMEBOY
 #include "activities/gameboy/GameBoyActivity.h"
 #include "activities/home/FileBrowserActivity.h"
@@ -50,6 +52,14 @@ class ApplicationsActivity : public Activity {
     auto launchSelectedApp = [this]() {
       const auto& app = visibleApps[selectedIndex];
       if (!app.supported) return;  // made for another reader: its row says so
+      if (app.slideshow) {
+        startActivityForResult(std::make_unique<SlideshowActivity>(renderer, mappedInput, true),
+                               [this](const ActivityResult&) {
+                                 refreshMenuList();
+                                 requestUpdate();
+                               });
+        return;
+      }
 #if CROSSINK_GAMEBOY
       if (app.gameBoy) {
         // Built in: pick a ROM (starting where the last game was) and play it;
@@ -152,7 +162,8 @@ class ApplicationsActivity : public Activity {
       if (app.hasIcon) {
         renderer.drawIcon(app.iconData, iconX, iconY, ICON_SIZE, ICON_SIZE);
       } else {
-        const freeink::Icon& icon = app.gameBoy ? icon_gamepad_32
+        const freeink::Icon& icon = app.gameBoy     ? icon_gamepad_32
+                                    : app.slideshow ? icon_image_32
                                     : app.builtIn ? (app.icon == UIIcon::Settings ? icon_cog_32 : icon_lyra_library_32)
                                                   : icon_book_32;
         target.bitmap(freeink::ui::Rect{static_cast<int16_t>(iconX), static_cast<int16_t>(iconY),
@@ -183,7 +194,8 @@ class ApplicationsActivity : public Activity {
     std::string name;
     UIIcon icon;
     bool builtIn = false;  // App Store / App Settings rather than an SD-card app
-    bool gameBoy = false;  // the built-in Game Boy launcher (X4 Pro)
+    bool gameBoy = false;    // the built-in Game Boy launcher (X4 Pro)
+    bool slideshow = false;  // the built-in Photo Slideshow
     std::string dir;        // SD-card app: its folder and entry script
     std::string entry;
     bool supported = true;  // false: its manifest lists other readers only
@@ -298,6 +310,17 @@ class ApplicationsActivity : public Activity {
     appSettings.icon = UIIcon::Settings;
     appSettings.builtIn = true;
     visibleApps.push_back(std::move(appSettings));
+
+    // Built in too, and listed here rather than on Home (features::slideshowOnHome()).
+    if (features::slideshow()) {
+      AppEntry slideshow;
+      slideshow.name = tr(STR_SLIDESHOW);
+      slideshow.detail = tr(STR_SLIDESHOW_APP_DETAIL);
+      slideshow.icon = UIIcon::Image;
+      slideshow.builtIn = true;
+      slideshow.slideshow = true;
+      visibleApps.insert(visibleApps.begin(), std::move(slideshow));
+    }
 
 #if CROSSINK_GAMEBOY
     // The Game Boy emulator is built in: offered first, so it is easy to find.

@@ -288,7 +288,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   if (features::applications()) items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
 #endif
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
-  if (features::slideshow()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
+  if (features::slideshowOnHome()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
 }
 
 HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
@@ -325,7 +325,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   // No Settings entry in this minimal menu variant (reached another way in
   // this theme) - Slideshow still goes last, matching the "below Settings"
   // placement in appendHomeMenuItems() above.
-  if (features::slideshow()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
+  if (features::slideshowOnHome()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
   return items;
 }
 

@@ -948,7 +948,7 @@ void GameBoyActivity::loadSettings() {
   romFolder.clear();
   bool status = false;
   HalFile file;
-  if (Storage.openFileForRead(TAG, kSettingsPath, file)) {
+  if (Storage.exists(kSettingsPath) && Storage.openFileForRead(TAG, kSettingsPath, file)) {
     char text[768] = {};
     const int got = file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
     file.close();
@@ -973,7 +973,7 @@ void GameBoyActivity::loadSettings() {
 
 std::string GameBoyActivity::lastRomFolder() {
   HalFile file;
-  if (!Storage.openFileForRead(TAG, kSettingsPath, file)) return "/";
+  if (!Storage.exists(kSettingsPath) || !Storage.openFileForRead(TAG, kSettingsPath, file)) return "/";
   char text[768] = {};
   const int got = file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
   file.close();

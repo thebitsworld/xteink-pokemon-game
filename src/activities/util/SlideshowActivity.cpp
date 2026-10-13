@@ -44,8 +44,17 @@ constexpr unsigned long AUTO_EXIT_IDLE_MS = 60UL * 60UL * 1000UL;
 
 }  // namespace
 
-SlideshowActivity::SlideshowActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("Slideshow", renderer, mappedInput) {}
+SlideshowActivity::SlideshowActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                     const bool fromApplications)
+    : Activity("Slideshow", renderer, mappedInput), fromApplications(fromApplications) {}
+
+void SlideshowActivity::leave() {
+  if (fromApplications) {
+    finish();
+  } else {
+    activityManager.goHome();
+  }
+}
 
 void SlideshowActivity::onEnter() {
   Activity::onEnter();
@@ -85,7 +94,7 @@ void SlideshowActivity::refreshMenuPopup() {
   std::vector<std::string> options{folderLabel, intervalLabel, displayModeLabel, randomOrderLabel, startLabel};
   optionPopup.show(tr(STR_SLIDESHOW), options, 0, [this](const int index) { onMenuOptionSelected(index); });
   optionPopup.setDisabledOptions({false, false, false, false, APP_STATE.slideshowFolderPath.empty()});
-  optionPopup.setCancelCallback([this] { activityManager.goHome(); });
+  optionPopup.setCancelCallback([this] { leave(); });
 }
 
 void SlideshowActivity::onMenuOptionSelected(const int index) {
@@ -446,9 +455,10 @@ void SlideshowActivity::loop() {
     return;
   }
 
-  // Screen::Playing and Screen::Empty: Back exits straight to Home.
+  // Screen::Playing and Screen::Empty: Back leaves straight away (to Home, or
+  // back to Applications).
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    activityManager.goHome();
+    leave();
     return;
   }
 
@@ -473,7 +483,7 @@ void SlideshowActivity::loop() {
   // which this activity deliberately blocks while Playing (see
   // preventAutoSleep()) so the display keeps auto-advancing on its own.
   if (millis() - lastInteractionMs >= AUTO_EXIT_IDLE_MS) {
-    activityManager.goHome();
+    leave();
     return;
   }
 
