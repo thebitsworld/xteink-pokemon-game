@@ -1,111 +1,23 @@
-## [1.8.3-beta.9] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only: in a Game Boy Color game (Pokémon Gold), set SETTINGS > Colours to Smooth (a setting kept from beta.7/8 stays Contrast) and compare it with Contrast by day, by night and in a cave: is the picture clearer, or too grainy? Does it ghost more when you walk? Check that Game Boy games look as before. Then send `/.crosspoint/gameboy-perf.txt` with your notes.
+## [1.8.3] - 2026-10-13
 
 ### Added
 
-- Game Boy (X4 Pro): SETTINGS > Colours > Smooth, the new default for Game Boy Color games: each colour gets its own grey out of 17, drawn as fine dot patterns, so close colours stay apart, by day and by night. Contrast (the Game Boy's four greys) and Brightness stay.
-
-## [1.8.3-beta.8] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only: play Pokémon Gold at night again: the scene should now stay dark (no white) while the grass still shows its shades. Check that day scenes and Game Boy games look as before. Then send `/.crosspoint/gameboy-perf.txt` with your notes.
-
-### Fixed
-
-- Game Boy (X4 Pro): with SETTINGS > Colours on Contrast, night scenes in Game Boy Color games came out glaring white. They now use darker greys - a new half-tone grey between the light and dark ones - so they stay dark while their colours stay apart.
-
-## [1.8.3-beta.7] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only: play Pokémon Gold at night and walk through tall grass: the grass should now show its shades instead of a dark patch. Compare SETTINGS > Colours: Contrast (new, the default) with Brightness (the old look), by day and by night, and in a dark cave. Then send `/.crosspoint/gameboy-perf.txt` with your notes.
-
-### Added
-
-- Game Boy (X4 Pro): SETTINGS > Colours for Game Boy Color games. Contrast (the default) keeps colours apart when a game darkens the whole picture, as at night in Pokémon Gold and Silver, where the grass turned into one dark patch; by day it looks as before. Brightness keeps the previous look.
-
-## [1.8.3-beta.6] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only: play a Game Boy Color game (Pokémon Gold) and a Game Boy game a few minutes each with the status line on, and check that the Game Boy Color game now runs at full speed (100%), that the picture still moves smoothly, and that nothing looks behind. In the App Store, swipe (X4 Pro) or press the side buttons (X3/X4) and check that the list turns a page at a time. Then send `/.crosspoint/gameboy-perf.txt`.
-
-### Changed
-
-- Game Boy (X4 Pro): Game Boy Color games should now run at full speed. The emulator draws one frame in three into a picture - still four times what the e-ink screen can show - instead of all sixty a second, and keeps running instead of waiting while the screen is busy.
-- App Store: a swipe (X4 Pro) or the side buttons (X3/X4) turn the list a whole page at a time; the front buttons still step one app at a time.
-
-## [1.8.3-beta.5] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): play a Game Boy Color game (Pokémon Gold) and a Game Boy game for a few minutes each, with the status line on: does the Game Boy Color game now run at full speed? Try the new D50 screen speeds too. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt`; its new last column, `core`, should read `walnut-internal` for the Game Boy Color game (`walnut-psram` means it could not get the faster memory). Delete the old file first if you want its header line to list the new column.
-
-### Changed
-
-- Game Boy (X4 Pro, UC8279 screens): two more screen speeds in SETTINGS, D50 with a cleaning refresh every 30 or 60 s - slower, but sharper and with less ghosting - and D40 with a cleaning refresh every minute is now the default.
-- Game Boy (X4 Pro): Game Boy Color games should run faster: the emulator keeps its working memory in the reader's faster internal memory when there is room, and is built for speed (Pokémon Gold ran at about 61% of full speed in beta.4).
-- Game Boy (X4 Pro): `gameboy-perf.txt` no longer breaks its columns on the screen speed's name, and records which emulator ran the game.
-
-## [1.8.3-beta.4] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its new Game Boy Color emulator has not run on a reader yet, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only: check that Applications now starts with Pokémon, Game Boy (X4 Pro) and Photo Slideshow, that each opens and returns to Applications, and that Home keeps the Pokémon band but no Pokémon or Slideshow menu entry. On the X4 Pro, open a Game Boy Color game (`.gbc`) from Applications > Game Boy: does it run at full speed (turn on the status line), do its colours read well as greys, and do Quick save, Quick load and sleep-and-wake work? Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
-
-### Added
-
-- Game Boy (X4 Pro): Game Boy Color games. A game made for the Game Boy Color runs on the Walnut-CGB emulator (MIT, a Peanut-GB rewrite) and shows its colours as greys by brightness; Game Boy games run as before.
-- Applications > Game Boy (X4 Pro): pick a `.gb` or `.gbc` game from the SD card, starting in the folder of the last game played, and play it.
-
-### Changed
-
-- The Pokémon game and Photo Slideshow are in Applications now, with Game Boy at the top of the list. Home keeps the Pokémon band (or the Cover Grid's Pokémon tile); with Applications switched off they are on Home as before.
-
-## [1.8.3-beta.3] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. It also brings new save files that could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only (X4 Pro): in a Game Boy game, try SETTINGS (where ROTATE was): every orientation, every screen speed, the status line, Quick save and Quick load (in different places of a game). Put the reader to sleep with Power in the middle of a game and turn it on again: the game should come back where it was. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
-
-### Added
-
-- Game Boy (X4 Pro): SETTINGS replaces ROTATE. It pauses the game and offers the orientation (all four ways round), the screen speed (UC8279 screens: D40, D30 or D25, with a cleaning refresh every 30 or 60 s), the status line, and quick save and load (one saved state per game, `<game>.state`). The settings are shared by every game.
+- Game Boy (X4 Pro): Game Boy Color games. A game made for the Game Boy Color runs on the Walnut-CGB emulator (MIT, a Peanut-GB rewrite) at full speed, its colours shown as greys.
+- Applications > Game Boy (X4 Pro): pick a `.gb` or `.gbc` game from the SD card, starting in the folder of the last game played, and play it; leaving the game returns to Applications.
+- Game Boy (X4 Pro): SETTINGS, where ROTATE was. It pauses the game and offers:
+  - Orientation: upright, sideways, or either one upside down.
+  - Screen speed (UC8279 screens): D50, D40, D30 or D25 - D50 the slowest but sharpest, the lower ones faster with a little more ghosting - with a full cleaning refresh every 30 or 60 seconds; D40 with a cleaning refresh every minute is the default.
+  - Colours (Game Boy Color games): Contrast, the default, uses the Game Boy's four greys and keeps a picture the game darkens readable - at night in Pokémon Gold and Silver the grass no longer turns into one dark patch, and the scene stays dark; Smooth gives each colour its own grey out of 17, drawn as fine dot patterns; Brightness is the plain mapping.
+  - The status line: screen updates per second and the game's speed (also shown or hidden by tapping the title strip).
+  - Quick save and Quick load: one saved state per game (`<game>.state`); loading asks twice.
 - Game Boy (X4 Pro): putting the reader to sleep during a game saves it, and turning the reader on again reopens the game where it was. Hold Back while it starts to go to the home screen instead.
 
-## [1.8.3-beta.2] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with a shorter waveform than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): play a Game Boy game for a few minutes. The screen now uses beta.1's D30 preset with the cleaning refresh every minute (not every 30 s): watch whether ghosting builds up too much before each cleaning. Tap the title strip to show or hide the new status line, in both orientations. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
-
-### Added
-
-- Game Boy (X4 Pro): tap the title strip to show or hide a status line with the screen updates per second and the game's speed.
-
 ### Changed
 
-- Game Boy (X4 Pro, UC8279-68 screens, test only): a shorter screen waveform (30% of the frames instead of 40%), about 10% faster; the presets of beta.1 are gone.
-
-## [1.8.3-beta.1] - 2026-10-13
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it tries even shorter screen waveforms and frame rates that the screen's controller does not document, none of them validated on this panel. They can leave ghosted, faint, flickering or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): open a Game Boy game and tap the title strip at the top (in landscape, the panel above the D-pad) to cycle six presets, shown next to the title with the updates per second and the waveform and sending times in ms:
-
-- D40 0F: v1.8.2's refresh, for comparison.
-- D30 0F and D25 0F: shorter waveforms, with a cleaning refresh every 30 s instead of every minute.
-- D40 P1F, D40 P3F and D40 P10: v1.8.2's waveform at frame-rate settings the controller does not document. Each may turn out faster, slower, or no different; if the screen stops updating for more than a few seconds or looks wrong, tap the title strip again to move on.
-
-Play about a minute per preset, walking around so the picture keeps changing, and note how dark and clean each one looks. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` (one line per preset) with your notes.
-
-### Added
-
-- Game Boy (X4 Pro, UC8279-68 screens, test only): six refresh presets to try, cycled by tapping the title strip, with their speed figures on screen.
+- The Pokémon game and Photo Slideshow are in Applications now, with Game Boy, at the top of the list. Home keeps the Pokémon band (or the Cover Grid's Pokémon tile); with Applications switched off, they are on Home as before.
+- App Store: a swipe (X4 Pro) or the side buttons (X3/X4) turn the list a whole page at a time; the front buttons still step one app at a time.
+- Game Boy (X4 Pro): the emulator draws one frame in three into a picture - still four times what the e-ink screen can show - and keeps running while the screen is busy instead of waiting for it, which also saves battery in Game Boy games.
+- Game Boy (X4 Pro): `gameboy-perf.txt` keeps its columns straight and records which emulator ran the game.
 
 ## [1.8.2] - 2026-10-13
 
