@@ -602,10 +602,7 @@ void Uc8279X4Driver::sendPartialWindow(EpdBus& bus) {
   bus.data(static_cast<uint8_t>(yStart & 0xFF));
   bus.data(static_cast<uint8_t>(yEnd >> 8));
   bus.data(static_cast<uint8_t>(yEnd & 0xFF));
-  // PT_SCAN: 0x01 scans every gate (stock). xteink-pokemon: a changed
-  // rectangle scans only its own gates (0x00, as the UC8179 defines it), so a
-  // small change may finish sooner.
-  bus.data(_windowActive ? 0x00 : 0x01);
+  bus.data(0x01);
 }
 
 // xteink-pokemon: the bounding rectangle (visible rows, bytes) where `fb`
