@@ -998,7 +998,7 @@ void GameBoyActivity::loadSettings() {
   orientation = 0;
   fastPreset = kDefaultFastPreset;
   romFolder.clear();
-  colourMode = WALNUT_COLOURS_SMOOTH;
+  colourMode = WALNUT_COLOURS_CONTRAST;
   bool status = false;
   HalFile file;
   if (Storage.exists(kSettingsPath) && Storage.openFileForRead(TAG, kSettingsPath, file)) {

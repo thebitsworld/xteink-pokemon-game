@@ -176,9 +176,10 @@ class GameBoyActivity final : public Activity {
   char menuMessage[48] = {};
   bool settingsDirty = false;
   std::string romFolder;  // saved as romdir= with the settings
-  // How Game Boy Color colours become greys: WALNUT_COLOURS_SMOOTH (the
-  // default), _CONTRAST or _BRIGHTNESS (walnut_cgb_set_colours()).
-  uint8_t colourMode = WALNUT_COLOURS_SMOOTH;
+  // How Game Boy Color colours become greys: WALNUT_COLOURS_CONTRAST (the
+  // default: the tester found Smooth's fine dots busy), _SMOOTH or
+  // _BRIGHTNESS (walnut_cgb_set_colours()).
+  uint8_t colourMode = WALNUT_COLOURS_CONTRAST;
   bool stateExists = false;  // a quick save is there to load
   // An orientation chosen in SETTINGS, applied once the finger lifts: turning
   // the screen mid-tap makes the tap's two ends read as a Back swipe.

@@ -36,8 +36,9 @@ void walnut_cgb_set_cart_ram(WalnutCgb* cgb, uint8_t* ram, size_t size);
 void walnut_cgb_set_ram_written(WalnutCgb* cgb, void (*written)(void* user));
 
 void walnut_cgb_run_frame(WalnutCgb* cgb);
-// How Game Boy Color colours become greys. Smooth (the default) gives each
-// colour its own level of the 17; Contrast uses the Game Boy's four greys;
+// How Game Boy Color colours become greys. Smooth gives each colour its own
+// level of the 17; Contrast (the reader's default) uses the Game Boy's four
+// greys;
 // both stretch a scene the game dims (night) onto the darker levels so its
 // colours stay apart and it stays dark. Brightness: the four greys by
 // brightness alone.
