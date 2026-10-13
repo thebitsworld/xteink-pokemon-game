@@ -13,7 +13,8 @@ is in git history (before 2026-10-08).
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
-  without a firmware release): 34 apps - the CrossPlay-inspired games and tools written here plus 11 from
+  without a firmware release): 36 apps - the CrossPlay-inspired games and tools written here (plus
+  Tic-Tac-Toe and Xiangqi, 2026-10-13) plus 11 from
   CrossSmudge. CrossPlay apps needing data or a network were skipped on purpose.
 - X3 app policy: an app must stay under 75 KB in `pokemon-simulator-X3` (the 64-bit simulator reports
   15-35% more than a real X3, where ~65 KB of Lua is the measured ceiling). An app that cannot fit lists
