@@ -7,6 +7,7 @@
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
 #include "activities/Activity.h"
+#include "activities/apps/GuideViewerActivity.h"
 #include "activities/apps/lua/AppMemoryLog.h"
 #include "activities/apps/lua/LuaRunner.h"
 #include "components/UITheme.h"
@@ -153,6 +154,17 @@ class LuaAppActivity : public Activity {
     {
       std::lock_guard<std::mutex> lock(luaMutex_);
       runner_->onUpdate();
+    }
+
+    // smudge.open_guide(): the guide opens over the app, which stays loaded
+    // and is drawn again when the guide closes.
+    if (runner_ && runner_->takeGuideRequest()) {
+      const std::string guide = GuideViewerActivity::guidePathFor(appDir_);
+      if (!guide.empty()) {
+        startActivityForResult(std::make_unique<GuideViewerActivity>(renderer, mappedInput, guide, appName_),
+                               [this](const ActivityResult&) { requestUpdate(); });
+        return;
+      }
     }
 
     if (buttonHandled || (runner_ && runner_->checkAndClearRedrawRequested())) {

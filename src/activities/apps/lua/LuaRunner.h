@@ -42,6 +42,12 @@ class LuaRunner {
   }
 
   bool shouldExit() const { return requestedExit_; }
+  // smudge.open_guide() asked for the app's guide; cleared by the call.
+  bool takeGuideRequest() {
+    const bool r = guideRequested_;
+    guideRequested_ = false;
+    return r;
+  }
   bool hasError() const { return hasError_; }
   const std::string& getErrorMessage() const { return errorMessage_; }
 
@@ -67,6 +73,7 @@ class LuaRunner {
 
   lua_State* L = nullptr;
   bool requestedExit_ = false;
+  bool guideRequested_ = false;
   bool hasError_ = false;
   bool redrawRequested_ = false;
   std::string errorMessage_;
@@ -115,6 +122,8 @@ class LuaRunner {
   static int l_findSection(lua_State* L);
   static int l_fileExists(lua_State* L);
   static int l_exit(lua_State* L);
+  static int l_hasGuide(lua_State* L);
+  static int l_openGuide(lua_State* L);
   static int l_log(lua_State* L);
   static int l_time(lua_State* L);
   static int l_getDate(lua_State* L);

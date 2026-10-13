@@ -9,6 +9,7 @@
 #include "SmudgeSettings.h"
 #include "activities/Activity.h"
 #include "activities/apps/AppSettingsActivity.h"
+#include "activities/apps/GuideViewerActivity.h"
 #include "activities/apps/AppStoreActivity.h"
 #include "activities/apps/lua/AppPackage.h"
 #include "activities/apps/lua/LuaAppActivity.h"
@@ -49,6 +50,24 @@ class ApplicationsActivity : public Activity {
 
     int appCount = static_cast<int>(visibleApps.size());
     if (appCount == 0) return;
+
+    // An app's "How to play" guide: tap its row's "?", or hold Confirm on it.
+    const auto openGuide = [this](const AppEntry& app) {
+      const std::string guide = GuideViewerActivity::guidePathFor(app.dir);
+      if (guide.empty()) return;
+      startActivityForResult(std::make_unique<GuideViewerActivity>(renderer, mappedInput, guide, app.name),
+                             [this](const ActivityResult&) { requestUpdate(); });
+    };
+    if (confirmHoldHandled) {
+      if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) confirmHoldHandled = false;
+      return;
+    }
+    if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+        mappedInput.getHeldTime() >= GUIDE_HOLD_MS && visibleApps[selectedIndex].hasGuide) {
+      confirmHoldHandled = true;
+      openGuide(visibleApps[selectedIndex]);
+      return;
+    }
 
     auto launchSelectedApp = [this]() {
       const auto& app = visibleApps[selectedIndex];
@@ -107,6 +126,15 @@ class ApplicationsActivity : public Activity {
     if (mappedInput.hasTouchHardware()) {
       const int start = pageStart();
       const int end = std::min(appCount, start + rowsPerPage());
+      for (int i = start; i < end; ++i) {
+        if (!visibleApps[i].hasGuide) continue;
+        const Rect help = guideRect(rowRect(i - start));
+        if (mappedInput.wasTapInRect(help.x, help.y, help.width, help.height)) {
+          selectedIndex = i;
+          openGuide(visibleApps[i]);
+          return;
+        }
+      }
       for (int i = start; i < end; ++i) {
         const Rect row = rowRect(i - start);
         if (mappedInput.wasTapInRect(row.x, row.y, row.width, row.height)) {
@@ -181,7 +209,18 @@ class ApplicationsActivity : public Activity {
                       freeink::ui::bitmapFromIcon(icon), freeink::ui::BitmapMode::Center);
       }
       const int textX = iconX + ICON_SIZE + 14;
-      const int textWidth = row.x + row.width - 12 - textX;
+      int textWidth = row.x + row.width - 12 - textX;
+      if (app.hasGuide) {
+        // "?": the app's guide (tap it, or hold Confirm on the row).
+        const Rect help = guideRect(row);
+        renderer.drawRoundedRect(help.x + 6, help.y + 6, GUIDE_MARK, GUIDE_MARK, 2, GUIDE_MARK / 2, true);
+        const char* mark = "?";
+        const int mw = renderer.getTextWidth(UI_12_FONT_ID, mark, EpdFontFamily::BOLD);
+        renderer.drawText(UI_12_FONT_ID, help.x + (help.width - mw) / 2,
+                          help.y + (help.height - renderer.getLineHeight(UI_12_FONT_ID)) / 2, mark, true,
+                          EpdFontFamily::BOLD);
+        textWidth = help.x - 8 - textX;
+      }
       const int nameHeight = renderer.getLineHeight(UI_12_FONT_ID);
       const int detailHeight = app.detail.empty() ? 0 : renderer.getLineHeight(SMALL_FONT_ID) + 2;
       const int nameY = row.y + (row.height - nameHeight - detailHeight) / 2;
@@ -193,6 +232,11 @@ class ApplicationsActivity : public Activity {
       }
     }
 
+    if (!mappedInput.hasTouchHardware() && selectedIndex < appCount && visibleApps[selectedIndex].hasGuide) {
+      const auto& hintMetrics = UITheme::getInstance().getMetrics();
+      renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - hintMetrics.buttonHintsHeight - GUIDE_HINT_HEIGHT,
+                                tr(STR_APPS_HOLD_FOR_GUIDE), true);
+    }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
@@ -207,6 +251,7 @@ class ApplicationsActivity : public Activity {
     bool gameBoy = false;    // the built-in Game Boy launcher (X4 Pro)
     bool slideshow = false;  // the built-in Photo Slideshow
     bool pokemon = false;    // the built-in Pokemon game
+    bool hasGuide = false;   // a "How to play" guide in its folder (GuideViewerActivity)
     std::string dir;        // SD-card app: its folder and entry script
     std::string entry;
     bool supported = true;  // false: its manifest lists other readers only
@@ -219,6 +264,16 @@ class ApplicationsActivity : public Activity {
   static constexpr int ROW_HEIGHT = 60;
   static constexpr int ROW_GAP = 8;
   static constexpr int ROW_MARGIN = 16;
+  static constexpr int GUIDE_MARK = 34;          // the "?" circle's size
+  static constexpr int GUIDE_HINT_HEIGHT = 22;   // "Hold Confirm..." line on button readers
+  static constexpr unsigned long GUIDE_HOLD_MS = 700;
+  bool confirmHoldHandled = false;
+
+  // The "?" at the right end of a row.
+  static Rect guideRect(const Rect& row) {
+    return Rect{row.x + row.width - 12 - GUIDE_MARK - 6, row.y + (row.height - GUIDE_MARK) / 2 - 6, GUIDE_MARK + 12,
+                GUIDE_MARK + 12};
+  }
 
   int listTop() const {
     const auto& metrics = UITheme::getInstance().getMetrics();
@@ -227,7 +282,8 @@ class ApplicationsActivity : public Activity {
 
   int rowsPerPage() const {
     const auto& metrics = UITheme::getInstance().getMetrics();
-    const int available = renderer.getScreenHeight() - listTop() - metrics.buttonHintsHeight - metrics.verticalSpacing;
+    const int available = renderer.getScreenHeight() - listTop() - metrics.buttonHintsHeight - metrics.verticalSpacing -
+                          (mappedInput.hasTouchHardware() ? 0 : GUIDE_HINT_HEIGHT);
     return std::max(1, (available + ROW_GAP) / (ROW_HEIGHT + ROW_GAP));
   }
 
@@ -280,6 +336,7 @@ class ApplicationsActivity : public Activity {
       app.dir = std::move(pkg.path);
       app.entry = std::move(pkg.entryScript);
       app.hasIcon = pkg.hasIcon;
+      app.hasGuide = app.supported && !GuideViewerActivity::guidePathFor(app.dir).empty();
       if (pkg.hasIcon) {
         std::memcpy(app.iconData, pkg.iconData, sizeof(pkg.iconData));
       }

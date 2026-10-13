@@ -1242,6 +1242,7 @@ STR_POKEMON_TRANSFER_INSTALL_PENDING: "Save sẽ cài xong sau khi khởi độn
 STR_POKEMON_TRANSFER_MOVE_FAILED: "Đã gửi, nhưng máy này không xoá được bản của nó."
 STR_APPS_TITLE: "Ứng dụng"
 STR_APPS_STORE: "Kho ứng dụng"
+STR_APPS_HOLD_FOR_GUIDE: "Giữ Chọn để xem Cách chơi"
 STR_APPS_SETTINGS: "Cài đặt ứng dụng"
 STR_APPS_SORT_ALPHA: "Theo bảng chữ cái (A - Z)"
 STR_APPS_SORT_USAGE: "Dùng nhiều nhất"
