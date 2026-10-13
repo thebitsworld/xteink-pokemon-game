@@ -1,3 +1,19 @@
+## [1.8.3-beta.1] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it tries even shorter screen waveforms and frame rates that the screen's controller does not document, none of them validated on this panel. They can leave ghosted, faint, flickering or broken pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen): open a Game Boy game and tap the title strip at the top (in landscape, the panel above the D-pad) to cycle six presets, shown next to the title with the updates per second and the waveform and sending times in ms:
+
+- D40 0F: v1.8.2's refresh, for comparison.
+- D30 0F and D25 0F: shorter waveforms, with a cleaning refresh every 30 s instead of every minute.
+- D40 P1F, D40 P3F and D40 P10: v1.8.2's waveform at frame-rate settings the controller does not document. Each may turn out faster, slower, or no different; if the screen stops updating for more than a few seconds or looks wrong, tap the title strip again to move on.
+
+Play about a minute per preset, walking around so the picture keeps changing, and note how dark and clean each one looks. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` (one line per preset) with your notes.
+
+### Added
+
+- Game Boy (X4 Pro, UC8279-68 screens, test only): six refresh presets to try, cycled by tapping the title strip, with their speed figures on screen.
+
 ## [1.8.2] - 2026-10-13
 
 ### Changed
