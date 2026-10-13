@@ -49,11 +49,12 @@ states.
 - Game Boy only: Game Boy Color-only games (`.gbc`) do not run, and MBC7
   cartridges are not supported.
 - No sound.
-- The game runs at full speed, but the e-ink screen updates only about three
-  times a second (X4 Pros with a UC8279 screen controller) or about once or
-  twice a second (other X4 Pro screens), so fast action games are hard to
-  play. Turn-based and puzzle games work best. On the faster screens a full
-  refresh every minute clears any ghost images.
+- The game runs at full speed, but the e-ink screen updates only about four
+  to five times a second (X4 Pros with a UC8279 screen controller, which
+  redraw only the part of the picture that changed) or about once or twice a
+  second (other X4 Pro screens), so fast action games are hard to play.
+  Turn-based and puzzle games work best. On the faster screens a full refresh
+  every minute clears any ghost images.
 - Grey shades are drawn as dot patterns.
 - The screen stays on and the reader does not go to sleep while a game is
   open, so leave with EXIT when you are done.
@@ -62,8 +63,9 @@ states.
 
 Each game session adds a line to `/.crosspoint/gameboy-perf.txt` on the SD
 card: the game, how fast the emulator ran against a real Game Boy, how often
-the screen updated, the reader's screen controller and how long each part of a
-screen update took. Send it along when you report a slow or choppy game.
+the screen updated, the reader's screen controller, how long each part of a
+screen update took, how many pictures were skipped because nothing had changed
+and how much picture data each update sent. Send it along when you report a slow or choppy game.
 
 ## Credits
 
