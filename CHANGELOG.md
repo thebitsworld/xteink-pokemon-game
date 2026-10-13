@@ -1,3 +1,15 @@
+## [1.8.3-beta.5] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen): play a Game Boy Color game (Pokémon Gold) and a Game Boy game for a few minutes each, with the status line on: does the Game Boy Color game now run at full speed? Try the new D50 screen speeds too. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt`; its new last column, `core`, should read `walnut-internal` for the Game Boy Color game (`walnut-psram` means it could not get the faster memory). Delete the old file first if you want its header line to list the new column.
+
+### Changed
+
+- Game Boy (X4 Pro, UC8279 screens): two more screen speeds in SETTINGS, D50 with a cleaning refresh every 30 or 60 s - slower, but sharper and with less ghosting - and D40 with a cleaning refresh every minute is now the default.
+- Game Boy (X4 Pro): Game Boy Color games should run faster: the emulator keeps its working memory in the reader's faster internal memory when there is room, and is built for speed (Pokémon Gold ran at about 61% of full speed in beta.4).
+- Game Boy (X4 Pro): `gameboy-perf.txt` no longer breaks its columns on the screen speed's name, and records which emulator ran the game.
+
 ## [1.8.3-beta.4] - 2026-10-13
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its new Game Boy Color emulator has not run on a reader yet, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
