@@ -2313,16 +2313,42 @@ class SimulatorSmokeTest {
   }
 
 #if defined(CROSSINK_ENABLE_LUA_APPS)
-  // The runner copies test/lua_apps/smoke into the SD sandbox, so the
-  // alphabetical list is: Lua Smoke Test, then the built-in App Store and App
-  // Settings. Launches the app, presses Confirm inside it, exits with Back
-  // (the app calls smudge.exit()), then opens App Settings. The runner checks
-  // the app's "LUA_SMOKE ..." log markers and that no Lua error was logged.
+  // The runner copies test/lua_apps/smoke into the SD sandbox, so the list
+  // is: the built-in Pokemon row, Game Boy row (Game Boy builds) and Photo Slideshow, Lua
+  // Smoke Test, then the built-in App Store and App Settings. Opens and closes
+  // the Game Boy ROM picker and the slideshow, launches the app, presses
+  // Confirm inside it, exits with Back (the app calls smudge.exit()), then
+  // opens App Settings. The runner checks the app's "LUA_SMOKE ..." log
+  // markers and that no Lua error was logged.
   void buildLuaAppsInputScript() {
     inputScript.clear();
     scriptIndex = 0;
     inputScript.push_back(render("Lua Applications", 4));
     inputScript.push_back(assertActivity("Applications"));
+    int builtInsAbove = 0;
+    if (features::pokemonGame()) {  // the Pokemon row leads; its own route tests the game
+      addTap(MappedInputManager::Button::Down);
+      ++builtInsAbove;
+    }
+#if CROSSINK_GAMEBOY
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Game Boy ROM picker", 4));
+    inputScript.push_back(assertActivity("FileBrowser"));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Lua Applications after the ROM picker", 4));
+    inputScript.push_back(assertActivity("Applications"));
+    addTap(MappedInputManager::Button::Down);
+    ++builtInsAbove;
+#endif
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Photo Slideshow", 4));
+    inputScript.push_back(assertActivity("Slideshow"));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Lua Applications after the slideshow", 4));
+    inputScript.push_back(assertActivity("Applications"));
+    addTap(MappedInputManager::Button::Down);
+    ++builtInsAbove;
+    inputScript.push_back(render("Lua Smoke Test selected", 3));
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Lua Smoke Test app", 8));
     inputScript.push_back(assertActivity("Lua Smoke Test"));
@@ -2331,7 +2357,8 @@ class SimulatorSmokeTest {
     addTap(MappedInputManager::Button::Back);
     inputScript.push_back(render("Lua Applications Restored", 6));
     inputScript.push_back(assertActivity("Applications"));
-    addTap(MappedInputManager::Button::Up);  // wraps to the last entry, App Settings
+    // Up past the built-in rows, then wraps to the last entry, App Settings.
+    for (int i = 0; i <= builtInsAbove; ++i) addTap(MappedInputManager::Button::Up);
     inputScript.push_back(render("Lua Applications Settings selected", 3));
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Lua App Settings", 4));
@@ -2362,10 +2389,18 @@ class SimulatorSmokeTest {
     } else if (homeNavigationUsesMinimalInteraction()) {
       addTap(MappedInputManager::Button::Left);
     } else if (homeNavigationUsesCoverGrid()) {
-      // Up lands in the books, wherever Home started; Left then steps into the
-      // icon bar from its end, where Settings is.
-      addTap(MappedInputManager::Button::Up);
-      addTap(MappedInputManager::Button::Left);
+      if (UITheme::hasCoverGridHome()) {
+        // Up lands in the books, wherever Home started; Left then steps into
+        // the icon bar from its end, where Settings is.
+        addTap(MappedInputManager::Button::Up);
+        addTap(MappedInputManager::Button::Left);
+      } else {
+        // A reader without the cover grid shows the standard menu: Up wraps
+        // to its last entry, Settings, or Photo Slideshow just after it when
+        // Slideshow stays on Home.
+        addTap(MappedInputManager::Button::Up);
+        if (features::slideshowOnHome()) addTap(MappedInputManager::Button::Up);
+      }
     } else {
       for (int index = 0; index < 3 + applicationsEntries; ++index) addTap(MappedInputManager::Button::Down);
     }

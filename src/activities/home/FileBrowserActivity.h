@@ -18,7 +18,8 @@
 class FileBrowserActivity final : public Activity {
  public:
   // Picker modes return their selected path via ActivityResult.
-  enum class Mode { Books, PickFirmware, PickDirectory };
+  // PickGameBoyRom lists folders and Game Boy ROMs only (Applications > Game Boy).
+  enum class Mode { Books, PickFirmware, PickDirectory, PickGameBoyRom };
 
  private:
   // FreeInkApp hosts the file list (themed rows, icons, touch routing); the

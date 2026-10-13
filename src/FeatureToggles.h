@@ -26,4 +26,8 @@ inline bool applications() {
 
 inline bool slideshow() { return SETTINGS.slideshowEnabled != 0; }
 
+// Photo Slideshow is listed in Applications when they are there, and on Home
+// only otherwise (a build without them, or Applications switched off).
+inline bool slideshowOnHome() { return slideshow() && !applications(); }
+
 }  // namespace features

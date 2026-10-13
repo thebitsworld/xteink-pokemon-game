@@ -50,9 +50,12 @@ saved data in `apps-data/`, the list settings in `apps-settings.bin`, and the Ap
 
 ## Using apps
 
-- **Applications** lists every installed app with its icon, version and author, followed by
-  **App Store** and **App Settings**. App Settings sorts the list alphabetically or by how often
-  each app is used.
+- **Applications** first lists what is built into the firmware - the **Pokémon** game, **Game
+  Boy** (X4 Pro; see [Game Boy](gameboy.md)) and **Photo Slideshow** - then every installed app
+  with its icon, version and author, followed by **App Store** and **App Settings**. App Settings
+  sorts the installed apps alphabetically or by how often each one is used. Each built-in entry
+  disappears when its switch under Settings > System > Features is off; with Applications
+  switched off, the Pokémon game and the slideshow are on Home instead.
 - Inside an app, the buttons (or touch) do whatever the app says in its button hints; **Back**
   usually saves and leaves the app.
 - If an app's script fails, the reader shows an **Application Error** screen with the message

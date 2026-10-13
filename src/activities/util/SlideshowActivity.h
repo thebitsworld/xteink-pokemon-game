@@ -8,7 +8,8 @@
 
 class SlideshowActivity final : public Activity {
  public:
-  SlideshowActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  // `fromApplications`: leaving returns to Applications rather than Home.
+  SlideshowActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromApplications = false);
 
   void onEnter() override;
   void onExit() override;
@@ -23,6 +24,10 @@ class SlideshowActivity final : public Activity {
 
  private:
   enum class Screen { Menu, Playing, Empty };
+
+  bool fromApplications = false;
+  // Back to Applications when it opened the slideshow, else Home.
+  void leave();
 
   // Screen::Menu
   void refreshMenuPopup();

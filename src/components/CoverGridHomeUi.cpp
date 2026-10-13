@@ -281,7 +281,7 @@ void CoverGridHomeUi::buildTabs() {
 #if defined(CROSSINK_ENABLE_POKEMON) && defined(CROSSINK_ENABLE_LUA_APPS)
   if (features::applications()) add(CoverGridTab::Applications);
 #endif
-  if (features::slideshow()) add(CoverGridTab::Slideshow);
+  if (features::slideshowOnHome()) add(CoverGridTab::Slideshow);
   add(CoverGridTab::Transfer);
   add(CoverGridTab::Settings);
 }

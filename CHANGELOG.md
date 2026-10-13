@@ -1,3 +1,24 @@
+## [1.8.3] - 2026-10-13
+
+### Added
+
+- Game Boy (X4 Pro): Game Boy Color games. A game made for the Game Boy Color runs on the Walnut-CGB emulator (MIT, a Peanut-GB rewrite) at full speed, its colours shown as greys.
+- Applications > Game Boy (X4 Pro): pick a `.gb` or `.gbc` game from the SD card, starting in the folder of the last game played, and play it; leaving the game returns to Applications.
+- Game Boy (X4 Pro): SETTINGS, where ROTATE was. It pauses the game and offers:
+  - Orientation: upright, sideways, or either one upside down.
+  - Screen speed (UC8279 screens): D50, D40, D30 or D25 - D50 the slowest but sharpest, the lower ones faster with a little more ghosting - with a full cleaning refresh every 30 or 60 seconds; D40 with a cleaning refresh every minute is the default.
+  - Colours (Game Boy Color games): Contrast, the default, uses the Game Boy's four greys and keeps a picture the game darkens readable - at night in Pokémon Gold and Silver the grass no longer turns into one dark patch, and the scene stays dark; Smooth gives each colour its own grey out of 17, drawn as fine dot patterns; Brightness is the plain mapping.
+  - The status line: screen updates per second and the game's speed (also shown or hidden by tapping the title strip).
+  - Quick save and Quick load: one saved state per game (`<game>.state`); loading asks twice.
+- Game Boy (X4 Pro): putting the reader to sleep during a game saves it, and turning the reader on again reopens the game where it was. Hold Back while it starts to go to the home screen instead.
+
+### Changed
+
+- The Pokémon game and Photo Slideshow are in Applications now, with Game Boy, at the top of the list. Home keeps the Pokémon band (or the Cover Grid's Pokémon tile); with Applications switched off, they are on Home as before.
+- App Store: a swipe (X4 Pro) or the side buttons (X3/X4) turn the list a whole page at a time; the front buttons still step one app at a time.
+- Game Boy (X4 Pro): the emulator draws one frame in three into a picture - still four times what the e-ink screen can show - and keeps running while the screen is busy instead of waiting for it, which also saves battery in Game Boy games.
+- Game Boy (X4 Pro): `gameboy-perf.txt` keeps its columns straight and records which emulator ran the game.
+
 ## [1.8.2] - 2026-10-13
 
 ### Changed

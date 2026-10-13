@@ -130,6 +130,8 @@ void CrossPointState::toJson(JsonDocument& doc) const {
   doc["recentBootFill"] = recentBootFill;
   doc["readerActivityLoadCount"] = readerActivityLoadCount;
   doc["lastSleepFromReader"] = lastSleepFromReader;
+  doc["lastSleepFromGameBoy"] = lastSleepFromGameBoy;
+  doc["gameBoyResumePath"] = gameBoyResumePath;
   doc["pendingBookmarkSpine"] = pendingBookmarkSpine;
   doc["pendingBookmarkProgress"] = pendingBookmarkProgress;
   doc["pendingBookmarkParagraphIndex"] = pendingBookmarkParagraphIndex;
@@ -184,6 +186,8 @@ bool CrossPointState::fromJson(JsonVariantConst doc) {
   recentBootFill = static_cast<uint8_t>(std::min(static_cast<int>(recentBootFill), actualBootCount));
   readerActivityLoadCount = doc["readerActivityLoadCount"] | static_cast<uint8_t>(0);
   lastSleepFromReader = doc["lastSleepFromReader"] | false;
+  lastSleepFromGameBoy = doc["lastSleepFromGameBoy"] | false;
+  gameBoyResumePath = doc["gameBoyResumePath"] | "";
   pendingBookmarkSpine = doc["pendingBookmarkSpine"] | static_cast<uint16_t>(UINT16_MAX);
   pendingBookmarkProgress = doc["pendingBookmarkProgress"] | static_cast<float>(-1.0f);
   pendingBookmarkParagraphIndex = doc["pendingBookmarkParagraphIndex"] | static_cast<uint16_t>(UINT16_MAX);

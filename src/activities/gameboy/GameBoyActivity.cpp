@@ -10,6 +10,7 @@
 #include <esp_heap_caps.h>
 #ifndef SIMULATOR
 #include <BoardConfig.h>
+#include <esp_memory_utils.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #endif
@@ -20,6 +21,7 @@
 #include <ctime>
 #include <utility>
 
+#include "CrossPointState.h"
 #include "components/TouchRegistry.h"
 #include "fontIds.h"
 
@@ -58,28 +60,93 @@ uint64_t nowMicros() {
 }
 
 // The screen refresh a game uses (GameBoyActivity::refreshPreset). The panel's
-// built-in Fast waveform takes ~680 ms on the X4 Pro's UC8279, about 1.3
+// built-in Fast waveform takes ~540 ms on the X4 Pro's UC8279, about 1.3
 // pictures a second. Measured on a UC8279 (variant 0x68) unit across the
-// 1.8.1 betas, "fast" runs a host-loaded DU waveform (the stock X3 UC8279
-// bank) at 40% of its frames, the PLL frame rate at 0x0F and the display SPI
-// at 20 MHz (the controller's rating; 10 MHz otherwise): a refresh takes
-// ~276 ms, about 3 pictures a second, with the darkness of stock and a little
-// ghosting that the periodic cleaning refresh clears. Drive levels stay the
+// 1.8.1-1.8.3 test builds, "fast" runs a host-loaded DU waveform (the stock X3
+// UC8279 bank) at 30% of its frames, the PLL frame rate at 0x0F and the
+// display SPI at 20 MHz (the controller's rating; 10 MHz otherwise), and sends
+// and drives only the rectangle that changed since the last picture (an
+// unchanged picture is skipped): ~155 ms of waveform, about 5 pictures a
+// second, with the darkness of stock and a little ghosting that the cleaning
+// refresh every minute clears. 40% looked the same and 25% runs the same
+// frames (phases of one frame do not shrink); PLL 0x1F and 0x3F were faster
+// but faint, 0x10 no different. SETTINGS offers 50/40/30/25% (50% slower but
+// sharper, with less ghosting) with a cleaning refresh every 30 or 60 s; D40
+// with a cleaning refresh every minute is the default. Drive levels stay the
 // bank's and voltages the panel's. Other controllers and variants keep stock.
-// It also sends and drives only the rectangle that changed since the last
-// picture, and skips a picture that did not change at all.
 struct RefreshPreset {
   const char* label;
+  const char* key;  // how gameboy.cfg names it (speed=)
   uint8_t tsset;
   uint8_t pll;
   uint8_t duPct;
-  uint32_t spiHz;   // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
-  bool diffWindow;  // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
+  uint32_t spiHz;    // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
+  bool diffWindow;   // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
+  uint8_t cleanSec;  // seconds between cleaning refreshes (0 = none)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"stock", 0, 0, 0, 0, false},
-    {"fast-window", 0, 0x0F, 40, 20000000, true},
+    {"Standard", "standard", 0, 0, 0, 0, false, 0},
+    {"D50, clean 30 s", "D50-30", 0, 0x0F, 50, 20000000, true, 30},
+    {"D50, clean 60 s", "D50-60", 0, 0x0F, 50, 20000000, true, 60},
+    {"D40, clean 30 s", "D40-30", 0, 0x0F, 40, 20000000, true, 30},
+    {"D40, clean 60 s", "D40-60", 0, 0x0F, 40, 20000000, true, 60},
+    {"D30, clean 30 s", "D30-30", 0, 0x0F, 30, 20000000, true, 30},
+    {"D30, clean 60 s", "D30-60", 0, 0x0F, 30, 20000000, true, 60},
+    {"D25, clean 30 s", "D25-30", 0, 0x0F, 25, 20000000, true, 30},
+    {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
 };
+constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
+constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
+// gameboy.cfg from 1.8.3-beta.3/4 stored speed= as an index into the list
+// before D50 was added: D40/30, D40/60, D30/30, D30/60, D25/30, D25/60.
+constexpr const char* kOldSpeedKeys[] = {"", "D40-30", "D40-60", "D30-30", "D30-60", "D25-30", "D25-60"};
+
+// SETTINGS > Colours, in the order of WALNUT_COLOURS_* (walnut_cgb_port.h).
+struct ColourModeChoice {
+  const char* label;
+  const char* key;  // how gameboy.cfg names it (colours=)
+};
+constexpr ColourModeChoice kColourModes[] = {
+    {"Smooth", "smooth"},
+    {"Contrast", "contrast"},
+    {"Brightness", "brightness"},
+};
+constexpr uint8_t kColourModeCount = sizeof(kColourModes) / sizeof(kColourModes[0]);
+
+// The orientations SETTINGS offers, in its order.
+struct OrientationChoice {
+  const char* label;
+  GfxRenderer::Orientation orientation;
+  bool portrait;
+};
+constexpr OrientationChoice kOrientations[] = {
+    {"Portrait", GfxRenderer::Portrait, true},
+    {"Landscape", GfxRenderer::LandscapeCounterClockwise, false},
+    {"Portrait, flipped", GfxRenderer::PortraitInverted, true},
+    {"Landscape, flipped", GfxRenderer::LandscapeClockwise, false},
+};
+constexpr uint8_t kOrientationCount = sizeof(kOrientations) / sizeof(kOrientations[0]);
+
+// The settings every game shares.
+constexpr char kSettingsPath[] = "/.crosspoint/gameboy.cfg";
+
+// A quick-save or resume file: this header, Peanut-GB's whole gb_s (its
+// callback pointers are put back on load) and the cartridge RAM.
+struct StateHeader {
+  char magic[4];  // "GBQS"
+  uint16_t version;
+  uint16_t reserved;
+  uint32_t gbSize;
+  uint32_t cartRamSize;
+  uint32_t romSize;
+  char title[16];
+};
+constexpr uint16_t kStateVersion = 1;
+
+// Whether the status line (screen updates per second, emulator speed) shows
+// under the title; a tap on the title strip or SETTINGS toggles it. Saved
+// with the other settings.
+std::atomic<bool> statusLineShown{false};
 
 // Whether this reader's screen is one the fast refresh was validated on.
 bool fastRefreshValidated() {
@@ -113,19 +180,22 @@ void panelName(char* out, const size_t size) {
 // Whether panel pixel (x, y) is black for Game Boy shade 0 (white, the
 // lightest) to 3 (black). The panel here is black and white only, so the two
 // greys are dithered: one dot in four for light grey, three in four for dark.
-bool shadeIsBlack(const uint8_t shade, const int x, const int y) {
-  switch (shade) {
-    case 3: return true;
-    case 2: return ((x ^ y) & 1) == 0 || (x & 1) == 0;
-    case 1: return (x & 1) == 0 && (y & 1) == 0;
-    default: return false;
-  }
-}
+// The picture's greys: 17 levels of darkness, 0 white to 16 black, drawn as an
+// ordered (4x4 Bayer) dither - a dot is black where its threshold is below the
+// level. Levels 4, 8 and 12 are the quarter, half (checkerboard) and
+// three-quarter patterns; a Game Boy's four shades use 0, 4, 12 and 16
+// (kDmgLevel), and Game Boy Color colours any level (src/walnut_cgb_impl.c).
+constexpr int kGreyLevels = 17;
+constexpr uint8_t kDmgLevel[4] = {0, 4, 12, 16};
+constexpr uint8_t kBayer4[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+
+bool shadeIsBlack(const uint8_t level, const int x, const int y) { return kBayer4[y & 3][x & 3] < level; }
 
 }  // namespace
 
-GameBoyActivity::GameBoyActivity(GfxRenderer& rendererIn, MappedInputManager& mappedInputIn, std::string romPathIn)
-    : Activity("GameBoy", rendererIn, mappedInputIn), romPath(std::move(romPathIn)) {}
+GameBoyActivity::GameBoyActivity(GfxRenderer& rendererIn, MappedInputManager& mappedInputIn, std::string romPathIn,
+                                 const bool resume)
+    : Activity("GameBoy", rendererIn, mappedInputIn), romPath(std::move(romPathIn)), resumeRequested(resume) {}
 
 GameBoyActivity::~GameBoyActivity() { cleanup(); }
 
@@ -139,14 +209,28 @@ void GameBoyActivity::onEnter() {
   touchJoypadMask = 0;
   activeTouch = TouchControl::None;
   nextFrameUs = 0;
+  framesSinceDraw = DRAW_EVERY;
   nextDisplayUs = 0;
   displayDue.store(true, std::memory_order_release);
   error[0] = '\0';
   title[0] = '\0';
 
-  portrait = true;
-  rotateRequested = false;
-  renderer.setOrientation(GfxRenderer::Portrait);
+  menuOpen.store(false, std::memory_order_release);
+  menuSel = 0;
+  loadArmed = false;
+  menuMessage[0] = '\0';
+  settingsDirty = false;
+  loadSettings();
+  {
+    const size_t slash = romPath.find_last_of('/');
+    const std::string folder = slash == std::string::npos || slash == 0 ? "/" : romPath.substr(0, slash);
+    if (!romPath.empty() && folder != romFolder && folder.size() < 600) {
+      romFolder = folder;
+      settingsDirty = true;  // saved on exit, for the ROM picker
+    }
+  }
+  portrait = kOrientations[orientation].portrait;
+  renderer.setOrientation(kOrientations[orientation].orientation);
   setLayout();
   renderer.clearScreen(0xFF);
   chromeKey = CHROME_NONE;
@@ -160,16 +244,27 @@ void GameBoyActivity::onEnter() {
     return;
   }
 
+  // Woken in this game: pick up where the reader went to sleep. A resume file
+  // is used once; one left from an earlier sleep is stale on a normal launch.
+  if (resumeRequested && Storage.exists(resumePath.c_str())) {
+    if (!readState(resumePath)) LOG_ERR(TAG, "Could not resume from %s", resumePath.c_str());
+  }
+  if (Storage.exists(resumePath.c_str())) Storage.remove(resumePath.c_str());
+
   // Peanut-GB keeps the RTC registers internally. Seed them from the wall
   // clock on every launch; the emulator advances them during frame execution.
   time_t rawTime = 0;
   time(&rawTime);
   struct tm timeInfo {};
   localtime_r(&rawTime, &timeInfo);
-  gb_set_rtc(gb, &timeInfo);
+  setCoreRtc(timeInfo);
 
   char gameTitle[17] = {};
-  gb_get_rom_name(gb, gameTitle);
+  if (cgb) {
+    walnut_cgb_rom_name(cgb, gameTitle);
+  } else {
+    gb_get_rom_name(gb, gameTitle);
+  }
   std::strncpy(title, gameTitle, sizeof(title) - 1);
   if (title[0] == '\0') std::strncpy(title, "GAME BOY", sizeof(title) - 1);
 
@@ -192,20 +287,31 @@ void GameBoyActivity::onEnter() {
   nextAutosaveUs = nowUs + AUTOSAVE_PERIOD_US;
   perfWindowStartUs = perfSessionStartUs = nowUs;
   if (fastRefreshValidated()) {
-    refreshPreset = 1;
+    refreshPreset = fastPreset;
     applyRefreshPreset();
   }
   startEmuTask();
-  LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes)", title, static_cast<unsigned>(romSize),
-          static_cast<unsigned>(cartRamSize));
+  LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes, core %s)", title, static_cast<unsigned>(romSize),
+          static_cast<unsigned>(cartRamSize), coreName());
 }
 
 void GameBoyActivity::onExit() {
   stopEmuTask();  // before the save and cleanup touch its state
   if (initialized.load(std::memory_order_acquire)) {
     if (!saveCartRam()) LOG_ERR(TAG, "Save failed during Game Boy exit: %s", savePath.c_str());
+    // Going to sleep in the game (enterDeepSleep() sets the flag first): save
+    // the whole state so waking reopens the game where it was.
+    if (APP_STATE.lastSleepFromGameBoy) {
+      if (writeState(resumePath)) {
+        APP_STATE.gameBoyResumePath = romPath;
+      } else {
+        APP_STATE.gameBoyResumePath.clear();
+        LOG_ERR(TAG, "Could not save the state for wake: %s", resumePath.c_str());
+      }
+    }
     writePerfLog();
   }
+  if (settingsDirty) saveSettings();
   TouchRegistry::getInstance().clear();
   cleanup();
   if (refreshPreset != 0) {
@@ -247,9 +353,10 @@ void GameBoyActivity::loop() {
     return;
   }
 
-  if (rotateRequested) {
-    rotateRequested = false;
-    rotate();
+  // With SETTINGS open, the screen changes only when the menu does.
+  if (menuOpen.load(std::memory_order_acquire)) {
+    delay(2);
+    return;
   }
   const uint64_t nowUs = nowMicros();
   if (nowUs >= nextDisplayUs) {
@@ -301,7 +408,24 @@ void GameBoyActivity::emuTaskEntry(void* arg) {
 
 void GameBoyActivity::emuTaskLoop() {
   while (emuRun.load(std::memory_order_acquire)) {
+    if (menuOpen.load(std::memory_order_acquire)) {
+      // Paused for SETTINGS; the frame clock restarts when it closes.
+      if (pauseStartUs == 0) pauseStartUs = nowMicros();
+      emuIdle.store(true, std::memory_order_release);
+      nextFrameUs = 0;
+      delay(5);
+      continue;
+    }
     const uint64_t nowUs = nowMicros();
+    if (pauseStartUs != 0) {
+      // Leave the pause out of the speed figures and the cleaning period.
+      const uint64_t pausedUs = nowUs - pauseStartUs;
+      pauseStartUs = 0;
+      perfSessionStartUs += pausedUs;
+      perfWindowStartUs += pausedUs;
+      nextCleanUs += pausedUs;
+      perfLastLoopUs = 0;
+    }
     if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
     perfLastLoopUs = nowUs;
     ++perfLoops;
@@ -309,7 +433,7 @@ void GameBoyActivity::emuTaskLoop() {
     updatePerf(nowUs);
 
     if (refreshPreset != 0 && nowUs >= nextCleanUs) {
-      nextCleanUs = nowUs + CLEAN_PERIOD_US;
+      nextCleanUs = nowUs + kRefreshPresets[refreshPreset].cleanSec * 1000000ULL;
       fullRefreshDue.store(true, std::memory_order_release);
     }
 
@@ -329,6 +453,26 @@ void GameBoyActivity::render(RenderLock&&) {
   // waited up to a display period for the next request.)
   if (!displayDue.exchange(false, std::memory_order_acq_rel)) return;
 
+  if (initialized.load(std::memory_order_acquire) && menuOpen.load(std::memory_order_acquire)) {
+    chromeKey = CHROME_NONE;  // the game screen is redrawn whole on return
+    // The game's touch targets share ids with the front-button hints, so a
+    // menu tap over an old one would also read as a button (Back): the menu
+    // reads its own taps and registers none.
+    TouchRegistry::getInstance().clear();
+    drawMenu();
+    // Blocking (the menu changes rarely) and left out of the speed figures. A
+    // cleaning refresh asked for meanwhile waits for the game screen.
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+#ifndef SIMULATOR
+    uint32_t phases[8];
+    if (display.lastRefreshTimings(phases)) {
+      perfSeenRefreshes = phases[6];
+      perfSeenSkipped = phases[7];
+    }
+#endif
+    return;
+  }
+
   if (!initialized.load(std::memory_order_acquire)) {
     chromeKey = CHROME_NONE;
     renderer.clearScreen(0xFF);
@@ -345,7 +489,11 @@ void GameBoyActivity::render(RenderLock&&) {
   // display is single-buffered): clear and redraw them only when they change,
   // and with every cleaning refresh in case anything else drew on the screen.
   const uint32_t chrome = static_cast<uint32_t>(physicalJoypadMask | touchJoypadMask) |
-                          (static_cast<uint32_t>(activeTouch) << 8) | (portrait ? 0x10000u : 0u);
+                          (static_cast<uint32_t>(activeTouch) << 8) | (static_cast<uint32_t>(orientation) << 22) |
+                          (statusLineShown.load(std::memory_order_acquire) ? (0x20000u | (static_cast<uint32_t>(
+                                                             perfTextIdx.load(std::memory_order_acquire))
+                                                         << 18))
+                                           : 0u);
   const bool redrawChrome = cleaning || chrome != chromeKey;
   if (redrawChrome) renderer.clearScreen(0xFF);
   drawGameFrame();
@@ -436,6 +584,10 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
   const uint32_t unchanged = perfUnchanged.exchange(0, std::memory_order_relaxed);
   const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
+  // The status line under the title (drawControls()): "screen|game" parts.
+  const uint8_t nextText = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
+  snprintf(perfText[nextText], sizeof(perfText[nextText]), "Screen %.1f/s|Game %u%%", displays / seconds, speed);
+  perfTextIdx.store(nextText, std::memory_order_release);
 
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
           "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
@@ -487,6 +639,17 @@ void GameBoyActivity::resetPerfTotals(const uint64_t nowUs) {
   }
 }
 
+// The emulator core, and for Walnut-CGB where its context landed (internal
+// RAM is several times faster than PSRAM), for the speed log.
+const char* GameBoyActivity::coreName() const {
+  if (!cgb) return "peanut";
+#ifdef SIMULATOR
+  return "walnut";
+#else
+  return esp_ptr_external_ram(cgb) ? "walnut-psram" : "walnut-internal";
+#endif
+}
+
 // One line per game session (and per refresh preset tried in it), for
 // comparing readers, builds and presets.
 void GameBoyActivity::writePerfLog() {
@@ -496,23 +659,31 @@ void GameBoyActivity::writePerfLog() {
   char panel[24];
   panelName(panel, sizeof(panel));
   const float phaseDiv = perfTotalDisplays ? 1000.0f * perfTotalDisplays : 1.0f;
-  char line[340];
+  // The preset's label is for SETTINGS ("D30, clean 60 s"): no commas in a
+  // CSV field.
+  char preset[32];
+  std::strncpy(preset, kRefreshPresets[refreshPreset].label, sizeof(preset) - 1);
+  preset[sizeof(preset) - 1] = '\0';
+  for (char* c = preset; *c; ++c) {
+    if (*c == ',') *c = ' ';
+  }
+  char line[360];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f,%s\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
       perfTotalDisplays ? perfTotalRefreshUs / 1000.0f / perfTotalDisplays : 0.0f, perfTotalRefreshMaxUs / 1000.0f,
       perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
-      panel, kRefreshPresets[refreshPreset].label, static_cast<unsigned long long>(perfTotalCleanRefreshes),
+      panel, preset, static_cast<unsigned long long>(perfTotalCleanRefreshes),
       perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
       perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv,
-      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv);
+      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv, coreName());
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb,core\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -551,15 +722,15 @@ void GameBoyActivity::setLayout() {
     const int rowH = 52;
     const int rowY = screenH - 12 - rowH;
     const int rowW = (screenW - 8 - 3 * TOUCH_TARGET_GAP) / 4;
-    const TouchControl row[] = {TouchControl::Exit, TouchControl::Select, TouchControl::Start, TouchControl::Rotate};
-    const char* rowLabels[] = {"EXIT", "SEL", "START", "ROTATE"};
+    const TouchControl row[] = {TouchControl::Exit, TouchControl::Select, TouchControl::Start, TouchControl::Settings};
+    const char* rowLabels[] = {"EXIT", "SEL", "START", "SETTINGS"};
     for (int i = 0; i < 4; ++i) {
       addControl(row[i], 4 + i * (rowW + TOUCH_TARGET_GAP), rowY, rowW, rowH, rowLabels[i]);
     }
     return;
   }
 
-  // 800x480: the game in the middle, the D-pad and ROTATE on the left, B/A,
+  // 800x480: the game in the middle, the D-pad and SETTINGS on the left, B/A,
   // SELECT/START and EXIT on the right.
   const int availableH = std::max(GAMEBOY_HEIGHT, screenH - 48);
   scale = std::min({MAX_GAME_SCALE, std::max(GAMEBOY_WIDTH, screenW) / GAMEBOY_WIDTH, availableH / GAMEBOY_HEIGHT});
@@ -578,7 +749,7 @@ void GameBoyActivity::setLayout() {
   addControl(TouchControl::Down, centerX - 35, panelY + 140, 70, 58, "D");
   addControl(TouchControl::Left, 10, panelY + 58, 60, 82, "L");
   addControl(TouchControl::Right, leftW - 70, panelY + 58, 60, 82, "R");
-  addControl(TouchControl::Rotate, 4, gameY + gameH - 52, leftW - 8, 48, "ROTATE");
+  addControl(TouchControl::Settings, 4, gameY + gameH - 52, leftW - 8, 48, "SETTINGS");
 
   const int rightX = gameX + gameW;
   const int rightW = screenW - rightX;
@@ -590,6 +761,12 @@ void GameBoyActivity::setLayout() {
   addControl(TouchControl::Select, firstX, gameY + 275, buttonW, 52, "SEL");
   addControl(TouchControl::Start, secondX, gameY + 275, buttonW, 52, "START");
   addControl(TouchControl::Exit, rightX + 4, gameY + gameH - 52, rightW - 8, 48, "EXIT");
+}
+
+// Above the game in portrait; the left panel above the D-pad in landscape.
+bool GameBoyActivity::inTitleStrip(const int x, const int y) const {
+  if (portrait) return y < gameY;
+  return x < gameX && y < gameY + 120;
 }
 
 void GameBoyActivity::addControl(const TouchControl control, const int x, const int y, const int w, const int h,
@@ -614,28 +791,366 @@ void GameBoyActivity::applyRefreshPreset() {
     (void)p;
 #endif
   }
-  nextCleanUs = nowMicros() + CLEAN_PERIOD_US;
+  nextCleanUs = nowMicros() + p.cleanSec * 1000000ULL;
   fullRefreshDue.store(true, std::memory_order_release);
   displayDue.store(true, std::memory_order_release);
   requestUpdate();
 }
 
-void GameBoyActivity::rotate() {
-  // The buttons move, so the finger on ROTATE must not press whatever lands
-  // under it.
+void GameBoyActivity::openMenu() {
+  // The finger on SETTINGS must not press a menu row, and the game must not
+  // see a button held while it is paused.
   mappedInput.suppressCurrentTouchContact();
   activeTouch = TouchControl::None;
   touchJoypadMask = 0;
+  physicalJoypadMask = 0;
   applyJoypad();
+  menuSel = 0;
+  loadArmed = false;
+  orientationPending = false;
+  menuMessage[0] = '\0';
+  stateExists = Storage.exists(statePath.c_str());
+  menuOpen.store(true, std::memory_order_release);
+  menuChanged();
+}
+
+void GameBoyActivity::closeMenu() {
+  if (settingsDirty) saveSettings();
+  loadArmed = false;
+  mappedInput.suppressCurrentTouchContact();
+  emuIdle.store(false, std::memory_order_release);  // before the emulator may run
+  menuOpen.store(false, std::memory_order_release);
+  fullRefreshDue.store(true, std::memory_order_release);  // clear the menu's traces
+  displayDue.store(true, std::memory_order_release);
+  requestUpdate();
+}
+
+void GameBoyActivity::menuChanged() {
+  displayDue.store(true, std::memory_order_release);
+  requestUpdate();
+}
+
+// Waits (bounded) until the emulator task has stopped between frames.
+bool GameBoyActivity::waitEmuIdle() {
+  const unsigned long start = millis();
+  while (!emuIdle.load(std::memory_order_acquire)) {
+    if (millis() - start > 500) return false;
+    delay(2);
+  }
+  return true;
+}
+
+void GameBoyActivity::menuActivate(const MenuItem item) {
+  if (item != MenuItem::Load) loadArmed = false;
+  menuMessage[0] = '\0';
+  switch (item) {
+    case MenuItem::Orientation:
+      orientationPending = true;  // turned in handleInput() once no finger is down
+      settingsDirty = true;
+      break;
+    case MenuItem::Speed:
+      if (fastRefreshValidated()) {
+        fastPreset = static_cast<uint8_t>(fastPreset % (kRefreshPresetCount - 1) + 1);
+        refreshPreset = fastPreset;
+        applyRefreshPreset();
+        settingsDirty = true;
+      } else {
+        std::strncpy(menuMessage, "Only Standard on this screen", sizeof(menuMessage) - 1);
+      }
+      break;
+    case MenuItem::Colours:
+      colourMode = static_cast<uint8_t>((colourMode + 1) % kColourModeCount);
+      if (cgb) walnut_cgb_set_colours(cgb, colourMode);
+      settingsDirty = true;
+      break;
+    case MenuItem::Status:
+      statusLineShown.store(!statusLineShown.load(std::memory_order_relaxed), std::memory_order_release);
+      settingsDirty = true;
+      break;
+    case MenuItem::Save: {
+      const bool ok = waitEmuIdle() && writeState(statePath);
+      stateExists = stateExists || ok;
+      std::strncpy(menuMessage, ok ? "Saved" : "Could not save", sizeof(menuMessage) - 1);
+      break;
+    }
+    case MenuItem::Load:
+      if (!stateExists) {
+        std::strncpy(menuMessage, "No quick save yet", sizeof(menuMessage) - 1);
+      } else if (!loadArmed) {
+        loadArmed = true;
+        std::strncpy(menuMessage, "Load again: play since the save is lost", sizeof(menuMessage) - 1);
+      } else if (waitEmuIdle() && readState(statePath)) {
+        // A real cartridge clock does not go back with the game.
+        time_t rawTime = 0;
+        time(&rawTime);
+        struct tm timeInfo {};
+        localtime_r(&rawTime, &timeInfo);
+        setCoreRtc(timeInfo);
+        closeMenu();
+        return;
+      } else {
+        loadArmed = false;
+        std::strncpy(menuMessage, "Could not load", sizeof(menuMessage) - 1);
+      }
+      break;
+    case MenuItem::Back:
+      closeMenu();
+      return;
+    default:
+      break;
+  }
+  menuChanged();
+}
+
+// The SETTINGS rows, in logical coordinates for the current orientation.
+void GameBoyActivity::menuRowRect(const int row, int& x, int& y, int& w, int& h) const {
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+  constexpr int top = 56;
+  h = std::min(72, (screenH - top - 48) / static_cast<int>(MenuItem::Count));
+  x = 12;
+  w = screenW - 24;
+  y = top + row * h;
+}
+
+int GameBoyActivity::menuRowAt(const int x, const int y) const {
+  for (int row = 0; row < static_cast<int>(MenuItem::Count); ++row) {
+    int rx, ry, rw, rh;
+    menuRowRect(row, rx, ry, rw, rh);
+    if (hitRect(x, y, rx, ry + 2, rw, rh - 4)) return row;
+  }
+  return -1;
+}
+
+void GameBoyActivity::drawMenu() {
+  renderer.clearScreen(0xFF);
+  renderer.drawText(UI_12_FONT_ID, 16, 14, "SETTINGS", true, EpdFontFamily::BOLD);
+  const char* gameName = title[0] ? title : "GAME BOY";
+  const int tw = renderer.getTextWidth(UI_10_FONT_ID, gameName);
+  renderer.drawText(UI_10_FONT_ID, renderer.getScreenWidth() - 16 - tw, 20, gameName, true);
+  for (int row = 0; row < static_cast<int>(MenuItem::Count); ++row) {
+    const char* label = "";
+    const char* value = "";
+    switch (static_cast<MenuItem>(row)) {
+      case MenuItem::Orientation:
+        label = "Orientation";
+        value = kOrientations[orientation].label;
+        break;
+      case MenuItem::Speed:
+        label = "Screen speed";
+        value = fastRefreshValidated() ? kRefreshPresets[fastPreset].label : kRefreshPresets[0].label;
+        break;
+      case MenuItem::Colours:
+        // Game Boy Color games only: see colourMode.
+        label = "Colours";
+        value = kColourModes[colourMode].label;
+        break;
+      case MenuItem::Status:
+        label = "Status line";
+        value = statusLineShown.load(std::memory_order_acquire) ? "On" : "Off";
+        break;
+      case MenuItem::Save:
+        label = "Quick save";
+        value = stateExists ? "Replaces the last one" : "";
+        break;
+      case MenuItem::Load:
+        label = "Quick load";
+        value = !stateExists ? "No save yet" : (loadArmed ? "Tap again" : "");
+        break;
+      case MenuItem::Back:
+        label = "Back to game";
+        break;
+      default:
+        break;
+    }
+    int x, y, w, h;
+    menuRowRect(row, x, y, w, h);
+    // The row the buttons act on is drawn dark.
+    const bool selected = row == menuSel;
+    renderer.fillRect(x, y + 2, w, h - 4, selected);
+    renderer.drawRect(x, y + 2, w, h - 4, true);
+    const int textY = y + h / 2 - 9;
+    renderer.drawText(UI_10_FONT_ID, x + 12, textY, label, !selected, EpdFontFamily::BOLD);
+    const int vw = renderer.getTextWidth(UI_10_FONT_ID, value);
+    renderer.drawText(UI_10_FONT_ID, x + w - 12 - vw, textY, value, !selected);
+  }
+  int x, y, w, h;
+  menuRowRect(static_cast<int>(MenuItem::Count), x, y, w, h);
+  if (menuMessage[0]) renderer.drawText(UI_10_FONT_ID, x + 4, y + 10, menuMessage, true, EpdFontFamily::BOLD);
+}
+
+// Turns the screen to kOrientations[value] and lays the controls out again
+// (under the render lock: a refresh may be running).
+void GameBoyActivity::applyOrientation(const uint8_t value) {
+  if (value >= kOrientationCount) return;
   {
     RenderLock lock(*this);
-    portrait = !portrait;
-    renderer.setOrientation(portrait ? GfxRenderer::Portrait : GfxRenderer::LandscapeCounterClockwise);
+    orientation = value;
+    portrait = kOrientations[value].portrait;
+    renderer.setOrientation(kOrientations[value].orientation);
     setLayout();
   }
   fullRefreshDue.store(true, std::memory_order_release);
-  displayDue.store(true, std::memory_order_release);
-  requestUpdate();
+}
+
+// /.crosspoint/gameboy.cfg: "key=value" lines, shared by every game.
+void GameBoyActivity::loadSettings() {
+  orientation = 0;
+  fastPreset = kDefaultFastPreset;
+  romFolder.clear();
+  colourMode = WALNUT_COLOURS_CONTRAST;
+  bool status = false;
+  HalFile file;
+  if (Storage.exists(kSettingsPath) && Storage.openFileForRead(TAG, kSettingsPath, file)) {
+    char text[768] = {};
+    const int got = file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
+    file.close();
+    if (got > 0) {
+      text[got] = '\0';
+      for (char* line = std::strtok(text, "\n"); line; line = std::strtok(nullptr, "\n")) {
+        unsigned value = 0;
+        if (std::sscanf(line, "orientation=%u", &value) == 1 && value < kOrientationCount) {
+          orientation = static_cast<uint8_t>(value);
+        } else if (std::strncmp(line, "speed=", 6) == 0) {
+          const char* key = line + 6;
+          constexpr unsigned kOldSpeedCount = sizeof(kOldSpeedKeys) / sizeof(kOldSpeedKeys[0]);
+          if (std::sscanf(key, "%u", &value) == 1 && value >= 1 && value < kOldSpeedCount) {
+            key = kOldSpeedKeys[value];
+          }
+          for (uint8_t i = 1; i < kRefreshPresetCount; ++i) {
+            if (std::strcmp(key, kRefreshPresets[i].key) == 0) fastPreset = i;
+          }
+        } else if (std::sscanf(line, "status=%u", &value) == 1) {
+          status = value != 0;
+        } else if (std::strncmp(line, "colours=", 8) == 0) {
+          for (uint8_t i = 0; i < kColourModeCount; ++i) {
+            if (std::strcmp(line + 8, kColourModes[i].key) == 0) colourMode = i;
+          }
+        } else if (std::strncmp(line, "romdir=", 7) == 0) {
+          romFolder = line + 7;
+        }
+      }
+    }
+  }
+  statusLineShown.store(status, std::memory_order_release);
+}
+
+std::string GameBoyActivity::lastRomFolder() {
+  HalFile file;
+  if (!Storage.exists(kSettingsPath) || !Storage.openFileForRead(TAG, kSettingsPath, file)) return "/";
+  char text[768] = {};
+  const int got = file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
+  file.close();
+  if (got <= 0) return "/";
+  text[got] = '\0';
+  for (char* line = std::strtok(text, "\n"); line; line = std::strtok(nullptr, "\n")) {
+    if (std::strncmp(line, "romdir=", 7) == 0 && line[7] == '/') {
+      const std::string folder = line + 7;
+      return Storage.exists(folder.c_str()) ? folder : "/";
+    }
+  }
+  return "/";
+}
+
+void GameBoyActivity::saveSettings() {
+  char text[768];
+  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nromdir=%s\n",
+                           orientation, kRefreshPresets[fastPreset].key, kColourModes[colourMode].key,
+                           statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, romFolder.c_str());
+  HalFile file;
+  if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
+    LOG_ERR(TAG, "Could not save %s", kSettingsPath);
+    return;
+  }
+  file.write(reinterpret_cast<const uint8_t*>(text), static_cast<size_t>(len));
+  file.close();
+  settingsDirty = false;
+}
+
+// Writes header + gb_s + cartridge RAM to `path` (through a .tmp file, so a
+// failed write keeps the old one). The emulator must not be running.
+bool GameBoyActivity::writeState(const std::string& path) {
+  if (!gb && !cgb) return false;
+  const size_t coreSize = cgb ? walnut_cgb_state_size() : sizeof(gb_s);
+  StateHeader header{};
+  std::memcpy(header.magic, "GBQS", 4);
+  header.version = kStateVersion;
+  header.reserved = cgb ? 1 : 0;  // which core the state belongs to
+  header.gbSize = static_cast<uint32_t>(coreSize);
+  header.cartRamSize = static_cast<uint32_t>(cartRamSize);
+  header.romSize = static_cast<uint32_t>(romSize);
+  std::memcpy(header.title, title, sizeof(header.title));
+
+  // Walnut-CGB's context is opaque: copied out first.
+  uint8_t* coreState = reinterpret_cast<uint8_t*>(gb);
+  if (cgb) {
+    coreState = static_cast<uint8_t*>(heap_caps_malloc(coreSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!coreState) return false;
+    walnut_cgb_save_state(cgb, coreState);
+  }
+  const std::string tempPath = path + ".tmp";
+  HalFile file;
+  bool ok = Storage.openFileForWrite(TAG, tempPath, file);
+  ok = ok && file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
+       file.write(coreState, coreSize) == coreSize;
+  if (cgb) heap_caps_free(coreState);
+  if (ok && cartRamSize > 0) ok = file.write(cartRam, cartRamSize) == cartRamSize;
+  ok = ok && file.sync();
+  file.close();
+  if (ok) {
+    if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
+    ok = Storage.rename(tempPath.c_str(), path.c_str());
+  }
+  if (!ok) Storage.remove(tempPath.c_str());
+  LOG_INF(TAG, "State %s: %s", ok ? "saved" : "NOT saved", path.c_str());
+  return ok;
+}
+
+// Loads a state written by writeState() for this ROM, keeping this session's
+// callbacks. The emulator must not be running. The cartridge RAM it brings
+// back is written to the .sav at the next save.
+bool GameBoyActivity::readState(const std::string& path) {
+  if (!gb && !cgb) return false;
+  const size_t coreSize = cgb ? walnut_cgb_state_size() : sizeof(gb_s);
+  HalFile file;
+  if (!Storage.openFileForRead(TAG, path, file)) return false;
+  StateHeader header{};
+  bool ok = file.read(reinterpret_cast<uint8_t*>(&header), sizeof(header)) == static_cast<int>(sizeof(header)) &&
+            std::memcmp(header.magic, "GBQS", 4) == 0 && header.version == kStateVersion &&
+            header.reserved == (cgb ? 1 : 0) && header.gbSize == coreSize && header.cartRamSize == cartRamSize &&
+            header.romSize == romSize;
+  // Read everything aside first, so a short file leaves the game untouched.
+  auto* loaded = static_cast<gb_s*>(heap_caps_malloc(coreSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  uint8_t* loadedRam =
+      cartRamSize > 0 ? static_cast<uint8_t*>(heap_caps_malloc(cartRamSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT))
+                      : nullptr;
+  ok = ok && loaded && (cartRamSize == 0 || loadedRam) &&
+       file.read(reinterpret_cast<uint8_t*>(loaded), coreSize) == static_cast<int>(coreSize) &&
+       (cartRamSize == 0 || file.read(loadedRam, cartRamSize) == static_cast<int>(cartRamSize));
+  file.close();
+  if (ok && cgb) {
+    walnut_cgb_load_state(cgb, loaded);
+    if (cartRamSize > 0) std::memcpy(cartRam, loadedRam, cartRamSize);
+    saveDirty = cartRamSize > 0;
+  } else if (ok) {
+    // Peanut-GB's only pointers: the callbacks and the front end's context.
+    loaded->gb_rom_read = gb->gb_rom_read;
+    loaded->gb_cart_ram_read = gb->gb_cart_ram_read;
+    loaded->gb_cart_ram_write = gb->gb_cart_ram_write;
+    loaded->gb_error = gb->gb_error;
+    loaded->gb_serial_tx = gb->gb_serial_tx;
+    loaded->gb_serial_rx = gb->gb_serial_rx;
+    loaded->gb_bootrom_read = gb->gb_bootrom_read;
+    loaded->display.lcd_draw_line = gb->display.lcd_draw_line;
+    loaded->direct.priv = gb->direct.priv;
+    std::memcpy(gb, loaded, sizeof(gb_s));
+    if (cartRamSize > 0) std::memcpy(cartRam, loadedRam, cartRamSize);
+    saveDirty = cartRamSize > 0;
+  }
+  if (loaded) heap_caps_free(loaded);
+  if (loadedRam) heap_caps_free(loadedRam);
+  LOG_INF(TAG, "State %s: %s", ok ? "loaded" : "NOT loaded", path.c_str());
+  return ok;
 }
 
 size_t GameBoyActivity::romBankCountFromCode(const uint8_t code) {
@@ -731,25 +1246,46 @@ bool GameBoyActivity::buildSavePaths() {
 
   tempSavePath = savePath + ".tmp";
   backupSavePath = savePath + ".bak";
-  return savePath.size() < 512 && tempSavePath.size() < 512 && backupSavePath.size() < 512;
+  const std::string base = savePath.substr(0, savePath.size() - 4);  // without ".sav"
+  statePath = base + ".state";
+  resumePath = base + ".resume";
+  return savePath.size() < 512 && tempSavePath.size() < 512 && backupSavePath.size() < 512 && statePath.size() < 500 &&
+         resumePath.size() < 500;
 }
 
 bool GameBoyActivity::initEmulator() {
-  gb = static_cast<gb_s*>(calloc(1, sizeof(gb_s)));
-  if (!gb) {
-    showError("Not enough memory for emulator");
-    return false;
-  }
-
-  const enum gb_init_error_e initResult = gb_init(gb, &GameBoyActivity::romRead, &GameBoyActivity::cartRamRead,
-                                                   &GameBoyActivity::cartRamWrite, &GameBoyActivity::fatalError, this);
-  if (initResult != GB_INIT_NO_ERROR) {
-    showError(initErrorString(initResult));
-    return false;
-  }
-
   size_t saveSize = 0;
-  if (gb_get_save_size_s(gb, &saveSize) < 0) {
+  if (rom[0x143] & 0x80) {
+    // Made for (or also for) the Game Boy Color: the Walnut-CGB core.
+    int initResult = 0;
+    cgb = walnut_cgb_create(rom, romSize, &GameBoyActivity::cgbLine, &GameBoyActivity::cgbError, this, &initResult);
+    if (!cgb) {
+      showError(initResult < 0 ? "Not enough memory for emulator" : initErrorString(initResult));
+      return false;
+    }
+    walnut_cgb_set_ram_written(cgb, &GameBoyActivity::cgbRamWritten);
+    walnut_cgb_set_colours(cgb, colourMode);
+    if (walnut_cgb_save_size(cgb, &saveSize) < 0) {
+      showError("Unknown cartridge RAM size");
+      return false;
+    }
+  } else {
+    gb = static_cast<gb_s*>(calloc(1, sizeof(gb_s)));
+    if (!gb) {
+      showError("Not enough memory for emulator");
+      return false;
+    }
+
+    const enum gb_init_error_e initResult = gb_init(gb, &GameBoyActivity::romRead, &GameBoyActivity::cartRamRead,
+                                                     &GameBoyActivity::cartRamWrite, &GameBoyActivity::fatalError,
+                                                     this);
+    if (initResult != GB_INIT_NO_ERROR) {
+      showError(initErrorString(initResult));
+      return false;
+    }
+  }
+
+  if (gb && gb_get_save_size_s(gb, &saveSize) < 0) {
     showError("Unknown cartridge RAM size");
     return false;
   }
@@ -762,6 +1298,7 @@ bool GameBoyActivity::initEmulator() {
     }
     std::memset(cartRam, 0, saveSize);
     cartRamSize = saveSize;
+    if (cgb) walnut_cgb_set_cart_ram(cgb, cartRam, cartRamSize);
   }
 
   frameBuffers[0] = static_cast<uint8_t*>(heap_caps_malloc(EMULATOR_FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -776,7 +1313,7 @@ bool GameBoyActivity::initEmulator() {
   readyFrame.store(0xFF, std::memory_order_release);
   renderFrame.store(0xFF, std::memory_order_release);
 
-  gb_init_lcd(gb, &GameBoyActivity::lcdDrawLine);
+  if (gb) gb_init_lcd(gb, &GameBoyActivity::lcdDrawLine);
   return true;
 }
 
@@ -847,6 +1384,10 @@ void GameBoyActivity::cleanup() {
     free(gb);
     gb = nullptr;
   }
+  if (cgb) {
+    walnut_cgb_destroy(cgb);
+    cgb = nullptr;
+  }
   if (rom) {
     heap_caps_free(rom);
     rom = nullptr;
@@ -880,6 +1421,46 @@ void GameBoyActivity::showError(const char* message) {
 
 void GameBoyActivity::handleInput() {
   using Button = MappedInputManager::Button;
+  if (menuOpen.load(std::memory_order_acquire)) {
+    // SETTINGS: Up/Down pick a row, Confirm acts on it, Back returns to the
+    // game; a tap acts on the row under it.
+    constexpr int rows = static_cast<int>(MenuItem::Count);
+    bool touching = false;
+#if CROSSINK_APP_CAP_TOUCH
+    int hx = 0;
+    int hy = 0;
+    touching = mappedInput.isScreenTouchHeld(hx, hy) || mappedInput.wasScreenTouchReleased();
+#endif
+    if (orientationPending && !touching) {
+      orientationPending = false;
+      applyOrientation(static_cast<uint8_t>((orientation + 1) % kOrientationCount));
+      menuChanged();
+      return;
+    }
+    if (mappedInput.wasPressed(Button::Up)) {
+      menuSel = (menuSel + rows - 1) % rows;
+      menuChanged();
+    } else if (mappedInput.wasPressed(Button::Down)) {
+      menuSel = (menuSel + 1) % rows;
+      menuChanged();
+    } else if (mappedInput.wasPressed(Button::Confirm)) {
+      menuActivate(static_cast<MenuItem>(menuSel));
+    } else if (mappedInput.wasPressed(Button::Back)) {
+      closeMenu();
+    }
+#if CROSSINK_APP_CAP_TOUCH
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasScreenTouchDown(x, y)) {
+      const int row = menuRowAt(x, y);
+      if (row >= 0) {
+        menuSel = row;
+        menuActivate(static_cast<MenuItem>(row));
+      }
+    }
+#endif
+    return;
+  }
   const Button buttons[] = {Button::Up, Button::Down, Button::Left, Button::Right, Button::Confirm, Button::Back,
                             Button::Power};
   uint8_t nextPhysical = 0;
@@ -895,6 +1476,12 @@ void GameBoyActivity::handleInput() {
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTouchDown(x, y)) {
+    // The title strip shows or hides the status line, once per touch.
+    if (inTitleStrip(x, y) && hitTestTouch(x, y) == TouchControl::None) {
+      statusLineShown.store(!statusLineShown.load(std::memory_order_relaxed), std::memory_order_release);
+      displayDue.store(true, std::memory_order_release);
+      requestUpdate();
+    }
     updateTouch(x, y);
   }
 
@@ -914,8 +1501,8 @@ void GameBoyActivity::updateTouch(const int x, const int y) {
     exitRequested = true;
     return;
   }
-  if (control == TouchControl::Rotate) {
-    rotateRequested = true;
+  if (control == TouchControl::Settings) {
+    openMenu();
     return;
   }
   if (control == activeTouch) return;
@@ -960,31 +1547,50 @@ uint8_t GameBoyActivity::joypadBitForButton(const MappedInputManager::Button but
 }
 
 void GameBoyActivity::applyJoypad() {
-  if (gb) gb->direct.joypad = static_cast<uint8_t>(~(physicalJoypadMask | touchJoypadMask));
+  const uint8_t joypad = static_cast<uint8_t>(~(physicalJoypadMask | touchJoypadMask));
+  if (gb) gb->direct.joypad = joypad;
+  if (cgb) walnut_cgb_set_joypad(cgb, joypad);
 }
 
 void GameBoyActivity::runEmulation(const uint64_t nowUs) {
-  if (!gb || nextFrameUs == 0) nextFrameUs = nowUs;
+  if ((!gb && !cgb) || nextFrameUs == 0) nextFrameUs = nowUs;
 
   uint8_t ran = 0;
   while (nowUs >= nextFrameUs && ran < MAX_CATCH_UP_FRAMES) {
-    // Do not start a frame in either buffer while the display task owns it,
-    // and do not overwrite the most recently completed frame before it has
-    // been consumed. With two buffers this gives a simple, lock-free handoff.
-    const uint8_t pending = readyFrame.load(std::memory_order_acquire);
-    const uint8_t rendering = renderFrame.load(std::memory_order_acquire);
-    if (writeFrame == pending || writeFrame == rendering) {
-      ++perfWaits;
-      break;
+    // Draw one frame in DRAW_EVERY. Never draw into a buffer the display task
+    // owns, nor over the most recently completed frame before it has been
+    // consumed (with two buffers, a simple lock-free handoff): such a frame
+    // runs undrawn instead, so the game never waits for the screen.
+    bool draw = framesSinceDraw + 1 >= DRAW_EVERY;
+    if (draw) {
+      const uint8_t pending = readyFrame.load(std::memory_order_acquire);
+      const uint8_t rendering = renderFrame.load(std::memory_order_acquire);
+      if (writeFrame == pending || writeFrame == rendering) {
+        ++perfWaits;
+        draw = false;
+      }
     }
 
     const uint64_t frameStartUs = nowMicros();
-    gb_run_frame(gb);
+    if (cgb) {
+      walnut_cgb_set_draw(cgb, draw ? 1 : 0);
+      walnut_cgb_run_frame(cgb);
+    } else {
+      // Peanut-GB's own frame skip, steered the same way (see walnut_cgb_set_draw()).
+      gb->direct.frame_skip = true;
+      gb->display.frame_skip_count = draw;
+      gb_run_frame(gb);
+    }
     const uint32_t frameUs = static_cast<uint32_t>(nowMicros() - frameStartUs);
     perfEmuUs += frameUs;
     perfEmuMaxUs = std::max(perfEmuMaxUs, frameUs);
     ++perfFrames;
-    publishCompletedFrame();
+    if (draw) {
+      publishCompletedFrame();
+      framesSinceDraw = 0;
+    } else if (framesSinceDraw < DRAW_EVERY) {
+      ++framesSinceDraw;
+    }
     nextFrameUs += EMULATION_FRAME_PERIOD_US;
     ++ran;
   }
@@ -1011,7 +1617,8 @@ void GameBoyActivity::drawGameFrame() {
   renderFrame.store(frameIndex, std::memory_order_release);
 
   const bool drawn =
-      portrait ? drawGameFramePortrait(source, framebuffer) : drawGameFrameLandscape(source, framebuffer);
+      portrait ? drawGameFramePortrait(source, framebuffer, orientation >= 2)
+               : drawGameFrameLandscape(source, framebuffer, orientation >= 2);
   if (!drawn) renderFrame.store(0xFF, std::memory_order_release);
 }
 
@@ -1019,15 +1626,15 @@ namespace {
 
 // Builds one panel row of the game a byte at a time: `count` game pixels read
 // from `src` every `step` bytes, each `scale` panel pixels long. A game pixel
-// becomes the bits patterns[shade][first panel pixel's parity] (1 = black,
-// most significant first), so the row is about count table lookups.
+// becomes the bits patterns[grey level][first panel pixel's phase, mod 4] (1
+// = black, most significant first), so the row is about count table lookups.
 constexpr int MAX_GAME_ROW_BYTES = 64;
 void buildGameRow(uint8_t* out, const uint8_t* src, const int step, const int count, const int scale,
-                  const uint8_t (&patterns)[4][2]) {
+                  const uint8_t (&patterns)[kGreyLevels][4]) {
   uint32_t acc = 0;
   int bits = 0;
   for (int g = 0; g < count; ++g) {
-    acc = (acc << scale) | patterns[src[g * step] & 0x03][(g * scale) & 1];
+    acc = (acc << scale) | patterns[src[g * step]][(g * scale) & 3];
     bits += scale;
     if (bits >= 8) {
       bits -= 8;
@@ -1037,13 +1644,13 @@ void buildGameRow(uint8_t* out, const uint8_t* src, const int step, const int co
   }
 }
 
-// patterns[fixedParity][shade][alongParity] for buildGameRow: the dither of
-// shadeIsBlack() for a panel row whose fixed coordinate has parity
-// fixedParity. alongIsX says whether the row runs along the dither's x.
-void gamePatterns(uint8_t (&patterns)[2][4][2], const int scale, const bool alongIsX) {
-  for (int fixed = 0; fixed < 2; ++fixed) {
-    for (int shade = 0; shade < 4; ++shade) {
-      for (int along0 = 0; along0 < 2; ++along0) {
+// patterns[fixedPhase][level][alongPhase] for buildGameRow: the dither of
+// shadeIsBlack() for a panel row whose fixed coordinate is fixedPhase mod 4.
+// alongIsX says whether the row runs along the dither's x.
+void gamePatterns(uint8_t (&patterns)[4][kGreyLevels][4], const int scale, const bool alongIsX) {
+  for (int fixed = 0; fixed < 4; ++fixed) {
+    for (int shade = 0; shade < kGreyLevels; ++shade) {
+      for (int along0 = 0; along0 < 4; ++along0) {
         uint8_t pattern = 0;
         for (int k = 0; k < scale; ++k) {
           const int along = along0 + k;
@@ -1058,59 +1665,86 @@ void gamePatterns(uint8_t (&patterns)[2][4][2], const int scale, const bool alon
 
 }  // namespace
 
-bool GameBoyActivity::drawGameFrameLandscape(const uint8_t* source, uint8_t* framebuffer) {
+namespace {
+
+// Copies a built row into the framebuffer; a flipped orientation runs the
+// panel the other way, so the bytes go in reverse order with their bits
+// reversed.
+void putGameRow(uint8_t* out, const uint8_t* row, const int bytes, const bool flipped) {
+  if (!flipped) {
+    std::memcpy(out, row, static_cast<size_t>(bytes));
+    return;
+  }
+  static constexpr uint8_t kNibbleRev[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
+                                             0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
+  for (int i = 0; i < bytes; ++i) {
+    const uint8_t b = row[bytes - 1 - i];
+    out[i] = static_cast<uint8_t>((kNibbleRev[b & 0x0F] << 4) | kNibbleRev[b >> 4]);
+  }
+}
+
+}  // namespace
+
+bool GameBoyActivity::drawGameFrameLandscape(const uint8_t* source, uint8_t* framebuffer, const bool flipped) {
   // LandscapeCounterClockwise is the native X4 Pro framebuffer orientation,
-  // so logical (x,y) maps directly to physical (x,y). Peanut-GB's four shades
-  // become black, two dithered greys and white (shadeIsBlack()). A game line's
-  // panel rows differ only by their y parity: two are built, the rest copied.
+  // so logical (x,y) maps directly to physical (x,y); LandscapeClockwise turns
+  // it half round: physical (W-1-x, H-1-y). Peanut-GB's four shades become
+  // greys (shadeIsBlack()). A game line's panel rows differ only by their y
+  // phase in the 4x4 dither: four are built, the rest copied.
   const int panelBytes = renderer.getDisplayWidthBytes();
   const int screenW = renderer.getDisplayWidth();
+  const int screenH = renderer.getDisplayHeight();
   const int rowBytes = gameW / 8;
-  if (panelBytes <= 0 || screenW <= 0 || gameX < 0 || gameX % 8 != 0 || gameX + gameW > screenW ||
-      rowBytes > MAX_GAME_ROW_BYTES) {
+  const int startX = flipped ? screenW - gameX - gameW : gameX;
+  if (panelBytes <= 0 || screenW <= 0 || gameX < 0 || startX < 0 || startX % 8 != 0 || gameX + gameW > screenW ||
+      gameY + gameH > screenH || rowBytes > MAX_GAME_ROW_BYTES) {
     return false;
   }
-  uint8_t patterns[2][4][2];
+  uint8_t patterns[4][kGreyLevels][4];
   gamePatterns(patterns, scale, /*alongIsX=*/true);
-  uint8_t rows[2][MAX_GAME_ROW_BYTES];
+  uint8_t rows[4][MAX_GAME_ROW_BYTES];
   for (int gy = 0; gy < GAMEBOY_HEIGHT; ++gy) {
     const uint8_t* line = source + gy * GAMEBOY_WIDTH;
-    for (int parity = 0; parity < 2; ++parity) {
+    for (int parity = 0; parity < 4; ++parity) {
       buildGameRow(rows[parity], line, 1, GAMEBOY_WIDTH, scale, patterns[parity]);
     }
     for (int sy = 0; sy < scale; ++sy) {
       const int panelY = gy * scale + sy;
-      uint8_t* out = framebuffer + static_cast<size_t>(gameY + panelY) * panelBytes + gameX / 8;
-      std::memcpy(out, rows[panelY & 1], static_cast<size_t>(rowBytes));
+      const int row = flipped ? screenH - 1 - (gameY + panelY) : gameY + panelY;
+      putGameRow(framebuffer + static_cast<size_t>(row) * panelBytes + startX / 8, rows[panelY & 3], rowBytes,
+                 flipped);
     }
   }
   return true;
 }
 
-bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer) {
+bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* framebuffer, const bool flipped) {
   // Portrait turns the panel a quarter: logical (x, y) is panel
-  // (y, panelHeight - 1 - x), so each game column is one panel row with the
-  // game's lines running along it. A column's panel rows differ only by their
-  // x parity: two are built, the rest copied.
+  // (y, panelHeight - 1 - x), and PortraitInverted (panelWidth - 1 - y, x).
+  // Each game column is one panel row with the game's lines running along it.
+  // A column's panel rows differ only by their x phase in the 4x4 dither:
+  // four are built, the rest copied.
   const int panelBytes = renderer.getDisplayWidthBytes();
   const int panelW = renderer.getDisplayWidth();
   const int panelH = renderer.getDisplayHeight();
   const int rowBytes = gameH / 8;
-  if (panelBytes <= 0 || gameY % 8 != 0 || gameH % 8 != 0 || gameX < 0 || gameX + gameW > panelH ||
+  const int startY = flipped ? panelW - gameY - gameH : gameY;
+  if (panelBytes <= 0 || startY < 0 || startY % 8 != 0 || gameH % 8 != 0 || gameX < 0 || gameX + gameW > panelH ||
       gameY + gameH > panelW || rowBytes > MAX_GAME_ROW_BYTES) {
     return false;
   }
-  uint8_t patterns[2][4][2];
+  uint8_t patterns[4][kGreyLevels][4];
   gamePatterns(patterns, scale, /*alongIsX=*/false);
-  uint8_t rows[2][MAX_GAME_ROW_BYTES];
+  uint8_t rows[4][MAX_GAME_ROW_BYTES];
   for (int gx = 0; gx < GAMEBOY_WIDTH; ++gx) {
-    for (int parity = 0; parity < 2; ++parity) {
+    for (int parity = 0; parity < 4; ++parity) {
       buildGameRow(rows[parity], source + gx, GAMEBOY_WIDTH, GAMEBOY_HEIGHT, scale, patterns[parity]);
     }
     for (int sx = 0; sx < scale; ++sx) {
       const int dstX = gx * scale + sx;
-      uint8_t* out = framebuffer + static_cast<size_t>(panelH - 1 - (gameX + dstX)) * panelBytes + gameY / 8;
-      std::memcpy(out, rows[dstX & 1], static_cast<size_t>(rowBytes));
+      const int row = flipped ? gameX + dstX : panelH - 1 - (gameX + dstX);
+      putGameRow(framebuffer + static_cast<size_t>(row) * panelBytes + startY / 8, rows[dstX & 3], rowBytes,
+                 flipped);
     }
   }
   return true;
@@ -1121,6 +1755,24 @@ void GameBoyActivity::drawControls() {
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
+  if (statusLineShown.load(std::memory_order_acquire)) {
+    // The last figures (updatePerf()), "screen|game": one line right of the
+    // title in portrait, two in the narrow landscape panel. Blank until the
+    // first figures arrive (two seconds).
+    char screen[48];
+    snprintf(screen, sizeof(screen), "%s", perfText[perfTextIdx.load(std::memory_order_acquire)]);
+    char* game = std::strchr(screen, '|');
+    if (game) *game++ = '\0';
+    if (portrait) {
+      char line[64];
+      snprintf(line, sizeof(line), "%s  %s", screen, game ? game : "");
+      const int w = renderer.getTextWidth(SMALL_FONT_ID, line);
+      renderer.drawText(SMALL_FONT_ID, renderer.getScreenWidth() - 8 - w, titleY + 2, line, true);
+    } else {
+      renderer.drawText(SMALL_FONT_ID, titleX, titleY + 24, screen, true);
+      if (game) renderer.drawText(SMALL_FONT_ID, titleX, titleY + 40, game, true);
+    }
+  }
   for (size_t i = 0; i < controlCount; ++i) {
     const ControlButton& c = controls[i];
     const uint8_t bit = joypadBitForTouch(c.control);
@@ -1167,9 +1819,12 @@ void GameBoyActivity::lcdDrawLine(gb_s* state, const uint8_t* pixels, const uint
   if (self) self->writeGameBoyLine(pixels, line);
 }
 
+// A Peanut-GB line: shade in bits 1-0 (0 white..3 black), palette bits above;
+// stored as grey levels (kDmgLevel).
 void GameBoyActivity::writeGameBoyLine(const uint8_t* pixels, const uint_fast8_t line) {
   if (!pixels || line >= GAMEBOY_HEIGHT || !frameBuffers[writeFrame]) return;
-  std::memcpy(frameBuffers[writeFrame] + static_cast<size_t>(line) * GAMEBOY_WIDTH, pixels, GAMEBOY_WIDTH);
+  uint8_t* out = frameBuffers[writeFrame] + static_cast<size_t>(line) * GAMEBOY_WIDTH;
+  for (int x = 0; x < GAMEBOY_WIDTH; ++x) out[x] = kDmgLevel[pixels[x] & 0x03];
 }
 
 void GameBoyActivity::fatalError(gb_s* state, enum gb_error_e errorCode, const uint16_t addr) {
@@ -1179,11 +1834,46 @@ void GameBoyActivity::fatalError(gb_s* state, enum gb_error_e errorCode, const u
     while (true) delay(1000);
   }
 
-  LOG_ERR(TAG, "Peanut-GB fatal error=%d addr=0x%04X", static_cast<int>(errorCode), addr);
-  if (!self->saveCartRam()) LOG_ERR(TAG, "Emergency save failed before restart: %s", self->savePath.c_str());
+  self->emergencyRestart(static_cast<int>(errorCode), addr);
+}
+
+// The core cannot run past the error: save the cartridge RAM and restart.
+void GameBoyActivity::emergencyRestart(const int error, const uint16_t addr) {
+  LOG_ERR(TAG, "%s fatal error=%d addr=0x%04X", cgb ? "Walnut-CGB" : "Peanut-GB", error, addr);
+  if (!saveCartRam()) LOG_ERR(TAG, "Emergency save failed before restart: %s", savePath.c_str());
 
   ESP.restart();
   while (true) delay(1000);
+}
+
+// Walnut-CGB hands over grey levels already (0..16, see shadeIsBlack()).
+void GameBoyActivity::cgbLine(void* user, const uint8_t* levels, const uint_fast8_t line) {
+  auto* self = static_cast<GameBoyActivity*>(user);
+  if (!self || line >= GAMEBOY_HEIGHT || !self->frameBuffers[self->writeFrame]) return;
+  std::memcpy(self->frameBuffers[self->writeFrame] + static_cast<size_t>(line) * GAMEBOY_WIDTH, levels,
+              GAMEBOY_WIDTH);
+}
+
+void GameBoyActivity::cgbError(void* user, const int error, const uint16_t addr) {
+  auto* self = static_cast<GameBoyActivity*>(user);
+  if (!self) {
+    ESP.restart();
+    while (true) delay(1000);
+  }
+  self->emergencyRestart(error, addr);
+}
+
+void GameBoyActivity::cgbRamWritten(void* user) {
+  auto* self = static_cast<GameBoyActivity*>(user);
+  if (self) self->saveDirty = true;
+}
+
+void GameBoyActivity::setCoreRtc(const struct tm& time) {
+  if (cgb) {
+    walnut_cgb_set_rtc(cgb, &time);
+  } else if (gb) {
+    gb_set_rtc(gb, &time);
+  }
 }
 
 const char* GameBoyActivity::initErrorString(const int errorCode) {

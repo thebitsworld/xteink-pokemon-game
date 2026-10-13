@@ -166,8 +166,10 @@ class ActivityManager {
   void goToReader(std::string path, bool suppressBackRelease = false, bool allowFastInitialRefresh = false,
                   bool cleanImageBaseOnEntry = false);
 #if CROSSINK_GAMEBOY
-  void goToGameBoy(std::string path);
+  // `resume` reopens the game where the reader went to sleep in it.
+  void goToGameBoy(std::string path, bool resume = false);
 #endif
+  bool isGameBoyActivity() const;
   void goToReaderAndRunMenuAction(std::string path, uint8_t action);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

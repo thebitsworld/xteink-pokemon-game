@@ -5,18 +5,23 @@ nav_order: 1.45
 
 # Game Boy (X4 Pro)
 
-The X4 Pro firmware can play original Game Boy (DMG) games. Copy a `.gb` ROM
-file to the SD card, then open it from the file browser like a book.
+The X4 Pro firmware can play Game Boy and Game Boy Color games. Copy a `.gb`
+or `.gbc` ROM file to the SD card, then open **Applications > Game Boy**: it
+lists the folders and games on the card (starting in the folder of the last
+game you played), and a tap on a game starts it. Leaving the game returns to
+Applications. A ROM also opens from the file browser like a book.
+
+Game Boy Color games show in shades of grey: each colour becomes the grey of
+its brightness, drawn as dot patterns like the Game Boy's own greys.
 
 Only play ROMs you own. No games come with the firmware.
 
 ## Controls
 
-The game opens upright, three times its original size, with the controls
-below it as on a Game Boy: the D-pad on the left, B and A on the right, and a
-row of **EXIT**, **SEL**, **START** and **ROTATE** at the bottom. **ROTATE**
-turns the reader sideways, with the D-pad left of the game and the buttons
-right of it; **ROTATE** (bottom left) turns it back. Each game starts upright.
+The game opens three times its original size. Upright, the controls sit below
+it as on a Game Boy: the D-pad on the left, B and A on the right, and a row of
+**EXIT**, **SEL**, **START** and **SETTINGS** at the bottom. Sideways, the
+D-pad and **SETTINGS** are left of the game and the buttons right of it.
 
 | Game Boy | Touch | Buttons |
 | --- | --- | --- |
@@ -26,7 +31,37 @@ right of it; **ROTATE** (bottom left) turns it back. Each game starts upright.
 | Start | **START** | Confirm |
 | Select | **SEL** | Back |
 | Leave the game | **EXIT** | - |
-| Turn the screen | **ROTATE** | - |
+| Settings, quick save and load | **SETTINGS** | - |
+
+Tap the title strip above the game (in landscape, the panel above the D-pad)
+to show or hide a status line: how many times a second the screen updates and
+how fast the game runs against a real Game Boy.
+
+## Settings
+
+**SETTINGS** pauses the game and opens a list; tap a row (or pick it with
+Up/Down and Confirm), and **Back to game** or Back returns to the game.
+
+- **Orientation**: upright, sideways, upright upside down, or sideways the
+  other way round.
+- **Screen speed** (X4 Pros with a UC8279 screen only): how much the screen
+  shortens each update - D50, D40, D30 or D25: D50 is the slowest but the
+  sharpest with the least ghosting, the lower numbers faster with a little more
+  ghosting - and whether a full cleaning refresh clears the ghosting every 30 or
+  60 seconds. D40 with a cleaning refresh every 60 seconds is the default.
+  Other screens use the standard refresh.
+- **Colours** (Game Boy Color games): how colours become greys. **Contrast**
+  (the default) uses the Game Boy's four greys and keeps a picture the game
+  darkens - night in Pokémon Gold and Silver - dark but readable (the grass
+  does not turn into one dark patch). **Smooth** gives each colour its own
+  grey out of 17, drawn as fine dot patterns: closer to the colours, but
+  grainier. **Brightness** gives each colour the one of the four greys nearest
+  its brightness, without the night adjustment.
+- **Status line**: the same as tapping the title strip.
+- **Quick save** and **Quick load**: see below.
+
+Orientation, screen speed, colours and the status line are kept for every game, in
+`/.crosspoint/gameboy.cfg`.
 
 Hold a touch button to keep it pressed. If a ROM cannot be opened, the error
 screen closes with Back or a tap.
@@ -39,15 +74,22 @@ EXIT, and once a minute while you play if the game changed it. The previous
 save is kept as `.sav.bak`. A `.sav` from another emulator works if it is the
 plain cartridge RAM.
 
-Saving inside the game (from its own menu) is still needed - there are no save
-states.
+**Quick save** in SETTINGS saves the whole game as it is at that moment, next
+to the ROM (`Tetris.state`), whether or not the game has its own saves. Each
+game has one quick save, replaced by the next. **Quick load** goes back to it:
+tap it twice, since everything played since the quick save is lost.
+
+If the reader goes to sleep while a game is open (the Power button), the game
+is saved the same way (`Tetris.resume`) and the next time the reader is
+turned on it opens the game where it was, instead of the home screen. Hold
+Back while it starts to go to the home screen instead.
 
 ## Limits
 
 - X4 Pro only: the ROM is loaded into the X4 Pro's extra memory (PSRAM), which
   the X3 and X4 do not have.
-- Game Boy only: Game Boy Color-only games (`.gbc`) do not run, and MBC7
-  cartridges are not supported.
+- MBC7 cartridges and the Game Boy Camera are not supported, and some Game Boy
+  Color games may run slower or less accurately than Game Boy ones.
 - No sound.
 - The game runs at full speed, but the e-ink screen updates only about four
   to five times a second (X4 Pros with a UC8279 screen controller, which
@@ -69,7 +111,10 @@ and how much picture data each update sent. Send it along when you report a slow
 
 ## Credits
 
-The emulator is [Peanut-GB](https://github.com/deltabeard/Peanut-GB) by Mahyar
-Koshkouei (MIT), with parts from SameBoy by Lior Halphon. The game screen
-started from the [Ink-boy](https://github.com/hellominecraft913-dev/Ink-boy)
-CrossInk fork (MIT).
+Game Boy games run on [Peanut-GB](https://github.com/deltabeard/Peanut-GB) by
+Mahyar Koshkouei (MIT), and Game Boy Color games on
+[Walnut-CGB](https://github.com/Mr-PauI/Walnut-CGB) by Mr. Paul (MIT), a
+Peanut-GB rewrite; both carry parts from SameBoy by Lior Halphon (MIT). The
+game screen started from the [Ink-boy](https://github.com/hellominecraft913-dev/Ink-boy)
+CrossInk fork (MIT), whose Game Boy Color integration showed how to fit
+Walnut-CGB beside Peanut-GB.

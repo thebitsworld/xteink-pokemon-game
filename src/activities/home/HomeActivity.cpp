@@ -254,7 +254,12 @@ bool ensureReusableCoverPath(RecentBook& book) {
 // (in the game's settings) and the entry comes back, so the game is never out of reach.
 bool pokemonBandOnHome = false;
 int pokemonBandSlots() { return pokemonBandOnHome ? 1 : 0; }
-bool pokemonMenuEntryWanted() { return features::pokemonGame() && !pokemonBandOnHome; }
+// The game is listed in Applications when they are there; Home then keeps only
+// its band (or the Cover Grid tile). Otherwise a hidden band brings back the
+// menu entry.
+bool pokemonMenuEntryWanted() {
+  return features::pokemonGame() && !pokemonBandOnHome && !features::applications();
+}
 // Minimal and Dashboard keep their four front-button actions (nav 0-3); the side
 // buttons move the focus onto the band instead.
 constexpr int kMinimalPokemonBandNav = 100;
@@ -288,7 +293,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   if (features::applications()) items.push({tr(STR_APPS_TITLE), Gamepad, HomeMenuAction::Applications});
 #endif
   items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
-  if (features::slideshow()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
+  if (features::slideshowOnHome()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
 }
 
 HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
@@ -325,7 +330,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   // No Settings entry in this minimal menu variant (reached another way in
   // this theme) - Slideshow still goes last, matching the "below Settings"
   // placement in appendHomeMenuItems() above.
-  if (features::slideshow()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
+  if (features::slideshowOnHome()) items.push({tr(STR_SLIDESHOW), Image, HomeMenuAction::Slideshow});
   return items;
 }
 

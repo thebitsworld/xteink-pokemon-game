@@ -1071,8 +1071,8 @@ void ActivityManager::goToReader(std::string path, const bool suppressBackReleas
 }
 
 #if CROSSINK_GAMEBOY
-void ActivityManager::goToGameBoy(std::string path) {
-  auto activity = makeUniqueNoThrow<GameBoyActivity>(renderer, mappedInput, std::move(path));
+void ActivityManager::goToGameBoy(std::string path, const bool resume) {
+  auto activity = makeUniqueNoThrow<GameBoyActivity>(renderer, mappedInput, std::move(path), resume);
   if (!activity) {
     LOG_ERR("ACT", "OOM opening Game Boy activity");
     return;
@@ -1186,6 +1186,8 @@ bool ActivityManager::requiresExclusiveStorageLoop() const {
 bool ActivityManager::blocksGlobalInput() const { return currentActivity && currentActivity->blocksGlobalInput(); }
 
 bool ActivityManager::isHomeActivity() const { return currentActivity && currentActivity->name == "Home"; }
+
+bool ActivityManager::isGameBoyActivity() const { return currentActivity && currentActivity->name == "GameBoy"; }
 
 bool ActivityManager::isReaderActivity() const {
   if (currentActivity && currentActivity->isReaderActivity()) {

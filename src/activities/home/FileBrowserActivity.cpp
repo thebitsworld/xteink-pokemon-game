@@ -134,7 +134,7 @@ bool isSupportedBrowserFile(std::string_view filename) {
          FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
          FsHelpers::hasBmpExtension(filename) || FsHelpers::hasPngExtension(filename)
 #if CROSSINK_GAMEBOY
-         || FsHelpers::checkFileExtension(filename, ".gb")
+         || FsHelpers::checkFileExtension(filename, ".gb") || FsHelpers::checkFileExtension(filename, ".gbc")
 #endif
       ;
 }
@@ -151,6 +151,15 @@ bool acceptFirmware(const char* name, bool isDir) {
     return false;
   }
   return isDir || FsHelpers::checkFileExtension(std::string_view{name}, ".bin");
+}
+
+// Folders and Game Boy ROMs, for Mode::PickGameBoyRom.
+bool acceptGameBoyRom(const char* name, const bool isDir) {
+  if (isMacOSMetadataEntry(name) || isWindowsMetadataEntry(name) || (!SETTINGS.showHiddenFiles && name[0] == '.')) {
+    return false;
+  }
+  return isDir || FsHelpers::checkFileExtension(std::string_view{name}, ".gb") ||
+         FsHelpers::checkFileExtension(std::string_view{name}, ".gbc");
 }
 
 bool acceptDirectory(const char* name, const bool isDir) {
@@ -241,8 +250,10 @@ bool FileBrowserActivity::loadFilesIntoVector(size_t cap, bool& overflow) {
     return false;
   }
 
-  const auto accept =
-      mode == Mode::PickFirmware ? acceptFirmware : (mode == Mode::PickDirectory ? acceptDirectory : acceptCommon);
+  const auto accept = mode == Mode::PickFirmware     ? acceptFirmware
+                     : mode == Mode::PickDirectory  ? acceptDirectory
+                     : mode == Mode::PickGameBoyRom ? acceptGameBoyRom
+                                                    : acceptCommon;
 
   files.reserve(std::min<size_t>(cap, INDEX_THRESHOLD));
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
@@ -324,8 +335,10 @@ void FileBrowserActivity::loadFilesLocked() {
   if (fileIndex && indexEntry) {
     GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
-    const auto accept =
-        mode == Mode::PickFirmware ? acceptFirmware : (mode == Mode::PickDirectory ? acceptDirectory : acceptCommon);
+    const auto accept = mode == Mode::PickFirmware     ? acceptFirmware
+                       : mode == Mode::PickDirectory  ? acceptDirectory
+                       : mode == Mode::PickGameBoyRom ? acceptGameBoyRom
+                                                      : acceptCommon;
     if (fileIndex->open(basepath.c_str(), accept)) {
       usingIndex = true;
       return;
@@ -1097,8 +1110,8 @@ void FileBrowserActivity::activateSelected() {
   const std::string entry = entryNameAt(selectorIndex);
   const bool isDirectory = (entry.back() == '/');
 
-  // Firmware picker: select file -> return path; navigate into directories normally.
-  if (mode == Mode::PickFirmware && !isDirectory) {
+  // Firmware and ROM pickers: select file -> return path; navigate into directories normally.
+  if ((mode == Mode::PickFirmware || mode == Mode::PickGameBoyRom) && !isDirectory) {
     std::string cleanBasePath = basepath;
     if (cleanBasePath.back() != '/') cleanBasePath += "/";
     ActivityResult res{FilePathResult{cleanBasePath + entry}};
@@ -1467,7 +1480,9 @@ void FileBrowserActivity::buildListScreen(UiApp::ScreenType& screen) {
         fileListMemoryLimited
             ? tr(STR_MEMORY_ERROR)
             : (fileListReadFailed ? tr(STR_ERROR_GENERAL_FAILURE)
-                                  : (mode == Mode::PickFirmware ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND)));
+                                  : (mode == Mode::PickFirmware     ? tr(STR_NO_BIN_FILES)
+                                     : mode == Mode::PickGameBoyRom ? tr(STR_NO_GAME_ROMS)
+                                                                    : tr(STR_NO_FILES_FOUND)));
     screen.centeredText(emptyMessage, screen.theme().bodyText);
     return;
   }
@@ -1563,8 +1578,8 @@ void FileBrowserActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   std::string folderName =
-      mode == Mode::PickFirmware
-          ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
+      mode == Mode::PickFirmware     ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
+      : mode == Mode::PickGameBoyRom ? std::string(tr(STR_SELECT_GAME_ROM))
           : (mode == Mode::PickDirectory
                  ? std::string(tr(STR_SELECT_FOLDER))
                  : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1)));
@@ -1596,8 +1611,8 @@ void FileBrowserActivity::render(RenderLock&&) {
                                            : mappedInput.withBackArrow(tr(STR_BACK));
   // In PickFirmware mode, Confirm on a .bin returns the path to the caller (not "open"); show
   // STR_SELECT instead. Directories in the same picker still descend, so keep STR_OPEN there.
-  const bool selectingFirmwareFile =
-      mode == Mode::PickFirmware && visibleEntries > 0 && std::string(entryNameAt(selectorIndex)).back() != '/';
+  const bool selectingFirmwareFile = (mode == Mode::PickFirmware || mode == Mode::PickGameBoyRom) &&
+                                     visibleEntries > 0 && std::string(entryNameAt(selectorIndex)).back() != '/';
   const char* confirmLabel = visibleEntries == 0 ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
   const auto labels = mappedInput.mapLabels(
       backLabel, confirmLabel, visibleEntries == 0 || mode == Mode::PickDirectory ? "" : tr(STR_DIR_UP),
