@@ -5,11 +5,11 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-12)
+## Where things stand (2026-10-13)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
-  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.1; latest release `v1.8.1` (stable). Its
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.2; latest release `v1.8.2` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
@@ -22,14 +22,17 @@ is in git history (before 2026-10-08).
 - Game Boy (X4 Pro only, `CROSSINK_GAMEBOY`): Peanut-GB core in `lib/PeanutGB`, screen in
   `src/activities/gameboy/`. The simulator needs `CROSSINK_SIMULATOR_PSRAM_TOTAL=8388608` to open a ROM.
   Never commit ROMs (`game/` is untracked).
-- Game Boy screen speed (1.8.1): on UC8279 variant 0x68 only (`fastRefreshValidated()`, the user's
-  panel) the game uses the X3 UC8279 DU bank scaled to 40%, PLL 0x0F and 20 MHz display SPI, plus a
-  cleaning refresh every 60 s: ~276 ms per refresh, ~3 updates/s (stock ~614 ms, ~1.4/s). Other panels
-  stay stock until someone tests them (betas 1.8.1-beta.1..7 tried presets; findings: forced TSSET
-  above 0x5A is slower and flashes, PLL has no effect on the OTP waveform, DU below ~35% ghosts). The
-  emulator runs in its own task on core 0. Each session appends to `/.crosspoint/gameboy-perf.txt`
-  (panel, preset, refresh phase times). Ideas not tried: partial-window refresh of the game area,
-  skipping the OLD-plane restream, smaller scale. ~5-9 updates/s is the practical ceiling of this panel.
+- Game Boy screen speed (1.8.2): on UC8279 variant 0x68 only (`fastRefreshValidated()`, the user's
+  panel) the "fast-window" preset uses the X3 UC8279 DU bank scaled to 40%, PLL 0x0F, 20 MHz display
+  SPI and a cleaning refresh every 60 s. The driver sends/drives only the changed rectangle and skips
+  unchanged frames; the next picture is requested 50 ms after the last (no 250 ms cap) and drawn while
+  the waveform runs (overlapped refresh). Measured: ~190 ms per refresh (wave ~166 ms, ~14 KB per
+  plane), 4-5 updates/s while the picture changes (1.8.1: 276 ms, ~3/s; stock ~614 ms, ~1.4/s); draw
+  ~10 ms (byte-table drawing, buttons redrawn only on change). Other panels stay stock until tested.
+  Findings from the betas: forced TSSET above 0x5A is slower and flashes, PLL has no effect on the
+  OTP waveform, DU below ~35% ghosts, PT_SCAN 0 (scan only the window's gates) changed nothing.
+  `displays_per_s` in `/.crosspoint/gameboy-perf.txt` depends on how much the picture changes - read
+  it with the `unchanged` column. Beyond ~5/s only a shorter waveform helps, which ghosts.
 - Open, undecided: a translation mechanism for Lua apps (all English today; the user wants to discuss it
   first). Firmware strings: the fork's own Pokémon strings are untranslated in most languages (fall back
   to English); Vietnamese is complete.
