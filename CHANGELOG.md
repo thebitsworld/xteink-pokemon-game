@@ -1,43 +1,10 @@
-## [1.8.2-beta.4] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, as often as it can, while drawing the next picture, and now also tells the screen to scan only the rows of the part that changed, in ways not yet validated on this panel. It can leave scrambled, ghosted, striped or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): play as for beta.3, in menus and text boxes as well as walking around, and also a minute turned sideways with ROTATE (the game covers fewer of the screen's rows that way). Send `/.crosspoint/gameboy-perf.txt` with your notes. Compare `wave_ms` with beta.3: it should drop when only a small part changes. Watch for stripes, rows that are not updated, or ghosting outside the part that changed. If the picture breaks, go back to beta.3.
+## [1.8.2] - 2026-10-13
 
 ### Changed
 
-- Game Boy (X4 Pro, UC8279-68 screens, test only): a screen update scans only the screen rows of the part that changed.
-
-## [1.8.2-beta.3] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, as often as it can, and now draws the next picture while the screen is still changing, in ways not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): play as for beta.2 and send `/.crosspoint/gameboy-perf.txt` with your notes. `displays_per_s` should go up a little from beta.2. `refresh_ms_avg` now counts only the time the game waits for the screen, which is shorter than a whole refresh, and `wave_ms` can include time the screen sat finished while the next picture was drawn. Watch for torn pictures (half of one frame, half of the next), saves that fail, and the game freezing when you leave it with EXIT.
-
-### Changed
-
-- Game Boy (X4 Pro, UC8279-68 screens, test only): the next picture is drawn while the screen is still refreshing the last one.
-
-## [1.8.2-beta.2] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed and now refreshes it as often as it can, in ways not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): like beta.1, play a Game Boy game for a few minutes, walking around and in menus or text, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes. The screen should update more often than beta.1 (`displays_per_s`, about 2.9 there) and `draw_ms_avg` should drop from about 34 ms to a few. Watch for more ghosting than beta.1 and for buttons that do not show as pressed.
-
-### Changed
-
-- Game Boy (X4 Pro, UC8279-68 screens, test only): the screen no longer waits a quarter second between updates; the next picture starts as soon as the last one is on screen.
+- Game Boy (X4 Pro, UC8279 screens): the screen updates about four to five times a second instead of about three. Each update redraws only the part of the picture that changed, a picture that did not change is not refreshed at all, the next picture starts as soon as the last one is on screen and is drawn while the screen is still refreshing. Ghosting stays light, and the full cleaning refresh every minute clears it.
 - Game Boy (X4 Pro): the game picture is drawn several times faster, and the title and buttons are only redrawn when they change.
-
-## [1.8.2-beta.1] - 2026-10-12
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it updates only the part of the e-ink screen that changed, in a way not yet validated on this panel. It can leave scrambled, ghosted or half-drawn pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.1](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.1). Install it at your own risk.
-
-For the tester only (X4 Pro, UC8279-68 screen): play a Game Boy game for a few minutes, both walking around (the whole picture moves) and in menus or text (a small part changes). Watch for scrambled or misplaced parts of the picture and for ghosting that the one-minute cleaning refresh does not clear, then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes. Its new columns `unchanged` (pictures skipped because nothing changed) and `plane_kb` (data sent per update) show what the change does.
-
-### Changed
-
-- Game Boy (X4 Pro, UC8279-68 screens, test only): each screen update sends and refreshes only the rectangle that changed since the last one, and a picture that did not change is not refreshed at all.
+- Game Boy (X4 Pro): `gameboy-perf.txt` also records how many pictures were skipped because nothing had changed and how much picture data each update sent.
 
 ## [1.8.1] - 2026-10-12
 
