@@ -1,3 +1,14 @@
+## [1.8.3-beta.6] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only: play a Game Boy Color game (Pokémon Gold) and a Game Boy game a few minutes each with the status line on, and check that the Game Boy Color game now runs at full speed (100%), that the picture still moves smoothly, and that nothing looks behind. In the App Store, swipe (X4 Pro) or press the side buttons (X3/X4) and check that the list turns a page at a time. Then send `/.crosspoint/gameboy-perf.txt`.
+
+### Changed
+
+- Game Boy (X4 Pro): Game Boy Color games should now run at full speed. The emulator draws one frame in three into a picture - still four times what the e-ink screen can show - instead of all sixty a second, and keeps running instead of waiting while the screen is busy.
+- App Store: a swipe (X4 Pro) or the side buttons (X3/X4) turn the list a whole page at a time; the front buttons still step one app at a time.
+
 ## [1.8.3-beta.5] - 2026-10-13
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
