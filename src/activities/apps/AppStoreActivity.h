@@ -522,28 +522,38 @@ class AppStoreActivity : public Activity {
     const int rowsPerPage = 8;
     int pageStart = (selectedIndex_ / rowsPerPage) * rowsPerPage;
 
-    if (mappedInput.wasReleased(MappedInputManager::Button::Right) ||
-        mappedInput.wasReleased(MappedInputManager::Button::Down) ||
-        mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
+    // The front buttons step through the apps one at a time; the side
+    // buttons and a swipe turn a whole page (to its first app), wrapping round.
+    const int pageCount = (count + rowsPerPage - 1) / rowsPerPage;
+    const auto turnPage = [&](const int dir) {
+      const int page = (selectedIndex_ / rowsPerPage + dir + pageCount) % pageCount;
+      selectedIndex_ = page * rowsPerPage;
+      requestUpdate();
+    };
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
       selectedIndex_ = (selectedIndex_ + 1) % count;
       requestUpdate();
       return;
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Left) ||
-               mappedInput.wasReleased(MappedInputManager::Button::Up) ||
-               mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
       selectedIndex_ = (selectedIndex_ - 1 + count) % count;
       requestUpdate();
+      return;
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Down) ||
+               mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
+      turnPage(1);
+      return;
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+               mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
+      turnPage(-1);
       return;
     }
 
     auto swipe = mappedInput.wasSwipe();
     if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Left) {
-      selectedIndex_ = (selectedIndex_ + 1) % count;
-      requestUpdate();
+      turnPage(1);
       return;
     } else if (swipe == MappedInputManager::SwipeDir::Down || swipe == MappedInputManager::SwipeDir::Right) {
-      selectedIndex_ = (selectedIndex_ - 1 + count) % count;
-      requestUpdate();
+      turnPage(-1);
       return;
     }
 
