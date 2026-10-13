@@ -66,7 +66,7 @@ class GameBoyActivity final : public Activity {
   };
 
   // The SETTINGS screen's rows, top to bottom.
-  enum class MenuItem : uint8_t { Orientation, Speed, Status, Save, Load, Back, Count };
+  enum class MenuItem : uint8_t { Orientation, Speed, Colours, Status, Save, Load, Back, Count };
 
   // One on-screen button, in logical coordinates for the current orientation.
   struct ControlButton {
@@ -176,6 +176,9 @@ class GameBoyActivity final : public Activity {
   char menuMessage[48] = {};
   bool settingsDirty = false;
   std::string romFolder;  // saved as romdir= with the settings
+  // Game Boy Color colours as shades: by contrast within each palette (true,
+  // the default) or by brightness (walnut_cgb_set_contrast()).
+  bool colourContrast = true;
   bool stateExists = false;  // a quick save is there to load
   // An orientation chosen in SETTINGS, applied once the finger lifts: turning
   // the screen mid-tap makes the tap's two ends read as a Back swipe.

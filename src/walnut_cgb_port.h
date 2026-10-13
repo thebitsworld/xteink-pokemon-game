@@ -35,6 +35,10 @@ void walnut_cgb_set_cart_ram(WalnutCgb* cgb, uint8_t* ram, size_t size);
 void walnut_cgb_set_ram_written(WalnutCgb* cgb, void (*written)(void* user));
 
 void walnut_cgb_run_frame(WalnutCgb* cgb);
+// How Game Boy Color colours become shades: contrast (default) ranks each
+// palette's colours from light to dark so they stay apart even when the game
+// dims them (night); otherwise each colour takes the shade of its brightness.
+void walnut_cgb_set_contrast(WalnutCgb* cgb, int contrast);
 // Whether the next frame's lines are drawn (sent to the line callback); a
 // frame that is not drawn still runs in full.
 void walnut_cgb_set_draw(WalnutCgb* cgb, int draw);

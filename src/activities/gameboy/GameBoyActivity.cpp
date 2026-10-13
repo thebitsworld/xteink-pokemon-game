@@ -844,6 +844,11 @@ void GameBoyActivity::menuActivate(const MenuItem item) {
         std::strncpy(menuMessage, "Only Standard on this screen", sizeof(menuMessage) - 1);
       }
       break;
+    case MenuItem::Colours:
+      colourContrast = !colourContrast;
+      if (cgb) walnut_cgb_set_contrast(cgb, colourContrast ? 1 : 0);
+      settingsDirty = true;
+      break;
     case MenuItem::Status:
       statusLineShown.store(!statusLineShown.load(std::memory_order_relaxed), std::memory_order_release);
       settingsDirty = true;
@@ -921,6 +926,11 @@ void GameBoyActivity::drawMenu() {
         label = "Screen speed";
         value = fastRefreshValidated() ? kRefreshPresets[fastPreset].label : kRefreshPresets[0].label;
         break;
+      case MenuItem::Colours:
+        // Game Boy Color games only: see colourContrast.
+        label = "Colours";
+        value = colourContrast ? "Contrast" : "Brightness";
+        break;
       case MenuItem::Status:
         label = "Status line";
         value = statusLineShown.load(std::memory_order_acquire) ? "On" : "Off";
@@ -974,6 +984,7 @@ void GameBoyActivity::loadSettings() {
   orientation = 0;
   fastPreset = kDefaultFastPreset;
   romFolder.clear();
+  colourContrast = true;
   bool status = false;
   HalFile file;
   if (Storage.exists(kSettingsPath) && Storage.openFileForRead(TAG, kSettingsPath, file)) {
@@ -997,6 +1008,8 @@ void GameBoyActivity::loadSettings() {
           }
         } else if (std::sscanf(line, "status=%u", &value) == 1) {
           status = value != 0;
+        } else if (std::strncmp(line, "colours=", 8) == 0) {
+          colourContrast = std::strcmp(line + 8, "brightness") != 0;
         } else if (std::strncmp(line, "romdir=", 7) == 0) {
           romFolder = line + 7;
         }
@@ -1025,9 +1038,9 @@ std::string GameBoyActivity::lastRomFolder() {
 
 void GameBoyActivity::saveSettings() {
   char text[768];
-  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%s\nstatus=%u\nromdir=%s\n", orientation,
-                           kRefreshPresets[fastPreset].key, statusLineShown.load(std::memory_order_acquire) ? 1u : 0u,
-                           romFolder.c_str());
+  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nromdir=%s\n",
+                           orientation, kRefreshPresets[fastPreset].key, colourContrast ? "contrast" : "brightness",
+                           statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, romFolder.c_str());
   HalFile file;
   if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
     LOG_ERR(TAG, "Could not save %s", kSettingsPath);
@@ -1235,6 +1248,7 @@ bool GameBoyActivity::initEmulator() {
       return false;
     }
     walnut_cgb_set_ram_written(cgb, &GameBoyActivity::cgbRamWritten);
+    walnut_cgb_set_contrast(cgb, colourContrast ? 1 : 0);
     if (walnut_cgb_save_size(cgb, &saveSize) < 0) {
       showError("Unknown cartridge RAM size");
       return false;
