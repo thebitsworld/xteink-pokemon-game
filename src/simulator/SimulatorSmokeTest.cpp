@@ -2314,7 +2314,7 @@ class SimulatorSmokeTest {
 
 #if defined(CROSSINK_ENABLE_LUA_APPS)
   // The runner copies test/lua_apps/smoke into the SD sandbox, so the list
-  // is: the built-in Game Boy row (Game Boy builds) and Photo Slideshow, Lua
+  // is: the built-in Pokemon row, Game Boy row (Game Boy builds) and Photo Slideshow, Lua
   // Smoke Test, then the built-in App Store and App Settings. Opens and closes
   // the Game Boy ROM picker and the slideshow, launches the app, presses
   // Confirm inside it, exits with Back (the app calls smudge.exit()), then
@@ -2326,6 +2326,10 @@ class SimulatorSmokeTest {
     inputScript.push_back(render("Lua Applications", 4));
     inputScript.push_back(assertActivity("Applications"));
     int builtInsAbove = 0;
+    if (features::pokemonGame()) {  // the Pokemon row leads; its own route tests the game
+      addTap(MappedInputManager::Button::Down);
+      ++builtInsAbove;
+    }
 #if CROSSINK_GAMEBOY
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Game Boy ROM picker", 4));
@@ -2385,12 +2389,18 @@ class SimulatorSmokeTest {
     } else if (homeNavigationUsesMinimalInteraction()) {
       addTap(MappedInputManager::Button::Left);
     } else if (homeNavigationUsesCoverGrid()) {
-      // Up lands in the books, wherever Home started; Left then steps into the
-      // icon bar (at the icon nearest that book, so where depends on how many
-      // icons there are), and Right runs to its end, where Settings is.
-      addTap(MappedInputManager::Button::Up);
-      addTap(MappedInputManager::Button::Left);
-      for (int i = 0; i < 7; ++i) addTap(MappedInputManager::Button::Right);
+      if (UITheme::hasCoverGridHome()) {
+        // Up lands in the books, wherever Home started; Left then steps into
+        // the icon bar from its end, where Settings is.
+        addTap(MappedInputManager::Button::Up);
+        addTap(MappedInputManager::Button::Left);
+      } else {
+        // A reader without the cover grid shows the standard menu: Up wraps
+        // to its last entry, Settings, or Photo Slideshow just after it when
+        // Slideshow stays on Home.
+        addTap(MappedInputManager::Button::Up);
+        if (features::slideshowOnHome()) addTap(MappedInputManager::Button::Up);
+      }
     } else {
       for (int index = 0; index < 3 + applicationsEntries; ++index) addTap(MappedInputManager::Button::Down);
     }

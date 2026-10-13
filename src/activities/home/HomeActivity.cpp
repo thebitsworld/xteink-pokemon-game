@@ -254,7 +254,12 @@ bool ensureReusableCoverPath(RecentBook& book) {
 // (in the game's settings) and the entry comes back, so the game is never out of reach.
 bool pokemonBandOnHome = false;
 int pokemonBandSlots() { return pokemonBandOnHome ? 1 : 0; }
-bool pokemonMenuEntryWanted() { return features::pokemonGame() && !pokemonBandOnHome; }
+// The game is listed in Applications when they are there; Home then keeps only
+// its band (or the Cover Grid tile). Otherwise a hidden band brings back the
+// menu entry.
+bool pokemonMenuEntryWanted() {
+  return features::pokemonGame() && !pokemonBandOnHome && !features::applications();
+}
 // Minimal and Dashboard keep their four front-button actions (nav 0-3); the side
 // buttons move the focus onto the band instead.
 constexpr int kMinimalPokemonBandNav = 100;
