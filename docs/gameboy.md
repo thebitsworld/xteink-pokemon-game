@@ -45,10 +45,11 @@ Up/Down and Confirm), and **Back to game** or Back returns to the game.
 - **Orientation**: upright, sideways, upright upside down, or sideways the
   other way round.
 - **Screen speed** (X4 Pros with a UC8279 screen only): how much the screen
-  shortens each update - D40, D30 or D25, the lower the faster with a little
-  more ghosting - and whether a full cleaning refresh clears the ghosting every
-  30 or 60 seconds. D30 with a cleaning refresh every 60 seconds is the
-  default. Other screens use the standard refresh.
+  shortens each update - D50, D40, D30 or D25: D50 is the slowest but the
+  sharpest with the least ghosting, the lower numbers faster with a little more
+  ghosting - and whether a full cleaning refresh clears the ghosting every 30 or
+  60 seconds. D40 with a cleaning refresh every 60 seconds is the default.
+  Other screens use the standard refresh.
 - **Status line**: the same as tapping the title strip.
 - **Quick save** and **Quick load**: see below.
 
