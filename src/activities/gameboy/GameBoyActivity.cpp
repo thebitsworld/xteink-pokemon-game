@@ -68,18 +68,29 @@ uint64_t nowMicros() {
 // bank's and voltages the panel's. Other controllers and variants keep stock.
 // It also sends and drives only the rectangle that changed since the last
 // picture, and skips a picture that did not change at all.
+// 1.8.3 test build: tapping the title strip cycles the fast presets (1 and up).
+// "D30"/"D25" run 30%/25% of the DU frames with a cleaning refresh every 30 s;
+// "P1F"/"P3F"/"P10" try PLL values above 0x0F (undocumented on this
+// controller: 0x0E measured ~20.5 ms a frame, 0x0F ~11.5 ms).
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
   uint8_t pll;
   uint8_t duPct;
-  uint32_t spiHz;   // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
-  bool diffWindow;  // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
+  uint32_t spiHz;    // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
+  bool diffWindow;   // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
+  uint8_t cleanSec;  // seconds between cleaning refreshes (0 = none)
 };
 constexpr RefreshPreset kRefreshPresets[] = {
-    {"stock", 0, 0, 0, 0, false},
-    {"fast-window", 0, 0x0F, 40, 20000000, true},
+    {"stock", 0, 0, 0, 0, false, 0},
+    {"D40 0F", 0, 0x0F, 40, 20000000, true, 60},
+    {"D30 0F", 0, 0x0F, 30, 20000000, true, 30},
+    {"D25 0F", 0, 0x0F, 25, 20000000, true, 30},
+    {"D40 P1F", 0, 0x1F, 40, 20000000, true, 60},
+    {"D40 P3F", 0, 0x3F, 40, 20000000, true, 60},
+    {"D40 P10", 0, 0x10, 40, 20000000, true, 60},
 };
+constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 
 // Whether this reader's screen is one the fast refresh was validated on.
 bool fastRefreshValidated() {
@@ -301,6 +312,13 @@ void GameBoyActivity::emuTaskEntry(void* arg) {
 
 void GameBoyActivity::emuTaskLoop() {
   while (emuRun.load(std::memory_order_acquire)) {
+    if (presetRequested.exchange(false, std::memory_order_acq_rel) && refreshPreset != 0) {
+      // One gameboy-perf.txt line per preset tried: close this one's figures.
+      writePerfLog();
+      resetPerfTotals(nowMicros());
+      refreshPreset = static_cast<uint8_t>(refreshPreset % (kRefreshPresetCount - 1) + 1);
+      applyRefreshPreset();
+    }
     const uint64_t nowUs = nowMicros();
     if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
     perfLastLoopUs = nowUs;
@@ -309,7 +327,7 @@ void GameBoyActivity::emuTaskLoop() {
     updatePerf(nowUs);
 
     if (refreshPreset != 0 && nowUs >= nextCleanUs) {
-      nextCleanUs = nowUs + CLEAN_PERIOD_US;
+      nextCleanUs = nowUs + kRefreshPresets[refreshPreset].cleanSec * 1000000ULL;
       fullRefreshDue.store(true, std::memory_order_release);
     }
 
@@ -345,7 +363,9 @@ void GameBoyActivity::render(RenderLock&&) {
   // display is single-buffered): clear and redraw them only when they change,
   // and with every cleaning refresh in case anything else drew on the screen.
   const uint32_t chrome = static_cast<uint32_t>(physicalJoypadMask | touchJoypadMask) |
-                          (static_cast<uint32_t>(activeTouch) << 8) | (portrait ? 0x10000u : 0u);
+                          (static_cast<uint32_t>(activeTouch) << 8) | (portrait ? 0x10000u : 0u) |
+                          (static_cast<uint32_t>(perfTextIdx.load(std::memory_order_acquire)) << 17) |
+                          (static_cast<uint32_t>(refreshPreset) << 18);
   const bool redrawChrome = cleaning || chrome != chromeKey;
   if (redrawChrome) renderer.clearScreen(0xFF);
   drawGameFrame();
@@ -436,6 +456,11 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
   const uint32_t unchanged = perfUnchanged.exchange(0, std::memory_order_relaxed);
   const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
+  // The figures line under the title (drawControls()).
+  const uint8_t nextText = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
+  snprintf(perfText[nextText], sizeof(perfText[nextText]), "%.1f/s|wave %.0f send %.0f", displays / seconds,
+           phaseUs[3] * perDisplayMs, (phaseUs[1] + phaseUs[4]) * perDisplayMs);
+  perfTextIdx.store(nextText, std::memory_order_release);
 
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
           "refresh %.0f ms avg %.0f max; loop %.0f/s, longest gap %u ms",
@@ -592,6 +617,12 @@ void GameBoyActivity::setLayout() {
   addControl(TouchControl::Exit, rightX + 4, gameY + gameH - 52, rightW - 8, 48, "EXIT");
 }
 
+// Above the game in portrait; the left panel above the D-pad in landscape.
+bool GameBoyActivity::inTitleStrip(const int x, const int y) const {
+  if (portrait) return y < gameY;
+  return x < gameX && y < gameY + 120;
+}
+
 void GameBoyActivity::addControl(const TouchControl control, const int x, const int y, const int w, const int h,
                                  const char* label) {
   if (controlCount >= MAX_CONTROLS) return;
@@ -614,7 +645,7 @@ void GameBoyActivity::applyRefreshPreset() {
     (void)p;
 #endif
   }
-  nextCleanUs = nowMicros() + CLEAN_PERIOD_US;
+  nextCleanUs = nowMicros() + p.cleanSec * 1000000ULL;
   fullRefreshDue.store(true, std::memory_order_release);
   displayDue.store(true, std::memory_order_release);
   requestUpdate();
@@ -895,6 +926,10 @@ void GameBoyActivity::handleInput() {
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTouchDown(x, y)) {
+    // The title strip cycles the fast refresh presets, once per touch.
+    if (refreshPreset != 0 && inTitleStrip(x, y) && hitTestTouch(x, y) == TouchControl::None) {
+      presetRequested = true;
+    }
     updateTouch(x, y);
   }
 
@@ -1121,6 +1156,27 @@ void GameBoyActivity::drawControls() {
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
+  if (refreshPreset != 0) {
+    // 1.8.3 test build: the preset (tap the title strip for the next one) and
+    // the last figures (updatePerf()).
+    const char* label = kRefreshPresets[refreshPreset].label;
+    // perfText is "rate|phases": one line in portrait, two in the narrow
+    // landscape panel.
+    char figures[48];
+    snprintf(figures, sizeof(figures), "%s", perfText[perfTextIdx.load(std::memory_order_acquire)]);
+    char* phases = std::strchr(figures, '|');
+    if (phases) *phases++ = '\0';
+    if (portrait) {
+      char line[80];
+      snprintf(line, sizeof(line), "%s  %s %s", label, figures, phases ? phases : "");
+      const int w = renderer.getTextWidth(SMALL_FONT_ID, line);
+      renderer.drawText(SMALL_FONT_ID, renderer.getScreenWidth() - 8 - w, titleY + 2, line, true);
+    } else {
+      renderer.drawText(SMALL_FONT_ID, titleX, titleY + 24, label, true);
+      renderer.drawText(SMALL_FONT_ID, titleX, titleY + 40, figures, true);
+      if (phases) renderer.drawText(SMALL_FONT_ID, titleX, titleY + 56, phases, true);
+    }
+  }
   for (size_t i = 0; i < controlCount; ++i) {
     const ControlButton& c = controls[i];
     const uint8_t bit = joypadBitForTouch(c.control);

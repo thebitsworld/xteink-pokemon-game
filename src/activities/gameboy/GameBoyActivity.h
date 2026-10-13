@@ -182,11 +182,16 @@ class GameBoyActivity final : public Activity {
   uint32_t perfSeenRefreshes = 0, perfSeenSkipped = 0;
   uint64_t perfTotalPhaseUs[6] = {};
 
-  // The screen refresh the game uses: 0 = stock, 1 = the faster one on readers
-  // it was validated on (see kRefreshPresets). The faster one gets a cleaning
-  // refresh every CLEAN_PERIOD_US against ghosting.
-  static constexpr uint64_t CLEAN_PERIOD_US = 60000000ULL;
+  // The screen refresh the game uses: 0 = stock, 1 and up the faster ones on
+  // readers they were validated on (see kRefreshPresets), each with its own
+  // cleaning refresh period against ghosting. 1.8.3 test build: a tap on the
+  // title strip asks for the next fast preset (presetRequested), and the
+  // figures line under the title is perfText.
   uint8_t refreshPreset = 0;
+  std::atomic<bool> presetRequested{false};
+  char perfText[2][48] = {};
+  std::atomic<uint8_t> perfTextIdx{0};
+  bool inTitleStrip(int x, int y) const;
   uint64_t nextCleanUs = 0;
 
   void setLayout();
