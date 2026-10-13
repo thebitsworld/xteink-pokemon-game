@@ -428,7 +428,23 @@
         "input.lua",
         "xqmenu.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "sprites/r1.raw",
+        "sprites/r2.raw",
+        "sprites/r3.raw",
+        "sprites/r4.raw",
+        "sprites/r5.raw",
+        "sprites/r6.raw",
+        "sprites/r7.raw",
+        "sprites/b1.raw",
+        "sprites/b2.raw",
+        "sprites/b3.raw",
+        "sprites/b4.raw",
+        "sprites/b5.raw",
+        "sprites/b6.raw",
+        "sprites/b7.raw",
+        "sprites/river1.raw",
+        "sprites/river2.raw"
       ]
     },
     {

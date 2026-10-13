@@ -6,10 +6,12 @@
 -- S.B ({ x, y, cell }: the top-left intersection and the spacing) and whether
 -- it is turned round in S.flip, for input.lua.
 --
--- Pieces stand on the intersections. The device has no Chinese font, so a
--- piece is a disc with a letter: K general, A advisor, E elephant, H horse,
--- R chariot, C cannon, P soldier. Red is a white disc with a black ring,
--- Black a black disc.
+-- Pieces stand on the intersections: a disc with the piece's Chinese
+-- character, a 32x32 sprite (sprites/r1..r7.raw for Red, b1..b7.raw for
+-- Black, in piece-type order: general, advisor, elephant, horse, chariot,
+-- cannon, soldier) since the device has no Chinese font. Red is a white disc
+-- with a black ring and a black character, Black a black disc with a white
+-- one. Move notation keeps Latin letters: K A E H R C P.
 
 return function(C, S)
 local V = {}
@@ -65,8 +67,10 @@ local function drawGrid()
         smudge.line(x0 + 3 * c, ya, x0 + 5 * c, yb, 1, true)
         smudge.line(x0 + 5 * c, ya, x0 + 3 * c, yb, 1, true)
     end
-    smudge.text(S.w // 2, y0 + 4 * c + (c - smudge.line_height("ui12")) // 2, "~  River  ~", "ui12", "bold", "center",
-                true)
+    -- The river: "Chu River" and "Han Border" (80x32 sprites), as on a real board.
+    local ry = y0 + 4 * c + (c - 32) // 2
+    smudge.draw_sprite(x0 + 2 * c - 40, ry, 80, 32, "sprites/river1.raw")
+    smudge.draw_sprite(x0 + 6 * c - 40, ry, 80, 32, "sprites/river2.raw")
 end
 
 local function drawPiece(x, y, R, p)
@@ -74,12 +78,11 @@ local function drawPiece(x, y, R, p)
     if red then
         smudge.circle(x, y, R, true, false)
         smudge.circle(x, y, R, false, true, 3)
-        smudge.circle(x, y, R - 6, false, true, 1)
     else
         smudge.circle(x, y, R, true, true)
-        smudge.circle(x, y, R - 5, false, false, 1)
     end
-    smudge.text(x, y - smudge.line_height("ui12") // 2, letterOf(p), "ui12", "bold", "center", red)
+    local t = red and p or p - 8
+    smudge.draw_sprite(x - 16, y - 16, 32, 32, (red and "sprites/r" or "sprites/b") .. t .. ".raw", not red)
 end
 
 local function statusText()
