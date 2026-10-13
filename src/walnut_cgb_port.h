@@ -35,6 +35,9 @@ void walnut_cgb_set_cart_ram(WalnutCgb* cgb, uint8_t* ram, size_t size);
 void walnut_cgb_set_ram_written(WalnutCgb* cgb, void (*written)(void* user));
 
 void walnut_cgb_run_frame(WalnutCgb* cgb);
+// Whether the next frame's lines are drawn (sent to the line callback); a
+// frame that is not drawn still runs in full.
+void walnut_cgb_set_draw(WalnutCgb* cgb, int draw);
 // Joypad state, active low as on the Game Boy.
 void walnut_cgb_set_joypad(WalnutCgb* cgb, uint8_t activeLow);
 void walnut_cgb_set_rtc(WalnutCgb* cgb, const struct tm* time);

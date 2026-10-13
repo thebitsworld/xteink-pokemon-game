@@ -87,6 +87,12 @@ class GameBoyActivity final : public Activity {
   static constexpr uint64_t DISPLAY_PERIOD_US = 250000ULL;
   static constexpr uint64_t FAST_DISPLAY_PERIOD_US = 50000ULL;
   static constexpr uint8_t MAX_CATCH_UP_FRAMES = 4;
+  // One emulated frame in DRAW_EVERY is drawn into a picture: the e-ink
+  // screen shows at most ~5 a second, and drawing the lines is a large part of
+  // a frame's work (Walnut-CGB ran Game Boy Color games at ~2/3 speed drawing
+  // all 60). The other frames run in full but are never drawn or published.
+  static constexpr uint8_t DRAW_EVERY = 3;
+  uint8_t framesSinceDraw = DRAW_EVERY;  // draw the first frame
   static constexpr size_t EMULATOR_FRAME_BYTES = GAMEBOY_WIDTH * GAMEBOY_HEIGHT;
   static constexpr size_t MAX_CONTROLS = 10;
   // Battery-backed cartridge RAM is written out this often while it changes,
@@ -199,8 +205,9 @@ class GameBoyActivity final : public Activity {
 
   // Performance counters, logged every 2 s and appended to
   // /.crosspoint/gameboy-perf.txt on exit: the emulator's speed against real
-  // time, the time one Game Boy frame takes, how often it waited for a buffer
-  // the display held, and how long drawing and the e-ink refresh take. The
+  // time, the time one Game Boy frame takes, how often a frame due to be drawn
+  // ran undrawn because the display held both buffers ("waits"), and how long
+  // drawing and the e-ink refresh take. The
   // emulator task owns its counters; the render task adds to the atomics.
   static constexpr uint64_t PERF_WINDOW_US = 2000000ULL;
   uint64_t perfWindowStartUs = 0;

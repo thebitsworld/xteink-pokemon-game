@@ -195,6 +195,7 @@ void GameBoyActivity::onEnter() {
   touchJoypadMask = 0;
   activeTouch = TouchControl::None;
   nextFrameUs = 0;
+  framesSinceDraw = DRAW_EVERY;
   nextDisplayUs = 0;
   displayDue.store(true, std::memory_order_release);
   error[0] = '\0';
@@ -1526,27 +1527,40 @@ void GameBoyActivity::runEmulation(const uint64_t nowUs) {
 
   uint8_t ran = 0;
   while (nowUs >= nextFrameUs && ran < MAX_CATCH_UP_FRAMES) {
-    // Do not start a frame in either buffer while the display task owns it,
-    // and do not overwrite the most recently completed frame before it has
-    // been consumed. With two buffers this gives a simple, lock-free handoff.
-    const uint8_t pending = readyFrame.load(std::memory_order_acquire);
-    const uint8_t rendering = renderFrame.load(std::memory_order_acquire);
-    if (writeFrame == pending || writeFrame == rendering) {
-      ++perfWaits;
-      break;
+    // Draw one frame in DRAW_EVERY. Never draw into a buffer the display task
+    // owns, nor over the most recently completed frame before it has been
+    // consumed (with two buffers, a simple lock-free handoff): such a frame
+    // runs undrawn instead, so the game never waits for the screen.
+    bool draw = framesSinceDraw + 1 >= DRAW_EVERY;
+    if (draw) {
+      const uint8_t pending = readyFrame.load(std::memory_order_acquire);
+      const uint8_t rendering = renderFrame.load(std::memory_order_acquire);
+      if (writeFrame == pending || writeFrame == rendering) {
+        ++perfWaits;
+        draw = false;
+      }
     }
 
     const uint64_t frameStartUs = nowMicros();
     if (cgb) {
+      walnut_cgb_set_draw(cgb, draw ? 1 : 0);
       walnut_cgb_run_frame(cgb);
     } else {
+      // Peanut-GB's own frame skip, steered the same way (see walnut_cgb_set_draw()).
+      gb->direct.frame_skip = true;
+      gb->display.frame_skip_count = draw;
       gb_run_frame(gb);
     }
     const uint32_t frameUs = static_cast<uint32_t>(nowMicros() - frameStartUs);
     perfEmuUs += frameUs;
     perfEmuMaxUs = std::max(perfEmuMaxUs, frameUs);
     ++perfFrames;
-    publishCompletedFrame();
+    if (draw) {
+      publishCompletedFrame();
+      framesSinceDraw = 0;
+    } else if (framesSinceDraw < DRAW_EVERY) {
+      ++framesSinceDraw;
+    }
     nextFrameUs += EMULATION_FRAME_PERIOD_US;
     ++ran;
   }

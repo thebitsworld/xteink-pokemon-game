@@ -178,6 +178,14 @@ void walnut_cgb_set_ram_written(WalnutCgb* c, void (*written)(void* user)) { c->
 
 void walnut_cgb_run_frame(WalnutCgb* c) { gb_run_frame_dualfetch(&c->gb); }
 
+// The core's own frame skip, steered from outside: its line drawing runs while
+// frame_skip_count is set (it flips the count at each VBlank; this sets it
+// again before every frame).
+void walnut_cgb_set_draw(WalnutCgb* c, const int draw) {
+  c->gb.direct.frame_skip = 1;
+  c->gb.display.frame_skip_count = draw ? 1 : 0;
+}
+
 void walnut_cgb_set_joypad(WalnutCgb* c, const uint8_t activeLow) { c->gb.direct.joypad = activeLow; }
 
 void walnut_cgb_set_rtc(WalnutCgb* c, const struct tm* time) { gb_set_rtc(&c->gb, time); }
