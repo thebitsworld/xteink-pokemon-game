@@ -12,6 +12,8 @@ Both run the [Peanut-GB](https://github.com/deltabeard/Peanut-GB) emulator, so
 the differences come from how the picture reaches the e-ink screen. This page
 explains why Ink-boy's picture comes out in inverted black and white, and what
 was changed here to make the screen update about three times as fast.
+The changes are written up step by step, with code, in
+[Making the Game Boy screen faster](gameboy-speed-guide.md).
 
 Compared against Ink-boy as of 12 October 2026 and this fork's v1.8.2.
 
