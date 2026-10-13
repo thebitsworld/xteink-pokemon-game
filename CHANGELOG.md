@@ -1,3 +1,13 @@
+## [1.8.3-beta.9] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only: in a Game Boy Color game (Pokémon Gold), set SETTINGS > Colours to Smooth (a setting kept from beta.7/8 stays Contrast) and compare it with Contrast by day, by night and in a cave: is the picture clearer, or too grainy? Does it ghost more when you walk? Check that Game Boy games look as before. Then send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Added
+
+- Game Boy (X4 Pro): SETTINGS > Colours > Smooth, the new default for Game Boy Color games: each colour gets its own grey out of 17, drawn as fine dot patterns, so close colours stay apart, by day and by night. Contrast (the Game Boy's four greys) and Brightness stay.
+
 ## [1.8.3-beta.8] - 2026-10-13
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its Game Boy Color emulator is new, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
