@@ -1,3 +1,18 @@
+## [1.8.3-beta.4] - 2026-10-13
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. Its new Game Boy Color emulator has not run on a reader yet, and its save files could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
+
+For the tester only: check that Applications now starts with Pokémon, Game Boy (X4 Pro) and Photo Slideshow, that each opens and returns to Applications, and that Home keeps the Pokémon band but no Pokémon or Slideshow menu entry. On the X4 Pro, open a Game Boy Color game (`.gbc`) from Applications > Game Boy: does it run at full speed (turn on the status line), do its colours read well as greys, and do Quick save, Quick load and sleep-and-wake work? Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Added
+
+- Game Boy (X4 Pro): Game Boy Color games. A game made for the Game Boy Color runs on the Walnut-CGB emulator (MIT, a Peanut-GB rewrite) and shows its colours as greys by brightness; Game Boy games run as before.
+- Applications > Game Boy (X4 Pro): pick a `.gb` or `.gbc` game from the SD card, starting in the folder of the last game played, and play it.
+
+### Changed
+
+- The Pokémon game and Photo Slideshow are in Applications now, with Game Boy at the top of the list. Home keeps the Pokémon band (or the Cover Grid's Pokémon tile); with Applications switched off they are on Home as before.
+
 ## [1.8.3-beta.3] - 2026-10-13
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. While a Game Boy game runs on an X4 Pro with a UC8279 screen, it drives the e-ink screen with shorter waveforms than v1.8.2, not yet validated on this panel. It can leave ghosted or faint pictures on the screen, and in the worst case lasting image retention or damage to the display. It also brings new save files that could still lose game progress: back up your `.sav` files first. If you only want to read and play, stay on [v1.8.2](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.2). Install it at your own risk.
