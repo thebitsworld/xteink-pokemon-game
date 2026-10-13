@@ -5,8 +5,14 @@ nav_order: 1.45
 
 # Game Boy (X4 Pro)
 
-The X4 Pro firmware can play original Game Boy (DMG) games. Copy a `.gb` ROM
-file to the SD card, then open it from the file browser like a book.
+The X4 Pro firmware can play Game Boy and Game Boy Color games. Copy a `.gb`
+or `.gbc` ROM file to the SD card, then open **Applications > Game Boy**: it
+lists the folders and games on the card (starting in the folder of the last
+game you played), and a tap on a game starts it. Leaving the game returns to
+Applications. A ROM also opens from the file browser like a book.
+
+Game Boy Color games show in shades of grey: each colour becomes the grey of
+its brightness, drawn as dot patterns like the Game Boy's own greys.
 
 Only play ROMs you own. No games come with the firmware.
 
@@ -74,8 +80,8 @@ Back while it starts to go to the home screen instead.
 
 - X4 Pro only: the ROM is loaded into the X4 Pro's extra memory (PSRAM), which
   the X3 and X4 do not have.
-- Game Boy only: Game Boy Color-only games (`.gbc`) do not run, and MBC7
-  cartridges are not supported.
+- MBC7 cartridges and the Game Boy Camera are not supported, and some Game Boy
+  Color games may run slower or less accurately than Game Boy ones.
 - No sound.
 - The game runs at full speed, but the e-ink screen updates only about four
   to five times a second (X4 Pros with a UC8279 screen controller, which
@@ -97,7 +103,10 @@ and how much picture data each update sent. Send it along when you report a slow
 
 ## Credits
 
-The emulator is [Peanut-GB](https://github.com/deltabeard/Peanut-GB) by Mahyar
-Koshkouei (MIT), with parts from SameBoy by Lior Halphon. The game screen
-started from the [Ink-boy](https://github.com/hellominecraft913-dev/Ink-boy)
-CrossInk fork (MIT).
+Game Boy games run on [Peanut-GB](https://github.com/deltabeard/Peanut-GB) by
+Mahyar Koshkouei (MIT), and Game Boy Color games on
+[Walnut-CGB](https://github.com/Mr-PauI/Walnut-CGB) by Mr. Paul (MIT), a
+Peanut-GB rewrite; both carry parts from SameBoy by Lior Halphon (MIT). The
+game screen started from the [Ink-boy](https://github.com/hellominecraft913-dev/Ink-boy)
+CrossInk fork (MIT), whose Game Boy Color integration showed how to fit
+Walnut-CGB beside Peanut-GB.

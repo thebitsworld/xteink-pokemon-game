@@ -19,8 +19,12 @@ is in git history (before 2026-10-08).
   15-35% more than a real X3, where ~65 KB of Lua is the measured ceiling). An app that cannot fit lists
   `"devices": ["x4pro"]` in its manifest and catalog entry instead of losing features. On the X4 Pro the
   Lua heap is in PSRAM (2 MB limit).
-- Game Boy (X4 Pro only, `CROSSINK_GAMEBOY`): Peanut-GB core in `lib/PeanutGB`, screen in
-  `src/activities/gameboy/`. The simulator needs `CROSSINK_SIMULATOR_PSRAM_TOTAL=8388608` to open a ROM.
+- Game Boy (X4 Pro only, `CROSSINK_GAMEBOY`): Peanut-GB core in `lib/PeanutGB` for DMG ROMs; Walnut-CGB
+  v1.2.4 (`lib/WalnutCGB`, MIT, local forward-declaration edit) for ROMs with header 0x143 bit 7, compiled
+  alone with renamed symbols in `src/walnut_cgb_impl.c` behind `src/walnut_cgb_port.h`. Screen in
+  `src/activities/gameboy/`; Applications lists a built-in Game Boy row (ROM picker = FileBrowser
+  `Mode::PickGameBoyRom`). Settings/romdir in `/.crosspoint/gameboy.cfg`; `<rom>.state` quick save,
+  `<rom>.resume` + `APP_STATE.lastSleepFromGameBoy` for wake-into-game. The simulator needs `CROSSINK_SIMULATOR_PSRAM_TOTAL=8388608` to open a ROM.
   Never commit ROMs (`game/` is untracked).
 - Game Boy screen speed (1.8.2): on UC8279 variant 0x68 only (`fastRefreshValidated()`, the user's
   panel) the "fast-window" preset uses the X3 UC8279 DU bank scaled to 40%, PLL 0x0F, 20 MHz display
