@@ -1,0 +1,10 @@
+{
+  "name": "WalnutCGB",
+  "version": "1.2.4",
+  "description": "Walnut-CGB, a Game Boy / Game Boy Color emulator core derived from Peanut-GB (https://github.com/Mr-PauI/Walnut-CGB)",
+  "keywords": ["gameboy", "gameboy color", "emulator", "gbc"],
+  "license": "MIT",
+  "build": {
+    "srcDir": "src"
+  }
+}
