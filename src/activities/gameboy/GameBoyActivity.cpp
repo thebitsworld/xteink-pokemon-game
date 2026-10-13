@@ -10,6 +10,7 @@
 #include <esp_heap_caps.h>
 #ifndef SIMULATOR
 #include <BoardConfig.h>
+#include <esp_memory_utils.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #endif
@@ -268,8 +269,8 @@ void GameBoyActivity::onEnter() {
     applyRefreshPreset();
   }
   startEmuTask();
-  LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes)", title, static_cast<unsigned>(romSize),
-          static_cast<unsigned>(cartRamSize));
+  LOG_INF(TAG, "Started %s (%u bytes, save=%u bytes, core %s)", title, static_cast<unsigned>(romSize),
+          static_cast<unsigned>(cartRamSize), coreName());
 }
 
 void GameBoyActivity::onExit() {
@@ -616,6 +617,17 @@ void GameBoyActivity::resetPerfTotals(const uint64_t nowUs) {
   }
 }
 
+// The emulator core, and for Walnut-CGB where its context landed (internal
+// RAM is several times faster than PSRAM), for the speed log.
+const char* GameBoyActivity::coreName() const {
+  if (!cgb) return "peanut";
+#ifdef SIMULATOR
+  return "walnut";
+#else
+  return esp_ptr_external_ram(cgb) ? "walnut-psram" : "walnut-internal";
+#endif
+}
+
 // One line per game session (and per refresh preset tried in it), for
 // comparing readers, builds and presets.
 void GameBoyActivity::writePerfLog() {
@@ -625,23 +637,31 @@ void GameBoyActivity::writePerfLog() {
   char panel[24];
   panelName(panel, sizeof(panel));
   const float phaseDiv = perfTotalDisplays ? 1000.0f * perfTotalDisplays : 1.0f;
-  char line[340];
+  // The preset's label is for SETTINGS ("D30, clean 60 s"): no commas in a
+  // CSV field.
+  char preset[32];
+  std::strncpy(preset, kRefreshPresets[refreshPreset].label, sizeof(preset) - 1);
+  preset[sizeof(preset) - 1] = '\0';
+  for (char* c = preset; *c; ++c) {
+    if (*c == ',') *c = ' ';
+  }
+  char line[360];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f,%s\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
       perfTotalDisplays ? perfTotalRefreshUs / 1000.0f / perfTotalDisplays : 0.0f, perfTotalRefreshMaxUs / 1000.0f,
       perfTotalLoops / seconds, static_cast<unsigned>(perfTotalLoopMaxGapUs / 1000), portrait ? "portrait" : "landscape",
-      panel, kRefreshPresets[refreshPreset].label, static_cast<unsigned long long>(perfTotalCleanRefreshes),
+      panel, preset, static_cast<unsigned long long>(perfTotalCleanRefreshes),
       perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
       perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv,
-      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv);
+      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv, coreName());
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb,core\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);

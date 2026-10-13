@@ -262,6 +262,7 @@ class GameBoyActivity final : public Activity {
   void runEmulation(uint64_t nowUs);
   void updatePerf(uint64_t nowUs);
   void writePerfLog();
+  const char* coreName() const;
   void resetPerfTotals(uint64_t nowUs);
   void releaseRenderedFrame();
   void publishCompletedFrame();

@@ -4,18 +4,32 @@
 // clash with Peanut-GB's in src/peanut_gb_impl.c; C++ uses walnut_cgb_port.h.
 #if defined(CROSSINK_GAMEBOY) && CROSSINK_GAMEBOY
 
+// The core is the Game Boy Color's CPU: compiled for speed rather than the
+// firmware's default size (-Os). At -Os it ran Pokemon Gold at ~61% speed.
+#pragma GCC optimize("O2")
+
 #include <stdlib.h>
 #include <string.h>
 
-// The context (~50 KB) goes to PSRAM on the reader; the simulator's
+// The context (~50 KB: work RAM, video RAM and the CPU's registers, touched
+// on every instruction) goes to internal RAM when there is room to spare,
+// PSRAM otherwise (several times slower to reach). The simulator's
 // esp_heap_caps.h is C++ only.
 #ifdef SIMULATOR
 #define walnutAlloc(size) calloc(1, (size))
 #define walnutFree(ptr) free(ptr)
 #else
 #include <esp_heap_caps.h>
+// Internal RAM left for the rest of the firmware with the context there.
+#define WALNUT_INTERNAL_RESERVE (48 * 1024)
 static void* walnutAlloc(const size_t size) {
-  void* p = heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  const size_t freeInternal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  void* p = NULL;
+  if (largest >= size && freeInternal >= size + WALNUT_INTERNAL_RESERVE) {
+    p = heap_caps_calloc(1, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
+  if (!p) p = heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   return p ? p : calloc(1, size);
 }
 #define walnutFree(ptr) heap_caps_free(ptr)
