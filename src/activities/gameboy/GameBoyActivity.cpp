@@ -58,20 +58,18 @@ uint64_t nowMicros() {
 }
 
 // The screen refresh a game uses (GameBoyActivity::refreshPreset). The panel's
-// built-in Fast waveform takes ~680 ms on the X4 Pro's UC8279, about 1.3
+// built-in Fast waveform takes ~540 ms on the X4 Pro's UC8279, about 1.3
 // pictures a second. Measured on a UC8279 (variant 0x68) unit across the
-// 1.8.1 betas, "fast" runs a host-loaded DU waveform (the stock X3 UC8279
-// bank) at 40% of its frames, the PLL frame rate at 0x0F and the display SPI
-// at 20 MHz (the controller's rating; 10 MHz otherwise): a refresh takes
-// ~276 ms, about 3 pictures a second, with the darkness of stock and a little
-// ghosting that the periodic cleaning refresh clears. Drive levels stay the
-// bank's and voltages the panel's. Other controllers and variants keep stock.
-// It also sends and drives only the rectangle that changed since the last
-// picture, and skips a picture that did not change at all.
-// 1.8.3 test build: tapping the title strip cycles the fast presets (1 and up).
-// "D30"/"D25" run 30%/25% of the DU frames with a cleaning refresh every 30 s;
-// "P1F"/"P3F"/"P10" try PLL values above 0x0F (undocumented on this
-// controller: 0x0E measured ~20.5 ms a frame, 0x0F ~11.5 ms).
+// 1.8.1-1.8.3 test builds, "fast" runs a host-loaded DU waveform (the stock X3
+// UC8279 bank) at 30% of its frames, the PLL frame rate at 0x0F and the
+// display SPI at 20 MHz (the controller's rating; 10 MHz otherwise), and sends
+// and drives only the rectangle that changed since the last picture (an
+// unchanged picture is skipped): ~155 ms of waveform, about 5 pictures a
+// second, with the darkness of stock and a little ghosting that the cleaning
+// refresh every minute clears. 40% looked the same and 25% runs the same
+// frames (phases of one frame do not shrink); PLL 0x1F and 0x3F were faster
+// but faint, 0x10 no different. Drive levels stay the bank's and voltages the
+// panel's. Other controllers and variants keep stock.
 struct RefreshPreset {
   const char* label;
   uint8_t tsset;
@@ -83,14 +81,13 @@ struct RefreshPreset {
 };
 constexpr RefreshPreset kRefreshPresets[] = {
     {"stock", 0, 0, 0, 0, false, 0},
-    {"D40 0F", 0, 0x0F, 40, 20000000, true, 60},
-    {"D30 0F", 0, 0x0F, 30, 20000000, true, 30},
-    {"D25 0F", 0, 0x0F, 25, 20000000, true, 30},
-    {"D40 P1F", 0, 0x1F, 40, 20000000, true, 60},
-    {"D40 P3F", 0, 0x3F, 40, 20000000, true, 60},
-    {"D40 P10", 0, 0x10, 40, 20000000, true, 60},
+    {"D30 0F", 0, 0x0F, 30, 20000000, true, 60},
 };
-constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
+
+// Whether the status line (screen updates per second, emulator speed) shows
+// under the title; a tap on the title strip toggles it. Kept across games
+// until the reader restarts.
+std::atomic<bool> statusLineShown{false};
 
 // Whether this reader's screen is one the fast refresh was validated on.
 bool fastRefreshValidated() {
@@ -312,13 +309,6 @@ void GameBoyActivity::emuTaskEntry(void* arg) {
 
 void GameBoyActivity::emuTaskLoop() {
   while (emuRun.load(std::memory_order_acquire)) {
-    if (presetRequested.exchange(false, std::memory_order_acq_rel) && refreshPreset != 0) {
-      // One gameboy-perf.txt line per preset tried: close this one's figures.
-      writePerfLog();
-      resetPerfTotals(nowMicros());
-      refreshPreset = static_cast<uint8_t>(refreshPreset % (kRefreshPresetCount - 1) + 1);
-      applyRefreshPreset();
-    }
     const uint64_t nowUs = nowMicros();
     if (perfLastLoopUs) perfLoopMaxGapUs = std::max(perfLoopMaxGapUs, static_cast<uint32_t>(nowUs - perfLastLoopUs));
     perfLastLoopUs = nowUs;
@@ -364,8 +354,10 @@ void GameBoyActivity::render(RenderLock&&) {
   // and with every cleaning refresh in case anything else drew on the screen.
   const uint32_t chrome = static_cast<uint32_t>(physicalJoypadMask | touchJoypadMask) |
                           (static_cast<uint32_t>(activeTouch) << 8) | (portrait ? 0x10000u : 0u) |
-                          (static_cast<uint32_t>(perfTextIdx.load(std::memory_order_acquire)) << 17) |
-                          (static_cast<uint32_t>(refreshPreset) << 18);
+                          (statusLineShown.load(std::memory_order_acquire) ? (0x20000u | (static_cast<uint32_t>(
+                                                             perfTextIdx.load(std::memory_order_acquire))
+                                                         << 18))
+                                           : 0u);
   const bool redrawChrome = cleaning || chrome != chromeKey;
   if (redrawChrome) renderer.clearScreen(0xFF);
   drawGameFrame();
@@ -456,10 +448,9 @@ void GameBoyActivity::updatePerf(const uint64_t nowUs) {
   const uint32_t cleanRefreshes = perfCleanRefreshes.exchange(0, std::memory_order_relaxed);
   const uint32_t unchanged = perfUnchanged.exchange(0, std::memory_order_relaxed);
   const float perDisplayMs = displays ? 1.0f / displays / 1000.0f : 0.0f;
-  // The figures line under the title (drawControls()).
+  // The status line under the title (drawControls()): "screen|game" parts.
   const uint8_t nextText = perfTextIdx.load(std::memory_order_relaxed) ^ 1u;
-  snprintf(perfText[nextText], sizeof(perfText[nextText]), "%.1f/s|wave %.0f send %.0f", displays / seconds,
-           phaseUs[3] * perDisplayMs, (phaseUs[1] + phaseUs[4]) * perDisplayMs);
+  snprintf(perfText[nextText], sizeof(perfText[nextText]), "Screen %.1f/s|Game %u%%", displays / seconds, speed);
   perfTextIdx.store(nextText, std::memory_order_release);
 
   LOG_INF(TAG, "perf: emu %.1f fps (%u%%), frame %.1f ms avg %.1f max, waits %u; lcd %.1f/s, draw %.1f ms, "
@@ -926,9 +917,11 @@ void GameBoyActivity::handleInput() {
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTouchDown(x, y)) {
-    // The title strip cycles the fast refresh presets, once per touch.
-    if (refreshPreset != 0 && inTitleStrip(x, y) && hitTestTouch(x, y) == TouchControl::None) {
-      presetRequested = true;
+    // The title strip shows or hides the status line, once per touch.
+    if (inTitleStrip(x, y) && hitTestTouch(x, y) == TouchControl::None) {
+      statusLineShown.store(!statusLineShown.load(std::memory_order_relaxed), std::memory_order_release);
+      displayDue.store(true, std::memory_order_release);
+      requestUpdate();
     }
     updateTouch(x, y);
   }
@@ -1156,25 +1149,22 @@ void GameBoyActivity::drawControls() {
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);
-  if (refreshPreset != 0) {
-    // 1.8.3 test build: the preset (tap the title strip for the next one) and
-    // the last figures (updatePerf()).
-    const char* label = kRefreshPresets[refreshPreset].label;
-    // perfText is "rate|phases": one line in portrait, two in the narrow
-    // landscape panel.
-    char figures[48];
-    snprintf(figures, sizeof(figures), "%s", perfText[perfTextIdx.load(std::memory_order_acquire)]);
-    char* phases = std::strchr(figures, '|');
-    if (phases) *phases++ = '\0';
+  if (statusLineShown.load(std::memory_order_acquire)) {
+    // The last figures (updatePerf()), "screen|game": one line right of the
+    // title in portrait, two in the narrow landscape panel. Blank until the
+    // first figures arrive (two seconds).
+    char screen[48];
+    snprintf(screen, sizeof(screen), "%s", perfText[perfTextIdx.load(std::memory_order_acquire)]);
+    char* game = std::strchr(screen, '|');
+    if (game) *game++ = '\0';
     if (portrait) {
-      char line[80];
-      snprintf(line, sizeof(line), "%s  %s %s", label, figures, phases ? phases : "");
+      char line[64];
+      snprintf(line, sizeof(line), "%s  %s", screen, game ? game : "");
       const int w = renderer.getTextWidth(SMALL_FONT_ID, line);
       renderer.drawText(SMALL_FONT_ID, renderer.getScreenWidth() - 8 - w, titleY + 2, line, true);
     } else {
-      renderer.drawText(SMALL_FONT_ID, titleX, titleY + 24, label, true);
-      renderer.drawText(SMALL_FONT_ID, titleX, titleY + 40, figures, true);
-      if (phases) renderer.drawText(SMALL_FONT_ID, titleX, titleY + 56, phases, true);
+      renderer.drawText(SMALL_FONT_ID, titleX, titleY + 24, screen, true);
+      if (game) renderer.drawText(SMALL_FONT_ID, titleX, titleY + 40, game, true);
     }
   }
   for (size_t i = 0; i < controlCount; ++i) {
