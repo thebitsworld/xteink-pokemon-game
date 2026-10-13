@@ -67,8 +67,6 @@ is in git history (before 2026-10-08).
   - `RefreshTimings` reports the last COMPLETED refresh with running `refreshes`/`skipped` counts (an
     overlapped refresh completes on the next call). Not an SDK file but related:
     `HalDisplay::displayBufferOverlapped`/`finishOverlapped` (SPI-locked shadow-free async refresh).
-  - `sendPartialWindow` sends PT_SCAN 0x00 (scan only the window's gates) for a changed rectangle,
-    stock 0x01 otherwise (1.8.2-beta.4 experiment).
 
 ## Constraints that still bite
 
