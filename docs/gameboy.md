@@ -50,10 +50,15 @@ Up/Down and Confirm), and **Back to game** or Back returns to the game.
   ghosting - and whether a full cleaning refresh clears the ghosting every 30 or
   60 seconds. D40 with a cleaning refresh every 60 seconds is the default.
   Other screens use the standard refresh.
+- **Colours** (Game Boy Color games): how colours become greys. **Contrast**
+  (the default) keeps them apart when the game darkens the whole picture, as
+  at night in Pokémon Gold and Silver, where the grass would otherwise turn
+  into one dark patch; by day it looks the same as **Brightness**, which gives
+  each colour the grey of its own brightness.
 - **Status line**: the same as tapping the title strip.
 - **Quick save** and **Quick load**: see below.
 
-Orientation, screen speed and the status line are kept for every game, in
+Orientation, screen speed, colours and the status line are kept for every game, in
 `/.crosspoint/gameboy.cfg`.
 
 Hold a touch button to keep it pressed. If a ROM cannot be opened, the error
