@@ -2315,14 +2315,26 @@ class SimulatorSmokeTest {
 #if defined(CROSSINK_ENABLE_LUA_APPS)
   // The runner copies test/lua_apps/smoke into the SD sandbox, so the
   // alphabetical list is: Lua Smoke Test, then the built-in App Store and App
-  // Settings. Launches the app, presses Confirm inside it, exits with Back
-  // (the app calls smudge.exit()), then opens App Settings. The runner checks
-  // the app's "LUA_SMOKE ..." log markers and that no Lua error was logged.
+  // Settings (on Game Boy builds, after the built-in Game Boy row, whose ROM
+  // picker opens and closes first). Launches the app, presses Confirm inside
+  // it, exits with Back (the app calls smudge.exit()), then opens App
+  // Settings. The runner checks the app's "LUA_SMOKE ..." log markers and that
+  // no Lua error was logged.
   void buildLuaAppsInputScript() {
     inputScript.clear();
     scriptIndex = 0;
     inputScript.push_back(render("Lua Applications", 4));
     inputScript.push_back(assertActivity("Applications"));
+#if CROSSINK_GAMEBOY
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Game Boy ROM picker", 4));
+    inputScript.push_back(assertActivity("FileBrowser"));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Lua Applications after the ROM picker", 4));
+    inputScript.push_back(assertActivity("Applications"));
+    addTap(MappedInputManager::Button::Down);
+    inputScript.push_back(render("Lua Smoke Test selected", 3));
+#endif
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Lua Smoke Test app", 8));
     inputScript.push_back(assertActivity("Lua Smoke Test"));
@@ -2331,6 +2343,9 @@ class SimulatorSmokeTest {
     addTap(MappedInputManager::Button::Back);
     inputScript.push_back(render("Lua Applications Restored", 6));
     inputScript.push_back(assertActivity("Applications"));
+#if CROSSINK_GAMEBOY
+    addTap(MappedInputManager::Button::Up);  // to the Game Boy row first
+#endif
     addTap(MappedInputManager::Button::Up);  // wraps to the last entry, App Settings
     inputScript.push_back(render("Lua Applications Settings selected", 3));
     addTap(MappedInputManager::Button::Confirm);

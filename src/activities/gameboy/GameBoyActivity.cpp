@@ -234,10 +234,14 @@ void GameBoyActivity::onEnter() {
   time(&rawTime);
   struct tm timeInfo {};
   localtime_r(&rawTime, &timeInfo);
-  gb_set_rtc(gb, &timeInfo);
+  setCoreRtc(timeInfo);
 
   char gameTitle[17] = {};
-  gb_get_rom_name(gb, gameTitle);
+  if (cgb) {
+    walnut_cgb_rom_name(cgb, gameTitle);
+  } else {
+    gb_get_rom_name(gb, gameTitle);
+  }
   std::strncpy(title, gameTitle, sizeof(title) - 1);
   if (title[0] == '\0') std::strncpy(title, "GAME BOY", sizeof(title) - 1);
 
@@ -834,7 +838,7 @@ void GameBoyActivity::menuActivate(const MenuItem item) {
         time(&rawTime);
         struct tm timeInfo {};
         localtime_r(&rawTime, &timeInfo);
-        gb_set_rtc(gb, &timeInfo);
+        setCoreRtc(timeInfo);
         closeMenu();
         return;
       } else {
@@ -1001,20 +1005,30 @@ void GameBoyActivity::saveSettings() {
 // Writes header + gb_s + cartridge RAM to `path` (through a .tmp file, so a
 // failed write keeps the old one). The emulator must not be running.
 bool GameBoyActivity::writeState(const std::string& path) {
-  if (!gb) return false;
+  if (!gb && !cgb) return false;
+  const size_t coreSize = cgb ? walnut_cgb_state_size() : sizeof(gb_s);
   StateHeader header{};
   std::memcpy(header.magic, "GBQS", 4);
   header.version = kStateVersion;
-  header.gbSize = sizeof(gb_s);
+  header.reserved = cgb ? 1 : 0;  // which core the state belongs to
+  header.gbSize = static_cast<uint32_t>(coreSize);
   header.cartRamSize = static_cast<uint32_t>(cartRamSize);
   header.romSize = static_cast<uint32_t>(romSize);
   std::memcpy(header.title, title, sizeof(header.title));
 
+  // Walnut-CGB's context is opaque: copied out first.
+  uint8_t* coreState = reinterpret_cast<uint8_t*>(gb);
+  if (cgb) {
+    coreState = static_cast<uint8_t*>(heap_caps_malloc(coreSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!coreState) return false;
+    walnut_cgb_save_state(cgb, coreState);
+  }
   const std::string tempPath = path + ".tmp";
   HalFile file;
-  if (!Storage.openFileForWrite(TAG, tempPath, file)) return false;
-  bool ok = file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
-            file.write(reinterpret_cast<const uint8_t*>(gb), sizeof(gb_s)) == sizeof(gb_s);
+  bool ok = Storage.openFileForWrite(TAG, tempPath, file);
+  ok = ok && file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
+       file.write(coreState, coreSize) == coreSize;
+  if (cgb) heap_caps_free(coreState);
   if (ok && cartRamSize > 0) ok = file.write(cartRam, cartRamSize) == cartRamSize;
   ok = ok && file.sync();
   file.close();
@@ -1031,23 +1045,29 @@ bool GameBoyActivity::writeState(const std::string& path) {
 // callbacks. The emulator must not be running. The cartridge RAM it brings
 // back is written to the .sav at the next save.
 bool GameBoyActivity::readState(const std::string& path) {
-  if (!gb) return false;
+  if (!gb && !cgb) return false;
+  const size_t coreSize = cgb ? walnut_cgb_state_size() : sizeof(gb_s);
   HalFile file;
   if (!Storage.openFileForRead(TAG, path, file)) return false;
   StateHeader header{};
   bool ok = file.read(reinterpret_cast<uint8_t*>(&header), sizeof(header)) == static_cast<int>(sizeof(header)) &&
             std::memcmp(header.magic, "GBQS", 4) == 0 && header.version == kStateVersion &&
-            header.gbSize == sizeof(gb_s) && header.cartRamSize == cartRamSize && header.romSize == romSize;
+            header.reserved == (cgb ? 1 : 0) && header.gbSize == coreSize && header.cartRamSize == cartRamSize &&
+            header.romSize == romSize;
   // Read everything aside first, so a short file leaves the game untouched.
-  auto* loaded = static_cast<gb_s*>(heap_caps_malloc(sizeof(gb_s), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  auto* loaded = static_cast<gb_s*>(heap_caps_malloc(coreSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   uint8_t* loadedRam =
       cartRamSize > 0 ? static_cast<uint8_t*>(heap_caps_malloc(cartRamSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT))
                       : nullptr;
   ok = ok && loaded && (cartRamSize == 0 || loadedRam) &&
-       file.read(reinterpret_cast<uint8_t*>(loaded), sizeof(gb_s)) == static_cast<int>(sizeof(gb_s)) &&
+       file.read(reinterpret_cast<uint8_t*>(loaded), coreSize) == static_cast<int>(coreSize) &&
        (cartRamSize == 0 || file.read(loadedRam, cartRamSize) == static_cast<int>(cartRamSize));
   file.close();
-  if (ok) {
+  if (ok && cgb) {
+    walnut_cgb_load_state(cgb, loaded);
+    if (cartRamSize > 0) std::memcpy(cartRam, loadedRam, cartRamSize);
+    saveDirty = cartRamSize > 0;
+  } else if (ok) {
     // Peanut-GB's only pointers: the callbacks and the front end's context.
     loaded->gb_rom_read = gb->gb_rom_read;
     loaded->gb_cart_ram_read = gb->gb_cart_ram_read;
@@ -1169,21 +1189,37 @@ bool GameBoyActivity::buildSavePaths() {
 }
 
 bool GameBoyActivity::initEmulator() {
-  gb = static_cast<gb_s*>(calloc(1, sizeof(gb_s)));
-  if (!gb) {
-    showError("Not enough memory for emulator");
-    return false;
-  }
-
-  const enum gb_init_error_e initResult = gb_init(gb, &GameBoyActivity::romRead, &GameBoyActivity::cartRamRead,
-                                                   &GameBoyActivity::cartRamWrite, &GameBoyActivity::fatalError, this);
-  if (initResult != GB_INIT_NO_ERROR) {
-    showError(initErrorString(initResult));
-    return false;
-  }
-
   size_t saveSize = 0;
-  if (gb_get_save_size_s(gb, &saveSize) < 0) {
+  if (rom[0x143] & 0x80) {
+    // Made for (or also for) the Game Boy Color: the Walnut-CGB core.
+    int initResult = 0;
+    cgb = walnut_cgb_create(rom, romSize, &GameBoyActivity::cgbLine, &GameBoyActivity::cgbError, this, &initResult);
+    if (!cgb) {
+      showError(initResult < 0 ? "Not enough memory for emulator" : initErrorString(initResult));
+      return false;
+    }
+    walnut_cgb_set_ram_written(cgb, &GameBoyActivity::cgbRamWritten);
+    if (walnut_cgb_save_size(cgb, &saveSize) < 0) {
+      showError("Unknown cartridge RAM size");
+      return false;
+    }
+  } else {
+    gb = static_cast<gb_s*>(calloc(1, sizeof(gb_s)));
+    if (!gb) {
+      showError("Not enough memory for emulator");
+      return false;
+    }
+
+    const enum gb_init_error_e initResult = gb_init(gb, &GameBoyActivity::romRead, &GameBoyActivity::cartRamRead,
+                                                     &GameBoyActivity::cartRamWrite, &GameBoyActivity::fatalError,
+                                                     this);
+    if (initResult != GB_INIT_NO_ERROR) {
+      showError(initErrorString(initResult));
+      return false;
+    }
+  }
+
+  if (gb && gb_get_save_size_s(gb, &saveSize) < 0) {
     showError("Unknown cartridge RAM size");
     return false;
   }
@@ -1196,6 +1232,7 @@ bool GameBoyActivity::initEmulator() {
     }
     std::memset(cartRam, 0, saveSize);
     cartRamSize = saveSize;
+    if (cgb) walnut_cgb_set_cart_ram(cgb, cartRam, cartRamSize);
   }
 
   frameBuffers[0] = static_cast<uint8_t*>(heap_caps_malloc(EMULATOR_FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -1210,7 +1247,7 @@ bool GameBoyActivity::initEmulator() {
   readyFrame.store(0xFF, std::memory_order_release);
   renderFrame.store(0xFF, std::memory_order_release);
 
-  gb_init_lcd(gb, &GameBoyActivity::lcdDrawLine);
+  if (gb) gb_init_lcd(gb, &GameBoyActivity::lcdDrawLine);
   return true;
 }
 
@@ -1280,6 +1317,10 @@ void GameBoyActivity::cleanup() {
   if (gb) {
     free(gb);
     gb = nullptr;
+  }
+  if (cgb) {
+    walnut_cgb_destroy(cgb);
+    cgb = nullptr;
   }
   if (rom) {
     heap_caps_free(rom);
@@ -1440,11 +1481,13 @@ uint8_t GameBoyActivity::joypadBitForButton(const MappedInputManager::Button but
 }
 
 void GameBoyActivity::applyJoypad() {
-  if (gb) gb->direct.joypad = static_cast<uint8_t>(~(physicalJoypadMask | touchJoypadMask));
+  const uint8_t joypad = static_cast<uint8_t>(~(physicalJoypadMask | touchJoypadMask));
+  if (gb) gb->direct.joypad = joypad;
+  if (cgb) walnut_cgb_set_joypad(cgb, joypad);
 }
 
 void GameBoyActivity::runEmulation(const uint64_t nowUs) {
-  if (!gb || nextFrameUs == 0) nextFrameUs = nowUs;
+  if ((!gb && !cgb) || nextFrameUs == 0) nextFrameUs = nowUs;
 
   uint8_t ran = 0;
   while (nowUs >= nextFrameUs && ran < MAX_CATCH_UP_FRAMES) {
@@ -1459,7 +1502,11 @@ void GameBoyActivity::runEmulation(const uint64_t nowUs) {
     }
 
     const uint64_t frameStartUs = nowMicros();
-    gb_run_frame(gb);
+    if (cgb) {
+      walnut_cgb_run_frame(cgb);
+    } else {
+      gb_run_frame(gb);
+    }
     const uint32_t frameUs = static_cast<uint32_t>(nowMicros() - frameStartUs);
     perfEmuUs += frameUs;
     perfEmuMaxUs = std::max(perfEmuMaxUs, frameUs);
@@ -1705,11 +1752,43 @@ void GameBoyActivity::fatalError(gb_s* state, enum gb_error_e errorCode, const u
     while (true) delay(1000);
   }
 
-  LOG_ERR(TAG, "Peanut-GB fatal error=%d addr=0x%04X", static_cast<int>(errorCode), addr);
-  if (!self->saveCartRam()) LOG_ERR(TAG, "Emergency save failed before restart: %s", self->savePath.c_str());
+  self->emergencyRestart(static_cast<int>(errorCode), addr);
+}
+
+// The core cannot run past the error: save the cartridge RAM and restart.
+void GameBoyActivity::emergencyRestart(const int error, const uint16_t addr) {
+  LOG_ERR(TAG, "%s fatal error=%d addr=0x%04X", cgb ? "Walnut-CGB" : "Peanut-GB", error, addr);
+  if (!saveCartRam()) LOG_ERR(TAG, "Emergency save failed before restart: %s", savePath.c_str());
 
   ESP.restart();
   while (true) delay(1000);
+}
+
+void GameBoyActivity::cgbLine(void* user, const uint8_t* shades, const uint_fast8_t line) {
+  auto* self = static_cast<GameBoyActivity*>(user);
+  if (self) self->writeGameBoyLine(shades, line);
+}
+
+void GameBoyActivity::cgbError(void* user, const int error, const uint16_t addr) {
+  auto* self = static_cast<GameBoyActivity*>(user);
+  if (!self) {
+    ESP.restart();
+    while (true) delay(1000);
+  }
+  self->emergencyRestart(error, addr);
+}
+
+void GameBoyActivity::cgbRamWritten(void* user) {
+  auto* self = static_cast<GameBoyActivity*>(user);
+  if (self) self->saveDirty = true;
+}
+
+void GameBoyActivity::setCoreRtc(const struct tm& time) {
+  if (cgb) {
+    walnut_cgb_set_rtc(cgb, &time);
+  } else if (gb) {
+    gb_set_rtc(gb, &time);
+  }
 }
 
 const char* GameBoyActivity::initErrorString(const int errorCode) {

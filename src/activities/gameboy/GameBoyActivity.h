@@ -18,6 +18,8 @@
 #include "activities/Activity.h"
 
 #if CROSSINK_GAMEBOY
+#include "walnut_cgb_port.h"
+
 extern "C" {
 // The same configuration as src/peanut_gb_impl.c, so both see one gb_s layout.
 #define PEANUT_GB_IS_LITTLE_ENDIAN 1
@@ -99,7 +101,10 @@ class GameBoyActivity final : public Activity {
   std::string tempSavePath;
   std::string backupSavePath;
 
+  // The emulator core: Peanut-GB for Game Boy games, Walnut-CGB (cgb) for
+  // games whose header marks them for the Game Boy Color. One is set.
   gb_s* gb = nullptr;
+  WalnutCgb* cgb = nullptr;
   uint8_t* rom = nullptr;
   size_t romSize = 0;
   uint8_t* cartRam = nullptr;
@@ -276,6 +281,11 @@ class GameBoyActivity final : public Activity {
   static void cartRamWrite(gb_s* gb, uint_fast32_t addr, uint8_t value);
   static void lcdDrawLine(gb_s* gb, const uint8_t* pixels, uint_fast8_t line);
   static void fatalError(gb_s* gb, enum gb_error_e error, uint16_t addr);
+  static void cgbLine(void* user, const uint8_t* shades, uint_fast8_t line);
+  static void cgbError(void* user, int error, uint16_t addr);
+  static void cgbRamWritten(void* user);
+  void emergencyRestart(int error, uint16_t addr);
+  void setCoreRtc(const struct tm& time);
   void writeGameBoyLine(const uint8_t* pixels, uint_fast8_t line);
 
   static bool isBatteryBackedCart(uint8_t type);

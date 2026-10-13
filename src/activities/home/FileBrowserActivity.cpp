@@ -134,7 +134,7 @@ bool isSupportedBrowserFile(std::string_view filename) {
          FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
          FsHelpers::hasBmpExtension(filename) || FsHelpers::hasPngExtension(filename)
 #if CROSSINK_GAMEBOY
-         || FsHelpers::checkFileExtension(filename, ".gb")
+         || FsHelpers::checkFileExtension(filename, ".gb") || FsHelpers::checkFileExtension(filename, ".gbc")
 #endif
       ;
 }
@@ -158,7 +158,8 @@ bool acceptGameBoyRom(const char* name, const bool isDir) {
   if (isMacOSMetadataEntry(name) || isWindowsMetadataEntry(name) || (!SETTINGS.showHiddenFiles && name[0] == '.')) {
     return false;
   }
-  return isDir || FsHelpers::checkFileExtension(std::string_view{name}, ".gb");
+  return isDir || FsHelpers::checkFileExtension(std::string_view{name}, ".gb") ||
+         FsHelpers::checkFileExtension(std::string_view{name}, ".gbc");
 }
 
 bool acceptDirectory(const char* name, const bool isDir) {

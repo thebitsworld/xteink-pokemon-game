@@ -20,8 +20,8 @@ void Activity::onGoHome(HomeMenuItem item) { activityManager.goHome(item); }
 
 void Activity::onSelectBook(const std::string& path) {
 #if CROSSINK_GAMEBOY
-  // A Game Boy ROM opens in the emulator rather than the reader.
-  if (FsHelpers::checkFileExtension(path, ".gb")) {
+  // A Game Boy (Color) ROM opens in the emulator rather than the reader.
+  if (FsHelpers::checkFileExtension(path, ".gb") || FsHelpers::checkFileExtension(path, ".gbc")) {
     activityManager.goToGameBoy(path);
     return;
   }
