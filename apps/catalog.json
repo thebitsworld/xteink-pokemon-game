@@ -223,6 +223,19 @@
       ]
     },
     {
+      "id": "tictactoe",
+      "name": "Tic-Tac-Toe",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Three in a row. Play the device at three levels (Hard never loses) or a friend on the same reader",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "icon.raw"
+      ]
+    },
+    {
       "id": "solitaire",
       "name": "Solitaire",
       "version": "1.0.0",
