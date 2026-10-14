@@ -1041,6 +1041,27 @@
         "menu.lua",
         "mkmenu.lua"
       ]
+    },
+    {
+      "id": "coganh",
+      "name": "Co Ganh",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Cờ gánh, the Vietnamese folk board game: flank and surround your opponent's pieces to win them over, against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "manifest.json",
+        "ai.lua",
+        "draw.lua",
+        "game.lua",
+        "gmenu.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "input.lua",
+        "logic.lua",
+        "main.lua",
+        "menu.lua"
+      ]
     }
   ]
 }
