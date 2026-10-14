@@ -594,9 +594,7 @@ void Uc8279X4Driver::loadScaledDuLut(EpdBus& bus, const uint8_t percent) {
 // there does here too.
 void Uc8279X4Driver::loadPulseLut(EpdBus& bus, const uint8_t frames) {
   constexpr size_t kTableLen = 42;
-  const bool noTail = (frames & PanelDriver::kPulseNoTail) != 0;
-  const uint8_t count = static_cast<uint8_t>(frames & 0x3F);
-  const uint8_t n = static_cast<uint8_t>(count < 1 ? 1 : count);
+  const uint8_t n = static_cast<uint8_t>(frames < 1 ? 1 : (frames > 0x3F ? 0x3F : frames));
   for (size_t t = 0; t < 5; ++t) {
     const uint8_t reg = kUc8279X3_BwDu[t][0];
     uint8_t level = 0;
@@ -615,8 +613,9 @@ void Uc8279X4Driver::loadPulseLut(EpdBus& bus, const uint8_t frames) {
     uint8_t table[kTableLen] = {};
     table[0] = 0x01;
     table[1] = static_cast<uint8_t>((level << 6) | n);
-    table[5] = noTail ? 0x00 : 0x01;
-    table[6] = noTail ? 0x00 : 0x01;
+    // The group's last two bytes are repeat counts (0 runs nothing at all).
+    table[5] = 0x01;
+    table[6] = 0x01;
     bus.cmd(reg);
     bus.data(table, kTableLen);
   }
