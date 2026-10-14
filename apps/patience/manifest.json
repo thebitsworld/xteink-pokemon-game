@@ -1,0 +1,8 @@
+{
+  "id": "patience",
+  "name": "Patience",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "FreeCell with numbered deals and Spider with one, two or four suits, with unlimited undo and statistics",
+  "entry": "main.lua"
+}
