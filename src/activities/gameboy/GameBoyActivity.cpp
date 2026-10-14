@@ -100,6 +100,8 @@ constexpr RefreshPreset kRefreshPresets[] = {
     {"D25, clean 30 s", "D25-30", 0, 0x0F, 25, 20000000, true, 30},
     {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
     {"Pulse 8x2, clean 60 s", "P8x2-60", 0, 0x0F, 0, 20000000, false, 60, 2, 8, 8},
+    {"Pulse 8x2, clean 30 s", "P8x2-30", 0, 0x0F, 0, 20000000, false, 30, 2, 8, 8},
+    {"Pulse 8x3, clean 60 s", "P8x3-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8},
     {"Pulse 6x2, clean 60 s", "P6x2-60", 0, 0x0F, 0, 20000000, false, 60, 2, 6, 6},
     {"Pulse 8x1, clean 60 s", "P8x1-60", 0, 0x0F, 0, 20000000, false, 60, 1, 8, 8},
 };
