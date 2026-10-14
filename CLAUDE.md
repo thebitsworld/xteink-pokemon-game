@@ -13,7 +13,7 @@ is in git history (before 2026-10-08).
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
-  without a firmware release): 36 apps - the CrossPlay-inspired games and tools written here (plus
+  without a firmware release): 40 apps - the CrossPlay-inspired games and tools written here (plus
   Tic-Tac-Toe and Xiangqi, 2026-10-13) plus 11 from
   CrossSmudge. CrossPlay apps needing data or a network were skipped on purpose.
 - X3 app policy: an app must stay under 75 KB in `pokemon-simulator-X3` (the 64-bit simulator reports
@@ -45,6 +45,17 @@ is in git history (before 2026-10-08).
   palette span - stretched onto levels 4..16), Smooth (17 levels, the tester found it busy), Brightness.
   Settings menu taps: orientation changes wait for the finger to lift, and the touch registry is cleared
   while it shows (game target ids collide with the front-button hints).
+- How to play guides (1.8.4-beta.1, branch `feat/guides-and-games`): `guide.md` / `guide.vi.md` in an app
+  folder, shown by `GuideViewerActivity` (Markdown subset, not the EPUB reader - that would add recents,
+  reading time and Pokemon credit). "?" on Applications rows (tap; hold Select on X3/X4);
+  `smudge.has_guide()`/`open_guide()` push it over the running Lua app. The shared `menu.lua` (identical
+  copy in every game; keep it byte-identical) adds "How to play" above Exit and shrinks its buttons to
+  fit. UI fonts have no CJK: guides must not use Chinese characters. New games: caro, reversi, oanquan,
+  tienlen (X3 sim peaks 56-64 KB). Catan-like game waits for the user's name/AI-count decision.
+- Measuring a Lua app needs no `src/` hooks now: run the simulator binary with `SDL_VIDEODRIVER=offscreen`,
+  `CROSSPOINT_SIM_INPUT_SCRIPT` (`ms:DOWN;ms:CONFIRM:1000;ms:TAP:x,y;...;ms:QUIT`) and
+  `CROSSPOINT_SIM_SCREENSHOTS` (`ms:path.bmp`); the app's peak lands in `fs_/.crosspoint/apps-memory.txt`
+  when it exits cleanly (Back out of it). `SDL_VIDEODRIVER=dummy` gives no screenshots.
 - Open, undecided: a translation mechanism for Lua apps (all English today; the user wants to discuss it
   first). Firmware strings: the fork's own Pokémon strings are untranslated in most languages (fall back
   to English); Vietnamese is complete.
