@@ -1,0 +1,8 @@
+{
+  "id": "oanquan",
+  "name": "O An Quan",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Ô ăn quan, the Vietnamese mandarin-square mancala: sow stones, capture squares and the two mandarins, against the device at three levels or a friend",
+  "entry": "main.lua"
+}
