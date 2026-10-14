@@ -274,6 +274,10 @@ class GameBoyActivity final : public Activity {
   uint8_t* pulseStore = nullptr;
   uint8_t* pulseDrive = nullptr;
   bool pulseActive = false;
+  // When the planner last saw the picture change: a polish waits for it to
+  // stand still this long.
+  uint64_t pulseLastChangeUs = 0;
+  static constexpr uint64_t PULSE_POLISH_DELAY_US = 300000ULL;
   bool allocatePulse();
   void releasePulse();
   void showError(const char* message);

@@ -88,6 +88,9 @@ struct RefreshPreset {
   uint8_t pulseFrames;
   uint8_t pulseBlack;
   uint8_t pulseWhite;
+  // Pulses every pixel of the area that changed gets once the picture has
+  // stood still (PulsePlanner::polish; 0 = none), against ghosting.
+  uint8_t pulsePolish;
 };
 constexpr RefreshPreset kRefreshPresets[] = {
     {"Standard", "standard", 0, 0, 0, 0, false, 0},
@@ -101,13 +104,13 @@ constexpr RefreshPreset kRefreshPresets[] = {
     {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
     // Pulse drive (pulses x frames per pulse). At frame rate 0x1F a frame
     // takes ~7.6 ms instead of ~11.7 and a scan's fixed part ~18 ms instead
-    // of ~25 (Pulse test sweep), so 3 frames there push like 2 at 0x0F, 4
-    // like 3, in less time: those are the "fast" ones.
-    {"Pulse 8x2, clean 60 s", "P8x2-60", 0, 0x0F, 0, 20000000, false, 60, 2, 8, 8},
-    {"Pulse 8x3, clean 60 s", "P8x3-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8},
-    {"Pulse 8x3 fast, clean 60 s", "P8x3F-60", 0, 0x1F, 0, 20000000, false, 60, 3, 8, 8},
-    {"Pulse 8x4 fast, clean 60 s", "P8x4F-60", 0, 0x1F, 0, 20000000, false, 60, 4, 8, 8},
-    {"Pulse 10x3 fast, clean 60 s", "P10x3F-60", 0, 0x1F, 0, 20000000, false, 60, 3, 10, 10},
+    // of ~25 (Pulse test sweep), so 4 frames there push about like 3 at
+    // 0x0F, in less time: the "fast" ones. "polish" adds 4 pulses to the
+    // area that changed once the picture stands still.
+    {"Pulse 8x3, clean 60 s", "P8x3-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 0},
+    {"Pulse 8x3 polish, clean 60 s", "P8x3P-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 4},
+    {"Pulse 8x4 fast, clean 60 s", "P8x4F-60", 0, 0x1F, 0, 20000000, false, 60, 4, 8, 8, 0},
+    {"Pulse 8x4 fast polish, clean 60 s", "P8x4FP-60", 0, 0x1F, 0, 20000000, false, 60, 4, 8, 8, 4},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
@@ -555,9 +558,17 @@ void GameBoyActivity::render(RenderLock&&) {
     // One pulse scan of whatever still has pulses left, started without
     // waiting: the next render plans while its waveform runs.
     uint8_t* fb = renderer.getFrameBuffer();
-    pulsePlanner.retarget(fb);
+    const uint64_t nowUs = nowMicros();
+    if (pulsePlanner.retarget(fb)) pulseLastChangeUs = nowUs;
     PulsePlanner::Window w;
-    if (!pulsePlanner.plan(pulseDrive, w)) {
+    bool any = pulsePlanner.plan(pulseDrive, w);
+    // Still for a moment: what moved gets a few more pulses (polish), which
+    // finishes pixels a reversal cut short.
+    if (!any && preset.pulsePolish != 0 && nowUs - pulseLastChangeUs >= PULSE_POLISH_DELAY_US &&
+        pulsePlanner.polish(preset.pulsePolish)) {
+      any = pulsePlanner.plan(pulseDrive, w);
+    }
+    if (!any) {
       perfUnchanged.fetch_add(1, std::memory_order_relaxed);
       return;
     }
