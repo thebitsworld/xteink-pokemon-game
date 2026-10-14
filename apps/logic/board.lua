@@ -36,8 +36,8 @@ end
 
 function B.drawSolved()
     if not S.P.solved then return false end
-    local s = S.stats[S.kind][S.level]
-    smudge.popup(string.format("Solved in %s!  Best %s", S.formatTime(S.P.elapsedMs), S.formatTime(s[2])))
+    local best = S.stats[S.stat(S.kind, S.level) + 1]
+    smudge.popup(string.format("Solved in %s!  Best %s", S.formatTime(S.P.elapsedMs), S.formatTime(best)))
     if S.touch then
         smudge.button_hints("", "", "", "")
     else
@@ -53,10 +53,10 @@ function B.moved()
     if P.solved and not P.counted then
         P.counted = true
         P.elapsedMs = P.elapsedMs + (smudge.millis() - S.since)
-        local s = S.stats[S.kind][S.level]
-        s[1] = s[1] + 1
-        if s[2] == 0 or P.elapsedMs < s[2] then s[2] = P.elapsedMs end
-        smudge.save("st_" .. S.KINDS[S.kind].id .. S.level, s[1] .. "," .. s[2])
+        local s, i = S.stats, S.stat(S.kind, S.level)
+        s[i] = s[i] + 1
+        if s[i + 1] == 0 or P.elapsedMs < s[i + 1] then s[i + 1] = P.elapsedMs end
+        smudge.save("st_" .. S.KINDS[S.kind].id .. S.level, s[i] .. "," .. s[i + 1])
         S.savePuzzle()
     end
     smudge.request_update()

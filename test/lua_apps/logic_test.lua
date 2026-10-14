@@ -1,11 +1,17 @@
--- Logic tests for apps/logic (Logic Puzzles): Hashi, Lights Out and
--- Slitherlink rules and generators (run by ctest: LuaAppLogic_logic).
+-- Logic tests for apps/logic (Logic Puzzles): Hashi, Lights Out,
+-- Slitherlink, Kakuro and Light Up rules and generators (run by ctest:
+-- LuaAppLogic_logic).
 local H = dofile(APPS .. "/logic/hashi.lua")
 local HG = dofile(APPS .. "/logic/hashigen.lua")()
 local L = dofile(APPS .. "/logic/lights.lua")
 local SL = dofile(APPS .. "/logic/slither.lua")
 local SG = dofile(APPS .. "/logic/slithergen.lua")()
 local SLP = dofile(APPS .. "/logic/slitherloop.lua")()
+local K = dofile(APPS .. "/logic/kakuro.lua")
+local KL = dofile(APPS .. "/logic/kakurolay.lua")()
+local KG = dofile(APPS .. "/logic/kakurogen.lua")()
+local A = dofile(APPS .. "/logic/akari.lua")
+local AG = dofile(APPS .. "/logic/akarigen.lua")()
 
 -- make.lua's Slitherlink steps: a loop, then its clues thinned; again while
 -- deduction cannot solve the full set.
@@ -355,6 +361,350 @@ do
         for e = 1, #sol do p.cur[e] = sol:byte(e) - 48 end
         assert(SL.isSolved(p))
     end
+end
+
+-- Kakuro ----------------------------------------------------------------------
+
+-- make.lua's Kakuro steps: a filled layout, then its digits changed until
+-- reasoning alone solves it; again when that gets stuck.
+local function kakuroGen(n, clock)
+    clock = clock or millis
+    local start = clock()
+    repeat
+        local _, d = KL.make(n, rand)
+        local grid = KG.reduce(n, true, d, rand, clock, start + 10 ^ 7)
+        if grid then return grid end
+    until false
+end
+
+-- Kakuro solutions, counted by a plain search independent of the
+-- generator's solver (0, 1 or 2 meaning two or more; nil past `cap`): cells
+-- in reading order, each digit checked against the digits and sums of its
+-- two runs (the rest of a run must still be able to reach its sum).
+local function kakuroCount(grid, n, cap)
+    local p = K.new(n, grid)
+    local N, cells, d = n * n, {}, {}
+    for i = 1, N do
+        d[i] = 0
+        if K.isWhite(p, i) then cells[#cells + 1] = i end
+    end
+    local function fits(i, digit)
+        for _, step in ipairs({ 1, n }) do
+            local h = i - step
+            while K.isWhite(p, h) do h = h - step end
+            local want = step == 1 and p.ca:byte(h) or p.cd:byte(h)
+            local sum, used, left, j = digit, 1 << digit, 0, h + step
+            while j <= N and (step == n or (j - 1) % n > 0) and K.isWhite(p, j) do
+                if j ~= i then
+                    if d[j] == 0 then
+                        left = left + 1
+                    else
+                        if used & (1 << d[j]) ~= 0 then return false end
+                        used, sum = used | (1 << d[j]), sum + d[j]
+                    end
+                end
+                j = j + step
+            end
+            local lo, hi, k = 0, 0, 0
+            for x = 1, 9 do
+                if k < left and used & (1 << x) == 0 then lo, k = lo + x, k + 1 end
+            end
+            k = 0
+            for x = 9, 1, -1 do
+                if k < left and used & (1 << x) == 0 then hi, k = hi + x, k + 1 end
+            end
+            if want - sum < lo or want - sum > hi then return false end
+        end
+        return true
+    end
+    local count, nodes = 0, 0
+    local function dfs(k)
+        if k > #cells then
+            count = count + 1
+            return count >= 2
+        end
+        nodes = nodes + 1
+        if nodes > cap then error("cap") end
+        local i = cells[k]
+        for digit = 1, 9 do
+            if fits(i, digit) then
+                d[i] = digit
+                if dfs(k + 1) then return true end
+                d[i] = 0
+            end
+        end
+        return false
+    end
+    if not pcall(dfs, 1) then return nil end
+    return count
+end
+
+-- Clues, runs, solved detection, mistakes, save and restore on a hand grid:
+--   # # # #        a 2x2 block: 1 2 / 3 4, so the sums are 3 and 7
+--   # # # #        across, 4 and 6 down.
+--   # # 1 2
+--   # # 3 4
+do
+    local grid = "####" .. "####" .. "##12" .. "##34"
+    local p = K.new(4, grid)
+    assert(p.ca:byte(10) == 3 and p.ca:byte(14) == 7, "across sums")
+    assert(p.cd:byte(7) == 4 and p.cd:byte(8) == 6, "down sums")
+    assert(p.ca:byte(1) == 0 and p.cd:byte(1) == 0, "no run after a corner cell")
+    -- 2 1 / 2 5 meets the sums too, but repeats the 2 down.
+    assert(kakuroCount(grid, 4, 1000) == 1, "one answer")
+    assert(not p.solved and K.runState(p, 10, 1) == 0)
+    assert(K.set(p, 11, 1) and K.set(p, 12, 1))
+    assert(K.runState(p, 10, 1) == 2, "a repeated digit is wrong")
+    assert(K.set(p, 12, 2) and K.runState(p, 10, 1) == 1, "a full run with its sum")
+    assert(not K.set(p, 12, 2), "the same digit again changes nothing")
+    assert(not K.set(p, 1, 5), "black cells take no digit")
+    assert(K.set(p, 15, 9) and K.runState(p, 14, 1) == 2, "9 alone is past 7")
+    assert(K.mistakes(p) == 1 and p.marks[15])
+    assert(K.set(p, 15, 3) and p.marks == nil, "a change clears the marks")
+    assert(K.set(p, 16, 4) and p.solved, "solved")
+    assert(not K.set(p, 16, 0), "no changes once solved")
+    K.restart(p)
+    assert(not p.solved and p.cur[11] == 0)
+    K.set(p, 11, 1)
+    p.elapsedMs = 4321
+    local q = K.deserialize(K.serialize(p))
+    assert(q and q.grid == grid and q.cur[11] == 1 and q.cur[12] == 0 and q.elapsedMs == 4321 and not q.solved)
+    assert(K.deserialize("4,####,0,0") == nil and K.deserialize("garbage") == nil)
+end
+
+-- Generated puzzles: a valid grid whose digits meet every clue, runs of 2
+-- to 5 cells without a repeat, reasoning alone finds it, and it is the only
+-- solution; solved by entering it.
+local function checkKakuro(n)
+    local grid = kakuroGen(n)
+    assert(grid and #grid == n * n, "kakuro generated")
+    for i = 1, n do
+        assert(grid:byte(i) == 35 and grid:byte((i - 1) * n + 1) == 35, "first row and column black")
+    end
+    local p = K.new(n, grid)
+    for i = 1, n * n do
+        if not K.isWhite(p, i) then
+            for _, step in ipairs({ 1, n }) do
+                local len, seen, sum, j = 0, 0, 0, i + step
+                while j <= n * n and (step == n or (j - 1) % n > 0) and K.isWhite(p, j) do
+                    local digit = grid:byte(j) - 48
+                    assert(seen & (1 << digit) == 0, "no repeat in a run")
+                    seen, sum, len, j = seen | (1 << digit), sum + digit, len + 1, j + step
+                end
+                assert(len == 0 or (len >= 2 and len <= 5), "runs of 2 to 5")
+                assert(sum == (step == 1 and p.ca:byte(i) or p.cd:byte(i)), "clue is the run's sum")
+            end
+        end
+    end
+    local d = {}
+    for i = 1, n * n do d[i] = K.isWhite(p, i) and grid:byte(i) - 48 or 0 end
+    local solver = KG.solver(d, n)
+    solver.clues(d)
+    assert(solver.deduce() == 0, "reasoning alone solves it")
+    assert(kakuroCount(grid, n, 2000000) == 1, "unique")
+    for i = 1, n * n do
+        if K.isWhite(p, i) then K.set(p, i, grid:byte(i) - 48) end
+    end
+    assert(p.solved and K.mistakes(p) == 0, "entering the solution solves it")
+    local q = K.deserialize(K.serialize(p))
+    assert(q and q.solved)
+end
+for _ = 1, 12 do checkKakuro(6) end
+for _ = 1, 8 do checkKakuro(8) end
+for _ = 1, 5 do checkKakuro(10) end
+
+-- Light Up --------------------------------------------------------------------
+
+-- Light Up solutions, counted by a plain search independent of the
+-- generator's solver (0, 1 or 2 meaning two or more; nil past `cap`): white
+-- cells in reading order, bulb or none; a bulb may not be lit by another
+-- nor pass a number; a number is checked again once its last neighbour is
+-- decided, a cell once the last cell that could light it is.
+local function akariCount(grid, n, cap)
+    local p = A.new(n, grid, string.rep("0", n * n))
+    local N, cells, lit, checkAt = n * n, {}, {}, {}
+    for i = 1, N do
+        lit[i], checkAt[i] = 0, {}
+        if A.isWhite(p, i) then cells[#cells + 1] = i end
+    end
+    -- The cells a bulb at i lights (i too).
+    local function rays(i, by)
+        lit[i] = lit[i] + by
+        for _, step in ipairs({ -n, n, -1, 1 }) do
+            local j = i + step
+            while j >= 1 and j <= N and (step == n or step == -n or (j - 1) // n == (i - 1) // n) and A.isWhite(p, j) do
+                lit[j] = lit[j] + by
+                j = j + step
+            end
+        end
+    end
+    -- Each white cell is checked for light after the last cell of its row
+    -- and column stretches; each number after its last white neighbour.
+    for _, i in ipairs(cells) do
+        local j = i
+        while (j - 1) % n < n - 1 and A.isWhite(p, j + 1) do j = j + 1 end
+        local k = i
+        while k + n <= N and A.isWhite(p, k + n) do k = k + n end
+        local at = checkAt[math.max(j, k)]
+        at[#at + 1] = i
+    end
+    local function around(i)
+        local c, out = (i - 1) % n, {}
+        for _, j in ipairs({ i - n, i + n, c > 0 and i - 1 or 0, c < n - 1 and i + 1 or 0 }) do
+            if j >= 1 and j <= N then out[#out + 1] = j end
+        end
+        return out
+    end
+    for i = 1, N do
+        if A.number(p, i) then
+            local lastWhite = 0
+            for _, j in ipairs(around(i)) do
+                if A.isWhite(p, j) then lastWhite = math.max(lastWhite, j) end
+            end
+            local at = checkAt[lastWhite > 0 and lastWhite or cells[1]]
+            at[#at + 1] = -i
+        end
+    end
+    local count, nodes = 0, 0
+    local function fine(i)
+        if p.cur[i] == 1 then
+            for _, j in ipairs(around(i)) do
+                local k = A.number(p, j)
+                if k and A.bulbsAround(p, j) > k then return false end
+            end
+        end
+        for _, c in ipairs(checkAt[i]) do
+            if c > 0 and lit[c] == 0 then return false end
+            if c < 0 and A.bulbsAround(p, -c) ~= A.number(p, -c) then return false end
+        end
+        return true
+    end
+    local function dfs(k)
+        if k > #cells then
+            count = count + 1
+            return count >= 2
+        end
+        nodes = nodes + 1
+        if nodes > cap then error("cap") end
+        local i = cells[k]
+        if lit[i] == 0 then
+            p.cur[i] = 1
+            rays(i, 1)
+            if fine(i) and dfs(k + 1) then return true end
+            rays(i, -1)
+        end
+        p.cur[i] = 0
+        if fine(i) and dfs(k + 1) then return true end
+        return false
+    end
+    if not pcall(dfs, 1) then return nil end
+    return count
+end
+
+-- Light, conflicts, numbers, solved detection, mistakes, save and restore
+-- on a hand grid; the 2 needs bulbs left and right of it, which light all:
+--   . # .
+--   . 2 .
+--   . # .
+do
+    local grid = ".#." .. ".2." .. ".#."
+    local p = A.new(3, grid, "000" .. "101" .. "000")
+    assert(A.number(p, 5) == 2 and A.number(p, 2) == nil and A.isWhite(p, 1) and not A.isWhite(p, 8))
+    assert(A.cycle(p, 4) and p.cur[4] == A.BULB)
+    local lit = A.lighting(p)
+    assert(lit[1] == 1 and lit[4] == 1 and lit[7] == 1, "a bulb lights its column")
+    assert(lit[6] == 0 and lit[3] == 0, "not past the number")
+    assert(not p.solved and A.bulbsAround(p, 5) == 1)
+    assert(A.cycle(p, 1) and A.lighting(p)[1] == 2, "two bulbs see each other")
+    assert(A.mistakes(p) == 1 and p.marks[1])
+    assert(A.cycle(p, 1) and p.cur[1] == A.DOT and p.marks == nil, "bulb -> dot")
+    assert(A.mistakes(p) == 0, "a dot off the solution is fine")
+    assert(A.cycle(p, 6, A.BULB) and p.solved, "solved: all lit, the 2 met")
+    assert(not A.cycle(p, 3), "no changes once solved")
+    assert(not A.cycle(A.new(3, grid, p.sol), 5), "black cells do not change")
+    A.restart(p)
+    assert(not p.solved and p.cur[4] == 0 and p.cur[6] == 0)
+    A.cycle(p, 4)
+    A.cycle(p, 3, A.DOT)
+    A.cycle(p, 7)
+    p.elapsedMs = 999
+    local q = A.deserialize(A.serialize(p))
+    assert(q and q.grid == grid and q.sol == p.sol and q.cur[4] == 1 and q.cur[3] == 2 and q.elapsedMs == 999)
+    assert(not q.solved and A.lighting(q)[7] == 2)
+    assert(akariCount(grid, 3, 10000) == 1, "one solution")
+    assert(A.deserialize("3,.#.,0,0,0") == nil and A.deserialize("x") == nil)
+end
+
+-- The generator's solver on hand grids.
+do
+    local function g(grid)
+        local t = {}
+        for i = 1, #grid do
+            local b = grid:byte(i)
+            t[i] = b == 46 and -1 or b == 35 and 5 or b - 48
+        end
+        return t
+    end
+    assert(AG.solver(g("........."), 3).count(100) == 2, "an open board has many answers")
+    assert(AG.solver(g(".#..2..#."), 3).count(100) == 1 and AG.solver(g(".#..2..#."), 3).deduce())
+    assert(AG.solver(g("..#.0.#.."), 3).count(100) == 1 and AG.solver(g("..#.0.#.."), 3).deduce())
+    assert(AG.solver(g("..#.2.#.."), 3).count(100) == 2, "bulbs 2, 4, 9 or 1, 6, 8")
+    assert(not AG.solver(g("..#.2.#.."), 3).deduce(), "reasoning cannot pick")
+    assert(AG.solver(g("..#.1.#.."), 3).count(100) == 0, "no answer")
+    for _, grid in ipairs({ ".#..2..#.", "..#.2.#..", "..#.1.#..", "...#2#..." }) do
+        assert(akariCount(grid, 3, 10000) == AG.solver(g(grid), 3).count(100), "both counts agree")
+    end
+end
+
+-- Generated puzzles: the solution lights every cell and meets the numbers,
+-- it is the only one (an easy one: reasoning alone finds it), entering it
+-- solves the puzzle, and the save restores it.
+local function checkAkari(n, easy)
+    local grid, sol = AG.generate(n, rand, millis, 1, easy)
+    assert(grid and #grid == n * n and #sol == n * n, "light up generated")
+    local p = A.new(n, grid, sol)
+    for i = 1, n * n do
+        if sol:byte(i) == 49 then
+            assert(A.isWhite(p, i))
+            p.cur[i] = 1
+        end
+    end
+    assert(A.isSolved(p), "the solution solves it")
+    assert(akariCount(grid, n, 2000000) == 1, "unique")
+    local t = {}
+    for i = 1, n * n do
+        local b = grid:byte(i)
+        t[i] = b == 46 and -1 or b == 35 and 5 or b - 48
+    end
+    if easy then assert(AG.solver(t, n).deduce(), "reasoning alone solves it") end
+    A.restart(p)
+    for i = 1, n * n do
+        if sol:byte(i) == 49 then A.cycle(p, i) end
+    end
+    assert(p.solved and A.mistakes(p) == 0, "entering the solution solves it")
+    local q = A.deserialize(A.serialize(p))
+    assert(q and q.solved and q.sol == sol)
+end
+for _ = 1, 12 do checkAkari(7, true) end
+for _ = 1, 8 do checkAkari(10, true) end
+for _ = 1, 6 do checkAkari(11, false) end
+
+-- Worst generation times on this computer (the reader is far slower; the
+-- simulator's GENTIME and the app's 6 s cap are what count there).
+do
+    local function ms() return os.clock() * 1000 end
+    local worst = {}
+    for _, cfg in ipairs({ { "kakuro", 10 }, { "akari", 11 } }) do
+        local w = 0
+        for _ = 1, 15 do
+            local t0 = ms()
+            if cfg[1] == "kakuro" then kakuroGen(cfg[2], ms) else AG.generate(cfg[2], rand, ms, 6000, false) end
+            w = math.max(w, ms() - t0)
+        end
+        worst[#worst + 1] = string.format("%s %dx%d %.0f ms", cfg[1], cfg[2], cfg[2], w)
+        assert(w < 3000, "generation on this computer stays well under the app's 6 s")
+    end
+    print("logic: worst generation " .. table.concat(worst, ", "))
 end
 
 print("logic: all tests passed")

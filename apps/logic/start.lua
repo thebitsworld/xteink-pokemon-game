@@ -9,10 +9,10 @@ local M = {}
 -- Stats and saved puzzles, when the app starts.
 function M.init()
     for k, info in ipairs(S.KINDS) do
-        S.stats[k] = {}
-        for lv = 1, #info.levels do
+        for lv = 1, 3 do
             local a, b = smudge.load("st_" .. info.id .. lv, "0,0"):match("(%d+),(%d+)")
-            S.stats[k][lv] = { tonumber(a) or 0, tonumber(b) or 0 }
+            local i = S.stat(k, lv)
+            S.stats[i], S.stats[i + 1] = tonumber(a) or 0, tonumber(b) or 0
         end
         local lv, ms = smudge.load("pz_" .. info.id, ""):match("^(%d+);.*,(%d+)$")
         if lv then S.saved[k] = { tonumber(lv), tonumber(ms) } end
@@ -29,7 +29,7 @@ function M.continue(k)
         local lv, data = smudge.load("pz_" .. S.KINDS[k].id, ""):match("^(%d+);(.*)$")
         local P = data and K.deserialize(data)
         lv = tonumber(lv)
-        if not P or not S.KINDS[k].levels[lv] then
+        if not P or not lv or lv < 1 or lv > 3 then
             S.saved[k] = nil
             S.failed = "The saved puzzle could not be read."
             S.show("options")

@@ -9,9 +9,9 @@ local menu
 local want = S.want
 
 local function statsNote(k, lv)
-    local s = S.stats[k][lv]
-    if s[1] == 0 then return "Not solved yet" end
-    return string.format("Solved %d  Best %s", s[1], S.formatTime(s[2]))
+    local i = S.stat(k, lv)
+    if S.stats[i] == 0 then return "Not solved yet" end
+    return string.format("Solved %d  Best %s", S.stats[i], S.formatTime(S.stats[i + 1]))
 end
 
 -- A kind's puzzle in progress: { level, ms } or nil.
@@ -29,7 +29,7 @@ local function items()
         end
         for k, info in ipairs(S.KINDS) do
             local solved = 0
-            for lv = 1, #info.levels do solved = solved + S.stats[k][lv][1] end
+            for lv = 1, 3 do solved = solved + S.stats[S.stat(k, lv)] end
             local note = info.blurb
             if inProgress(k) then
                 note = "Puzzle in progress"
@@ -46,8 +46,9 @@ local function items()
             out[1] = { label = "Continue", act = "continue",
                        note = S.levelText(k, cur[1]) .. "  " .. S.formatTime(cur[2]) }
         end
-        for lv, L in ipairs(S.KINDS[k].levels) do
-            out[#out + 1] = { label = string.format("%s  %dx%d", L.name, L.size, L.size), act = "new", level = lv,
+        for lv = 1, 3 do
+            local name, size = S.levelOf(k, lv)
+            out[#out + 1] = { label = string.format("%s  %dx%d", name, size, size), act = "new", level = lv,
                               note = statsNote(k, lv) }
         end
         out[#out + 1] = { label = "Back", act = "back" }

@@ -5,7 +5,7 @@
 
 return function(S, rand)
 local M = {}
-local GEN_MS = 6000 -- a generator's time; past it, Slitherlink keeps more clues
+local GEN_MS = 6000 -- a generator's time; past it, Slitherlink and Light Up keep more clues
 
 -- Makes the puzzle S.gen asks for and shows it (or the options with a note).
 function M.generate()
@@ -14,39 +14,41 @@ function M.generate()
     if S.kind ~= k then S.savePuzzle() end -- the other kind keeps its puzzle
     S.drop(true)
     local info = S.KINDS[k]
-    local L = info.levels[lv]
+    local _, size, arg = S.levelOf(k, lv)
     local K, P
     if info.loop then
         -- Slitherlink: a loop from one module, then its clues thinned by the
         -- generator, never both in memory; again while deduction fails.
+        -- Kakuro the same way: a filled layout, then its digits changed
+        -- until reasoning alone solves it; again when that gets stuck.
         local start, T, clues = smudge.millis(), nil, nil
         repeat
             local loop = smudge.dofile(info.loop)()
-            T = T or loop.topology(L.size)
-            local sol, all = loop.make(L.size, rand)
+            T = T or loop.topology(size)
+            local sol, all = loop.make(size, rand)
             loop = nil
             collectgarbage("collect")
             local G = smudge.dofile(info.gen)()
-            clues = G.reduce(L.size, T, all, rand, smudge.millis, start + GEN_MS, L.arg)
+            clues = G.reduce(size, T, all, rand, smudge.millis, start + GEN_MS, arg)
             G, all = nil, nil
             collectgarbage("collect")
             if clues then
                 K = smudge.dofile(info.logic)
-                P = K.new(L.size, clues, sol)
+                P = K.new(size, clues, sol)
             end
         until P or smudge.millis() - start > GEN_MS
     elseif info.gen then
         -- The rules are loaded only once the puzzle is made.
         local G = smudge.dofile(info.gen)()
         collectgarbage("collect")
-        local a, b = G.generate(L.size, rand, smudge.millis, GEN_MS, L.arg)
+        local a, b = G.generate(size, rand, smudge.millis, GEN_MS, arg)
         G = nil
         collectgarbage("collect")
         K = smudge.dofile(info.logic)
-        if a then P = K.new(L.size, a, b) end
+        if a then P = K.new(size, a, b) end
     else
         K = smudge.dofile(info.logic)
-        P = K.new(L.size, rand)
+        P = K.new(size, rand)
     end
     if not P then
         K = nil

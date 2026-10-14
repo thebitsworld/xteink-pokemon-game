@@ -1,33 +1,38 @@
--- Logic Puzzles for Xteink Pokemon (Lua app): Hashi, Lights Out and
--- Slitherlink, made fresh on the reader, each with a single solution.
+-- Logic Puzzles for Xteink Pokemon (Lua app): Hashi, Lights Out,
+-- Slitherlink, Kakuro and Light Up, made fresh on the reader, each with a
+-- single solution.
 --
 -- Each puzzle has its rules in a file of its own (hashi.lua, lights.lua,
--- slither.lua), its screen in another (hashiui.lua, lightsui.lua,
--- slitherui.lua, with board.lua for what they share) and, for Hashi and
--- Slitherlink, a generator (hashigen.lua; slitherloop.lua then
--- slithergen.lua) loaded only while a puzzle is made. make.lua makes a
--- puzzle, start.lua reads the saves and opens a saved puzzle; the menus are
--- lgmenu.lua on top of the shared menu.lua. Only one puzzle's rules, one
--- screen and never a generator next to a screen are in memory at a time:
--- the X3 gives a Lua app about 75 KB. This file keeps the state and the flow.
+-- slither.lua, kakuro.lua, akari.lua), its screen in another (hashiui.lua,
+-- lightsui.lua, slitherui.lua, kakuroui.lua, akariui.lua, with board.lua
+-- for what they share) and, except for Lights Out, a generator (hashigen.lua,
+-- akarigen.lua; slitherloop.lua then slithergen.lua; kakurolay.lua then
+-- kakurogen.lua) loaded only while a puzzle is made. make.lua makes a puzzle, start.lua reads the
+-- saves and opens a saved puzzle; the menus are lgmenu.lua on top of the
+-- shared menu.lua. Only one puzzle's rules, one screen and never a generator
+-- next to a screen are in memory at a time: the X3 gives a Lua app about
+-- 75 KB. This file keeps the state and the flow.
 --
 -- Each kind keeps one puzzle in progress, saved when you leave it.
 
 local S = {
+    -- Each kind's levels: "name size arg;..." (S.levelOf reads them; a string
+    -- costs the X3 far less than a table per level). arg goes to the
+    -- generator: 1 for "solved by reasoning alone" (none: guessing allowed),
+    -- for Slitherlink the clues that stay at least.
     KINDS = {
         { id = "hashi", name = "Hashi", logic = "hashi.lua", ui = "hashiui.lua", gen = "hashigen.lua",
-          blurb = "Join every island with bridges",
-          levels = { { name = "Easy", size = 7, arg = true }, { name = "Normal", size = 9, arg = true },
-                     { name = "Hard", size = 11, arg = false } } },
+          blurb = "Join every island with bridges", levels = "Easy 7 1;Normal 9 1;Hard 11" },
         { id = "lights", name = "Lights Out", logic = "lights.lua", ui = "lightsui.lua",
-          blurb = "Switch every light off",
-          levels = { { name = "Small", size = 5 }, { name = "Medium", size = 6 }, { name = "Large", size = 7 } } },
+          blurb = "Switch every light off", levels = "Small 5;Medium 6;Large 7" },
+        -- 8x8 would not fit the X3's memory.
         { id = "slither", name = "Slitherlink", logic = "slither.lua", ui = "slitherui.lua", gen = "slithergen.lua",
-          loop = "slitherloop.lua",
-          blurb = "Draw one loop around the numbers",
-          -- arg: clues that stay at least. 8x8 would not fit the X3's memory.
-          levels = { { name = "Easy", size = 5, arg = 13 }, { name = "Normal", size = 7, arg = 24 },
-                     { name = "Hard", size = 7, arg = 0 } } },
+          loop = "slitherloop.lua", blurb = "Draw one loop around the numbers", levels = "Easy 5 13;Normal 7 24;Hard 7 0" },
+        { id = "kakuro", name = "Kakuro", logic = "kakuro.lua", ui = "kakuroui.lua", gen = "kakurogen.lua",
+          loop = "kakurolay.lua", blurb = "Fill in digits that add up to the sums", levels = "Easy 6;Normal 8;Hard 10" },
+        -- 12x12 would not fit the X3's memory.
+        { id = "akari", name = "Light Up", logic = "akari.lua", ui = "akariui.lua", gen = "akarigen.lua",
+          blurb = "Light every cell with bulbs", levels = "Easy 7 1;Normal 10 1;Hard 11" },
     },
     w = 480, h = 800, m = {}, touch = false,
     kind = nil,     -- index in KINDS of the puzzle in memory
@@ -39,7 +44,7 @@ local S = {
     gen = nil,      -- { kind, level } of the puzzle to make
     note = nil,     -- a message under the board
     failed = nil,   -- a message on the options menu
-    stats = {},     -- stats[kind][level] = { solved, bestMs }
+    stats = {},     -- solved, bestMs of each kind and level, flat: see S.stat
     saved = {},     -- saved[kind] = { level, ms } of a saved puzzle in progress
     since = 0,      -- millis when the current stretch of play began
     -- Cursors, kept here so they outlive the screen modules.
@@ -60,9 +65,19 @@ function S.formatTime(ms)
     return string.format("%d:%02d", s // 60, s % 60)
 end
 
+-- Where kind k's level lv keeps its stats: stats[i] solved, stats[i + 1]
+-- the best time in ms (0: none).
+function S.stat(k, lv) return (k - 1) * 6 + lv * 2 - 1 end
+
+-- Level lv (1..3) of kind k: name, size, arg (or nil).
+function S.levelOf(k, lv)
+    local name, size, arg = S.KINDS[k].levels:match(("[^;]*;"):rep(lv - 1) .. "(%a+) (%d+) ?(%d*)")
+    return name, tonumber(size), tonumber(arg)
+end
+
 function S.levelText(k, lv)
-    local L = S.KINDS[k].levels[lv]
-    return string.format("%s %dx%d", L.name, L.size, L.size)
+    local name, size = S.levelOf(k, lv)
+    return string.format("%s %dx%d", name, size, size)
 end
 
 -- Play time: elapsedMs holds finished stretches, S.since the running one.
