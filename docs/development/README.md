@@ -15,5 +15,6 @@ It is written for software developers who may be new to embedded development.
 - [Icon Libraries](./icons.md)
 - [Pokémon Module Mechanics](./pokemon-mechanics.md)
 - [Build & Flash to X3](./pokemon-x3-build-and-flash.md)
+- [Game Ideas for Lua Apps](./game-ideas.md)
 
 If you are new, start with [Getting Started](./getting-started.md).

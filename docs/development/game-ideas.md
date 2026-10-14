@@ -1,0 +1,42 @@
+# Game ideas for Lua apps
+
+Games still to build as Lua apps in `apps/`, in rough order of priority. Each one ships like the
+others: rules in their own module, the device players loaded only while they move, the shared
+`menu.lua`, logic tests in `test/lua_apps/`, and `guide.md` + `guide.vi.md`. It must stay under 75 KB
+in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md](../applications.md)
+and [apps/README.md](../../apps/README.md)).
+
+Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, plus the earlier games.
+
+## Next
+
+1. **Phỏm (tá lả)**: the Vietnamese rummy, you against three device players. Reuse Tien Len's card
+   drawing and its module layout.
+2. **Backgammon**: dice, bearing off, doubling cube optional; the device player weighs outcomes by
+   their probability.
+3. **Nine Men's Morris**: small board, short rules, a strong search fits easily.
+4. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
+   - each generated on the reader with a single solution, one module per puzzle.
+
+## Later
+
+- **Sâm lốc**: close to Tien Len, quick to build from it.
+- **Mancala (Kalah)**: a cousin of O An Quan; most of its code carries over.
+- **Cờ gánh**: Vietnamese folk game on a 5x5 grid.
+- **Mastermind**: code breaking with 1-bit symbols instead of colours.
+- **Peg Solitaire**: the classic English and European boards.
+- **Texas Hold'em**: against device players that estimate their hand's strength.
+- **Cribbage, Gin Rummy**: two-player card classics.
+- **Go 9x9 quick mode**: a faster setting of the existing Go app.
+
+## Needs a decision or data first
+
+- **Sokoban**: needs a level set whose licence allows shipping it.
+- **Word games** (crosswords, word search, Spelling Bee-style): need a word list, which costs memory
+  and storage; a Vietnamese version needs its own list.
+
+## Not for e-ink
+
+Action and real-time games (shooters, racing, falling-block speed games): the screen updates only a
+few times a second.
