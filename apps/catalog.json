@@ -992,6 +992,36 @@
         "menu.lua",
         "mmenu.lua"
       ]
+    },
+    {
+      "id": "samloc",
+      "name": "Sam Loc",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Sâm lốc, the Vietnamese shedding card game: 10 cards each, báo Sâm and báo 1, against three device players at two levels, with a running points table",
+      "files": [
+        "manifest.json",
+        "ai.lua",
+        "game.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "input.lua",
+        "logic.lua",
+        "main.lua",
+        "menu.lua",
+        "save.lua",
+        "slmenu.lua",
+        "sprites/clubs.raw",
+        "sprites/clubs16.raw",
+        "sprites/diamonds.raw",
+        "sprites/diamonds16.raw",
+        "sprites/hearts.raw",
+        "sprites/hearts16.raw",
+        "sprites/spades.raw",
+        "sprites/spades16.raw",
+        "view.lua"
+      ]
     }
   ]
 }
