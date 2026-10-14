@@ -7,18 +7,17 @@ in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md]
 and [apps/README.md](../../apps/README.md)).
 
 Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
-Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, Phom, plus the earlier games.
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, Phom, Backgammon, plus the earlier games.
 
 ## Next
 
-1. **Backgammon**: dice, bearing off, doubling cube optional; the device player weighs outcomes by
-   their probability.
-2. **Nine Men's Morris**: small board, short rules, a strong search fits easily.
-3. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
+1. **Nine Men's Morris**: small board, short rules, a strong search fits easily.
+2. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
    - each generated on the reader with a single solution, one module per puzzle.
 
 ## Later
 
+- **Backgammon doubling cube**: an option for the built game.
 - **Sâm lốc**: close to Tien Len, quick to build from it.
 - **Mancala (Kalah)**: a cousin of O An Quan; most of its code carries over.
 - **Cờ gánh**: Vietnamese folk game on a 5x5 grid.
