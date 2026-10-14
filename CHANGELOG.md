@@ -1,3 +1,21 @@
+## [1.8.5-beta.4-x4pro] - 2026-10-14
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only experimental test build, like beta.3: its Pulse screen speeds drive the X4 Pro's UC8279 screen with short waveforms and frame rates the controller does not document, not validated on this panel. They can leave ghosted, faint or uneven pictures, and in the worst case lasting image retention or damage to the display. Stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4) unless you test it. Install it at your own risk. There is no X3/X4 file in this release.
+
+For the tester only (X4 Pro, UC8279-68 screen): **Game Boy > SETTINGS > Screen speed** has **Pulse 8x3 fast**, **Pulse 8x4 fast** and **Pulse 10x3 fast**, which run at the faster frame rate the timing sweep found (PLL 1F: 3 frames there push about like 2 at 0F, 4 like 3, in less time). Play a few minutes on each with the status line on, and compare with **Pulse 8x3** (0F): smoothness, ghosting, updates per second. The window is now sent to the screen faster too. Leave with EXIT and send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Added
+
+- Game Boy (test only): Pulse 8x3 fast, 8x4 fast and 10x3 fast at frame rate 0x1F.
+
+### Changed
+
+- Game Boy (X4 Pro, UC8279-68): the changed part of the picture goes to the screen in larger blocks, on the D speeds as well as the Pulse ones.
+
+### Removed
+
+- Game Boy (test only): Pulse 6x2, 8x1 and 8x2 with a 30 s clean.
+
 ## [1.8.5-beta.3] - 2026-10-14
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** Experimental test build, like beta.2: its Pulse screen speeds and Pulse test drive the X4 Pro's UC8279 screen with short waveforms and frame rates the controller does not document, not validated on this panel. They can leave ghosted, faint or uneven pictures, and in the worst case lasting image retention or damage to the display. Stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4) unless you test it. Install it at your own risk.
