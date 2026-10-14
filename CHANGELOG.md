@@ -1,3 +1,17 @@
+## [1.8.5-beta.6-x4pro] - 2026-10-14
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only experimental test build, like beta.5: its Pulse screen speeds drive the X4 Pro's UC8279 screen with a short waveform the controller does not document, not validated on this panel. It can leave ghosted, faint or uneven pictures, and in the worst case lasting image retention or damage to the display. Stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4) unless you test it. Install it at your own risk. There is no X3/X4 file in this release.
+
+For the tester only (X4 Pro, UC8279-68 screen): **Game Boy > SETTINGS > Screen speed** has **Pulse 8x3**, **Pulse 8x3 polish** and the new **Pulse 8x3 polish+**, which also polishes every 1.5 seconds while the picture keeps moving - holding a direction on a map, pressing buttons fast. Compare polish+ with polish there: does the ghost stay down while you keep moving, and is motion still as smooth? Leave with EXIT after each speed and send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Added
+
+- Game Boy (test only): Pulse 8x3 polish+.
+
+### Removed
+
+- Game Boy (test only): Pulse 8x4 fast and 8x4 fast polish (more ghosting).
+
 ## [1.8.5-beta.5-x4pro] - 2026-10-14
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only experimental test build, like beta.4: its Pulse screen speeds drive the X4 Pro's UC8279 screen with short waveforms and frame rates the controller does not document, not validated on this panel. They can leave ghosted, faint or uneven pictures, and in the worst case lasting image retention or damage to the display. Stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4) unless you test it. Install it at your own risk. There is no X3/X4 file in this release.
