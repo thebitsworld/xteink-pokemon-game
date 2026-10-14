@@ -1,3 +1,17 @@
+## [1.8.4-beta.1] - 2026-10-14
+
+> **Test build.** This beta adds How to play guides to Applications. If you only want to read and play, stay on [v1.8.3](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.3).
+
+### Added
+
+- Applications: How to play. A game with a guide shows a **?** at the end of its row: tap it (X4 Pro) or hold Select on the row (X3/X4) to read the guide, page by page. Inside a game, **How to play** in its start menu opens the same guide, and Back returns to the game where it was. Guides are in English, and in Vietnamese when the reader's language is Vietnamese.
+- Lua apps can ship a guide (`guide.md`, `guide.vi.md`) and open it with `smudge.has_guide()` / `smudge.open_guide()`.
+- App Store: guides for 29 games, and four new games - Caro (Gomoku, five in a row), Reversi, O An Quan (o an quan) and Tien Len (tien len mien Nam, against three device players). The games also run on v1.8.3; the **?** and How to play buttons need this firmware.
+
+### Fixed
+
+- App Store games: Chess and Xiangqi no longer hand your side to the device when you swap sides mid-game; Tide & Paper draws hands of more than ten cards; Hex keeps its last-move marker after a resume; Sudoku accepts any valid solution; Blackjack no longer deals a card twice after a reshuffle; Wordle no longer writes the secret word to the log; 2048 keeps a best score.
+
 ## [1.8.3] - 2026-10-13
 
 ### Added
