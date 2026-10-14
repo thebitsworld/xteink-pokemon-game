@@ -7,13 +7,12 @@ in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md]
 and [apps/README.md](../../apps/README.md)).
 
 Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
-Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink, Kakuro, Light Up), Hexland, Phom, Backgammon, Nine Men's Morris, plus the earlier games.
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink, Kakuro, Light Up), Hexland, Phom, Backgammon, Nine Men's Morris, Sam Loc, plus the earlier games.
 
 ## Next
 
-1. **Sâm lốc**: close to Tien Len, quick to build from it.
-2. **Mancala (Kalah)**: a cousin of O An Quan; most of its code carries over.
-3. **Logic Puzzles additions**: KenKen, Nurikabe, Masyu, Star Battle - each generated on the
+1. **Mancala (Kalah)**: a cousin of O An Quan; most of its code carries over.
+2. **Logic Puzzles additions**: KenKen, Nurikabe, Masyu, Star Battle - each generated on the
    reader with a single solution, one module per puzzle (the X3 limit is close: ~64 KB at most).
 
 ## Later
