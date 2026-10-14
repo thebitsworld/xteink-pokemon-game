@@ -1,0 +1,8 @@
+{
+  "id": "mancala",
+  "name": "Mancala",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Mancala with Kalah rules: sow seeds around the board, earn extra turns and captures, against the device at three levels or a friend",
+  "entry": "main.lua"
+}
