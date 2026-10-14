@@ -49,10 +49,11 @@ Up/Down and Confirm), and **Back to game** or Back returns to the game.
   sharpest with the least ghosting, the lower numbers faster with a little more
   ghosting - and whether a full cleaning refresh clears the ghosting every 30 or
   60 seconds. D40 with a cleaning refresh every 60 seconds is the default.
-  **Pulse 8x2**, **8x3**, **6x2** and **8x1** (experimental) drive only the
-  pixels that are changing, one short pulse at a time, about ten times a
-  second: each changed pixel gets 8 or 6 pulses of 1 to 3 waveform frames, and
-  the rest of the screen is left alone. Motion is smoother, a moving sprite stays half-changed
+  **Pulse 8x2**, **8x3**, **8x3 fast**, **8x4 fast** and **10x3 fast**
+  (experimental) drive only the pixels that are changing, one short pulse at a
+  time, about ten times a second: each changed pixel gets 8 or 10 pulses of 2
+  to 4 waveform frames (shorter frames on the "fast" ones), and the rest of the
+  screen is left alone. Motion is smoother, a moving sprite stays half-changed
   for a moment, and a cleaning refresh every 60 seconds clears what is left.
   Other screens use the standard refresh.
 - **Colours** (Game Boy Color games): how colours become greys. **Contrast**
