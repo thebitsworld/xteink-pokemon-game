@@ -21,6 +21,7 @@
 #include "FeatureToggles.h"
 #if CROSSINK_GAMEBOY
 #include "activities/gameboy/GameBoyActivity.h"
+#include "activities/gameboy/PulseTestActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #endif
 #include "fontIds.h"
@@ -89,6 +90,14 @@ class ApplicationsActivity : public Activity {
         return;
       }
 #if CROSSINK_GAMEBOY
+      if (app.pulseTest) {
+        startActivityForResult(std::make_unique<PulseTestActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) {
+                                 refreshMenuList();
+                                 requestUpdate();
+                               });
+        return;
+      }
       if (app.gameBoy) {
         // Built in: pick a ROM (starting where the last game was) and play it;
         // leaving the game comes back here.
@@ -250,6 +259,7 @@ class ApplicationsActivity : public Activity {
     bool builtIn = false;  // App Store / App Settings rather than an SD-card app
     bool gameBoy = false;    // the built-in Game Boy launcher (X4 Pro)
     bool slideshow = false;  // the built-in Photo Slideshow
+    bool pulseTest = false;  // the screen's pulse-drive test (X4 Pro, UC8279-0x68)
     bool pokemon = false;    // the built-in Pokemon game
     bool hasGuide = false;   // a "How to play" guide in its folder (GuideViewerActivity)
     std::string dir;        // SD-card app: its folder and entry script
@@ -366,6 +376,20 @@ class ApplicationsActivity : public Activity {
         return scoreA > scoreB;
       });
     }
+
+#if CROSSINK_GAMEBOY && CROSSINK_PULSE_TEST
+    // A test of the pulse drive, on the screens it is being tried on (test
+    // builds only: -DCROSSINK_PULSE_TEST=1).
+    if (PulseTestActivity::supported()) {
+      AppEntry pulse;
+      pulse.name = "Pulse test";
+      pulse.detail = "Screen test for a faster Game Boy display";
+      pulse.icon = UIIcon::Library;
+      pulse.builtIn = true;
+      pulse.pulseTest = true;
+      visibleApps.push_back(std::move(pulse));
+    }
+#endif
 
     // Always append App Store and App Settings at the bottom
     AppEntry store;

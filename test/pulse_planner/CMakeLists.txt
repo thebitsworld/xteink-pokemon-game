@@ -1,0 +1,3 @@
+add_executable(PulsePlannerTest PulsePlannerTest.cpp)
+target_link_libraries(PulsePlannerTest PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(PulsePlannerTest)

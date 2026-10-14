@@ -46,8 +46,12 @@ concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
+# A pre-release tag ending in "-x4pro" (v1.8.5-beta.4-x4pro) is an X4 Pro-only
+# test build: the X3/X4 firmware is not built and the release carries the X4
+# Pro file alone. Every other tag builds both.
 jobs:
   build-x3-x4:
+    if: ${{ !endsWith(github.ref_name, '-x4pro') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -166,13 +170,15 @@ jobs:
 
   release:
     needs: [build-x3-x4, build-x4-pro]
-    # Manual (workflow_dispatch) runs stop after the builds above.
-    if: github.ref_type == 'tag'
+    # Manual (workflow_dispatch) runs stop after the builds above. The X3/X4
+    # build may have been skipped on purpose (an -x4pro tag), not failed.
+    if: ${{ github.ref_type == 'tag' && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/download-artifact@v7
+        if: ${{ !endsWith(github.ref_name, '-x4pro') }}
         with:
           name: firmware-x3-x4
           path: build/pokemon-x3
@@ -191,6 +197,14 @@ jobs:
 
           x3_x4_src=build/pokemon-x3/firmware-x3-x4.bin
           x4_pro_src=build/pokemon-x4-pro/firmware-x4-pro.bin
+          if [[ "${GITHUB_REF_NAME}" == *-x4pro ]]; then
+            # X4 Pro-only test build: a pre-release with the X4 Pro file alone.
+            cp "$x4_pro_src" "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
+            (cd dist && sha256sum ./*.bin | sed 's#\./##' > SHA256SUMS.txt)
+            cat dist/SHA256SUMS.txt
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           for src in "$x3_x4_src" "$x4_pro_src"; do
             if [ ! -f "$src" ]; then
               echo "::error::expected downloaded artifact missing: $src"
@@ -247,10 +261,12 @@ jobs:
           set -euo pipefail
           version="${{ steps.package.outputs.version }}"
           assets=(
-            "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin"
             "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
             dist/SHA256SUMS.txt
           )
+          if [ -f "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin" ]; then
+            assets+=("dist/xteink-pokemon-x3-x4-firmware-v${version}.bin")
+          fi
           flags=(--latest)
           if [[ "${version}" == *-* ]]; then
             # Release candidate: pre-release, never "latest". Skip the

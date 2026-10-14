@@ -186,6 +186,14 @@ class Uc8279X4Driver : public PanelDriver {
     return d;
   }
   void loadScaledDuLut(EpdBus& bus, uint8_t percent);
+  // xteink-pokemon: pulse drive (pulseScan). While `_pulseFrames` is set, a
+  // Fast refresh loads the one-pulse LUT of that many frames instead of the
+  // DU bank; `_pulseDirty` says the RAM planes hold drive masks, not a frame.
+  uint8_t _pulseFrames = 0;
+  bool _pulseDirty = false;
+  bool _pulsePending = false;  // a scan started without waiting
+  void loadPulseLut(EpdBus& bus, uint8_t frames);
+  void streamPulseOldPlane(EpdBus& bus, const uint8_t* target, const uint8_t* drive);
   // xteink-pokemon: game-mode changed-rectangle refreshes. `_grayBase` doubles
   // as the copy of what both RAM planes hold; `_diffRefValid` says it does.
   // The window is in visible rows and bytes; `_windowActive` makes
@@ -212,6 +220,10 @@ class Uc8279X4Driver : public PanelDriver {
     out = _lastTimings;
     return true;
   }
+  bool pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1,
+                 uint16_t byte0, uint16_t byte1, uint8_t frames, bool wait) override;
+  void pulseFinish(EpdBus& bus) override;
+  void endPulseDrive(EpdBus& bus) override;
 
  private:
 };

@@ -1,3 +1,10 @@
+## [1.8.5] - 2026-10-14
+
+### Added
+
+- Game Boy (X4 Pro, UC8279-68 screens): three experimental Pulse screen speeds in SETTINGS > Screen speed - Pulse 8x3, Pulse polish and Pulse polish+. They drive only the pixels that are changing, one short pulse at a time, about ten times a second, and leave the rest of the screen alone: motion is smoother and calmer than on the D speeds, with more ghosting behind moving things. Pulse polish gives the area that moved 4 more pulses once every pixel has finished and the picture has stood still for a moment, which clears most of that ghosting; Pulse polish+ stops waiting for the picture to stand still when 1.5 seconds have gone by without a polish (holding a direction on a map). D40 with a cleaning refresh every minute stays the default.
+- Game Boy (X4 Pro, UC8279-68 screens): the changed part of the picture goes to the screen in larger blocks, a little faster on the D speeds too.
+
 ## [1.8.4] - 2026-10-14
 
 ### Added

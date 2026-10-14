@@ -16,6 +16,7 @@
 #include <string>
 
 #include "activities/Activity.h"
+#include "util/PulsePlanner.h"
 
 #if CROSSINK_GAMEBOY
 #include "walnut_cgb_port.h"
@@ -86,6 +87,9 @@ class GameBoyActivity final : public Activity {
   // ~59.73 Hz frame cadence.
   static constexpr uint64_t DISPLAY_PERIOD_US = 250000ULL;
   static constexpr uint64_t FAST_DISPLAY_PERIOD_US = 50000ULL;
+  // A pulse-drive preset asks for the next picture as soon as the render task
+  // is free: each render plans and starts one scan and returns while it runs.
+  static constexpr uint64_t PULSE_DISPLAY_PERIOD_US = 15000ULL;
   static constexpr uint8_t MAX_CATCH_UP_FRAMES = 4;
   // One emulated frame in DRAW_EVERY is drawn into a picture: the e-ink
   // screen shows at most ~5 a second, and drawing the lines is a large part of
@@ -261,6 +265,22 @@ class GameBoyActivity final : public Activity {
   bool loadSave();
   bool saveCartRam();
   void cleanup();
+
+  // Pulse drive (presets with pulse frames, HalDisplay::pulseScan): the
+  // planner, its storage and the drive mask (PSRAM, ~290 KB), and whether the
+  // panel follows the planner - false until a cleaning refresh has put the
+  // framebuffer on the screen.
+  PulsePlanner pulsePlanner;
+  uint8_t* pulseStore = nullptr;
+  uint8_t* pulseDrive = nullptr;
+  bool pulseActive = false;
+  // When the planner last saw the picture change: a polish waits for it to
+  // stand still this long.
+  uint64_t pulseLastChangeUs = 0;
+  uint64_t pulseLastPolishUs = 0;
+  static constexpr uint64_t PULSE_POLISH_DELAY_US = 300000ULL;
+  bool allocatePulse();
+  void releasePulse();
   void showError(const char* message);
 
   void handleInput();

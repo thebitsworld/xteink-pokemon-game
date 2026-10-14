@@ -5,11 +5,11 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-14, v1.8.4)
+## Where things stand (2026-10-14, v1.8.5)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
-  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.4; latest release `v1.8.4` (stable). Its
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.5; latest release `v1.8.5` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
@@ -93,6 +93,20 @@ is in git history (before 2026-10-08).
   - `setFastRefreshDiffWindow(on)` (same files as the DU scale; `findChangedWindow`, `streamWindow`,
     `sendPartialWindow` in `Uc8279X4Driver`): Fast refreshes send and drive only the changed rectangle
     (PTIN/PTL window) and skip unchanged frames; `RefreshTimings::planeBytes` reports the bytes sent.
+  - `pulseScan(...)` / `endPulseDrive()` (PanelDriver.h, FreeInkDisplay.h/.cpp, `Uc8279X4Driver::
+    loadPulseLut`/`streamPulseOldPlane`): pulse drive - NEW plane = target, OLD = target with the driven
+    pixels flipped, one-pulse LUT built from the DU bank's levels for its 0x22/0x23 tables; tested
+    through Applications > Pulse test (`PulseTestActivity`, `src/util/PulsePlanner.h`). `wait=false`
+    + `pulseFinish()` overlap planning with the waveform. Measured: wave ~36 ms fixed + ~11.6 ms per
+    frame at PLL 0x0F (zeroing a LUT group's two trailing bytes - repeat counts - drives nothing and
+    leaves the 36 ms), send ~14-24 ms for 12-18 KB/plane; ~10 scans/s in a game, smooth but ghosty;
+    the tester liked 2 frames per pulse, then 8x3 (less ghosting). PLL 0x1F/0x3F: ~7.6 ms frames and
+    ~18 ms fixed vs ~11.7/~25 at 0x0F (the fixed part also grows with the window's rows). Game Boy
+    presets (1.8.5): Pulse 8x3 (P8x3-60), Pulse polish (P8x3P-60: 4 more pulses on the area that
+    changed once the planner is idle AND the picture stood still 0.3 s; PulsePlanner::polish) and
+    Pulse polish+ (P8x3PP-60: idle, and still OR 1.5 s since the last polish). Betas tried and
+    dropped: fewer frames (blur), 0x1F "fast" (more ghost), polishing while pixels still changed
+    (patchy, flicker). Pulse test shows only with -DCROSSINK_PULSE_TEST=1. Default stays D40.
   - `RefreshTimings` reports the last COMPLETED refresh with running `refreshes`/`skipped` counts (an
     overlapped refresh completes on the next call). Not an SDK file but related:
     `HalDisplay::displayBufferOverlapped`/`finishOverlapped` (SPI-locked shadow-free async refresh).

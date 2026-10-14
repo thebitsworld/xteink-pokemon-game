@@ -1035,6 +1035,24 @@ bool FreeInkDisplay::lastRefreshTimings(uint32_t out[8]) const {
   return true;
 }
 
+// xteink-pokemon: one pulse scan, after any refresh still running.
+bool FreeInkDisplay::pulseScan(const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1,
+                               uint16_t byte0, uint16_t byte1, uint8_t frames, bool wait) {
+  if (!_driver) return false;
+  syncPendingAsync();
+  return _driver->pulseScan(_bus, target, drive, row0, row1, byte0, byte1, frames, wait);
+}
+
+// xteink-pokemon: waits out a pulse scan started without waiting.
+void FreeInkDisplay::pulseFinish() {
+  if (_driver) _driver->pulseFinish(_bus);
+}
+
+// xteink-pokemon: back to ordinary refreshes after pulse scans.
+void FreeInkDisplay::endPulseDrive() {
+  if (_driver) _driver->endPulseDrive(_bus);
+}
+
 // xteink-pokemon: a game's display SPI clock; 0 restores the driver default.
 void FreeInkDisplay::setDisplaySpiHz(uint32_t hz) {
   if (!_driver) return;

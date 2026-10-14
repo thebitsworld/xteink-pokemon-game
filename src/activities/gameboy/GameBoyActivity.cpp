@@ -83,6 +83,18 @@ struct RefreshPreset {
   uint32_t spiHz;    // display SPI clock, 0 = the driver's (10 MHz on the X4 Pro)
   bool diffWindow;   // only the changed rectangle (HalDisplay::setFastRefreshDiffWindow)
   uint8_t cleanSec;  // seconds between cleaning refreshes (0 = none)
+  // Pulse drive instead of whole refreshes: waveform frames per pulse (0 =
+  // not a pulse preset) and the pulses a pixel gets toward black and white.
+  uint8_t pulseFrames;
+  uint8_t pulseBlack;
+  uint8_t pulseWhite;
+  // Pulses every pixel of the area that changed gets once every pixel is
+  // done with its pulses and the picture has stood still (PulsePlanner::
+  // polish; 0 = none), against ghosting; and after how long (ms) without a
+  // polish one comes as soon as every pixel is done, still or not (0 = only
+  // when still).
+  uint8_t pulsePolish;
+  uint16_t pulsePolishEveryMs;
 };
 constexpr RefreshPreset kRefreshPresets[] = {
     {"Standard", "standard", 0, 0, 0, 0, false, 0},
@@ -94,6 +106,15 @@ constexpr RefreshPreset kRefreshPresets[] = {
     {"D30, clean 60 s", "D30-60", 0, 0x0F, 30, 20000000, true, 60},
     {"D25, clean 30 s", "D25-30", 0, 0x0F, 25, 20000000, true, 30},
     {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
+    // Pulse drive: 8 pulses of 3 frames per change (the 1.8.5 betas: fewer
+    // frames blurred, frame rate 0x1F ghosted more). polish adds 4 pulses to
+    // the area that changed once every pixel is done and the picture stands
+    // still; polish+ stops waiting for it to stand still once 1.5 s have gone
+    // by without a polish. Polishing while some pixels were still changing
+    // left the screen patchy, so neither does.
+    {"Pulse 8x3, clean 60 s", "P8x3-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 0, 0},
+    {"Pulse polish, clean 60 s", "P8x3P-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 4, 0},
+    {"Pulse polish+, clean 60 s", "P8x3PP-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 4, 1500},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
@@ -317,6 +338,8 @@ void GameBoyActivity::onExit() {
   if (refreshPreset != 0) {
     refreshPreset = 0;
 #ifndef SIMULATOR
+    if (pulseActive) display.endPulseDrive();  // the next refresh redraws the whole screen
+    pulseActive = false;
     display.finishOverlapped();  // the last picture's refresh may still run
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
     display.setFastRefreshDuScale(0);
@@ -324,6 +347,7 @@ void GameBoyActivity::onExit() {
     display.setDisplaySpiHz(0);
 #endif
   }
+  releasePulse();
   renderer.setOrientation(GfxRenderer::Portrait);
   Activity::onExit();
 }
@@ -363,7 +387,9 @@ void GameBoyActivity::loop() {
     displayDue.store(true, std::memory_order_release);
     // Do not accumulate an unbounded display backlog when an e-ink refresh or
     // a long emulation stretch takes longer than one target period.
-    nextDisplayUs = nowUs + (refreshPreset != 0 ? FAST_DISPLAY_PERIOD_US : DISPLAY_PERIOD_US);
+    nextDisplayUs = nowUs + (refreshPreset == 0                            ? DISPLAY_PERIOD_US
+                             : kRefreshPresets[refreshPreset].pulseFrames ? PULSE_DISPLAY_PERIOD_US
+                                                                          : FAST_DISPLAY_PERIOD_US);
     requestUpdate();
   }
 
@@ -460,6 +486,12 @@ void GameBoyActivity::render(RenderLock&&) {
     // reads its own taps and registers none.
     TouchRegistry::getInstance().clear();
     drawMenu();
+#ifndef SIMULATOR
+    // The menu takes an ordinary refresh (a full one after pulse drive); the
+    // game screen comes back with a cleaning refresh.
+    if (pulseActive) display.endPulseDrive();
+    pulseActive = false;
+#endif
     // Blocking (the menu changes rarely) and left out of the speed figures. A
     // cleaning refresh asked for meanwhile waits for the game screen.
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -484,7 +516,16 @@ void GameBoyActivity::render(RenderLock&&) {
   }
 
   const uint64_t drawStartUs = nowMicros();
-  const bool cleaning = fullRefreshDue.exchange(false, std::memory_order_acq_rel);
+  // A pulse preset drives the panel from the planner, which needs the screen
+  // to show the framebuffer first: a cleaning refresh starts it.
+  const RefreshPreset& preset = kRefreshPresets[refreshPreset];
+#ifdef SIMULATOR
+  const bool pulse = false;
+#else
+  const bool pulse = preset.pulseFrames != 0 && pulseStore != nullptr;
+#endif
+  bool cleaning = fullRefreshDue.exchange(false, std::memory_order_acq_rel);
+  if (pulse && !pulseActive) cleaning = true;
   // The framebuffer keeps the title and buttons from the last picture (the
   // display is single-buffered): clear and redraw them only when they change,
   // and with every cleaning refresh in case anything else drew on the screen.
@@ -514,14 +555,55 @@ void GameBoyActivity::render(RenderLock&&) {
 #ifdef SIMULATOR
   const bool overlap = false;
 #else
-  const bool overlap = !cleaning && refreshPreset != 0 && renderer.supportsAsyncRefresh();
+  const bool overlap = !cleaning && refreshPreset != 0 && preset.pulseFrames == 0 && renderer.supportsAsyncRefresh();
 #endif
-  if (overlap) {
+  if (pulse && !cleaning) {
+#ifndef SIMULATOR
+    // One pulse scan of whatever still has pulses left, started without
+    // waiting: the next render plans while its waveform runs.
+    uint8_t* fb = renderer.getFrameBuffer();
+    const uint64_t nowUs = nowMicros();
+    if (pulsePlanner.retarget(fb)) pulseLastChangeUs = nowUs;
+    PulsePlanner::Window w;
+    bool any = pulsePlanner.plan(pulseDrive, w);
+    // Every pixel done, and the picture still for a moment (or, with
+    // polishEvery, no polish for that long): what moved gets a few more
+    // pulses, all of it alike, which finishes pixels a reversal cut short.
+    if (!any && preset.pulsePolish != 0) {
+      const bool still = nowUs - pulseLastChangeUs >= PULSE_POLISH_DELAY_US;
+      const bool due =
+          preset.pulsePolishEveryMs != 0 && nowUs - pulseLastPolishUs >= preset.pulsePolishEveryMs * 1000ULL;
+      if ((still || due) && pulsePlanner.polish(preset.pulsePolish)) {
+        pulseLastPolishUs = nowUs;
+        any = pulsePlanner.plan(pulseDrive, w);
+      }
+    }
+    if (!any) {
+      perfUnchanged.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    display.pulseScan(fb, pulseDrive, w.row0, w.row1, w.byte0, w.byte1, preset.pulseFrames, false);
+    pulsePlanner.delivered(pulseDrive, w);
+#endif
+  } else if (overlap) {
 #ifndef SIMULATOR
     display.displayBufferOverlapped(HalDisplay::FAST_REFRESH);
 #endif
   } else {
+#ifndef SIMULATOR
+    if (pulseActive) display.endPulseDrive();
+    pulseActive = false;
+#endif
     renderer.displayBuffer(cleaning ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+#ifndef SIMULATOR
+    if (pulse) {
+      // The screen shows the framebuffer: the planner starts from it.
+      pulsePlanner.init(pulseStore, display.getDisplayWidthBytes(), display.getDisplayHeight(),
+                        renderer.getFrameBuffer());
+      pulsePlanner.setBudgets(preset.pulseBlack, preset.pulseWhite);
+      pulseActive = true;
+    }
+#endif
   }
   const uint64_t doneUs = nowMicros();
 #ifndef SIMULATOR
@@ -782,6 +864,9 @@ void GameBoyActivity::applyRefreshPreset() {
   {
     RenderLock lock(*this);
 #ifndef SIMULATOR
+    if (pulseActive) display.endPulseDrive();
+    pulseActive = false;
+    if (p.pulseFrames != 0 && !allocatePulse()) LOG_ERR(TAG, "No memory for pulse drive: stock refreshes");
     display.finishOverlapped();
     display.setFastRefreshTuning(p.tsset, p.pll);
     display.setFastRefreshDuScale(p.duPct);
@@ -795,6 +880,33 @@ void GameBoyActivity::applyRefreshPreset() {
   fullRefreshDue.store(true, std::memory_order_release);
   displayDue.store(true, std::memory_order_release);
   requestUpdate();
+}
+
+// The pulse planner's storage and the drive mask, once per game.
+bool GameBoyActivity::allocatePulse() {
+  if (pulseStore != nullptr) return true;
+#ifdef SIMULATOR
+  return false;
+#else
+  const size_t size = renderer.getBufferSize();
+  pulseStore = static_cast<uint8_t*>(heap_caps_malloc(5 * size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  pulseDrive = static_cast<uint8_t*>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (pulseStore == nullptr || pulseDrive == nullptr) {
+    releasePulse();
+    return false;
+  }
+  return true;
+#endif
+}
+
+void GameBoyActivity::releasePulse() {
+#ifndef SIMULATOR
+  heap_caps_free(pulseStore);
+  heap_caps_free(pulseDrive);
+#endif
+  pulseStore = nullptr;
+  pulseDrive = nullptr;
+  pulseActive = false;
 }
 
 void GameBoyActivity::openMenu() {
