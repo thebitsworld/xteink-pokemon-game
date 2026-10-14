@@ -49,12 +49,16 @@ Up/Down and Confirm), and **Back to game** or Back returns to the game.
   sharpest with the least ghosting, the lower numbers faster with a little more
   ghosting - and whether a full cleaning refresh clears the ghosting every 30 or
   60 seconds. D40 with a cleaning refresh every 60 seconds is the default.
-  **Pulse** (experimental) drives only the pixels that are changing, one short
-  pulse at a time, about ten times a second: each changed pixel gets 8 pulses,
-  and the rest of the screen is left alone. Motion is smoother and calmer than
-  on the D speeds, with more ghosting behind moving things; once the picture
-  stands still for a moment, the area that moved gets 4 more pulses, which
-  clears most of it, and a cleaning refresh every 60 seconds the rest. Motion is smoother, a moving sprite stays half-changed
+  **Pulse 8x3**, **Pulse polish** and **Pulse polish+** (experimental) drive
+  only the pixels that are changing, one short pulse at a time, about ten
+  times a second: each changed pixel gets 8 pulses, and the rest of the screen
+  is left alone. Motion is smoother and calmer than on the D speeds, with more
+  ghosting behind moving things, which a cleaning refresh every 60 seconds
+  clears. **Pulse polish** also gives the area that moved 4 more pulses once
+  every pixel has finished and the picture has stood still for a moment,
+  which clears most of it sooner; **Pulse polish+** stops waiting for the
+  picture to stand still when 1.5 seconds have gone by without a polish
+  (holding a direction on a map). Motion is smoother, a moving sprite stays half-changed
   for a moment, and a cleaning refresh every 60 seconds clears what is left.
   Other screens use the standard refresh.
 - **Colours** (Game Boy Color games): how colours become greys. **Contrast**
