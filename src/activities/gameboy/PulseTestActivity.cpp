@@ -23,6 +23,10 @@ namespace {
 constexpr char TAG[] = "PULSE";
 constexpr char kLogPath[] = "/.crosspoint/pulse-test.txt";
 constexpr uint8_t kBudgetChoices[] = {2, 4, 6, 8, 10, 12, 15};
+// Frame rates (PLL register values) to try: 0x0F is the Game Boy's; 0x1F and
+// 0x3F looked fainter on the DU refresh (shorter frames), 0x10 the same.
+constexpr uint8_t kPllChoices[] = {0x0F, 0x10, 0x1F, 0x2F, 0x3F};
+constexpr int kSweepScans = 4;  // scans timed per frame rate and frame count
 constexpr uint32_t kMotionUs = 10000000;  // the motion test runs ten seconds
 constexpr int kMotionSpeed = 300;         // pixels per second
 constexpr int kSquare = 64;
@@ -112,12 +116,12 @@ void PulseTestActivity::release() {
   target = drive = plannerStorage = nullptr;
 }
 
-// The Game Boy's fast settings: frame rate 0x0F, display SPI at 20 MHz.
+// The Game Boy's fast settings (display SPI at 20 MHz) at the chosen frame rate.
 void PulseTestActivity::beginDrive() {
 #ifndef SIMULATOR
   display.setFastRefreshDuScale(0);
   display.setFastRefreshDiffWindow(false);
-  display.setFastRefreshTuning(0, 0x0F);
+  display.setFastRefreshTuning(0, pll);
   display.setDisplaySpiHz(20000000);
 #endif
 }
@@ -142,8 +146,7 @@ bool PulseTestActivity::scan(const PulsePlanner::Window& w, Totals& totals, cons
   return false;
 #else
   const uint8_t* picture = renderer.getFrameBuffer();
-  const uint8_t f = static_cast<uint8_t>(frames | (noTail ? 0x80 : 0));  // PanelDriver::kPulseNoTail
-  if (!display.pulseScan(picture, drive, w.row0, w.row1, w.byte0, w.byte1, f, wait)) return false;
+  if (!display.pulseScan(picture, drive, w.row0, w.row1, w.byte0, w.byte1, frames, wait)) return false;
   pulsed = true;
   uint32_t ph[8];
   if (display.lastRefreshTimings(ph)) {
@@ -206,8 +209,8 @@ void PulseTestActivity::runLadder() {
   // The base picture, cleaned with an ordinary full refresh.
   renderer.clearScreen(0xFF);
   char title[64];
-  snprintf(title, sizeof(title), "Ladder: 1-8 pulses of %u frame%s%s", frames, frames == 1 ? "" : "s",
-           noTail ? ", no tail" : "");
+  snprintf(title, sizeof(title), "Ladder: 1-8 pulses of %u frame%s, PLL %02X", frames, frames == 1 ? "" : "s",
+           pll);
   renderer.drawText(UI_12_FONT_ID, 16, 20, title, true, EpdFontFamily::BOLD);
   renderer.drawText(UI_10_FONT_ID, 16, 56, "To black on white:", true);
   renderer.fillRect(8, l.bandB0, w - 16, l.bandB1 - l.bandB0, true);
@@ -251,8 +254,8 @@ void PulseTestActivity::runMotion() {
   const int a0 = 90, a1 = 290, b0 = 320, b1 = 520;
   renderer.clearScreen(0xFF);
   char title[64];
-  snprintf(title, sizeof(title), "Motion: %u/%u pulses of %u frame%s%s", blackPulses, whitePulses, frames,
-           frames == 1 ? "" : "s", noTail ? ", no tail" : "");
+  snprintf(title, sizeof(title), "Motion: %u/%u x %u frame%s, PLL %02X", blackPulses, whitePulses, frames,
+           frames == 1 ? "" : "s", pll);
   renderer.drawText(UI_12_FONT_ID, 16, 20, title, true, EpdFontFamily::BOLD);
   renderer.drawRect(8, a0, w - 16, a1 - a0, true);
   renderer.fillRect(8, b0, w - 16, b1 - b0, true);
@@ -297,6 +300,65 @@ void PulseTestActivity::runMotion() {
   logResult("motion", totals);
 }
 
+// Times kSweepScans scans of one box at every frame rate and 1-3 frames per
+// pulse. A scan's waveform grows by a frame's time per frame: the fixed part
+// is what is left at zero frames.
+void PulseTestActivity::runSweep() {
+  const int w = renderer.getScreenWidth();
+  constexpr int box = 64;
+  const int bx = (w - box) / 2;
+  constexpr int by = 110;
+  renderer.clearScreen(0xFF);
+  renderer.drawText(UI_12_FONT_ID, 16, 20, "Timing sweep", true, EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, 16, 56, "Waveform ms at 1, 2, 3 frames per PLL:", true);
+#ifndef SIMULATOR
+  if (pulsed) display.endPulseDrive();
+  pulsed = false;
+#endif
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  int line = 0;
+  bool dark = false;
+  for (const uint8_t value : kPllChoices) {
+    if (abortRun.load(std::memory_order_acquire) || line >= 8) break;
+#ifndef SIMULATOR
+    display.setFastRefreshTuning(0, value);
+#endif
+    float ms[3] = {};
+    for (uint8_t f = 1; f <= 3; ++f) {
+      Totals t;
+      for (int n = 0; n < kSweepScans; ++n) {
+        dark = !dark;
+        renderer.fillRect(bx, by, box, box, dark);
+        memset(drive, 0, bufferSize);
+        captureDrive([](GfxRenderer& r, const int x) { r.fillRect(x, 110, 64, 64, true); }, bx);
+        PulsePlanner::Window win;
+        const uint8_t keep = frames;
+        frames = f;
+        const bool ok = maskWindow(win) && scan(win, t);
+        frames = keep;
+        if (!ok) break;
+      }
+      ms[f - 1] = t.scans ? t.waveUs / 1000.0f / t.scans : 0.0f;
+    }
+    const float perFrame = (ms[2] - ms[0]) / 2.0f;
+    snprintf(resultLines[line++], sizeof(resultLines[0]), "PLL %02X: %.1f %.1f %.1f  fixed %.1f, frame %.1f", value,
+             ms[0], ms[1], ms[2], ms[0] - perFrame, perFrame);
+    char csv[120];
+    const int len = snprintf(csv, sizeof(csv), "%s,sweep,pll %02X,wave_ms 1f %.2f,2f %.2f,3f %.2f\n",
+                             AppVersion::version(), value, ms[0], ms[1], ms[2]);
+    HalFile file = Storage.open(kLogPath, O_WRONLY | O_CREAT | O_APPEND);
+    if (file && len > 0 && static_cast<size_t>(len) < sizeof(csv) && file.size() < 64 * 1024) {
+      file.write(csv, static_cast<size_t>(len));
+    }
+    if (file) file.close();
+  }
+#ifndef SIMULATOR
+  display.setFastRefreshTuning(0, pll);
+#endif
+  planner.init(plannerStorage, widthBytes, rows, renderer.getFrameBuffer());
+  resultTop = 200;
+}
+
 void PulseTestActivity::summarize(const char* test, const Totals& t, const int line) {
   const float n = t.scans ? static_cast<float>(t.scans) : 1.0f;
   const float seconds = t.elapsedUs / 1e6f;
@@ -312,15 +374,15 @@ void PulseTestActivity::logResult(const char* test, const Totals& t) const {
   const float n = t.scans ? static_cast<float>(t.scans) : 1.0f;
   const float seconds = t.elapsedUs / 1e6f;
   char line[200];
-  const int len = snprintf(line, sizeof(line), "%s,%s,%u,%s,%u,%u,%u,%.2f,%.1f,%.2f,%.2f,%.2f,%.2f,%.1f\n",
-                           AppVersion::version(), test, frames, noTail ? "none" : "stock", blackPulses, whitePulses,
+  const int len = snprintf(line, sizeof(line), "%s,%s,%u,%02X,%u,%u,%u,%.2f,%.1f,%.2f,%.2f,%.2f,%.2f,%.1f\n",
+                           AppVersion::version(), test, frames, pll, blackPulses, whitePulses,
                            static_cast<unsigned>(t.scans), seconds, seconds > 0 ? t.scans / seconds : 0.0f,
                            t.sendUs / 1000.0f / n, t.setupUs / 1000.0f / n, t.waveUs / 1000.0f / n,
                            t.planUs / 1000.0f / n, t.bytes / 1024.0f / n);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kHeader[] =
-      "# version,test,frames,tail,black_pulses,white_pulses,scans,seconds,scans_per_s,send_ms,setup_ms,wave_ms,"
-      "plan_ms,plane_kb\n";
+      "# version,test,frames,pll (tail before 1.8.5-beta.3),black_pulses,white_pulses,scans,seconds,scans_per_s,"
+      "send_ms,setup_ms,wave_ms,plan_ms,plane_kb\n";
   HalFile file = Storage.open(kLogPath, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -332,12 +394,12 @@ void PulseTestActivity::logResult(const char* test, const Totals& t) const {
 // pulse mode until the menu comes back).
 void PulseTestActivity::drawResultArea() {
   const int w = renderer.getScreenWidth();
-  renderer.fillRect(0, kResultTop, w, renderer.getScreenHeight() - kResultTop, false);
-  int y = kResultTop + 8;
+  renderer.fillRect(0, resultTop, w, renderer.getScreenHeight() - resultTop, false);
+  int y = resultTop + 8;
   for (const auto& line : resultLines) {
     if (!line[0]) continue;
     renderer.drawText(UI_10_FONT_ID, 16, y, line, true);
-    y += 30;
+    y += 28;
   }
   renderer.drawText(UI_10_FONT_ID, 16, y + 10, "Tap or Select: menu.  Back: leave.", true, EpdFontFamily::BOLD);
   Totals ignored;
@@ -347,8 +409,8 @@ void PulseTestActivity::drawResultArea() {
 void PulseTestActivity::rowRect(const int row, int& x, int& y, int& w, int& h) const {
   x = 16;
   w = renderer.getScreenWidth() - 32;
-  h = 64;
-  y = 230 + row * (h + 8);
+  h = 58;
+  y = 230 + row * (h + 6);
 }
 
 void PulseTestActivity::drawMenu() {
@@ -374,9 +436,9 @@ void PulseTestActivity::drawMenu() {
         label = "Frames per pulse";
         snprintf(value, sizeof(value), "%u", frames);
         break;
-      case Row::Tail:
-        label = "LUT tail (experiment)";
-        snprintf(value, sizeof(value), "%s", noTail ? "None" : "Stock");
+      case Row::Pll:
+        label = "Frame rate (PLL)";
+        snprintf(value, sizeof(value), "%02X", pll);
         break;
       case Row::Black:
         label = "Pulses to black (motion)";
@@ -391,6 +453,9 @@ void PulseTestActivity::drawMenu() {
         break;
       case Row::Motion:
         label = "Run the motion test";
+        break;
+      case Row::Sweep:
+        label = "Run the timing sweep";
         break;
       case Row::Back:
         label = "Back";
@@ -419,11 +484,14 @@ static uint8_t nextBudget(const uint8_t current) {
 void PulseTestActivity::activate(const Row row) {
   switch (row) {
     case Row::Frames:
-      frames = static_cast<uint8_t>(frames % 3 + 1);
+      frames = static_cast<uint8_t>(frames % 4 + 1);
       break;
-    case Row::Tail:
-      noTail = !noTail;
+    case Row::Pll: {
+      size_t i = 0;
+      while (i < sizeof(kPllChoices) && kPllChoices[i] != pll) ++i;
+      pll = kPllChoices[(i + 1) % sizeof(kPllChoices)];
       break;
+    }
     case Row::Black:
       blackPulses = nextBudget(blackPulses);
       break;
@@ -432,7 +500,8 @@ void PulseTestActivity::activate(const Row row) {
       break;
     case Row::Ladder:
     case Row::Motion:
-      pending = row == Row::Ladder ? Run::Ladder : Run::Motion;
+    case Row::Sweep:
+      pending = row == Row::Ladder ? Run::Ladder : (row == Row::Motion ? Run::Motion : Run::Sweep);
       abortRun.store(false, std::memory_order_release);
       running.store(true, std::memory_order_release);
       break;
@@ -494,14 +563,17 @@ void PulseTestActivity::render(RenderLock&&) {
       pending = Run::None;
       running.store(false, std::memory_order_release);
       snprintf(resultLines[0], sizeof(resultLines[0]), "This screen cannot run the pulse test.");
-      resultLines[1][0] = resultLines[2][0] = resultLines[3][0] = '\0';
+      for (int i = 1; i < 8; ++i) resultLines[i][0] = '\0';
     } else {
       beginDrive();
       memset(resultLines, 0, sizeof(resultLines));
+      resultTop = kResultTop;
       if (pending == Run::Ladder) {
         runLadder();
-      } else {
+      } else if (pending == Run::Motion) {
         runMotion();
+      } else {
+        runSweep();
       }
       pending = Run::None;
       drawResultArea();

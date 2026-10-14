@@ -14,7 +14,9 @@
 // the rest of the screen stays still. The motion test moves a black and a
 // white square for ten seconds with the pulse budgets set here and counts the
 // scans per second; it plans the next scan while the waveform runs, as a game
-// would. Results show on screen and go to
+// would. The timing sweep times scans of one small box at several frame
+// rates (PLL) and frame counts, to split each scan into its fixed part and
+// its part per frame. Results show on screen and go to
 // /.crosspoint/pulse-test.txt.
 class PulseTestActivity final : public Activity {
  public:
@@ -31,8 +33,8 @@ class PulseTestActivity final : public Activity {
   bool preventAutoSleep() override { return running.load(std::memory_order_acquire); }
 
  private:
-  enum class Row : uint8_t { Frames, Tail, Black, White, Ladder, Motion, Back, Count };
-  enum class Run : uint8_t { None, Ladder, Motion };
+  enum class Row : uint8_t { Frames, Pll, Black, White, Ladder, Motion, Sweep, Back, Count };
+  enum class Run : uint8_t { None, Ladder, Motion, Sweep };
 
   // Scan timings summed over a test, in microseconds.
   struct Totals {
@@ -46,7 +48,7 @@ class PulseTestActivity final : public Activity {
   };
 
   uint8_t frames = 2;
-  bool noTail = false;  // the LUT groups' two trailing bytes 0 (an experiment)
+  uint8_t pll = 0x0F;  // the frame rate register (0x30) for the scans
   uint8_t blackPulses = 8;
   uint8_t whitePulses = 8;
   int selected = static_cast<int>(Row::Ladder);
@@ -55,7 +57,8 @@ class PulseTestActivity final : public Activity {
   std::atomic<bool> abortRun{false};
   bool showingResult = false;
   bool pulsed = false;  // the panel holds pulse masks: the next refresh must be full
-  char resultLines[4][96] = {};
+  char resultLines[8][96] = {};
+  int resultTop = 600;  // where the results start on screen
 
   uint8_t* target = nullptr;  // the picture the panel heads to (framebuffer layout)
   uint8_t* drive = nullptr;   // this scan's drive mask
@@ -78,6 +81,7 @@ class PulseTestActivity final : public Activity {
   void showWithPulses(Totals& totals);
   void runLadder();
   void runMotion();
+  void runSweep();
   void drawResultArea();
   void logResult(const char* test, const Totals& totals) const;
   void summarize(const char* test, const Totals& totals, int line);
