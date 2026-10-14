@@ -623,16 +623,24 @@ void Uc8279X4Driver::loadPulseLut(EpdBus& bus, const uint8_t frames) {
 
 // xteink-pokemon: OLD plane of a pulse scan, the target with the driven
 // pixels flipped, so that exactly those pixels read as a transition.
+// Rows go out gathered into 1 KB writes: one SPI write per row cost more
+// than the bytes themselves.
 void Uc8279X4Driver::streamPulseOldPlane(EpdBus& bus, const uint8_t* target, const uint8_t* drive) {
-  uint8_t row[128];
+  uint8_t buf[1024];
+  uint16_t used = 0;
   const uint16_t bytes = _winByte1 - _winByte0 + 1;
   bus.cmd(CMD_DTM1);
   bus.beginTxn();
   for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
+    if (used + bytes > sizeof(buf)) {
+      bus.rawWriteBytes(buf, used);
+      used = 0;
+    }
     const uint32_t at = static_cast<uint32_t>(r) * _wb + _winByte0;
-    for (uint16_t i = 0; i < bytes; ++i) row[i] = static_cast<uint8_t>(target[at + i] ^ drive[at + i]);
-    bus.rawWriteBytes(row, bytes);
+    for (uint16_t i = 0; i < bytes; ++i) buf[used + i] = static_cast<uint8_t>(target[at + i] ^ drive[at + i]);
+    used = static_cast<uint16_t>(used + bytes);
   }
+  if (used) bus.rawWriteBytes(buf, used);
   bus.endTxn();
 }
 
@@ -757,16 +765,23 @@ bool Uc8279X4Driver::findChangedWindow(const uint8_t* fb) {
 }
 
 // xteink-pokemon: streams the changed rectangle of `fb` into a RAM plane; the
-// controller must be in partial mode with that window set.
+// controller must be in partial mode with that window set. Rows go out
+// gathered into 1 KB writes.
 void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb) {
-  uint8_t row[128];
+  uint8_t buf[1024];
+  uint16_t used = 0;
   const uint16_t bytes = _winByte1 - _winByte0 + 1;
   bus.cmd(ramCmd);
   bus.beginTxn();
   for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
-    memcpy(row, fb + static_cast<uint32_t>(r) * _wb + _winByte0, bytes);
-    bus.rawWriteBytes(row, bytes);
+    if (used + bytes > sizeof(buf)) {
+      bus.rawWriteBytes(buf, used);
+      used = 0;
+    }
+    memcpy(buf + used, fb + static_cast<uint32_t>(r) * _wb + _winByte0, bytes);
+    used = static_cast<uint16_t>(used + bytes);
   }
+  if (used) bus.rawWriteBytes(buf, used);
   bus.endTxn();
 }
 
