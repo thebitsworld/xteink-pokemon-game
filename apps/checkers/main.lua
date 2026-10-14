@@ -119,7 +119,7 @@ end
 
 local function statusText()
     if game.winner ~= 0 then
-        if game.winner == -1 then return "Draw: forty moves each without a capture" end
+        if game.winner == -1 then return "Draw: 40 moves each, no capture or crowning" end
         if vsDevice() then return game.winner == C.LIGHT and "You win!" or "The device wins" end
         return (game.winner == C.LIGHT and "White" or "Black") .. " wins!"
     end

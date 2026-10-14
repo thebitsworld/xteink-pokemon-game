@@ -21,7 +21,8 @@ local S = {
     },
     w = 480, h = 800, m = {}, touch = false,
     mode = 2,          -- 1..3 against the device at that level, 4 two players
-    human = C.RED,     -- your side against the device
+    human = C.RED,     -- your side in this game against the device
+    side = C.RED,      -- your side in the next new game (the menu's choice)
     game = nil,
     legal = nil,       -- legal moves of the side to move
     picked = nil,      -- the point of the piece picked up
@@ -87,7 +88,7 @@ end
 
 -- A new game in `mode`: started once the current screen module is dropped.
 function S.newGame(mode)
-    S.mode, S.restart = mode, true
+    S.mode, S.human, S.restart = mode, S.side, true
 end
 
 function S.play(mv)
@@ -134,7 +135,8 @@ function on_init()
         local a, b, c = (smudge.load("rec" .. i, "0,0,0")):match("(%d+),(%d+),(%d+)")
         S.records[i] = { tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0 }
     end
-    S.human = tonumber(smudge.load("side", "0")) == C.BLACK and C.BLACK or C.RED
+    S.side = tonumber(smudge.load("side", "0")) == C.BLACK and C.BLACK or C.RED
+    S.human = S.side
     local savedMode, savedHuman, history = smudge.load("game", ""):match("^(%d)#(%d)#(.*)$")
     if history then
         local g = S.rules().replay(history)

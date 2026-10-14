@@ -1,8 +1,8 @@
 {
   "id": "2048",
   "name": "2048",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Mumfee",
-  "description": "Classic 4x4 sliding tile number puzzle with high scores",
+  "description": "Classic 4x4 sliding tile number puzzle with a best score",
   "entry": "main.lua"
 }

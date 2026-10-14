@@ -1,7 +1,7 @@
 {
   "id": "checkers",
   "name": "Checkers",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "xteink-pokemon-game",
   "description": "English draughts with compulsory captures. Play the device at three levels or a friend on the same reader",
   "entry": "main.lua"

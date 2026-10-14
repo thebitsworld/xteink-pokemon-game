@@ -197,4 +197,23 @@ do
     assert(wins[1] > 90)
 end
 
+-- A big hand still fits above the points line, in rows that do not overlap (the
+-- X3 height and the tallest theme header).
+do
+    local Lay = dofile(APPS .. "/tide/layout.lua")(T, { w = 480, h = 792,
+        m = { top_padding = 5, header_height = 84, button_hints_height = 40 } })
+    local L = Lay.layout()
+    for n = 1, 20 do
+        for k = 1, n do
+            local _, y, ch = Lay.handPos(L, k, n)
+            assert(ch >= 60 and y + ch <= L.points, "hand card " .. k .. " of " .. n .. " shows")
+            if k > 5 then
+                local _, above, ach = Lay.handPos(L, k - 5, n)
+                assert(above + ach < y, "rows apart")
+            end
+        end
+    end
+    assert(select(3, Lay.handPos(L, 10, 10)) == L.hh, "two rows keep the full size")
+end
+
 print("tide logic ok")

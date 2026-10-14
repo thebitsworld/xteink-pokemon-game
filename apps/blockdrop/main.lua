@@ -519,6 +519,12 @@ function on_draw()
         end
     end
 
+    -- Side buttons have no hint strip: name them under the preview
+    if not (smudge.has_touch and smudge.has_touch()) then
+        smudge.text(sidebarX, sidebarY + previewBoxSize + 16, "Up: Rotate", 10, false, "left")
+        smudge.text(sidebarX, sidebarY + previewBoxSize + 34, "Down: Reset", 10, false, "left")
+    end
+
     -- 7. Modal Confirmation Dialog
     if show_reset_confirm then
         local modalW = w - 60

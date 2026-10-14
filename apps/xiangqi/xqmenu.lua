@@ -16,8 +16,8 @@ local function items()
                           note = string.format("Won %d  Lost %d  Drawn %d", r[1], r[2], r[3]) }
     end
     out[#out + 1] = { label = "Two players", mode = #S.LEVELS + 1, note = "Take turns on this reader" }
-    out[#out + 1] = { label = "You play " .. (S.human == C.RED and "Red" or "Black"), mode = -2,
-                      note = "Against the device; tap to swap" }
+    out[#out + 1] = { label = "You play " .. (S.side == C.RED and "Red" or "Black"), mode = -2,
+                      note = "Next game vs device; tap to swap" }
     if playing and C.moveCount(S.game) > 0 then out[#out + 1] = { label = "Take back a move", mode = -3 } end
     out[#out + 1] = { label = "Exit", mode = -1 }
     return out
@@ -28,8 +28,9 @@ local function choose(item)
     if item == "exit" or item.mode == -1 then
         smudge.exit()
     elseif item.mode == -2 then
-        S.human = 1 - S.human
-        smudge.save("side", tostring(S.human))
+        -- Only new games take it: a game in progress keeps its sides.
+        S.side = 1 - S.side
+        smudge.save("side", tostring(S.side))
         smudge.request_update()
     elseif item.mode == -3 then
         -- Back to your own move: one ply with two players, otherwise to the

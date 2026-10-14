@@ -26,9 +26,21 @@ local w, h = 480, 800
 local pad_sel = nil
 local PAD_COLS = 5
 
+-- Any full grid that follows the rules wins, not only the stored solution:
+-- the generator does not guarantee a unique one. Givens cannot be edited.
 local function check_win()
     for i = 1, 81 do
-        if b[i] == 0 or b[i] ~= s[i] then return false end
+        if b[i] == 0 then return false end
+    end
+    for u = 0, 8 do
+        local mr, mc, mb = 0, 0, 0
+        local br, bc = (u // 3) * 3, (u % 3) * 3
+        for k = 0, 8 do
+            mr = mr | (1 << b[u * 9 + k + 1])
+            mc = mc | (1 << b[k * 9 + u + 1])
+            mb = mb | (1 << b[(br + k // 3) * 9 + bc + k % 3 + 1])
+        end
+        if mr ~= 1022 or mc ~= 1022 or mb ~= 1022 then return false end
     end
     solved = true
     return true

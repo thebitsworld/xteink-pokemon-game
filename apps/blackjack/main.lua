@@ -69,14 +69,26 @@ local function init_deck()
     end
 end
 
+-- Takes one copy of card c out of the undealt part of the shoe.
+local function take_from_shoe(c)
+    for j = 1, deck_top do
+        if deck[j] == c then
+            deck[j] = deck[deck_top]
+            deck[deck_top] = c
+            deck_top = deck_top - 1
+            return
+        end
+    end
+end
+
 local function draw_card()
     if deck_top <= 0 then
-        -- Reshuffle shoe in-place
-        for i = #deck, 2, -1 do
-            local j = math.random(1, i)
-            deck[i], deck[j] = deck[j], deck[i]
+        -- Shoe ran out mid-round: reshuffle, leaving out the cards on the table
+        init_deck()
+        for _, c in ipairs(dealer_hand) do take_from_shoe(c) end
+        for _, hd in ipairs(player_hands) do
+            for _, c in ipairs(hd.cards) do take_from_shoe(c) end
         end
-        deck_top = #deck
     end
     local c = deck[deck_top]
     deck_top = deck_top - 1
@@ -176,6 +188,10 @@ end
 
 local function advance_player_turn()
     active_hand_idx = active_hand_idx + 1
+    -- A split hand dealt 21 plays itself, like any other 21
+    while active_hand_idx <= #player_hands and hand_score(player_hands[active_hand_idx].cards) == 21 do
+        active_hand_idx = active_hand_idx + 1
+    end
     if active_hand_idx > #player_hands then
         dealer_play()
     end
@@ -195,6 +211,8 @@ end
 local function deal_round()
     if bankroll < current_bet then return end
     bankroll = bankroll - current_bet
+    -- Reshuffle between hands when the shoe runs low (the table is empty here)
+    if deck_top < 52 then init_deck() end
     insurance_bet = 0
     clear_table(dealer_hand)
     clear_table(player_hands)
@@ -268,13 +286,18 @@ local function perform_split()
 
     local secondCard = table.remove(h.cards)
     local newHand = {
-        cards = {secondCard, draw_card()},
+        cards = {secondCard},
         bet = h.bet,
         busted = false,
         result = ""
     }
-    table.insert(h.cards, draw_card())
+    -- On the table before drawing, so a mid-round reshuffle leaves it out
     table.insert(player_hands, active_hand_idx + 1, newHand)
+    table.insert(newHand.cards, draw_card())
+    table.insert(h.cards, draw_card())
+    if hand_score(h.cards) == 21 then
+        advance_player_turn()
+    end
 end
 
 -- Shared by the buttons, the hint taps and the touch bar.

@@ -179,4 +179,31 @@ do
     assert(wins >= 1, "beats random play")
 end
 
+-- The menu's side swap only applies to new games: a game in progress keeps its sides.
+do
+    local saved = {}
+    smudge = setmetatable({
+        get_bounds = function() return 480, 800 end,
+        get_metrics = function() return { top_padding = 0, header_height = 40 } end,
+        has_touch = function() return false end,
+        dofile = function(name) return dofile(APPS .. "/chess/" .. name) end,
+        save = function(k, v) saved[k] = v end,
+    }, { __index = function() return function() end end })
+    local S = { LEVELS = { { name = "1" }, { name = "2" }, { name = "3" } },
+                records = { { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 } },
+                human = C.WHITE, side = C.WHITE, mode = 1, game = C.new() }
+    function S.vsDevice() return S.mode <= #S.LEVELS end
+    function S.newGame(mode) S.mode, S.human = mode, S.side end
+    function S.refresh() end
+    function S.show() end
+    local screen = dofile(APPS .. "/chess/chessmenu.lua")(C, S)
+    for _ = 1, 5 do screen.button("down") end -- Resume, 3 levels, Two players, the side
+    screen.button("confirm")
+    assert(S.side == C.BLACK and saved.side == tostring(C.BLACK), "the side swaps")
+    assert(S.human == C.WHITE, "the game in progress keeps your side")
+    S.newGame(1)
+    assert(S.human == C.BLACK, "a new game takes the new side")
+    smudge = nil
+end
+
 print("chess logic ok")

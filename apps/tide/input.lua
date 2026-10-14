@@ -169,8 +169,8 @@ function V.tap(x, y)
         end
     end
     for k = 1, #g.hands[1] do
-        local cx, cy = handPos(L, k)
-        if smudge.in_rect(x, y, cx, cy, L.hw, L.hh) then
+        local cx, cy, ch = handPos(L, k, #g.hands[1])
+        if smudge.in_rect(x, y, cx, cy, L.hw, ch) then
             toggleSelect(k)
             smudge.request_update()
             return
