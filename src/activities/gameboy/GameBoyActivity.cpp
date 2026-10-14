@@ -99,11 +99,15 @@ constexpr RefreshPreset kRefreshPresets[] = {
     {"D30, clean 60 s", "D30-60", 0, 0x0F, 30, 20000000, true, 60},
     {"D25, clean 30 s", "D25-30", 0, 0x0F, 25, 20000000, true, 30},
     {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
+    // Pulse drive (pulses x frames per pulse). At frame rate 0x1F a frame
+    // takes ~7.6 ms instead of ~11.7 and a scan's fixed part ~18 ms instead
+    // of ~25 (Pulse test sweep), so 3 frames there push like 2 at 0x0F, 4
+    // like 3, in less time: those are the "fast" ones.
     {"Pulse 8x2, clean 60 s", "P8x2-60", 0, 0x0F, 0, 20000000, false, 60, 2, 8, 8},
-    {"Pulse 8x2, clean 30 s", "P8x2-30", 0, 0x0F, 0, 20000000, false, 30, 2, 8, 8},
     {"Pulse 8x3, clean 60 s", "P8x3-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8},
-    {"Pulse 6x2, clean 60 s", "P6x2-60", 0, 0x0F, 0, 20000000, false, 60, 2, 6, 6},
-    {"Pulse 8x1, clean 60 s", "P8x1-60", 0, 0x0F, 0, 20000000, false, 60, 1, 8, 8},
+    {"Pulse 8x3 fast, clean 60 s", "P8x3F-60", 0, 0x1F, 0, 20000000, false, 60, 3, 8, 8},
+    {"Pulse 8x4 fast, clean 60 s", "P8x4F-60", 0, 0x1F, 0, 20000000, false, 60, 4, 8, 8},
+    {"Pulse 10x3 fast, clean 60 s", "P10x3F-60", 0, 0x1F, 0, 20000000, false, 60, 3, 10, 10},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
