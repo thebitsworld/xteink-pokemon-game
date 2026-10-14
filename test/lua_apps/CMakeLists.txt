@@ -8,7 +8,7 @@ target_link_libraries(lua_host PUBLIC m)
 add_executable(LuaAppLogicTest lua_test_runner.c)
 target_link_libraries(LuaAppLogicTest PRIVATE lua_host)
 
-foreach(app minesweeper connectfour tictactoe reversi oanquan tienlen caro patience coup hexland dots logic phom solitaire knucklebones yacht nonogram checkers seabattle hearts hex go chess xiangqi bazaar whodunit dungeon tide calc notes dial forehead circle cult toyfront)
+foreach(app minesweeper connectfour tictactoe reversi oanquan tienlen caro patience coup hexland dots logic phom backgammon solitaire knucklebones yacht nonogram checkers seabattle hearts hex go chess xiangqi bazaar whodunit dungeon tide calc notes dial forehead circle cult toyfront)
   add_test(NAME LuaAppLogic_${app}
            COMMAND LuaAppLogicTest "${REPO_ROOT}/apps" "${CMAKE_CURRENT_SOURCE_DIR}/${app}_test.lua")
 endforeach()

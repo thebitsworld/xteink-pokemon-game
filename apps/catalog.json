@@ -943,6 +943,27 @@
         "sprites/spades16.raw",
         "view.lua"
       ]
+    },
+    {
+      "id": "backgammon",
+      "name": "Backgammon",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Backgammon (cờ thỏ cáo): race your 15 checkers home and bear them off, against the device at three levels or a friend, with gammons, backgammons, match points and saved games",
+      "files": [
+        "manifest.json",
+        "ai.lua",
+        "bgmenu.lua",
+        "draw.lua",
+        "game.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "input.lua",
+        "logic.lua",
+        "main.lua",
+        "menu.lua"
+      ]
     }
   ]
 }
