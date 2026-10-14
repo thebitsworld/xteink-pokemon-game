@@ -95,7 +95,8 @@ local function menuItems()
         local label = string.format("%s  %dx%d%s", L.name, L.size, L.size, L.rooms > 0 and " + treasure" or "")
         items[#items + 1] = { label = label, level = i, note = note }
     end
-    items[#items + 1] = { label = "How to play", level = -2 }
+    -- Firmware that opens guide.md adds its own "How to play" (menu.lua).
+    if not smudge.open_guide then items[#items + 1] = { label = "How to play", level = -2 } end
     items[#items + 1] = { label = "Exit", level = -1 }
     return items
 end

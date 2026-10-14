@@ -191,7 +191,8 @@ local function menuItems()
         local s = stats[i]
         items[#items + 1] = { label = "New game: " .. name, id = i, note = string.format("Won %d of %d", s[1], s[2]) }
     end
-    items[#items + 1] = { label = "How to play", id = -2 }
+    -- Firmware that opens guide.md adds its own "How to play" (menu.lua).
+    if not smudge.open_guide then items[#items + 1] = { label = "How to play", id = -2 } end
     items[#items + 1] = { label = "Exit", id = -1 }
     return items
 end

@@ -71,6 +71,7 @@ local function menuItems()
         items[#items + 1] = { label = "New game: " .. name .. " players", level = i,
                               note = string.format("Won %d of %d", s[1], s[2]) }
     end
+    if smudge.has_guide and smudge.has_guide() then items[#items + 1] = { label = "How to play", level = -2 } end
     items[#items + 1] = { label = "Exit", level = -1 }
     return items
 end
@@ -136,6 +137,10 @@ end
 
 local function choose(item)
     if not item then return end
+    if item ~= "exit" and item.level == -2 then
+        smudge.open_guide()
+        return
+    end
     if item == "exit" or item.level < 0 then
         smudge.exit()
         return
