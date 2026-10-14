@@ -1,3 +1,17 @@
+## [1.8.5-beta.5-x4pro] - 2026-10-14
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only experimental test build, like beta.4: its Pulse screen speeds drive the X4 Pro's UC8279 screen with short waveforms and frame rates the controller does not document, not validated on this panel. They can leave ghosted, faint or uneven pictures, and in the worst case lasting image retention or damage to the display. Stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4) unless you test it. Install it at your own risk. There is no X3/X4 file in this release.
+
+For the tester only (X4 Pro, UC8279-68 screen): **Game Boy > SETTINGS > Screen speed** now has four Pulse speeds - **Pulse 8x3**, **Pulse 8x3 polish**, **Pulse 8x4 fast** and **Pulse 8x4 fast polish**. The polish ones give the area that moved 4 more pulses once the picture has stood still for 0.3 s, against the ghosting left when motion stops. Play a few minutes on each, walking and then stopping, and compare each speed with its polish version: does the ghost go once you stop, and does anything look worse? Leave with EXIT after each speed (so every one gets its own line) and send `/.crosspoint/gameboy-perf.txt` with your notes.
+
+### Added
+
+- Game Boy (test only): Pulse 8x3 polish and Pulse 8x4 fast polish.
+
+### Removed
+
+- Game Boy (test only): Pulse 8x2, 8x3 fast and 10x3 fast.
+
 ## [1.8.5-beta.4-x4pro] - 2026-10-14
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only experimental test build, like beta.3: its Pulse screen speeds drive the X4 Pro's UC8279 screen with short waveforms and frame rates the controller does not document, not validated on this panel. They can leave ghosted, faint or uneven pictures, and in the worst case lasting image retention or damage to the display. Stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4) unless you test it. Install it at your own risk. There is no X3/X4 file in this release.
