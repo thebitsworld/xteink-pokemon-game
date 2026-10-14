@@ -1,0 +1,8 @@
+{
+  "id": "phom",
+  "name": "Phom",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Phỏm (tá lả), the Vietnamese rummy: eat or draw, build melds and hold the fewest points, against three device players at two levels, with a running points table",
+  "entry": "main.lua"
+}

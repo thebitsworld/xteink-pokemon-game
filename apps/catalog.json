@@ -912,6 +912,37 @@
       "devices": [
         "x4pro"
       ]
+    },
+    {
+      "id": "phom",
+      "name": "Phom",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Phỏm (tá lả), the Vietnamese rummy: eat or draw, build melds and hold the fewest points, against three device players at two levels, with a running points table",
+      "files": [
+        "manifest.json",
+        "ai.lua",
+        "boot.lua",
+        "game.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "input.lua",
+        "logic.lua",
+        "main.lua",
+        "menu.lua",
+        "phmenu.lua",
+        "save.lua",
+        "sprites/clubs.raw",
+        "sprites/clubs16.raw",
+        "sprites/diamonds.raw",
+        "sprites/diamonds16.raw",
+        "sprites/hearts.raw",
+        "sprites/hearts16.raw",
+        "sprites/spades.raw",
+        "sprites/spades16.raw",
+        "view.lua"
+      ]
     }
   ]
 }
