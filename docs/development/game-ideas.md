@@ -7,18 +7,18 @@ in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md]
 and [apps/README.md](../../apps/README.md)).
 
 Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
-Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, Phom, Backgammon, Nine Men's Morris, plus the earlier games.
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink, Kakuro, Light Up), Hexland, Phom, Backgammon, Nine Men's Morris, plus the earlier games.
 
 ## Next
 
-1. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
-   - each generated on the reader with a single solution, one module per puzzle.
+1. **Sâm lốc**: close to Tien Len, quick to build from it.
+2. **Mancala (Kalah)**: a cousin of O An Quan; most of its code carries over.
+3. **Logic Puzzles additions**: KenKen, Nurikabe, Masyu, Star Battle - each generated on the
+   reader with a single solution, one module per puzzle (the X3 limit is close: ~64 KB at most).
 
 ## Later
 
 - **Backgammon doubling cube**: an option for the built game.
-- **Sâm lốc**: close to Tien Len, quick to build from it.
-- **Mancala (Kalah)**: a cousin of O An Quan; most of its code carries over.
 - **Cờ gánh**: Vietnamese folk game on a 5x5 grid.
 - **Mastermind**: code breaking with 1-bit symbols instead of colours.
 - **Peg Solitaire**: the classic English and European boards.
