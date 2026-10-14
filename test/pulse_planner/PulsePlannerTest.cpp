@@ -154,3 +154,40 @@ TEST(PulsePlanner, WordAndBytePathsAgree) {
     b.delivered(driveB.data() + 1, wbw);
   }
 }
+
+TEST(PulsePlanner, PolishDrivesTheChangedAreaOnceMore) {
+  Rig rig(3, 3);
+  std::vector<uint8_t> target = rig.shown;
+  setPixel(target, 9, 1, false);
+  setPixel(target, 20, 3, false);
+  EXPECT_TRUE(rig.planner.retarget(target.data()));
+  EXPECT_FALSE(rig.planner.retarget(target.data()));  // nothing new
+  PulsePlanner::Window w;
+  while (rig.scan(w)) {
+  }
+  // Every pixel of rows 1-3 (the changed rectangle; a whole 32-pixel word
+  // wide here) gets 2 more, the white ones around the dots too; nothing in
+  // the rows outside it.
+  ASSERT_TRUE(rig.planner.polish(2));
+  EXPECT_EQ(rig.planner.pulsesLeft(9, 1), 2);
+  EXPECT_EQ(rig.planner.pulsesLeft(16, 2), 2);
+  EXPECT_EQ(rig.planner.pulsesLeft(23, 3), 2);
+  EXPECT_EQ(rig.planner.pulsesLeft(9, 0), 0);
+  EXPECT_EQ(rig.planner.pulsesLeft(9, 4), 0);
+  int scans = 0;
+  while (rig.scan(w)) ++scans;
+  EXPECT_EQ(scans, 2);
+  EXPECT_FALSE(rig.planner.polish(2));  // nothing changed since
+}
+
+TEST(PulsePlanner, PolishKeepsTheCountOfAPixelStillChanging) {
+  Rig rig(6, 6);
+  std::vector<uint8_t> target = rig.shown;
+  setPixel(target, 4, 0, false);
+  rig.planner.retarget(target.data());
+  PulsePlanner::Window w;
+  ASSERT_TRUE(rig.scan(w));
+  ASSERT_TRUE(rig.planner.polish(2));
+  EXPECT_EQ(rig.planner.pulsesLeft(4, 0), 5);
+  EXPECT_EQ(rig.planner.pulsesLeft(5, 0), 2);
+}

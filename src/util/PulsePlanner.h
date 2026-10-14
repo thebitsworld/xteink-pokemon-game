@@ -36,6 +36,8 @@ class PulsePlanner {
     words_ = widthBytes % 4 == 0 && aligned(storage) && aligned(shown);
     active0_ = 1;
     active1_ = 0;
+    dirtyRow0_ = 1;
+    dirtyRow1_ = 0;
   }
 
   // Pulses per change toward black and toward white (1-15).
@@ -45,14 +47,30 @@ class PulsePlanner {
   }
 
   // A new picture: every pixel whose target changed restarts its budget.
-  void retarget(const uint8_t* target) {
+  // Returns whether any did.
+  bool retarget(const uint8_t* target) {
+    bool any = false;
     for (uint16_t r = 0; r < rows_; ++r) {
       const uint32_t at = static_cast<uint32_t>(r) * wb_;
       if (memcmp(target_ + at, target + at, wb_) == 0) continue;
+      any = true;
       if (words_ && aligned(target)) {
         retargetWords(target, at);
       } else {
         retargetBytes(target, at);
+      }
+      // The bytes of this row that changed join the rectangle polish() takes.
+      const uint16_t b0 = pendingFirst_;
+      const uint16_t b1 = pendingLast_ < wb_ ? pendingLast_ : static_cast<uint16_t>(wb_ - 1);
+      if (dirtyRow0_ > dirtyRow1_) {
+        dirtyRow0_ = dirtyRow1_ = r;
+        dirtyByte0_ = b0;
+        dirtyByte1_ = b1;
+      } else {
+        if (r < dirtyRow0_) dirtyRow0_ = r;
+        if (r > dirtyRow1_) dirtyRow1_ = r;
+        if (b0 < dirtyByte0_) dirtyByte0_ = b0;
+        if (b1 > dirtyByte1_) dirtyByte1_ = b1;
       }
       if (active0_ > active1_) {
         active0_ = r;
@@ -62,6 +80,7 @@ class PulsePlanner {
         if (r > active1_) active1_ = r;
       }
     }
+    return any;
   }
 
   // The drive mask of the next scan (framebuffer layout, 1 = drive) and the
@@ -169,6 +188,35 @@ class PulsePlanner {
 
   bool busy() const { return active0_ <= active1_; }
 
+  // Every idle pixel of the rectangle that changed since the last polish -
+  // black and white alike - gets `pulses` more toward its target: run when
+  // the picture has stopped, it pushes what a cut-short change left behind
+  // (a pixel that reversed mid-way) the rest of the way without a flash.
+  // False when nothing changed since.
+  bool polish(const uint8_t pulses) {
+    if (dirtyRow0_ > dirtyRow1_) return false;
+    const uint8_t n = clampBudget(pulses);
+    for (uint16_t r = dirtyRow0_; r <= dirtyRow1_; ++r) {
+      const uint32_t at = static_cast<uint32_t>(r) * wb_;
+      for (uint16_t i = dirtyByte0_; i <= dirtyByte1_; ++i) {
+        const uint8_t idle = static_cast<uint8_t>(
+            ~(plane_[0][at + i] | plane_[1][at + i] | plane_[2][at + i] | plane_[3][at + i]));
+        for (int k = 0; k < 4; ++k)
+          if ((n >> k) & 1) plane_[k][at + i] = static_cast<uint8_t>(plane_[k][at + i] | idle);
+      }
+    }
+    if (active0_ > active1_) {
+      active0_ = dirtyRow0_;
+      active1_ = dirtyRow1_;
+    } else {
+      if (dirtyRow0_ < active0_) active0_ = dirtyRow0_;
+      if (dirtyRow1_ > active1_) active1_ = dirtyRow1_;
+    }
+    dirtyRow0_ = 1;
+    dirtyRow1_ = 0;
+    return true;
+  }
+
   // Pulses left for one pixel (tests and diagnostics).
   uint8_t pulsesLeft(const uint16_t x, const uint16_t row) const {
     const uint32_t at = static_cast<uint32_t>(row) * wb_ + x / 8;
@@ -186,10 +234,14 @@ class PulsePlanner {
 
   // One row of retarget(): eight pixels per step...
   void retargetBytes(const uint8_t* target, const uint32_t at) {
+    pendingFirst_ = wb_;
+    pendingLast_ = 0;
     for (uint16_t i = 0; i < wb_; ++i) {
       const uint8_t t = target[at + i];
       const uint8_t changed = static_cast<uint8_t>(target_[at + i] ^ t);
       if (!changed) continue;
+      if (i < pendingFirst_) pendingFirst_ = i;
+      pendingLast_ = i;
       const uint8_t toBlack = static_cast<uint8_t>(changed & ~t);
       const uint8_t toWhite = static_cast<uint8_t>(changed & t);
       for (int k = 0; k < 4; ++k) {
@@ -206,9 +258,13 @@ class PulsePlanner {
     uint32_t* cur = reinterpret_cast<uint32_t*>(target_ + at);
     uint32_t* p[4];
     for (int k = 0; k < 4; ++k) p[k] = reinterpret_cast<uint32_t*>(plane_[k] + at);
+    pendingFirst_ = wb_;
+    pendingLast_ = 0;
     for (uint16_t i = 0; i < wb_ / 4; ++i) {
       const uint32_t changed = cur[i] ^ t[i];
       if (!changed) continue;
+      if (i * 4 < pendingFirst_) pendingFirst_ = static_cast<uint16_t>(i * 4);
+      pendingLast_ = static_cast<uint16_t>(i * 4 + 3);
       const uint32_t toBlack = changed & ~t[i];
       const uint32_t toWhite = changed & t[i];
       for (int k = 0; k < 4; ++k) {
@@ -229,4 +285,12 @@ class PulsePlanner {
   // Rows that may still have pulses left (empty when active0_ > active1_).
   uint16_t active0_ = 1;
   uint16_t active1_ = 0;
+  // The rectangle changed since the last polish (empty when row0 > row1),
+  // and the byte span the last retargeted row changed in.
+  uint16_t dirtyRow0_ = 1;
+  uint16_t dirtyRow1_ = 0;
+  uint16_t dirtyByte0_ = 0;
+  uint16_t dirtyByte1_ = 0;
+  uint16_t pendingFirst_ = 0;
+  uint16_t pendingLast_ = 0;
 };
