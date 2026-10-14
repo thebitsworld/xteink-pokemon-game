@@ -1,0 +1,8 @@
+{
+  "id": "morris",
+  "name": "Nine Men's Morris",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Nine Men's Morris (cờ cối xay): form mills and take pieces, against the device at three levels or a friend, with take-backs and saved games",
+  "entry": "main.lua"
+}
