@@ -7,12 +7,11 @@ in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md]
 and [apps/README.md](../../apps/README.md)).
 
 Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
-Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, Phom, Backgammon, plus the earlier games.
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, Phom, Backgammon, Nine Men's Morris, plus the earlier games.
 
 ## Next
 
-1. **Nine Men's Morris**: small board, short rules, a strong search fits easily.
-2. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
+1. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
    - each generated on the reader with a single solution, one module per puzzle.
 
 ## Later
