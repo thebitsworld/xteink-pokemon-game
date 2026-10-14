@@ -1,3 +1,19 @@
+## [1.8.5-beta.1] - 2026-10-14
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. Its Pulse test drives the X4 Pro's UC8279 screen with a one-frame waveform repeated many times a second, which the screen's controller does not document and which has not been validated on this panel. It can leave ghosted, faint or uneven pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen): **Applications > Pulse test** tries the per-pixel pulse drive a faster Game Boy screen would use (the way InkBoy reaches about 30 updates a second on a small panel). Each scan drives only the pixels still changing, for one short pulse, and leaves the rest of the screen alone.
+
+1. **Run the ladder test** with Frames per pulse 1. The top band has eight boxes given 1 to 8 pulses toward black, the black band eight boxes given 1 to 8 pulses toward white. Note how many pulses a box needs to look fully black or white, whether the labels and the rest of the screen stayed exactly as they were, and whether every box moved the right way (boxes that stay white in the top band, or black in the bottom band, would mean the drive goes the wrong way).
+2. If one pulse barely shows, run it again with 2 and 3 frames per pulse.
+3. **Run the motion test** with the pulse counts the ladder suggests (Pulses to black / white): a black and a white square move for ten seconds. Note how sharp they look, the trails they leave and the scans per second shown at the bottom.
+
+Then send `/.crosspoint/pulse-test.txt` with your notes (and photos if you can).
+
+### Added
+
+- X4 Pro (UC8279-68 screens, test only): Applications > Pulse test, a ladder and a motion test of the per-pixel pulse drive, logging scan timings to `/.crosspoint/pulse-test.txt`.
+
 ## [1.8.4] - 2026-10-14
 
 ### Added
