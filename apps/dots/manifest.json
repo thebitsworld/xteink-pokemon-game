@@ -1,0 +1,8 @@
+{
+  "id": "dots",
+  "name": "Dots and Boxes",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Draw lines between dots and close boxes to score them, on 3x3 to 6x6 boards. Against the device at three levels or a friend, with take-backs and saved games",
+  "entry": "main.lua"
+}
