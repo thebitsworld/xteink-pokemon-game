@@ -5,15 +5,15 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-13, v1.8.3)
+## Where things stand (2026-10-14, v1.8.4)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
-  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.3; latest release `v1.8.3` (stable). Its
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.4; latest release `v1.8.4` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
-  without a firmware release): 36 apps - the CrossPlay-inspired games and tools written here (plus
+  without a firmware release): 45 apps - the CrossPlay-inspired games and tools written here (plus
   Tic-Tac-Toe and Xiangqi, 2026-10-13) plus 11 from
   CrossSmudge. CrossPlay apps needing data or a network were skipped on purpose.
 - X3 app policy: an app must stay under 75 KB in `pokemon-simulator-X3` (the 64-bit simulator reports
@@ -45,6 +45,20 @@ is in git history (before 2026-10-08).
   palette span - stretched onto levels 4..16), Smooth (17 levels, the tester found it busy), Brightness.
   Settings menu taps: orientation changes wait for the finger to lift, and the touch registry is cleared
   while it shows (game target ids collide with the front-button hints).
+- How to play guides (1.8.4): `guide.md` / `guide.vi.md` in an app
+  folder, shown by `GuideViewerActivity` (Markdown subset, not the EPUB reader - that would add recents,
+  reading time and Pokemon credit). "?" on Applications rows (tap; hold Select on X3/X4);
+  `smudge.has_guide()`/`open_guide()` push it over the running Lua app. The shared `menu.lua` (identical
+  copy in every game; keep it byte-identical) adds "How to play" above Exit and shrinks its buttons to
+  fit. UI fonts have no CJK: guides must not use Chinese characters. New games: caro, reversi, oanquan,
+  tienlen, then coup (hidden xiangqi), dots, patience (FreeCell + Spider), logic (Hashi, Lights Out,
+  Slitherlink) - X3 sim peaks 56-64 KB - and hexland (the Catan-like game: you + 3 AI; ~81 KB, so
+  `devices: ["x4pro"]`, ~104 KB there). Measuring on the X4 Pro simulator: the Applications list has an
+  extra Game Boy row, and set `CROSSINK_SIMULATOR_PSRAM_TOTAL=8388608`.
+- Measuring a Lua app needs no `src/` hooks now: run the simulator binary with `SDL_VIDEODRIVER=offscreen`,
+  `CROSSPOINT_SIM_INPUT_SCRIPT` (`ms:DOWN;ms:CONFIRM:1000;ms:TAP:x,y;...;ms:QUIT`) and
+  `CROSSPOINT_SIM_SCREENSHOTS` (`ms:path.bmp`); the app's peak lands in `fs_/.crosspoint/apps-memory.txt`
+  when it exits cleanly (Back out of it). `SDL_VIDEODRIVER=dummy` gives no screenshots.
 - Open, undecided: a translation mechanism for Lua apps (all English today; the user wants to discuss it
   first). Firmware strings: the fork's own Pokémon strings are untranslated in most languages (fall back
   to English); Vietnamese is complete.

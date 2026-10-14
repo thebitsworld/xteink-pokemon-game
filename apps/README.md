@@ -35,6 +35,7 @@ This firmware features a lightweight, sandboxed **Lua 5.4** application engine t
    - [Hardware Queries & Utilities](#hardware-queries--utilities)
    - [Persistence & File I/O](#persistence--file-io)
 8. [Multi-File Projects & Assets](#multi-file-projects--assets)
+   - [How to play guides](#how-to-play-guides)
 9. [Memory Discipline & E-Paper Best Practices](#memory-discipline--e-paper-best-practices)
 10. [Complete "Hello World" Example](#complete-hello-world-example)
 11. [Testing & Installing Apps](#testing--installing-apps)
@@ -61,6 +62,7 @@ apps/
     ├── manifest.json       # Required: Metadata, name, author, entry script
     ├── main.lua            # Required: Main Lua entry script
     ├── icon.raw            # Optional: 32x32 1-bit raw bitmap icon (128 bytes)
+    ├── guide.md            # Optional: "How to play" guide (guide.vi.md: Vietnamese)
     ├── helper.lua          # Optional: Secondary Lua modules
     └── data.txt            # Optional: Text or read-only assets
 ```
@@ -266,6 +268,11 @@ The firmware standardizes button names across all hardware variations:
   Returns a random integer between `min` and `max`.
 - **`smudge.exit()`**  
   Closes the application and returns to the Applications menu.
+- **`smudge.has_guide()`** / **`smudge.open_guide()`**  
+  `has_guide()` returns whether the app ships a guide (see [How to play guides](#how-to-play-guides)).
+  `open_guide()` shows it over the app once the current callback returns, and returns `false` when
+  there is none. Back closes the guide and the app carries on, redrawn. Both are missing on firmware
+  older than 1.8.4, so test for them: `if smudge.has_guide and smudge.has_guide() then`.
 - **`smudge.log(message)`**  
   Outputs a debug log message to serial monitor (`[INF] [LUA] ...`).
 
@@ -427,6 +434,22 @@ dofile("game_engine.lua")
 ```
 
 Any extra assets (like `.txt`, `.json`, `.raw` sprites, or level definitions) placed in your app folder can be read using `smudge.read_file("levels/level1.txt")` or streamed using `smudge.find_section()`.
+
+---
+
+### How to play guides
+
+A game can ship a short guide: `guide.md` in its folder, and optionally `guide.vi.md`, shown
+instead when the reader's language is Vietnamese. List them in the catalog's `files`. The firmware
+shows it page by page: from the app's **?** in Applications (tap it on the X4 Pro, hold Select on
+the row on the X3/X4) and from inside the app with `smudge.open_guide()`. The shared start menu
+(`menu.lua` in the games here) adds a **How to play** button above Exit by itself.
+
+The viewer understands a small part of Markdown: a first `# Title` (it goes in the header), `##`
+and `###` headings, paragraphs, `- ` bullets and `1. ` numbered items (an indented line continues
+an item). Inline marks (`**`, `*`, backticks) are dropped; there are no tables, links or images.
+The UI fonts have Latin and Vietnamese letters but no Chinese characters. Keep a guide to a few
+pages (at most 32 KB).
 
 ---
 

@@ -119,6 +119,10 @@ do
     local s = X.serialize(g)
     local back = X.deserialize(s)
     assert(back and X.serialize(back) == s and back.turn == g.turn)
+    assert(g.last and back.last == g.last, "the last move survives a save")
+    local old = s:match("^(.*)|%d*$") -- a save from before the last move was kept
+    back = X.deserialize(old)
+    assert(back and back.last == nil and back.moves == g.moves, "old saves still load")
     assert(X.deserialize("7|1|0|" .. string.rep("0", 48)) == nil)
 end
 

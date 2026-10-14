@@ -207,7 +207,7 @@ local function load_game_state()
 
     show_reset_confirm = false
     if smudge and smudge.log then
-        smudge.log(string.format("Wordle: restored game with %d guesses, secret %s", #guesses, secret))
+        smudge.log(string.format("Wordle: restored game with %d guesses", #guesses))
     end
     return true
 end
@@ -215,9 +215,6 @@ end
 local function new_game()
     secret = pick_secret_word()
     if #secret ~= 5 then secret = "CRANE" end
-    if smudge and smudge.log then
-        smudge.log("Wordle secret: " .. secret)
-    end
     guesses = {}
     current_guess = ""
     in_game = true

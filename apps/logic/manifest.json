@@ -1,0 +1,8 @@
+{
+  "id": "logic",
+  "name": "Logic Puzzles",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Hashi, Lights Out and Slitherlink made fresh on the reader, each with a single solution, at three levels",
+  "entry": "main.lua"
+}

@@ -21,6 +21,7 @@
 #include "Logging.h"
 #include "MappedInputManager.h"
 #include "Memory.h"
+#include "activities/apps/GuideViewerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -614,6 +615,10 @@ void LuaRunner::registerSmudgeApi() {
 
   lua_pushcfunction(L, l_exit);
   lua_setfield(L, -2, "exit");
+  lua_pushcfunction(L, l_hasGuide);
+  lua_setfield(L, -2, "has_guide");
+  lua_pushcfunction(L, l_openGuide);
+  lua_setfield(L, -2, "open_guide");
 
   lua_pushcfunction(L, l_log);
   lua_setfield(L, -2, "log");
@@ -1617,6 +1622,23 @@ int LuaRunner::l_exit(lua_State*) {
     s_activeRunner->requestedExit_ = true;
   }
   return 0;
+}
+
+// smudge.has_guide(): whether the app has a "How to play" guide (guide.md, or
+// guide.vi.md in Vietnamese) in its folder.
+int LuaRunner::l_hasGuide(lua_State* L) {
+  lua_pushboolean(L, s_activeRunner && !GuideViewerActivity::guidePathFor(s_activeRunner->appDir_).empty());
+  return 1;
+}
+
+// smudge.open_guide(): shows the guide over the app once the current callback
+// returns; the app carries on where it was when the guide closes. Returns
+// false (and shows nothing) when the app has no guide.
+int LuaRunner::l_openGuide(lua_State* L) {
+  const bool has = s_activeRunner && !GuideViewerActivity::guidePathFor(s_activeRunner->appDir_).empty();
+  if (has) s_activeRunner->guideRequested_ = true;
+  lua_pushboolean(L, has);
+  return 1;
 }
 
 int LuaRunner::l_log(lua_State* L) {

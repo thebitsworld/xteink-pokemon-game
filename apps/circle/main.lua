@@ -54,7 +54,8 @@ local function menuItems()
     items[#items + 1] = { label = "Time to find the word: " .. TIMES[timeIdx] .. " min", id = "time",
                           note = "Select to change" }
     items[#items + 1] = { label = "Deal the roles", id = "deal" }
-    items[#items + 1] = { label = "How to play", id = "rules" }
+    -- Firmware that opens guide.md adds its own "How to play" (menu.lua).
+    if not smudge.open_guide then items[#items + 1] = { label = "How to play", id = "rules" } end
     items[#items + 1] = { label = "Exit", id = "exit" }
     return items
 end

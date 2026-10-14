@@ -58,6 +58,10 @@ saved data in `apps-data/`, the list settings in `apps-settings.bin`, and the Ap
   switched off, the Pokémon game and the slideshow are on Home instead.
 - Inside an app, the buttons (or touch) do whatever the app says in its button hints; **Back**
   usually saves and leaves the app.
+- **How to play:** a game with a guide shows a **?** at the end of its row. Tap it (X4 Pro) or
+  hold **Select** on the row (X3/X4) to read the guide; most games also have a **How to play**
+  button in their start menu, and Back from the guide returns to the game. Guides are in English,
+  and in Vietnamese when the reader's language is Vietnamese.
 - If an app's script fails, the reader shows an **Application Error** screen with the message
   instead of crashing; press Back to return to the list.
 - Each app runs with at most 75 KB of memory. Apps keep their own saved data, separate from your

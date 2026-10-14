@@ -40,9 +40,14 @@ end
 
 local function tableX(L, count, k) return (S.w - count * L.tw - (count - 1) * 8) // 2 + (k - 1) * (L.tw + 8) end
 
-local function handPos(L, k)
-    local col, row = (k - 1) % 5, (k - 1) // 5
-    return 16 + col * (L.hw + 6), L.hand + row * (L.hh + 6)
+-- Card k in rows of five; with n (the hand's size) the cards get shorter when
+-- the rows would run past the points line, so a big hand still shows. Returns
+-- x, y and the card height.
+local function handPos(L, k, n)
+    local col, row, step = (k - 1) % 5, (k - 1) // 5, L.hh + 6
+    local rows = n and (n + 4) // 5 or 0
+    if L.hand + rows * step - 6 > L.points then step = (L.points - L.hand + 6) // rows end
+    return 16 + col * (L.hw + 6), L.hand + row * step, math.min(L.hh, step - 6)
 end
 
 local function buttonRect(L, k)

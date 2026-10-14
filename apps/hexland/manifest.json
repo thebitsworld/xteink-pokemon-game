@@ -1,0 +1,9 @@
+{
+  "id": "hexland",
+  "name": "Hexland",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Hex-island trading and building game against three device players: roll for resources, trade with the bank, ports and players, build roads, settlements and cities, first to 10 points",
+  "entry": "main.lua",
+  "devices": ["x4pro"]
+}

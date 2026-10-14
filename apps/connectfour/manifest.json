@@ -1,7 +1,7 @@
 {
   "id": "connectfour",
   "name": "Connect Four",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "xteink-pokemon-game",
   "description": "Line up four discs. Play the device at three levels or a friend on the same reader",
   "entry": "main.lua"

@@ -22,7 +22,8 @@ local S = {
     PROMOTIONS = { C.QUEEN, C.ROOK, C.BISHOP, C.KNIGHT },
     w = 480, h = 800, m = {}, touch = false,
     mode = 2,          -- 1..3 against the device at that level, 4 two players
-    human = C.WHITE,   -- your side against the device
+    human = C.WHITE,   -- your side in this game against the device
+    side = C.WHITE,    -- your side in the next new game (the menu's choice)
     game = nil,
     legal = {},        -- legal moves of the side to move
     picked = nil,      -- the square of the piece picked up
@@ -65,7 +66,7 @@ function S.refresh()
 end
 
 function S.newGame(mode)
-    S.mode = mode
+    S.mode, S.human = mode, S.side
     S.game = C.new()
     S.note, S.deviceMoved = nil, false
     S.curF, S.curR = 5, (S.vsDevice() and S.human == C.BLACK) and 7 or 2
@@ -118,7 +119,8 @@ function on_init()
         local a, b, c = (smudge.load("rec" .. i, "0,0,0")):match("(%d+),(%d+),(%d+)")
         S.records[i] = { tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0 }
     end
-    S.human = tonumber(smudge.load("side", "0")) == C.BLACK and C.BLACK or C.WHITE
+    S.side = tonumber(smudge.load("side", "0")) == C.BLACK and C.BLACK or C.WHITE
+    S.human = S.side
     local savedMode, savedHuman, history = smudge.load("game", ""):match("^(%d)#(%d)#(.*)$")
     if history then
         local g = (history == "") and C.new() or smudge.dofile("history.lua")(C).replay(history)

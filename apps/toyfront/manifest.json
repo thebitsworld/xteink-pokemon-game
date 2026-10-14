@@ -1,7 +1,7 @@
 {
   "id": "toyfront",
   "name": "Toy Front",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "xteink-pokemon-game",
   "description": "Toy armies fight over a board of bases for medals, you against the device: build, reinforce, attack - and keep some strong toys for the end",
   "entry": "main.lua"

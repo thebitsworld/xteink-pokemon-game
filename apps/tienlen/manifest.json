@@ -1,0 +1,8 @@
+{
+  "id": "tienlen",
+  "name": "Tien Len",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Tiến lên miền Nam, the Vietnamese climbing card game, against three device players at two levels, with a running points table",
+  "entry": "main.lua"
+}

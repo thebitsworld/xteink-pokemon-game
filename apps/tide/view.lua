@@ -50,7 +50,7 @@ local function card(x, y, cw, ch, id, selected, focused)
     end
     mark(T.MARK[id], x + 12, y + 12, 6)
     local name = T.NAMES[kind]
-    smudge.text(x + cw // 2, y + ch // 2 - 8, name, "ui10", "bold", "center", true)
+    smudge.text(x + cw // 2, y + math.min(ch // 2 - 8, ch - 46), name, "ui10", "bold", "center", true)
     if T.isDuo(kind) then smudge.text(x + cw // 2, y + ch - 24, "pair", "ui10", "regular", "center", true) end
 end
 
@@ -151,14 +151,12 @@ function V.draw()
         if second then smudge.text(16, L.status + 20, second, "ui10", "regular", "left", true) end
         smudge.text(16, L.played, "You played: " .. playedText(g, 1), "ui10", "regular", "left", true)
         for k, id in ipairs(g.hands[1]) do
-            local x, y = handPos(L, k)
-            if y + L.hh <= L.points then
-                local selected = false
-                for _, s in ipairs(S.sel) do
-                    if s == k then selected = true end
-                end
-                card(x, y, L.hw, L.hh, id, selected, not S.touch and S.row == 2 and S.col == k and not S.thinking)
+            local x, y, ch = handPos(L, k, #g.hands[1])
+            local selected = false
+            for _, s in ipairs(S.sel) do
+                if s == k then selected = true end
             end
+            card(x, y, L.hw, ch, id, selected, not S.touch and S.row == 2 and S.col == k and not S.thinking)
         end
     end
     smudge.text(16, L.points, string.format("Your cards: %d points, mark bonus %d", T.cardPoints(g, 1),

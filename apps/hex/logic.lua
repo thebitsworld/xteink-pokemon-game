@@ -236,18 +236,20 @@ function X.chooseMove(g, level, rand, now, timeMs)
     return best
 end
 
--- Save/restore: n | turn | moves | cell digits.
+-- Save/restore: n | turn | moves | cell digits | last move (missing in old saves).
 function X.serialize(g)
-    return table.concat({ g.n, g.turn, g.moves, table.concat(g.cells) }, "|")
+    return table.concat({ g.n, g.turn, g.moves, table.concat(g.cells), g.last or "" }, "|")
 end
 
 function X.deserialize(s)
-    local n, turn, moves, cells = s:match("^(%d+)|([12])|(%d+)|([012]+)$")
+    local n, turn, moves, cells, last = s:match("^(%d+)|([12])|(%d+)|([012]+)|?(%d*)$")
     n = tonumber(n)
     if not n or n < 3 or n > 13 or #cells ~= n * n then return nil end
     local g = X.new(n)
     g.turn, g.moves = tonumber(turn), tonumber(moves)
     for i = 1, n * n do g.cells[i] = cells:byte(i) - 48 end
+    last = tonumber(last)
+    if last and (g.cells[last] or 0) ~= X.EMPTY then g.last = last end
     if connected(g, X.BLACK) then g.winner = X.BLACK elseif connected(g, X.WHITE) then g.winner = X.WHITE end
     return g
 end

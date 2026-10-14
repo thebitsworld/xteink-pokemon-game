@@ -1,8 +1,8 @@
 {
   "id": "wordle",
   "name": "Wordle",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "Mumfee",
-  "description": "5-letter word deduction game with on-screen keyboard and statistics",
+  "description": "5-letter word deduction game with on-screen keyboard",
   "entry": "main.lua"
 }

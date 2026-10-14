@@ -1,7 +1,7 @@
 {
   "id": "forehead",
   "name": "Forehead",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "xteink-pokemon-game",
   "description": "A party game: hold the reader to your forehead and guess the word from your friends' clues before the time runs out",
   "entry": "main.lua"

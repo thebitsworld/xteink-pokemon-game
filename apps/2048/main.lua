@@ -30,6 +30,7 @@ end
 
 local board = {}
 local score = 0
+local best = 0 -- best score, kept across games
 local gameOver = false
 local showResetConfirm = false
 local w, h = 480, 800
@@ -96,6 +97,7 @@ local function save_state()
     smudge.save("board", table.concat(flat, ","))
     smudge.save("score", tostring(score))
     smudge.save("game_over", gameOver and "1" or "0")
+    smudge.save("best", tostring(best))
 end
 
 local function load_state()
@@ -124,6 +126,7 @@ end
 function on_init()
     w, h = smudge.get_bounds()
     math.randomseed(os.time())
+    best = tonumber(smudge.load("best", "0")) or 0
     if not load_state() then
         reset_game()
     end
@@ -204,6 +207,7 @@ local function move(dr, dc)
 
     if moved then
         score = score + total_gained
+        if score > best then best = score end
         spawn_tile()
         if not can_move() then
             gameOver = true
@@ -218,7 +222,8 @@ function on_draw()
     local headerBottomY = m.top_padding + m.header_height
 
     -- 1. Header with Score Display
-    local subtitle = gameOver and "GAME OVER!" or string.format("Score: %d", score)
+    local subtitle = gameOver and string.format("GAME OVER!  Best: %d", best)
+        or string.format("Score: %d  Best: %d", score, best)
     smudge.header("2048", subtitle)
 
     -- 2. Maximize Grid Geometry (exact formulas from TwoZeroFourEightActivity.h)

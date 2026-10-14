@@ -19,45 +19,51 @@
     {
       "id": "wordle",
       "name": "Wordle",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "author": "Mumfee",
-      "description": "5-letter word deduction game with on-screen keyboard and statistics",
+      "description": "5-letter word deduction game with on-screen keyboard",
       "files": [
         "manifest.json",
         "main.lua",
         "icon.raw",
-        "words.bin"
+        "words.bin",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "2048",
       "name": "2048",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": "Mumfee",
-      "description": "Classic 4x4 sliding tile number puzzle with high scores",
+      "description": "Classic 4x4 sliding tile number puzzle with a best score",
       "files": [
         "manifest.json",
         "main.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "sudoku",
       "name": "Sudoku",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": "Mumfee",
       "description": "Classic 9x9 Sudoku logic puzzle with puzzle generator",
       "files": [
         "manifest.json",
         "main.lua",
         "generator.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "blackjack",
       "name": "Blackjack",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": "Mumfee",
       "description": "Classic 21 card game with betting chips, hit, stand, and dealer rules",
       "files": [
@@ -67,25 +73,29 @@
         "sprites/clubs.raw",
         "sprites/diamonds.raw",
         "sprites/hearts.raw",
-        "sprites/spades.raw"
+        "sprites/spades.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "blockdrop",
       "name": "Block Drop",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "author": "Mumfee",
       "description": "Classic falling block puzzle optimized for e-paper displays",
       "files": [
         "manifest.json",
         "main.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "codex",
       "name": "Codex: Ink & Iron",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": "Mumfee",
       "description": "Medieval illuminated manuscript deckbuilder with Couplet synergy and page progression",
       "files": [
@@ -145,7 +155,9 @@
         "sprites/relic_8.raw",
         "sprites/relic_9.raw",
         "state.lua",
-        "ui_base.lua"
+        "ui_base.lua",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
@@ -199,46 +211,52 @@
     {
       "id": "minesweeper",
       "name": "Minesweeper",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Clear the field without digging up a mine. Three sizes, best times, hold to flag",
       "files": [
         "manifest.json",
         "main.lua",
         "logic.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "connectfour",
       "name": "Connect Four",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Line up four discs. Play the device at three levels or a friend on the same reader",
       "files": [
         "manifest.json",
         "main.lua",
         "logic.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "tictactoe",
       "name": "Tic-Tac-Toe",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Three in a row. Play the device at three levels (Hard never loses) or a friend on the same reader",
       "files": [
         "manifest.json",
         "main.lua",
         "logic.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "solitaire",
       "name": "Solitaire",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Klondike solitaire, draw one or three, with undo and your game kept for later",
       "files": [
@@ -249,13 +267,15 @@
         "sprites/clubs.raw",
         "sprites/diamonds.raw",
         "sprites/hearts.raw",
-        "sprites/spades.raw"
+        "sprites/spades.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "knucklebones",
       "name": "Knucklebones",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Dice duel on two 3x3 grids: stack matching dice, knock out your opponent's. Device or a friend",
       "files": [
@@ -263,13 +283,15 @@
         "main.lua",
         "logic.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "yacht",
       "name": "Yacht",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Five dice, three rolls, thirteen boxes. Play solo for a high score, the device, or a friend",
       "files": [
@@ -278,13 +300,15 @@
         "logic.lua",
         "ai.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "nonogram",
       "name": "Nonogram",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Picture logic puzzles from 5x5 to 12x12, made fresh on the reader. Every one has a single solution",
       "files": [
@@ -293,13 +317,15 @@
         "logic.lua",
         "generator.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "checkers",
       "name": "Checkers",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "English draughts with compulsory captures. Play the device at three levels or a friend on the same reader",
       "files": [
@@ -308,13 +334,15 @@
         "logic.lua",
         "ai.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "seabattle",
       "name": "Sea Battle",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Find and sink the hidden fleet before it sinks yours. Three levels, from random shots to a probability hunter",
       "files": [
@@ -322,13 +350,15 @@
         "main.lua",
         "logic.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "hearts",
       "name": "Hearts",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "The trick-taking card game against three computer players: dodge the hearts and the queen of spades",
       "files": [
@@ -345,13 +375,15 @@
         "sprites/spades.raw",
         "sprites/spades16.raw",
         "sprites/hearts.raw",
-        "sprites/hearts16.raw"
+        "sprites/hearts16.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "hex",
       "name": "Hex",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Connect your two sides of a rhombus of hexagons before your opponent does. 7x7 to 11x11, device or friend",
       "files": [
@@ -359,13 +391,15 @@
         "main.lua",
         "logic.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "go",
       "name": "Go",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "The board game of surrounding territory, 9x9 or 13x13, area scoring. Play the device or a friend",
       "files": [
@@ -373,13 +407,15 @@
         "main.lua",
         "logic.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "chess",
       "name": "Chess",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Full chess rules against the device at three levels or a friend, with take-backs and saved games",
       "files": [
@@ -409,13 +445,15 @@
         "sprites/mR.raw",
         "sprites/mB.raw",
         "sprites/mN.raw",
-        "sprites/mP.raw"
+        "sprites/mP.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "xiangqi",
       "name": "Xiangqi",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Chinese chess (cờ tướng) against the device at three levels or a friend, with take-backs and saved games",
       "files": [
@@ -444,13 +482,15 @@
         "sprites/b6.raw",
         "sprites/b7.raw",
         "sprites/river1.raw",
-        "sprites/river2.raw"
+        "sprites/river2.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "bazaar",
       "name": "Bazaar",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Two-player trading card game against the device: take, exchange and sell goods in sets, keep the most camels",
       "files": [
@@ -462,13 +502,15 @@
         "bazaarmenu.lua",
         "save.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "whodunit",
       "name": "Whodunit",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Logic-grid murder mysteries made fresh on the reader: deduce who had what and was where, then accuse",
       "files": [
@@ -483,13 +525,15 @@
         "accuse.lua",
         "wmenu.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "dungeon",
       "name": "Dungeon Map",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Wall in a dungeon from the numbers on its edges, the monsters in its dead ends and the treasure in its rooms. Every map has one solution",
       "files": [
@@ -500,13 +544,15 @@
         "view.lua",
         "rules.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "tide",
       "name": "Tide & Paper",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Collect pairs and sets of sea cards against the device, then stop the round - or bet on a last chance. First to 40 wins",
       "files": [
@@ -522,7 +568,9 @@
         "tmenu.lua",
         "save.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
@@ -555,7 +603,7 @@
     {
       "id": "dial",
       "name": "Mind Dial",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "A party game for three or more around one reader: give a clue for a hidden spot on a scale between two ideas, and the group guesses where it is",
       "files": [
@@ -563,26 +611,30 @@
         "main.lua",
         "cards.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "forehead",
       "name": "Forehead",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "A party game: hold the reader to your forehead and guess the word from your friends' clues before the time runs out",
       "files": [
         "manifest.json",
         "main.lua",
         "words.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "circle",
       "name": "Inner Circle",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "A party game for 4 to 8: find the secret word with yes/no questions, then unmask the Insider who knew it all along",
       "files": [
@@ -590,13 +642,15 @@
         "main.lua",
         "words.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "cult",
       "name": "Cult Ledger",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "A solo card game: run a small cult, gather relics, members and an offering, dodge the police - and summon a god before the inspector arrives",
       "files": [
@@ -605,13 +659,15 @@
         "logic.lua",
         "cards.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
       ]
     },
     {
       "id": "toyfront",
       "name": "Toy Front",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "xteink-pokemon-game",
       "description": "Toy armies fight over a board of bases for medals, you against the device: build, reinforce, attack - and keep some strong toys for the end",
       "files": [
@@ -620,7 +676,241 @@
         "logic.lua",
         "ai.lua",
         "menu.lua",
-        "icon.raw"
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
+      ]
+    },
+    {
+      "id": "caro",
+      "name": "Caro",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Gomoku (cờ caro) on a 15x15 board: five in a row wins. Against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "board.lua",
+        "cmenu.lua",
+        "menu.lua",
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
+      ]
+    },
+    {
+      "id": "reversi",
+      "name": "Reversi",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Outflank and flip discs on an 8x8 board against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "board.lua",
+        "rvmenu.lua",
+        "menu.lua",
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
+      ]
+    },
+    {
+      "id": "oanquan",
+      "name": "O An Quan",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Ô ăn quan, the Vietnamese mandarin-square mancala: sow stones, capture squares and the two mandarins, against the device at three levels or a friend",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "ai.lua",
+        "board.lua",
+        "oqmenu.lua",
+        "menu.lua",
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md"
+      ]
+    },
+    {
+      "id": "tienlen",
+      "name": "Tien Len",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Tiến lên miền Nam, the Vietnamese climbing card game, against three device players at two levels, with a running points table",
+      "files": [
+        "manifest.json",
+        "main.lua",
+        "logic.lua",
+        "game.lua",
+        "ai.lua",
+        "save.lua",
+        "view.lua",
+        "input.lua",
+        "tlmenu.lua",
+        "menu.lua",
+        "icon.raw",
+        "guide.md",
+        "guide.vi.md",
+        "sprites/spades.raw",
+        "sprites/spades16.raw",
+        "sprites/clubs.raw",
+        "sprites/clubs16.raw",
+        "sprites/diamonds.raw",
+        "sprites/diamonds16.raw",
+        "sprites/hearts.raw",
+        "sprites/hearts16.raw"
+      ]
+    },
+    {
+      "id": "coup",
+      "name": "Co Up",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Hidden xiangqi (cờ úp): all but the generals start face down and turn up as they move. Against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "ai.lua",
+        "cumenu.lua",
+        "draw.lua",
+        "game.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "input.lua",
+        "logic.lua",
+        "main.lua",
+        "manifest.json",
+        "menu.lua",
+        "sprites/b1.raw",
+        "sprites/b2.raw",
+        "sprites/b3.raw",
+        "sprites/b4.raw",
+        "sprites/b5.raw",
+        "sprites/b6.raw",
+        "sprites/b7.raw",
+        "sprites/r1.raw",
+        "sprites/r2.raw",
+        "sprites/r3.raw",
+        "sprites/r4.raw",
+        "sprites/r5.raw",
+        "sprites/r6.raw",
+        "sprites/r7.raw",
+        "sprites/river1.raw",
+        "sprites/river2.raw"
+      ]
+    },
+    {
+      "id": "dots",
+      "name": "Dots and Boxes",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Draw lines between dots and close boxes to score them, on 3x3 to 6x6 boards. Against the device at three levels or a friend, with take-backs and saved games",
+      "files": [
+        "ai.lua",
+        "board.lua",
+        "dmenu.lua",
+        "game.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "logic.lua",
+        "main.lua",
+        "manifest.json",
+        "menu.lua"
+      ]
+    },
+    {
+      "id": "patience",
+      "name": "Patience",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "FreeCell with numbered deals and Spider with one, two or four suits, with unlimited undo and statistics",
+      "files": [
+        "deal.lua",
+        "draw.lua",
+        "guide.md",
+        "guide.vi.md",
+        "icon.raw",
+        "input.lua",
+        "layout.lua",
+        "logic.lua",
+        "main.lua",
+        "manifest.json",
+        "menu.lua",
+        "pmenu.lua",
+        "save.lua",
+        "sprites/clubs.raw",
+        "sprites/clubs16.raw",
+        "sprites/diamonds.raw",
+        "sprites/diamonds16.raw",
+        "sprites/hearts.raw",
+        "sprites/hearts16.raw",
+        "sprites/spades.raw",
+        "sprites/spades16.raw",
+        "tools.lua"
+      ]
+    },
+    {
+      "id": "logic",
+      "name": "Logic Puzzles",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Hashi, Lights Out and Slitherlink made fresh on the reader, each with a single solution, at three levels",
+      "files": [
+        "board.lua",
+        "guide.md",
+        "guide.vi.md",
+        "hashi.lua",
+        "hashigen.lua",
+        "hashiui.lua",
+        "icon.raw",
+        "lgmenu.lua",
+        "lights.lua",
+        "lightsui.lua",
+        "main.lua",
+        "make.lua",
+        "manifest.json",
+        "menu.lua",
+        "slither.lua",
+        "slithergen.lua",
+        "slitherloop.lua",
+        "slitherui.lua",
+        "start.lua"
+      ]
+    },
+    {
+      "id": "hexland",
+      "name": "Hexland",
+      "version": "1.0.0",
+      "author": "xteink-pokemon-game",
+      "description": "Hex-island trading and building game against three device players: roll for resources, trade with the bank, ports and players, build roads, settlements and cities, first to 10 points",
+      "files": [
+        "ai.lua",
+        "board.lua",
+        "guide.md",
+        "guide.vi.md",
+        "hxmenu.lua",
+        "icon.raw",
+        "input.lua",
+        "logic.lua",
+        "main.lua",
+        "manifest.json",
+        "menu.lua",
+        "panel.lua",
+        "pieces.lua",
+        "rules.lua",
+        "save.lua",
+        "setup.lua",
+        "ui.lua"
+      ],
+      "devices": [
+        "x4pro"
       ]
     }
   ]

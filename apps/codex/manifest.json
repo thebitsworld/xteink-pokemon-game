@@ -1,7 +1,7 @@
 {
   "id": "codex",
   "name": "Codex: Ink & Iron",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Mumfee",
   "description": "Medieval illuminated manuscript deckbuilder with Couplet synergy and page progression",
   "entry": "main.lua"

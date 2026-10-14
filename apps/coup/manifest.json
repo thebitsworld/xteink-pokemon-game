@@ -1,0 +1,8 @@
+{
+  "id": "coup",
+  "name": "Co Up",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Hidden xiangqi (cờ úp): all but the generals start face down and turn up as they move. Against the device at three levels or a friend, with take-backs and saved games",
+  "entry": "main.lua"
+}
