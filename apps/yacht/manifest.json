@@ -1,7 +1,7 @@
 {
   "id": "yacht",
   "name": "Yacht",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "xteink-pokemon-game",
   "description": "Five dice, three rolls, thirteen boxes. Play solo for a high score, the device, or a friend",
   "entry": "main.lua"
