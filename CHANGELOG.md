@@ -1,12 +1,18 @@
-## [1.8.4-beta.1] - 2026-10-14
-
-> **Test build.** This beta adds How to play guides to Applications. If you only want to read and play, stay on [v1.8.3](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.3).
+## [1.8.4] - 2026-10-14
 
 ### Added
 
 - Applications: How to play. A game with a guide shows a **?** at the end of its row: tap it (X4 Pro) or hold Select on the row (X3/X4) to read the guide, page by page. Inside a game, **How to play** in its start menu opens the same guide, and Back returns to the game where it was. Guides are in English, and in Vietnamese when the reader's language is Vietnamese.
 - Lua apps can ship a guide (`guide.md`, `guide.vi.md`) and open it with `smudge.has_guide()` / `smudge.open_guide()`.
-- App Store: guides for 29 games, and four new games - Caro (Gomoku, five in a row), Reversi, O An Quan (o an quan) and Tien Len (tien len mien Nam, against three device players). The games also run on v1.8.3; the **?** and How to play buttons need this firmware.
+- App Store: guides for 29 games, and nine new games:
+  - Caro (Gomoku, five in a row on a 15x15 board), Reversi, Dots and Boxes - against the device at three levels or a friend.
+  - O An Quan (o an quan, the Vietnamese mandarin-square game) and Co Up (hidden xiangqi, pieces start face down).
+  - Tien Len (tien len mien Nam) against three device players.
+  - Patience: FreeCell with numbered deals and Spider with one, two or four suits.
+  - Logic Puzzles: Hashi, Lights Out and Slitherlink, made on the reader, each with a single solution.
+  - Hexland (X4 Pro only): a hex-island trading and building game against three device players.
+
+  The games also run on v1.8.3; the **?** and How to play buttons need this firmware.
 
 ### Fixed
 
