@@ -117,9 +117,14 @@ void HalDisplay::finishOverlapped() {
 }
 
 bool HalDisplay::pulseScan(const uint8_t* target, const uint8_t* drive, const uint16_t row0, const uint16_t row1,
-                           const uint16_t byte0, const uint16_t byte1, const uint8_t frames) {
+                           const uint16_t byte0, const uint16_t byte1, const uint8_t frames, const bool wait) {
   HalSpiBus::Lock spiLock;
-  return einkDisplay.pulseScan(target, drive, row0, row1, byte0, byte1, frames);
+  return einkDisplay.pulseScan(target, drive, row0, row1, byte0, byte1, frames, wait);
+}
+
+void HalDisplay::pulseFinish() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.pulseFinish();
 }
 
 void HalDisplay::endPulseDrive() {

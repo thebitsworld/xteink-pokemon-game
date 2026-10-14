@@ -288,12 +288,16 @@ class PanelDriver {
   // xteink-pokemon: pulse drive, a game's per-pixel refresh. One scan drives
   // the pixels set in `drive` for `frames` waveform frames toward their value
   // in `target` (1 white, 0 black) and holds every other pixel, over rows
-  // row0..row1 and bytes byte0..byte1 of the framebuffer layout. It returns
-  // once the scan is done; false where the driver cannot pulse.
+  // row0..row1 and bytes byte0..byte1 of the framebuffer layout; false where
+  // the driver cannot pulse. With `wait` it returns once the scan is done;
+  // without, as soon as the waveform runs (both buffers may change then), and
+  // pulseFinish() - or the next scan or refresh - waits it out. `frames` may
+  // carry kPulseNoTail (an experiment: the LUT group's two trailing bytes 0).
   // endPulseDrive() hands the panel back to ordinary refreshes, the next of
   // which cleans the whole screen.
+  static constexpr uint8_t kPulseNoTail = 0x80;
   virtual bool pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1,
-                         uint16_t byte0, uint16_t byte1, uint8_t frames) {
+                         uint16_t byte0, uint16_t byte1, uint8_t frames, bool wait) {
     (void)bus;
     (void)target;
     (void)drive;
@@ -302,9 +306,11 @@ class PanelDriver {
     (void)byte0;
     (void)byte1;
     (void)frames;
+    (void)wait;
     return false;
   }
-  virtual void endPulseDrive() {}
+  virtual void pulseFinish(EpdBus& bus) { (void)bus; }
+  virtual void endPulseDrive(EpdBus& bus) { (void)bus; }
   virtual uint16_t fastRefreshCutoffMs() const { return 0; }
   // Hold the periodic anti-ghost full refresh through a continuous interaction
   // (e.g. a live slider drag): while set, fast refreshes are never promoted to a

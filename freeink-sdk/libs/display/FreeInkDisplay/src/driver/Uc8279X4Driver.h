@@ -191,6 +191,7 @@ class Uc8279X4Driver : public PanelDriver {
   // DU bank; `_pulseDirty` says the RAM planes hold drive masks, not a frame.
   uint8_t _pulseFrames = 0;
   bool _pulseDirty = false;
+  bool _pulsePending = false;  // a scan started without waiting
   void loadPulseLut(EpdBus& bus, uint8_t frames);
   void streamPulseOldPlane(EpdBus& bus, const uint8_t* target, const uint8_t* drive);
   // xteink-pokemon: game-mode changed-rectangle refreshes. `_grayBase` doubles
@@ -220,8 +221,9 @@ class Uc8279X4Driver : public PanelDriver {
     return true;
   }
   bool pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1,
-                 uint16_t byte0, uint16_t byte1, uint8_t frames) override;
-  void endPulseDrive() override;
+                 uint16_t byte0, uint16_t byte1, uint8_t frames, bool wait) override;
+  void pulseFinish(EpdBus& bus) override;
+  void endPulseDrive(EpdBus& bus) override;
 
  private:
 };

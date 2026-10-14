@@ -137,10 +137,12 @@ class HalDisplay {
   // Pulse drive (UC8279 X4 Pro): one scan drives the pixels set in `drive` for
   // `frames` waveform frames toward `target` (framebuffer layout, 1 white)
   // and holds the rest, over framebuffer rows row0..row1 and bytes
-  // byte0..byte1; returns once done, false where the panel cannot. See
+  // byte0..byte1; false where the panel cannot. With `wait` it returns once
+  // done; without, while the waveform runs (pulseFinish() waits it out). See
   // FreeInkDisplay::pulseScan. endPulseDrive() makes the next refresh a full one.
   bool pulseScan(const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1, uint16_t byte0,
-                 uint16_t byte1, uint8_t frames);
+                 uint16_t byte1, uint8_t frames, bool wait = true);
+  void pulseFinish();
   void endPulseDrive();
   // The display SPI clock for a game (0 = the driver default); no refresh may run.
   void setDisplaySpiHz(uint32_t hz) { einkDisplay.setDisplaySpiHz(hz); }
