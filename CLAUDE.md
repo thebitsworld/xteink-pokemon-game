@@ -102,10 +102,10 @@ is in git history (before 2026-10-08).
     leaves the 36 ms), send ~14-24 ms for 12-18 KB/plane; ~10 scans/s in a game, smooth but ghosty;
     the tester liked 2 frames per pulse, then 8x3 (less ghosting). PLL 0x1F/0x3F: ~7.6 ms frames and
     ~18 ms fixed vs ~11.7/~25 at 0x0F (the fixed part also grows with the window's rows). Game Boy
-    presets (beta.6) Pulse 8x3, 8x3 polish (4 pulses on the area that changed, 0.3 s after the picture
-    stops; PulsePlanner::polish) and polish+ (also every 1.5 s while it moves). Tester: 8x3 polish
-    best; the 0x1F "fast" speeds ghosted more (dropped); polish alone did nothing while buttons were
-    held (a scrolling map never stands still).
+    preset: one "Pulse, clean 60 s" (key P8x3P-60: 8 pulses x 3 frames at 0x0F, polish 4 pulses on the
+    area that changed 0.3 s after the picture stops; PulsePlanner::polish). Betas tried and dropped:
+    fewer frames (blur), 0x1F "fast" (more ghost), plain 8x3 (more ghost), polish every 1.5 s while
+    moving (patchy, flicker). Pulse test shows only with -DCROSSINK_PULSE_TEST=1. Default stays D40.
   - `RefreshTimings` reports the last COMPLETED refresh with running `refreshes`/`skipped` counts (an
     overlapped refresh completes on the next call). Not an SDK file but related:
     `HalDisplay::displayBufferOverlapped`/`finishOverlapped` (SPI-locked shadow-free async refresh).
