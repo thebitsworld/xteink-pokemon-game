@@ -13,7 +13,8 @@
 // sees how dark one pulse gets and how many a full change takes, and whether
 // the rest of the screen stays still. The motion test moves a black and a
 // white square for ten seconds with the pulse budgets set here and counts the
-// scans per second. Results show on screen and go to
+// scans per second; it plans the next scan while the waveform runs, as a game
+// would. Results show on screen and go to
 // /.crosspoint/pulse-test.txt.
 class PulseTestActivity final : public Activity {
  public:
@@ -30,7 +31,7 @@ class PulseTestActivity final : public Activity {
   bool preventAutoSleep() override { return running.load(std::memory_order_acquire); }
 
  private:
-  enum class Row : uint8_t { Frames, Black, White, Ladder, Motion, Back, Count };
+  enum class Row : uint8_t { Frames, Tail, Black, White, Ladder, Motion, Back, Count };
   enum class Run : uint8_t { None, Ladder, Motion };
 
   // Scan timings summed over a test, in microseconds.
@@ -44,7 +45,8 @@ class PulseTestActivity final : public Activity {
     uint64_t elapsedUs = 0;
   };
 
-  uint8_t frames = 1;
+  uint8_t frames = 2;
+  bool noTail = false;  // the LUT groups' two trailing bytes 0 (an experiment)
   uint8_t blackPulses = 8;
   uint8_t whitePulses = 8;
   int selected = static_cast<int>(Row::Ladder);
@@ -70,7 +72,7 @@ class PulseTestActivity final : public Activity {
   void release();
   void beginDrive();
   void endDrive();
-  bool scan(const PulsePlanner::Window& w, Totals& totals);
+  bool scan(const PulsePlanner::Window& w, Totals& totals, bool wait = true);
   bool maskWindow(PulsePlanner::Window& w) const;
   void captureDrive(void (*draw)(GfxRenderer&, int), int arg);
   void showWithPulses(Totals& totals);

@@ -132,14 +132,18 @@ void PulseTestActivity::endDrive() {
 }
 
 // One pulse scan of `drive` toward `target`, with its timings added up.
-bool PulseTestActivity::scan(const PulsePlanner::Window& w, Totals& totals) {
+// Without `wait` it returns while the waveform runs, and the timings added
+// are those of the scan before.
+bool PulseTestActivity::scan(const PulsePlanner::Window& w, Totals& totals, const bool wait) {
 #ifdef SIMULATOR
   (void)w;
   (void)totals;
+  (void)wait;
   return false;
 #else
   const uint8_t* picture = renderer.getFrameBuffer();
-  if (!display.pulseScan(picture, drive, w.row0, w.row1, w.byte0, w.byte1, frames)) return false;
+  const uint8_t f = static_cast<uint8_t>(frames | (noTail ? 0x80 : 0));  // PanelDriver::kPulseNoTail
+  if (!display.pulseScan(picture, drive, w.row0, w.row1, w.byte0, w.byte1, f, wait)) return false;
   pulsed = true;
   uint32_t ph[8];
   if (display.lastRefreshTimings(ph)) {
@@ -202,7 +206,8 @@ void PulseTestActivity::runLadder() {
   // The base picture, cleaned with an ordinary full refresh.
   renderer.clearScreen(0xFF);
   char title[64];
-  snprintf(title, sizeof(title), "Ladder: 1-8 pulses of %u frame%s", frames, frames == 1 ? "" : "s");
+  snprintf(title, sizeof(title), "Ladder: 1-8 pulses of %u frame%s%s", frames, frames == 1 ? "" : "s",
+           noTail ? ", no tail" : "");
   renderer.drawText(UI_12_FONT_ID, 16, 20, title, true, EpdFontFamily::BOLD);
   renderer.drawText(UI_10_FONT_ID, 16, 56, "To black on white:", true);
   renderer.fillRect(8, l.bandB0, w - 16, l.bandB1 - l.bandB0, true);
@@ -246,8 +251,8 @@ void PulseTestActivity::runMotion() {
   const int a0 = 90, a1 = 290, b0 = 320, b1 = 520;
   renderer.clearScreen(0xFF);
   char title[64];
-  snprintf(title, sizeof(title), "Motion: %u/%u pulses of %u frame%s", blackPulses, whitePulses, frames,
-           frames == 1 ? "" : "s");
+  snprintf(title, sizeof(title), "Motion: %u/%u pulses of %u frame%s%s", blackPulses, whitePulses, frames,
+           frames == 1 ? "" : "s", noTail ? ", no tail" : "");
   renderer.drawText(UI_12_FONT_ID, 16, 20, title, true, EpdFontFamily::BOLD);
   renderer.drawRect(8, a0, w - 16, a1 - a0, true);
   renderer.fillRect(8, b0, w - 16, b1 - b0, true);
@@ -278,9 +283,12 @@ void PulseTestActivity::runMotion() {
     const bool any = planner.plan(drive, win);
     totals.planUs += micros() - planStart;
     if (!any) continue;
-    if (!scan(win, totals)) break;
+    if (!scan(win, totals, false)) break;
     planner.delivered(drive, win);
   }
+#ifndef SIMULATOR
+  display.pulseFinish();
+#endif
   totals.elapsedUs = micros() - start;
   summarize("motion", totals, 0);
   // The pulses still due, counted apart.
@@ -304,15 +312,15 @@ void PulseTestActivity::logResult(const char* test, const Totals& t) const {
   const float n = t.scans ? static_cast<float>(t.scans) : 1.0f;
   const float seconds = t.elapsedUs / 1e6f;
   char line[200];
-  const int len = snprintf(line, sizeof(line), "%s,%s,%u,%u,%u,%u,%.2f,%.1f,%.2f,%.2f,%.2f,%.2f,%.1f\n",
-                           AppVersion::version(), test, frames, blackPulses, whitePulses,
+  const int len = snprintf(line, sizeof(line), "%s,%s,%u,%s,%u,%u,%u,%.2f,%.1f,%.2f,%.2f,%.2f,%.2f,%.1f\n",
+                           AppVersion::version(), test, frames, noTail ? "none" : "stock", blackPulses, whitePulses,
                            static_cast<unsigned>(t.scans), seconds, seconds > 0 ? t.scans / seconds : 0.0f,
                            t.sendUs / 1000.0f / n, t.setupUs / 1000.0f / n, t.waveUs / 1000.0f / n,
                            t.planUs / 1000.0f / n, t.bytes / 1024.0f / n);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kHeader[] =
-      "# version,test,frames,black_pulses,white_pulses,scans,seconds,scans_per_s,send_ms,setup_ms,wave_ms,plan_ms,"
-      "plane_kb\n";
+      "# version,test,frames,tail,black_pulses,white_pulses,scans,seconds,scans_per_s,send_ms,setup_ms,wave_ms,"
+      "plan_ms,plane_kb\n";
   HalFile file = Storage.open(kLogPath, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -366,6 +374,10 @@ void PulseTestActivity::drawMenu() {
         label = "Frames per pulse";
         snprintf(value, sizeof(value), "%u", frames);
         break;
+      case Row::Tail:
+        label = "LUT tail (experiment)";
+        snprintf(value, sizeof(value), "%s", noTail ? "None" : "Stock");
+        break;
       case Row::Black:
         label = "Pulses to black (motion)";
         snprintf(value, sizeof(value), "%u", blackPulses);
@@ -408,6 +420,9 @@ void PulseTestActivity::activate(const Row row) {
   switch (row) {
     case Row::Frames:
       frames = static_cast<uint8_t>(frames % 3 + 1);
+      break;
+    case Row::Tail:
+      noTail = !noTail;
       break;
     case Row::Black:
       blackPulses = nextBudget(blackPulses);
