@@ -5,11 +5,11 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-13, v1.8.3)
+## Where things stand (2026-10-14, v1.8.4)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
-  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.3; latest release `v1.8.3` (stable). Its
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.4; latest release `v1.8.4` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
@@ -45,7 +45,7 @@ is in git history (before 2026-10-08).
   palette span - stretched onto levels 4..16), Smooth (17 levels, the tester found it busy), Brightness.
   Settings menu taps: orientation changes wait for the finger to lift, and the touch registry is cleared
   while it shows (game target ids collide with the front-button hints).
-- How to play guides (1.8.4-beta.1, branch `feat/guides-and-games`): `guide.md` / `guide.vi.md` in an app
+- How to play guides (1.8.4): `guide.md` / `guide.vi.md` in an app
   folder, shown by `GuideViewerActivity` (Markdown subset, not the EPUB reader - that would add recents,
   reading time and Pokemon credit). "?" on Applications rows (tap; hold Select on X3/X4);
   `smudge.has_guide()`/`open_guide()` push it over the running Lua app. The shared `menu.lua` (identical
