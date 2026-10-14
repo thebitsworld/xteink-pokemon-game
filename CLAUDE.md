@@ -93,6 +93,10 @@ is in git history (before 2026-10-08).
   - `setFastRefreshDiffWindow(on)` (same files as the DU scale; `findChangedWindow`, `streamWindow`,
     `sendPartialWindow` in `Uc8279X4Driver`): Fast refreshes send and drive only the changed rectangle
     (PTIN/PTL window) and skip unchanged frames; `RefreshTimings::planeBytes` reports the bytes sent.
+  - `pulseScan(...)` / `endPulseDrive()` (PanelDriver.h, FreeInkDisplay.h/.cpp, `Uc8279X4Driver::
+    loadPulseLut`/`streamPulseOldPlane`): pulse drive - NEW plane = target, OLD = target with the driven
+    pixels flipped, one-pulse LUT built from the DU bank's levels for its 0x22/0x23 tables; tested
+    through Applications > Pulse test (`PulseTestActivity`, `src/util/PulsePlanner.h`).
   - `RefreshTimings` reports the last COMPLETED refresh with running `refreshes`/`skipped` counts (an
     overlapped refresh completes on the next call). Not an SDK file but related:
     `HalDisplay::displayBufferOverlapped`/`finishOverlapped` (SPI-locked shadow-free async refresh).
