@@ -1,3 +1,17 @@
+## [1.8.5-beta.2] - 2026-10-14
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. Its Pulse screen speeds and Pulse test drive the X4 Pro's UC8279 screen with a short waveform repeated many times a second, which the screen's controller does not document and which has not been validated on this panel for long sessions. It can leave ghosted, faint or uneven pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4). Install it at your own risk.
+
+For the tester only (X4 Pro, UC8279-68 screen):
+
+1. **Game Boy > SETTINGS > Screen speed** now also offers **Pulse 8x2**, **Pulse 6x2** and **Pulse 8x1** (pulses per change x frames per pulse). Play a few minutes on each, walking around and in a menu with text, with the status line on (tap the title strip). Note how smooth it looks, the trails, how readable text is, and the updates per second shown. Then leave with EXIT and send `/.crosspoint/gameboy-perf.txt`.
+2. **Applications > Pulse test**: run the motion test again with 2 frames (it now plans the next scan while the waveform runs), then set **LUT tail** to **None** and run the ladder and the motion test once more. Note whether the boxes and squares still change as before and whether the scans got faster; send `/.crosspoint/pulse-test.txt`.
+
+### Added
+
+- Game Boy (X4 Pro, UC8279-68 screens, test only): Pulse 8x2, 6x2 and 8x1 screen speeds, which drive only the pixels still changing, a short pulse at a time, many times a second.
+- Pulse test: the motion test overlaps planning with the waveform, and a LUT tail experiment.
+
 ## [1.8.5-beta.1] - 2026-10-14
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** It is an experimental test build, not a release. Its Pulse test drives the X4 Pro's UC8279 screen with a one-frame waveform repeated many times a second, which the screen's controller does not document and which has not been validated on this panel. It can leave ghosted, faint or uneven pictures on the screen, and in the worst case lasting image retention or damage to the display. If you only want to read and play, stay on [v1.8.4](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.4). Install it at your own risk.
