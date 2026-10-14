@@ -96,7 +96,10 @@ is in git history (before 2026-10-08).
   - `pulseScan(...)` / `endPulseDrive()` (PanelDriver.h, FreeInkDisplay.h/.cpp, `Uc8279X4Driver::
     loadPulseLut`/`streamPulseOldPlane`): pulse drive - NEW plane = target, OLD = target with the driven
     pixels flipped, one-pulse LUT built from the DU bank's levels for its 0x22/0x23 tables; tested
-    through Applications > Pulse test (`PulseTestActivity`, `src/util/PulsePlanner.h`).
+    through Applications > Pulse test (`PulseTestActivity`, `src/util/PulsePlanner.h`). `wait=false`
+    + `pulseFinish()` overlap planning with the waveform; `kPulseNoTail` zeroes the LUT groups' two
+    trailing bytes (experiment). Measured beta.1: wave ~36 ms fixed + ~11.6 ms per frame, send
+    ~14 ms for 12 KB/plane; the tester liked 2 frames per pulse. Game Boy presets Pulse 8x2/6x2/8x1.
   - `RefreshTimings` reports the last COMPLETED refresh with running `refreshes`/`skipped` counts (an
     overlapped refresh completes on the next call). Not an SDK file but related:
     `HalDisplay::displayBufferOverlapped`/`finishOverlapped` (SPI-locked shadow-free async refresh).
