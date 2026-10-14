@@ -79,6 +79,12 @@ class FreeInkDisplay {
   // the running counts of completed and skipped (unchanged) refreshes. False
   // where the driver does not measure them.
   bool lastRefreshTimings(uint32_t out[8]) const;
+  // xteink-pokemon: see PanelDriver::pulseScan / endPulseDrive. The target is
+  // a framebuffer-layout image (1 white), `drive` a same-layout mask (1 =
+  // drive this pixel); the window is in framebuffer rows and bytes.
+  bool pulseScan(const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1, uint16_t byte0,
+                 uint16_t byte1, uint8_t frames);
+  void endPulseDrive();
   uint16_t fastRefreshCutoffMs() const;
 
   // Hold the periodic anti-ghost full refresh through a live interaction (slider

@@ -528,8 +528,13 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
 
   // xteink-pokemon: a game may run Fast refreshes on a host-loaded, shortened
   // DU waveform (REG=1 below) instead of the panel's built-in one.
-  const bool externalDu = fast && _duScalePct != 0;
-  if (externalDu) loadScaledDuLut(bus, _duScalePct);
+  // xteink-pokemon: or the one-pulse LUT of a pulse scan.
+  const bool externalDu = fast && (_duScalePct != 0 || _pulseFrames != 0);
+  if (fast && _pulseFrames != 0) {
+    loadPulseLut(bus, _pulseFrames);
+  } else if (externalDu) {
+    loadScaledDuLut(bus, _duScalePct);
+  }
 
   powerOnIfNeeded(bus, " 8279x4_PON");
 
@@ -577,6 +582,105 @@ void Uc8279X4Driver::loadScaledDuLut(EpdBus& bus, const uint8_t percent) {
     bus.cmd(kUc8279X3_BwDu[t][0]);
     bus.data(table, kTableLen);
   }
+}
+
+// xteink-pokemon: the one-pulse LUT of a pulse scan (see pulseScan). The two
+// transition tables of the DU bank (0x22, 0x23: a pixel whose OLD and NEW bits
+// differ) keep the drive level the bank gives them, for `frames` frames; the
+// other three (VCOM, and 0x21/0x24 where the bits agree) stay at level 0 for
+// as long, so a held pixel gets no drive. Copying the bank's levels keeps the
+// mapping the DU refresh already proved: whichever table turns a pixel black
+// there does here too.
+void Uc8279X4Driver::loadPulseLut(EpdBus& bus, const uint8_t frames) {
+  constexpr size_t kTableLen = 42;
+  const uint8_t n = static_cast<uint8_t>(frames < 1 ? 1 : (frames > 0x3F ? 0x3F : frames));
+  for (size_t t = 0; t < 5; ++t) {
+    const uint8_t reg = kUc8279X3_BwDu[t][0];
+    uint8_t level = 0;
+    if (reg == 0x22 || reg == 0x23) {
+      // The level the bank drives longest in this table.
+      uint16_t byLevel[4] = {};
+      for (size_t i = 0; i < kTableLen; ++i) {
+        const size_t pos = i % 7;
+        if (pos < 1 || pos > 4) continue;
+        const uint8_t b = kUc8279X3_BwDu[t][1 + i];
+        byLevel[b >> 6] += b & 0x3F;
+      }
+      for (uint8_t l = 1; l < 4; ++l)
+        if (byLevel[l] > byLevel[level]) level = l;
+    }
+    uint8_t table[kTableLen] = {};
+    table[0] = 0x01;
+    table[1] = static_cast<uint8_t>((level << 6) | n);
+    table[5] = 0x01;
+    table[6] = 0x01;
+    bus.cmd(reg);
+    bus.data(table, kTableLen);
+  }
+}
+
+// xteink-pokemon: OLD plane of a pulse scan, the target with the driven
+// pixels flipped, so that exactly those pixels read as a transition.
+void Uc8279X4Driver::streamPulseOldPlane(EpdBus& bus, const uint8_t* target, const uint8_t* drive) {
+  uint8_t row[128];
+  const uint16_t bytes = _winByte1 - _winByte0 + 1;
+  bus.cmd(CMD_DTM1);
+  bus.beginTxn();
+  for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
+    const uint32_t at = static_cast<uint32_t>(r) * _wb + _winByte0;
+    for (uint16_t i = 0; i < bytes; ++i) row[i] = static_cast<uint8_t>(target[at + i] ^ drive[at + i]);
+    bus.rawWriteBytes(row, bytes);
+  }
+  bus.endTxn();
+}
+
+// xteink-pokemon: see PanelDriver::pulseScan. Both planes of the window go
+// out (NEW = target, OLD = target with the driven pixels flipped), then a Fast
+// refresh runs the one-pulse LUT; power stays on between scans.
+bool Uc8279X4Driver::pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t* drive, const uint16_t row0,
+                               const uint16_t row1, const uint16_t byte0, const uint16_t byte1, const uint8_t frames) {
+  if (FREEINK_UC8279X4_ROWREV || FREEINK_UC8279X4_XMIRROR) return false;
+  if (target == nullptr || drive == nullptr || row0 > row1 || row1 >= _h || byte0 > byte1 || byte1 >= _wb) {
+    return false;
+  }
+  if (_pendingRefresh) displayFinish(bus, target);
+  _phaseStartUs = micros();
+  _timings = {};
+  _winRow0 = row0;
+  _winRow1 = row1;
+  _winByte0 = byte0;
+  _winByte1 = byte1;
+  _windowActive = true;
+  bus.cmd(CMD_PARTIAL_IN);
+  sendPartialWindow(bus);
+  streamWindow(bus, CMD_DTM2, target);
+  streamPulseOldPlane(bus, target, drive);
+  bus.cmd(CMD_PARTIAL_OUT);
+  _timings.newPlaneUs = phaseUs();
+  _timings.planeBytes = static_cast<uint32_t>(row1 - row0 + 1) * (byte1 - byte0 + 1);
+  _pulseFrames = frames;
+  startBwRefresh(bus, true);
+  _pulseFrames = 0;
+  _timings.setupUs = phaseUs();
+  bus.waitRefreshComplete(" 8279x4_PULSE");
+  _timings.waveformUs = phaseUs();
+  bus.cmd(CMD_PARTIAL_OUT);
+  _windowActive = false;
+  _timings.refreshes = _lastTimings.refreshes + 1;
+  _timings.skipped = _lastTimings.skipped;
+  _lastTimings = _timings;
+  _pulseDirty = true;
+  _diffRefValid = false;
+  return true;
+}
+
+// xteink-pokemon: the RAM planes hold drive masks after pulse scans; the next
+// refresh is a full one that redraws every pixel from the framebuffer.
+void Uc8279X4Driver::endPulseDrive() {
+  if (!_pulseDirty) return;
+  _pulseDirty = false;
+  _diffRefValid = false;
+  _needFullClear = true;
 }
 
 // PTL (0x90): the full screen, or a game's changed rectangle while

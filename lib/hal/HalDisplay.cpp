@@ -116,6 +116,17 @@ void HalDisplay::finishOverlapped() {
   einkDisplay.waitRefreshComplete();
 }
 
+bool HalDisplay::pulseScan(const uint8_t* target, const uint8_t* drive, const uint16_t row0, const uint16_t row1,
+                           const uint16_t byte0, const uint16_t byte1, const uint8_t frames) {
+  HalSpiBus::Lock spiLock;
+  return einkDisplay.pulseScan(target, drive, row0, row1, byte0, byte1, frames);
+}
+
+void HalDisplay::endPulseDrive() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.endPulseDrive();
+}
+
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
 
 HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode mode) const {
