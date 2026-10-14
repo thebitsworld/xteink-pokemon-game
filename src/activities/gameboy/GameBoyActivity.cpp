@@ -89,11 +89,8 @@ struct RefreshPreset {
   uint8_t pulseBlack;
   uint8_t pulseWhite;
   // Pulses every pixel of the area that changed gets once the picture has
-  // stood still (PulsePlanner::polish; 0 = none), against ghosting, and how
-  // often (ms) a picture that never stands still - a scrolling map - is
-  // polished anyway (0 = only when still).
+  // stood still (PulsePlanner::polish; 0 = none), against ghosting.
   uint8_t pulsePolish;
-  uint16_t pulsePolishEveryMs;
 };
 constexpr RefreshPreset kRefreshPresets[] = {
     {"Standard", "standard", 0, 0, 0, 0, false, 0},
@@ -105,13 +102,11 @@ constexpr RefreshPreset kRefreshPresets[] = {
     {"D30, clean 60 s", "D30-60", 0, 0x0F, 30, 20000000, true, 60},
     {"D25, clean 30 s", "D25-30", 0, 0x0F, 25, 20000000, true, 30},
     {"D25, clean 60 s", "D25-60", 0, 0x0F, 25, 20000000, true, 60},
-    // Pulse drive (pulses x frames per pulse). "polish" adds 4 pulses to the
-    // area that changed once the picture stands still; "polish+" also every
-    // 1.5 s while it keeps changing. (Frame rate 0x1F was faster per scan
-    // but left more ghosting on the tester's screen.)
-    {"Pulse 8x3, clean 60 s", "P8x3-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 0, 0},
-    {"Pulse 8x3 polish, clean 60 s", "P8x3P-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 4, 0},
-    {"Pulse 8x3 polish+, clean 60 s", "P8x3PP-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 4, 1500},
+    // Pulse drive: 8 pulses of 3 frames per change, and 4 more on the area
+    // that changed once the picture stands still (what the 1.8.5 betas found
+    // best: fewer frames blurred, frame rate 0x1F ghosted more, and a polish
+    // while the picture moved left it patchy).
+    {"Pulse, clean 60 s", "P8x3P-60", 0, 0x0F, 0, 20000000, false, 60, 3, 8, 8, 4},
 };
 constexpr uint8_t kRefreshPresetCount = sizeof(kRefreshPresets) / sizeof(kRefreshPresets[0]);
 constexpr uint8_t kDefaultFastPreset = 4;  // D40, clean 60 s
@@ -561,15 +556,10 @@ void GameBoyActivity::render(RenderLock&&) {
     uint8_t* fb = renderer.getFrameBuffer();
     const uint64_t nowUs = nowMicros();
     if (pulsePlanner.retarget(fb)) pulseLastChangeUs = nowUs;
-    // Still for a moment - or, with polishEvery, changing for that long
-    // since the last polish: what moved gets a few more pulses, which
-    // finishes pixels a reversal cut short (pixels still changing keep
-    // their own count).
-    if (preset.pulsePolish != 0) {
-      const bool still = nowUs - pulseLastChangeUs >= PULSE_POLISH_DELAY_US;
-      const bool due =
-          preset.pulsePolishEveryMs != 0 && nowUs - pulseLastPolishUs >= preset.pulsePolishEveryMs * 1000ULL;
-      if ((still || due) && pulsePlanner.polish(preset.pulsePolish)) pulseLastPolishUs = nowUs;
+    // Still for a moment: what moved gets a few more pulses, which finishes
+    // pixels a reversal cut short (pixels still changing keep their count).
+    if (preset.pulsePolish != 0 && nowUs - pulseLastChangeUs >= PULSE_POLISH_DELAY_US) {
+      pulsePlanner.polish(preset.pulsePolish);
     }
     PulsePlanner::Window w;
     const bool any = pulsePlanner.plan(pulseDrive, w);

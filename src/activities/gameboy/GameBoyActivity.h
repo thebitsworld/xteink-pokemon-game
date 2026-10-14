@@ -277,7 +277,6 @@ class GameBoyActivity final : public Activity {
   // When the planner last saw the picture change: a polish waits for it to
   // stand still this long.
   uint64_t pulseLastChangeUs = 0;
-  uint64_t pulseLastPolishUs = 0;
   static constexpr uint64_t PULSE_POLISH_DELAY_US = 300000ULL;
   bool allocatePulse();
   void releasePulse();

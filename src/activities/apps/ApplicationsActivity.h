@@ -377,8 +377,9 @@ class ApplicationsActivity : public Activity {
       });
     }
 
-#if CROSSINK_GAMEBOY
-    // A test of the pulse drive, on the screens it is being tried on.
+#if CROSSINK_GAMEBOY && CROSSINK_PULSE_TEST
+    // A test of the pulse drive, on the screens it is being tried on (test
+    // builds only: -DCROSSINK_PULSE_TEST=1).
     if (PulseTestActivity::supported()) {
       AppEntry pulse;
       pulse.name = "Pulse test";
