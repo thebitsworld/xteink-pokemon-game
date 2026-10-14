@@ -7,16 +7,14 @@ in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md]
 and [apps/README.md](../../apps/README.md)).
 
 Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
-Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, plus the earlier games.
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink), Hexland, Phom, plus the earlier games.
 
 ## Next
 
-1. **Phỏm (tá lả)**: the Vietnamese rummy, you against three device players. Reuse Tien Len's card
-   drawing and its module layout.
-2. **Backgammon**: dice, bearing off, doubling cube optional; the device player weighs outcomes by
+1. **Backgammon**: dice, bearing off, doubling cube optional; the device player weighs outcomes by
    their probability.
-3. **Nine Men's Morris**: small board, short rules, a strong search fits easily.
-4. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
+2. **Nine Men's Morris**: small board, short rules, a strong search fits easily.
+3. **Logic Puzzles additions**: Kakuro, Light Up (Akari), then KenKen, Nurikabe, Masyu, Star Battle
    - each generated on the reader with a single solution, one module per puzzle.
 
 ## Later
