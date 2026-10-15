@@ -91,7 +91,12 @@ is in git history (before 2026-10-08).
     refreshes on the X3 UC8279 DU bank with its frame counts scaled.
   - `lastRefreshTimings()` (same files; `RefreshTimings` in `PanelDriver.h`, phase clock in
     `Uc8279X4Driver`): where the last refresh spent its time.
-  - `EpdBus::setSpiHz`, `FreeInkDisplay::setDisplaySpiHz`: change the display SPI clock at runtime.
+  - `EpdBus::setSpiHz`, `FreeInkDisplay::setDisplaySpiHz`: change the display SPI clock at runtime;
+    `FreeInkDisplay::displaySpiHz` reads it. `Uc8279X4Driver::spiHz` returns 20 MHz on variant 0x68.
+  - `Uc8279X4Driver::flushDeferredBase` / `_baseDeferred` / `_baseRestored`: transitionGrayscaleBase
+    defers its DTM1 restore (the AA upload overwrites DTM1), every other entry point flushes it first;
+    cleanupGrayscaleBuffers skips a DTM1 rewrite displayGray just did. Reader timings:
+    `src/activities/reader/ReaderPerf.h` -> /.crosspoint/reader-perf.txt.
   - `setFastRefreshDiffWindow(on)` (same files as the DU scale; `findChangedWindow`, `streamWindow`,
     `sendPartialWindow` in `Uc8279X4Driver`): Fast refreshes send and drive only the changed rectangle
     (PTIN/PTL window) and skip unchanged frames; `RefreshTimings::planeBytes` reports the bytes sent.
