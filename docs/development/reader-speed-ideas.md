@@ -44,3 +44,35 @@ Key files: `src/activities/reader/EpubReaderActivity.cpp` (`renderContents`, `pa
 `idlePrewarmNextPage`), `src/activities/reader/EpubGrayscale.cpp`, `src/activities/reader/ReaderUtils.h`,
 `lib/Epub/Epub/Section.cpp`, `lib/GfxRenderer/GfxRenderer.cpp`,
 `freeink-sdk/libs/display/FreeInkDisplay/src/driver/Uc8279X4Driver.cpp`.
+
+## Status (2026-10-15) and the plan for every display controller
+
+Step 1 is in `v1.8.7-beta.1-x4pro` (branch `feat/reader-speed-1`, not merged): `reader-perf.txt`, a
+20 MHz SPI clock on the UC8279-0x68 only, and the two redundant UC8279 DTM1 writes dropped (for every
+UC8279 variant of the X4 Pro). Waiting for the tester's numbers and page-quality check.
+
+The goal is speed-ups that are right for **every** controller, not only the tester's panel. Sort each
+change by how much it depends on the panel:
+
+- **A - software only (safe on every device):** pre-render the next page (PSRAM boards; X3/X4 when the
+  heap allows), keep the section file open between turns, one combined state write on open,
+  incremental indexing for a cold chapter, no framebuffer loan on PSRAM boards.
+- **B - fewer bytes, same panel input (prove it, then enable for every batch):** the SDK's host tests
+  (`freeink-sdk/libs/display/FreeInkDisplay/test/host/run_pro.py`, `run_uc8279.py`) drive the real
+  drivers against a recording `EpdBus`. Add a controller RAM model: apply every write (including
+  PTIN/PTL windows) to two plane images, and at every refresh command snapshot both planes, the LUTs and
+  the registers. Run the same reader sequences (page turns, image pages, HALF cleanup, sleep, Game Boy)
+  through the old and the new driver code: identical snapshots mean the panel gets exactly what it got
+  before, so the change is safe on every batch of that controller. Then: UC8279 X4 (the 120 KB already
+  dropped; also stop rewriting the 120 off-screen gate rows, ~20% of every plane), UC8179, SSD1677
+  (X4/X4 Pro: defer the post-refresh BW+RED rewrite), UC8253/UC8279 on the X3.
+- **C - electrical/timing (SPI clock, waveforms, PLL): only on tested panels.** Keep the allowlist by
+  controller + variant (today 20 MHz on UC8279-0x68 only); maybe an experimental Settings switch
+  ("Display bus 20 MHz", off by default on untested batches) so owners of other batches can try and
+  report.
+
+Order: (1) fix the host-test stubs - they no longer build since our own SDK edits (`micros`,
+`heap_caps_free`, `EpdBus::spiHz/setSpiHz` are missing from `test/host/pro_stubs`), then add the RAM
+model; (2) prove the UC8279 change and drop any variant limit on it; (3) the A items; (4) B for the
+other drivers one by one; (5) widen C only with testers of other batches.
+
