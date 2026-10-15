@@ -146,9 +146,6 @@ class HalDisplay {
   void endPulseDrive();
   // The display SPI clock for a game (0 = the driver default); no refresh may run.
   void setDisplaySpiHz(uint32_t hz) { einkDisplay.setDisplaySpiHz(hz); }
-  // DMA writes on the display bus for a game (ESP32-S3 panels that are their
-  // SPI host's only user, the X4 Pro); false where it cannot. No refresh may run.
-  bool setDisplayDma(bool on) { return einkDisplay.setDisplayDma(on); }
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

@@ -123,7 +123,6 @@ void PulseTestActivity::beginDrive() {
   display.setFastRefreshDiffWindow(false);
   display.setFastRefreshTuning(0, pll);
   display.setDisplaySpiHz(20000000);
-  display.setDisplayDma(true);
 #endif
 }
 
@@ -132,7 +131,6 @@ void PulseTestActivity::endDrive() {
   if (pulsed) display.endPulseDrive();
   pulsed = false;
   display.setFastRefreshTuning(0, 0);
-  display.setDisplayDma(false);
   display.setDisplaySpiHz(0);
 #endif
 }

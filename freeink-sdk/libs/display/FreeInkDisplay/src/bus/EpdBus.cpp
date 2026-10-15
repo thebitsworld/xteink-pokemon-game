@@ -4,9 +4,6 @@
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-#if CONFIG_IDF_TARGET_ESP32S3
-#include <esp_heap_caps.h>  // xteink-pokemon: the DMA bounce buffer
-#endif
 
 #if FREEINK_DEVICE_PAPERMONO
 #include <PaperMonoBoard.h>
@@ -158,13 +155,6 @@ void EpdBus::reset(uint16_t extraSettleMs) {
 }
 
 void EpdBus::cmd(uint8_t c) {
-  if (_dmaOn) {  // xteink-pokemon
-    digitalWrite(_pins.dc, LOW);
-    digitalWrite(_pins.cs, LOW);
-    dmaWrite(&c, 1);
-    digitalWrite(_pins.cs, HIGH);
-    return;
-  }
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.dc, LOW);
   digitalWrite(_pins.cs, LOW);
@@ -174,13 +164,6 @@ void EpdBus::cmd(uint8_t c) {
 }
 
 void EpdBus::data(uint8_t d) {
-  if (_dmaOn) {  // xteink-pokemon
-    digitalWrite(_pins.dc, HIGH);
-    digitalWrite(_pins.cs, LOW);
-    dmaWrite(&d, 1);
-    digitalWrite(_pins.cs, HIGH);
-    return;
-  }
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.dc, HIGH);
   digitalWrite(_pins.cs, LOW);
@@ -190,13 +173,6 @@ void EpdBus::data(uint8_t d) {
 }
 
 void EpdBus::data(const uint8_t* d, uint16_t len) {
-  if (_dmaOn) {  // xteink-pokemon
-    digitalWrite(_pins.dc, HIGH);
-    digitalWrite(_pins.cs, LOW);
-    dmaWrite(d, len);
-    digitalWrite(_pins.cs, HIGH);
-    return;
-  }
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.dc, HIGH);
   digitalWrite(_pins.cs, LOW);
@@ -206,17 +182,6 @@ void EpdBus::data(const uint8_t* d, uint16_t len) {
 }
 
 void EpdBus::cmdData(uint8_t c, const uint8_t* d, uint16_t len) {
-  if (_dmaOn) {  // xteink-pokemon
-    digitalWrite(_pins.cs, LOW);
-    digitalWrite(_pins.dc, LOW);
-    dmaWrite(&c, 1);
-    if (len > 0 && d != nullptr) {
-      digitalWrite(_pins.dc, HIGH);
-      dmaWrite(d, len);
-    }
-    digitalWrite(_pins.cs, HIGH);
-    return;
-  }
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.cs, LOW);
   digitalWrite(_pins.dc, LOW);
@@ -238,141 +203,30 @@ void EpdBus::beginTxn() {
   if (_coCs >= 0) {
     digitalWrite(_coCs, HIGH);
   }
-  if (_dmaOn) {  // xteink-pokemon
-    digitalWrite(_pins.cs, LOW);
-    return;
-  }
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.cs, LOW);
 }
 
 void EpdBus::endTxn() {
   digitalWrite(_pins.cs, HIGH);
-  if (_dmaOn) return;  // xteink-pokemon
   SPI.endTransaction();
 }
 
 void EpdBus::rawCmd(uint8_t c) {
   digitalWrite(_pins.dc, LOW);
-  if (_dmaOn) {  // xteink-pokemon
-    dmaWrite(&c, 1);
-    digitalWrite(_pins.dc, HIGH);
-    return;
-  }
   SPI.transfer(c);
   digitalWrite(_pins.dc, HIGH);
 }
 
 void EpdBus::rawData(uint8_t d) {
   digitalWrite(_pins.dc, HIGH);
-  if (_dmaOn) {  // xteink-pokemon
-    dmaWrite(&d, 1);
-    return;
-  }
   SPI.transfer(d);
 }
 
 void EpdBus::rawWriteBytes(const uint8_t* d, uint16_t len) {
   digitalWrite(_pins.dc, HIGH);
-  if (_dmaOn) {  // xteink-pokemon
-    dmaWrite(d, len);
-    return;
-  }
   SPI.writeBytes(d, len);
 }
-
-// xteink-pokemon: DMA writes; see EpdBus::setDma.
-#if CONFIG_IDF_TARGET_ESP32S3
-namespace {
-constexpr size_t kDmaChunk = 4096;
-}
-
-bool EpdBus::setDma(const bool on) {
-  if (on == _dmaOn) return true;
-  if (on) {
-    SPI.end();  // hands the host and its pins over
-    spi_bus_config_t bus = {};
-    bus.mosi_io_num = _pins.mosi;
-    bus.miso_io_num = -1;
-    bus.sclk_io_num = _pins.sclk;
-    bus.quadwp_io_num = -1;
-    bus.quadhd_io_num = -1;
-    bus.max_transfer_sz = kDmaChunk;
-    _dmaBuf = static_cast<uint8_t*>(heap_caps_malloc(kDmaChunk, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
-    if (_dmaBuf == nullptr || spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO) != ESP_OK) {
-      heap_caps_free(_dmaBuf);
-      _dmaBuf = nullptr;
-      SPI.begin(_pins.sclk, -1, _pins.mosi, _pins.cs);
-      return false;
-    }
-    _dmaOn = true;
-    dmaClock();
-    if (_dmaDev == nullptr) {
-      spi_bus_free(SPI2_HOST);
-      heap_caps_free(_dmaBuf);
-      _dmaBuf = nullptr;
-      _dmaOn = false;
-      SPI.begin(_pins.sclk, -1, _pins.mosi, _pins.cs);
-      return false;
-    }
-  } else {
-    spi_bus_remove_device(_dmaDev);
-    _dmaDev = nullptr;
-    spi_bus_free(SPI2_HOST);
-    heap_caps_free(_dmaBuf);
-    _dmaBuf = nullptr;
-    _dmaOn = false;
-    SPI.begin(_pins.sclk, -1, _pins.mosi, _pins.cs);
-  }
-  pinMode(_pins.cs, OUTPUT);
-  pinMode(_pins.dc, OUTPUT);
-  digitalWrite(_pins.cs, HIGH);
-  digitalWrite(_pins.dc, HIGH);
-  return true;
-}
-
-// The device at the bus's clock; CS and DC stay host-driven GPIOs.
-void EpdBus::dmaClock() {
-  if (!_dmaOn) return;
-  if (_dmaDev != nullptr) {
-    spi_bus_remove_device(_dmaDev);
-    _dmaDev = nullptr;
-  }
-  spi_device_interface_config_t dev = {};
-  dev.clock_speed_hz = static_cast<int>(_spiHz);
-  dev.mode = 0;
-  dev.spics_io_num = -1;
-  dev.queue_size = 1;
-  if (spi_bus_add_device(SPI2_HOST, &dev, &_dmaDev) != ESP_OK) _dmaDev = nullptr;
-}
-
-void EpdBus::dmaWrite(const uint8_t* d, uint32_t len) {
-  while (len > 0) {
-    const uint32_t n = len < kDmaChunk ? len : kDmaChunk;
-    spi_transaction_t t = {};
-    t.length = n * 8;
-    if (n <= 4) {
-      // A command or a data byte: straight from the transaction, polled.
-      t.flags = SPI_TRANS_USE_TXDATA;
-      memcpy(t.tx_data, d, n);
-      spi_device_polling_transmit(_dmaDev, &t);
-    } else {
-      memcpy(_dmaBuf, d, n);
-      t.tx_buffer = _dmaBuf;
-      spi_device_transmit(_dmaDev, &t);
-    }
-    d += n;
-    len -= n;
-  }
-}
-#else
-bool EpdBus::setDma(const bool on) { return !on; }
-void EpdBus::dmaClock() {}
-void EpdBus::dmaWrite(const uint8_t* d, uint32_t len) {
-  (void)d;
-  (void)len;
-}
-#endif
 
 void EpdBus::waitBusy(const char* tag) { waitBusy(_busy, tag); }
 

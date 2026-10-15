@@ -1053,13 +1053,6 @@ void FreeInkDisplay::endPulseDrive() {
   if (_driver) _driver->endPulseDrive(_bus);
 }
 
-// xteink-pokemon: DMA writes on the display bus, after any refresh running.
-bool FreeInkDisplay::setDisplayDma(bool on) {
-  if (!_driver || _driver->usesExternalBus()) return !on;
-  syncPendingAsync();
-  return _bus.setDma(on);
-}
-
 // xteink-pokemon: a game's display SPI clock; 0 restores the driver default.
 void FreeInkDisplay::setDisplaySpiHz(uint32_t hz) {
   if (!_driver) return;
