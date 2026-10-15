@@ -1,3 +1,17 @@
+## [1.8.7-beta.1-x4pro] - 2026-10-15
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build: it changes how pages are sent to the screen while reading. If pages look wrong (ghosts that do not clear, half-drawn text, garbage), go back to v1.8.6. There is no X3/X4 file in this release.
+
+For the tester only (X4 Pro, UC8279-68 screen): before installing, open a book on v1.8.6 and turn about 30 pages. Then install this build and read the same book the same way: turn about 30 pages (and a few backwards), open the menu once, leave the book. Check that pages look as clean as before, especially right after a page with pictures, and that page turns feel faster. Then send `/.crosspoint/reader-perf.txt` (one line per book opened in this build; v1.8.6 writes none, so the comparison is by feel plus these numbers).
+
+### Changed
+
+- Reader (X4 Pro, UC8279-68 screens): page turns send less to the screen and at twice the speed - about 120 KB less per turn and a 20 MHz SPI clock instead of 10 MHz.
+
+### Added
+
+- Reader: page-turn timings in `/.crosspoint/reader-perf.txt` (one line per book).
+
 ## [1.8.6] - 2026-10-15
 
 ### Added
