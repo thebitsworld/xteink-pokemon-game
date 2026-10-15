@@ -10,6 +10,10 @@
 #include <Arduino.h>
 #include <SPI.h>
 
+#if CONFIG_IDF_TARGET_ESP32S3
+#include <driver/spi_master.h>  // xteink-pokemon: DMA writes (setDma)
+#endif
+
 namespace freeink {
 
 // BUSY line conventions differ by controller family.
@@ -42,7 +46,17 @@ class EpdBus {
   void setSpiHz(uint32_t spiHz) {
     _spiHz = spiHz;
     _spi = SPISettings(spiHz, MSBFIRST, SPI_MODE0);
+    dmaClock();  // xteink-pokemon
   }
+
+  // xteink-pokemon: DMA writes (ESP32-S3 only; false elsewhere or on failure).
+  // On, the bus leaves Arduino's SPI for the ESP-IDF master driver on the same
+  // host and pins, and bulk data goes out through a DMA bounce buffer instead
+  // of 64-byte FIFO loads the CPU waits on. Only for a panel that is the
+  // host's sole user (the X4 Pro: its SD card is SDMMC); call it with no
+  // refresh running.
+  bool setDma(bool on);
+  bool dma() const { return _dmaOn; }
 
   // Hardware reset pulse; extraSettleMs adds a post-reset settle (X3 needs 50 ms).
   void reset(uint16_t extraSettleMs = 0);
@@ -132,6 +146,15 @@ class EpdBus {
     }
     delay(fallbackDelayMs);
   }
+
+  // xteink-pokemon: the ESP-IDF device and bounce buffer while DMA is on.
+  bool _dmaOn = false;
+#if CONFIG_IDF_TARGET_ESP32S3
+  spi_device_handle_t _dmaDev = nullptr;
+  uint8_t* _dmaBuf = nullptr;
+#endif
+  void dmaClock();
+  void dmaWrite(const uint8_t* d, uint32_t len);
 
   EpdPins _pins{-1, -1, -1, -1, -1, -1};
   SPISettings _spi;

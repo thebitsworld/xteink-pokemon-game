@@ -74,6 +74,9 @@ class FreeInkDisplay {
   // xteink-pokemon: the display SPI clock for a game (0 = the driver's default).
   // Call it with no refresh running.
   void setDisplaySpiHz(uint32_t hz);
+  // xteink-pokemon: the display bus's DMA writes for a game (EpdBus::setDma);
+  // false where it cannot. Call it with no refresh running.
+  bool setDisplayDma(bool on);
   // xteink-pokemon: the last completed refresh's phases in microseconds: copy,
   // new plane, setup, waveform, old plane; then the bytes sent per plane and
   // the running counts of completed and skipped (unchanged) refreshes. False
