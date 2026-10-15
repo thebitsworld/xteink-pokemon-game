@@ -7,14 +7,13 @@ in `pokemon-simulator-X3`, or list `"devices": ["x4pro"]` (see [applications.md]
 and [apps/README.md](../../apps/README.md)).
 
 Already built: Caro, Reversi, O An Quan, Tien Len, Co Up, Dots and Boxes, Patience (FreeCell,
-Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink, Kakuro, Light Up), Hexland, Phom, Backgammon, Nine Men's Morris, Sam Loc, Mancala, Co Ganh, plus the earlier games.
+Spider), Logic Puzzles (Hashi, Lights Out, Slitherlink, Kakuro, Light Up), Hexland, Phom, Backgammon, Nine Men's Morris, Sam Loc, Mancala, Co Ganh, Code Breaker, plus the earlier games.
 
 ## Next
 
 1. **Logic Puzzles additions**: KenKen, Nurikabe, Masyu, Star Battle - each generated on the
    reader with a single solution, one module per puzzle (the X3 limit is close: ~64 KB at most).
-2. **Mastermind**: code breaking with 1-bit symbols instead of colours.
-3. **Peg Solitaire**: the classic English and European boards.
+2. **Peg Solitaire**: the classic English and European boards.
 
 ## Later
 
