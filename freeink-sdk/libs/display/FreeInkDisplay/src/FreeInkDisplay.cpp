@@ -1053,6 +1053,11 @@ void FreeInkDisplay::endPulseDrive() {
   if (_driver) _driver->endPulseDrive(_bus);
 }
 
+// xteink-pokemon: the display SPI clock in use.
+uint32_t FreeInkDisplay::displaySpiHz() const {
+  return (_driver && !_driver->usesExternalBus()) ? _bus.spiHz() : 0;
+}
+
 // xteink-pokemon: a game's display SPI clock; 0 restores the driver default.
 void FreeInkDisplay::setDisplaySpiHz(uint32_t hz) {
   if (!_driver) return;

@@ -189,6 +189,11 @@ class Uc8279X4Driver : public PanelDriver {
   // xteink-pokemon: pulse drive (pulseScan). While `_pulseFrames` is set, a
   // Fast refresh loads the one-pulse LUT of that many frames instead of the
   // DU bank; `_pulseDirty` says the RAM planes hold drive masks, not a frame.
+  // xteink-pokemon: DTM1 owes the B/W base in _grayBase (transitionGrayscaleBase
+  // put the write off), and both planes hold the base displayGray restored.
+  bool _baseDeferred = false;
+  bool _baseRestored = false;
+  void flushDeferredBase(EpdBus& bus);
   uint8_t _pulseFrames = 0;
   bool _pulseDirty = false;
   bool _pulsePending = false;  // a scan started without waiting

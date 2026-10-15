@@ -146,6 +146,7 @@ class HalDisplay {
   void endPulseDrive();
   // The display SPI clock for a game (0 = the driver default); no refresh may run.
   void setDisplaySpiHz(uint32_t hz) { einkDisplay.setDisplaySpiHz(hz); }
+  uint32_t displaySpiHz() const { return einkDisplay.displaySpiHz(); }
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

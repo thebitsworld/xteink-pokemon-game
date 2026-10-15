@@ -243,7 +243,19 @@ Uc8279X4Driver::Uc8279X4Driver(const Uc8279X4Config& cfg)
 
 uint32_t Uc8279X4Driver::spiHz() const {
   // UC8279 serial write timing is rated to 20 MHz, same as the rest of the family.
+  // xteink-pokemon: 20 MHz on variant 0x68, which the Game Boy has run at since
+  // 1.8.2; other batches keep the board's clock until someone tests them.
+  if (BoardConfig::ACTIVE.displayControllerVariant == 0x68) return 20000000;
   return BoardConfig::ACTIVE.displaySpiHz != 0 ? BoardConfig::ACTIVE.displaySpiHz : 16000000;
+}
+
+// xteink-pokemon: the DTM1 write transitionGrayscaleBase put off (the AA
+// upload that usually follows overwrites DTM1 anyway); anything else that
+// relies on DTM1 holding the B/W base sends it first.
+void Uc8279X4Driver::flushDeferredBase(EpdBus& bus) {
+  if (!_baseDeferred) return;
+  _baseDeferred = false;
+  if (_grayBase != nullptr) streamPlane(bus, CMD_DTM1, _grayBase);
 }
 
 PanelGeometry Uc8279X4Driver::geometry() const { return {_w, _h, _wb, _bufferSize}; }
@@ -307,6 +319,7 @@ void Uc8279X4Driver::begin(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
+  flushDeferredBase(bus);  // xteink-pokemon
   // CrossPoint's AA path draws its B/W base with an ordinary Fast paint. Right
   // after an AA page, route that base through stock's non-flashing prev->current
   // transition instead of a plain DU — this keeps the gray edge charge in check
@@ -321,6 +334,7 @@ void Uc8279X4Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev
 }
 
 void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb, bool invert) {
+  _baseRestored = false;  // xteink-pokemon: a plane changes
   uint8_t row[128];
   const uint16_t wb = _wb <= sizeof(row) ? _wb : sizeof(row);
   bus.cmd(ramCmd);
@@ -358,6 +372,7 @@ void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb,
 
 // Same geometry/mirroring as streamPlane, but each visible byte is lhs ^ rhs.
 void Uc8279X4Driver::streamPlaneXor(EpdBus& bus, uint8_t ramCmd, const uint8_t* lhs, const uint8_t* rhs, bool invert) {
+  _baseRestored = false;  // xteink-pokemon: a plane changes
   uint8_t row[128];
   const uint16_t wb = _wb <= sizeof(row) ? _wb : sizeof(row);
   bus.cmd(ramCmd);
@@ -394,6 +409,7 @@ void Uc8279X4Driver::powerOnIfNeeded(EpdBus& bus, const char* tag) {
 }
 
 bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
+  flushDeferredBase(bus);  // xteink-pokemon: before _grayBase changes below
   const bool paintDestination = _directGrayOnPanel;
   _directGrayOnPanel = false;
   _grayImagePass = false;
@@ -641,6 +657,8 @@ bool Uc8279X4Driver::pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t
   const uint32_t size = static_cast<uint32_t>(row1 - row0 + 1) * (byte1 - byte0 + 1);
   pulseFinish(bus);
   if (_pendingRefresh) displayFinish(bus, target);
+  flushDeferredBase(bus);
+  _baseRestored = false;
   _phaseStartUs = micros();
   _timings = {};
   _timings.copyUs = prepUs;
@@ -807,6 +825,7 @@ bool Uc8279X4Driver::findChangedWindow(const uint8_t* fb) {
 // controller must be in partial mode with that window set. Rows go out
 // gathered into 1 KB writes.
 void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb) {
+  _baseRestored = false;  // xteink-pokemon: a plane changes
   uint8_t buf[1024];
   uint16_t used = 0;
   const uint16_t bytes = _winByte1 - _winByte0 + 1;
@@ -874,6 +893,7 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
+  flushDeferredBase(bus);  // xteink-pokemon
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _directGrayOnPanel = false;
   _grayImagePass = false;
@@ -930,7 +950,11 @@ void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMod
 
 void Uc8279X4Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
-  if (!lsb) return;
+  if (!lsb) {
+    flushDeferredBase(bus);  // xteink-pokemon
+    return;
+  }
+  _baseDeferred = false;  // xteink-pokemon: DTM1 is written below either way
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
     streamPlane(bus, CMD_DTM1, lsb, true);
@@ -959,6 +983,7 @@ void Uc8279X4Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
 
 void Uc8279X4Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
+  flushDeferredBase(bus);  // xteink-pokemon
   if (!msb) return;
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
@@ -988,6 +1013,7 @@ void Uc8279X4Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
 void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
                                  bool factoryMode) {
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
+  flushDeferredBase(bus);  // xteink-pokemon
   (void)lut;
 
   // Vendor AA sequence: PSR (REG=1) -> [planes already in RAM via
@@ -1043,6 +1069,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
     streamPlane(bus, CMD_DTM2, _grayBase);
     _oldPlaneValid = true;
     _needFullClear = false;
+    _baseRestored = true;  // xteink-pokemon: cleanupGrayscaleBuffers may skip its rewrite
   }
   _grayBaseValid = false;
   _absoluteGrayPlanes = false;
@@ -1061,6 +1088,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
 
 void Uc8279X4Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) {
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
+  flushDeferredBase(bus);  // xteink-pokemon: the transition reads DTM1
   if (!fb) return;
   // Match the UC8179 sibling: an explicit Full/Half clean, or a
   // state that can't run the non-flashing transition (first AA page / no valid
@@ -1075,6 +1103,7 @@ void Uc8279X4Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, Refres
 
 void Uc8279X4Driver::transitionGrayscaleBase(EpdBus& bus, const uint8_t* fb, bool turnOff) {
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
+  flushDeferredBase(bus);  // xteink-pokemon: the transition reads DTM1
   if (!fb) return;
   // Snapshot the new B/W base for the AA fold that follows.
   _grayBaseValid = false;
@@ -1090,7 +1119,13 @@ void Uc8279X4Driver::transitionGrayscaleBase(EpdBus& bus, const uint8_t* fb, boo
   runGrayscalePrecondition(bus);
   // Restore the B/W baseline to DTM1 (an AA upload may overwrite these; the
   // cached snapshot above survives for the fold in copyGrayscale*).
-  streamPlane(bus, CMD_DTM1, fb);
+  // xteink-pokemon: put off until something needs it - the AA upload that
+  // usually comes next writes DTM1 itself (60 KB saved per page turn).
+  if (_grayBaseValid) {
+    _baseDeferred = true;
+  } else {
+    streamPlane(bus, CMD_DTM1, fb);
+  }
   _oldPlaneValid = true;
   _redriveAfterGray = false;
   _needFullClear = false;
@@ -1164,7 +1199,10 @@ void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
   // Re-seed the OLD plane (0x10) with the clean B/W frame the reader restored —
   // same rationale as the UC8179 sibling. (displayGray already restored the base
   // to both planes; this covers callers that reach cleanup by another route.)
-  streamPlane(bus, CMD_DTM1, bw);
+  // xteink-pokemon: skipped when displayGray just restored this very frame.
+  const bool same = _baseRestored && _grayBase != nullptr && memcmp(bw, _grayBase, _bufferSize) == 0;
+  _baseDeferred = false;
+  if (!same) streamPlane(bus, CMD_DTM1, bw);
   _oldPlaneValid = true;
   // RAM restoration does not cancel a requested physical clean.
 }
