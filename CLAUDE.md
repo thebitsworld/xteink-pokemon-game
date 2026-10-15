@@ -13,7 +13,7 @@ is in git history (before 2026-10-08).
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
-  without a firmware release): 45 apps - the CrossPlay-inspired games and tools written here (plus
+  without a firmware release): 52 apps - the CrossPlay-inspired games and tools written here (plus
   Tic-Tac-Toe and Xiangqi, 2026-10-13) plus 11 from
   CrossSmudge. CrossPlay apps needing data or a network were skipped on purpose.
 - X3 app policy: an app must stay under 75 KB in `pokemon-simulator-X3` (the 64-bit simulator reports
@@ -53,7 +53,9 @@ is in git history (before 2026-10-08).
   fit. UI fonts have no CJK: guides must not use Chinese characters. New games: caro, reversi, oanquan,
   tienlen, then coup (hidden xiangqi), dots, patience (FreeCell + Spider), logic (Hashi, Lights Out,
   Slitherlink) - X3 sim peaks 56-64 KB - and hexland (the Catan-like game: you + 3 AI; ~81 KB, so
-  `devices: ["x4pro"]`, ~104 KB there). Measuring on the X4 Pro simulator: the Applications list has an
+  `devices: ["x4pro"]`, ~104 KB there). After v1.8.5 (2026-10-15, pushed to main, no firmware needed):
+  phom, backgammon, morris, samloc, mancala, coganh, codebreak, and Kakuro + Light Up in logic 1.1.0
+  - all 57-62 KB on the X3 sim (Hashi Hard in logic 64 KB). Remaining ideas: docs/development/game-ideas.md. Measuring on the X4 Pro simulator: the Applications list has an
   extra Game Boy row, and set `CROSSINK_SIMULATOR_PSRAM_TOTAL=8388608`.
 - Measuring a Lua app needs no `src/` hooks now: run the simulator binary with `SDL_VIDEODRIVER=offscreen`,
   `CROSSPOINT_SIM_INPUT_SCRIPT` (`ms:DOWN;ms:CONFIRM:1000;ms:TAP:x,y;...;ms:QUIT`) and
