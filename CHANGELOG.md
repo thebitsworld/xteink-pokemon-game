@@ -1,3 +1,13 @@
+## [1.8.6-beta.4-x4pro] - 2026-10-15
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build. Stay on [v1.8.5](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.5) unless you test it. There is no X3/X4 file in this release.
+
+For the tester only (X4 Pro, UC8279-68 screen): Early send is gone (it froze the screen). On **Pulse polish** with the status line on, play about two minutes with Picture **Small (x2)** and two minutes with **Large (x3)**, leaving with EXIT after each, then send `/.crosspoint/gameboy-perf.txt`.
+
+### Removed
+
+- Game Boy (test only): Early send (the screen froze).
+
 ## [1.8.6-beta.3-x4pro] - 2026-10-15
 
 > **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build. Its Early send test sends picture data to the screen while it is still refreshing, which the controller may not accept: the picture can come out wrong while it is on. Stay on [v1.8.5](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.5) unless you test it. There is no X3/X4 file in this release.
