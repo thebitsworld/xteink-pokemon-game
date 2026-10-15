@@ -1,48 +1,13 @@
-## [1.8.6-beta.4-x4pro] - 2026-10-15
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build. Stay on [v1.8.5](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.5) unless you test it. There is no X3/X4 file in this release.
-
-For the tester only (X4 Pro, UC8279-68 screen): Early send is gone (it froze the screen). On **Pulse polish** with the status line on, play about two minutes with Picture **Small (x2)** and two minutes with **Large (x3)**, leaving with EXIT after each, then send `/.crosspoint/gameboy-perf.txt`.
-
-### Removed
-
-- Game Boy (test only): Early send (the screen froze).
-
-## [1.8.6-beta.3-x4pro] - 2026-10-15
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build. Its Early send test sends picture data to the screen while it is still refreshing, which the controller may not accept: the picture can come out wrong while it is on. Stay on [v1.8.5](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.5) unless you test it. There is no X3/X4 file in this release.
-
-For the tester only (X4 Pro, UC8279-68 screen): the DMA of beta.1/2 is gone (it gained ~5%). On **Pulse polish**, with the status line on, play about two minutes each way, leaving with EXIT after each (every choice is remembered):
-
-1. Picture **Large (x3)**, Early send **Off** - compare the updates per second with 1.8.5 (about 9-9.5).
-2. Picture **Small (x2)**, Early send Off - smaller but faster?
-3. Picture Large, Early send **On** - does the picture still look right (no garbage, no wrong pixels)? If it looks wrong, turn it off.
-4. Optional: one run in landscape.
-
-Then send `/.crosspoint/gameboy-perf.txt`; its new `scale` and `early` columns tell the runs apart.
+## [1.8.6] - 2026-10-15
 
 ### Added
 
-- Game Boy (X4 Pro): SETTINGS > Picture - Large (x3) or Small (x2).
-- Game Boy (X4 Pro, test only): SETTINGS > Early send.
+- Game Boy (X4 Pro): SETTINGS > Picture - **Large (x3)**, as before, or **Small (x2)**. The smaller picture has fewer pixels to send, so the screen keeps up better: about 25% more updates a second on the Pulse speeds (10 instead of 8), about 10% on the D speeds.
+- App Store: new games since 1.8.5 - Phom, Sam Loc, Backgammon, Nine Men's Morris, Mancala, Co Ganh and Code Breaker, and Kakuro and Light Up in Logic Puzzles. They install from the App Store on any version.
 
 ### Changed
 
-- Game Boy (X4 Pro, Pulse speeds): the next picture's data is prepared while the screen is still refreshing, then sent in long writes.
-
-### Removed
-
-- Game Boy (X4 Pro): the display DMA of beta.1 (no real gain).
-
-## [1.8.6-beta.1-x4pro] - 2026-10-15
-
-> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build: while a Game Boy game runs on a fast screen speed, the picture goes to the screen through a different SPI driver (DMA). If the screen stops updating, shows garbage or the game freezes, hold the power button to restart. Stay on [v1.8.5](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.5) unless you test it. There is no X3/X4 file in this release.
-
-For the tester only (X4 Pro): play a few minutes on **D40, clean 60 s** and on **Pulse polish**, each time leaving with EXIT, then send `/.crosspoint/gameboy-perf.txt`. Its `new_ms` (time to send the picture) should be clearly lower than in 1.8.5 (about 21 ms on Pulse) and the updates per second a little higher. Also check that the reader itself (books, menus) still refreshes normally after leaving a game.
-
-### Changed
-
-- Game Boy (X4 Pro): on the fast screen speeds the picture is sent to the screen by DMA, faster than before.
+- Game Boy (X4 Pro, Pulse speeds): the next picture's data is prepared while the screen is still refreshing and then sent in long writes, about 15% faster to send.
 
 ## [1.8.5] - 2026-10-14
 
