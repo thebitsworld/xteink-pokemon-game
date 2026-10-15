@@ -104,8 +104,10 @@ is in git history (before 2026-10-08).
     leaves the 36 ms), send ~14-24 ms for 12-18 KB/plane; ~10 scans/s in a game, smooth but ghosty;
     the tester liked 2 frames per pulse, then 8x3 (less ghosting). 1.8.6-beta.3: `preparePulsePlanes`
     builds both window planes into PSRAM before `pulseFinish` (overlapping the last waveform),
-    `sendPulsePlanes` sends them in long writes; `kPulseEarlySend` (frames | 0x80, SETTINGS > Early
-    send) sends during the last waveform (experiment); SETTINGS > Picture Small = x2. PLL 0x1F/0x3F: ~7.6 ms frames and
+    `sendPulsePlanes` sends them in long writes; sending during the last waveform
+    (beta.3's Early send) froze the screen - the UC8279 takes no RAM writes during a refresh;
+    SETTINGS > Picture Small = x2. Measured: Arduino SPI ~0.6 ms per KB per plane (DMA was worse),
+    D40 Small x2 only ~10% faster (the ~160 ms waveform dominates). PLL 0x1F/0x3F: ~7.6 ms frames and
     ~18 ms fixed vs ~11.7/~25 at 0x0F (the fixed part also grows with the window's rows). Game Boy
     presets (1.8.5): Pulse 8x3 (P8x3-60), Pulse polish (P8x3P-60: 4 more pulses on the area that
     changed once the planner is idle AND the picture stood still 0.3 s; PulsePlanner::polish) and
