@@ -92,6 +92,9 @@ is in git history (before 2026-10-08).
   - `lastRefreshTimings()` (same files; `RefreshTimings` in `PanelDriver.h`, phase clock in
     `Uc8279X4Driver`): where the last refresh spent its time.
   - `EpdBus::setSpiHz`, `FreeInkDisplay::setDisplaySpiHz`: change the display SPI clock at runtime.
+  - `EpdBus::setDma` (+ `dmaClock`/`dmaWrite`, `FreeInkDisplay::setDisplayDma`): ESP32-S3 only - the
+    bus leaves Arduino SPI for the ESP-IDF master driver on SPI2_HOST with 4 KB DMA writes; the Game
+    Boy turns it on with its fast speeds (the X4 Pro's display is the host's only user: SD is SDMMC).
   - `setFastRefreshDiffWindow(on)` (same files as the DU scale; `findChangedWindow`, `streamWindow`,
     `sendPartialWindow` in `Uc8279X4Driver`): Fast refreshes send and drive only the changed rectangle
     (PTIN/PTL window) and skip unchanged frames; `RefreshTimings::planeBytes` reports the bytes sent.
