@@ -193,7 +193,12 @@ class Uc8279X4Driver : public PanelDriver {
   bool _pulseDirty = false;
   bool _pulsePending = false;  // a scan started without waiting
   void loadPulseLut(EpdBus& bus, uint8_t frames);
-  void streamPulseOldPlane(EpdBus& bus, const uint8_t* target, const uint8_t* drive);
+  // The window's two planes, built ahead (PSRAM, kept until endPulseDrive).
+  uint8_t* _pulseNew = nullptr;
+  uint8_t* _pulseOld = nullptr;
+  bool preparePulsePlanes(const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1, uint16_t byte0,
+                          uint16_t byte1);
+  void sendPulsePlanes(EpdBus& bus, uint16_t row0, uint16_t row1, uint16_t byte0, uint16_t byte1, uint32_t size);
   // xteink-pokemon: game-mode changed-rectangle refreshes. `_grayBase` doubles
   // as the copy of what both RAM planes hold; `_diffRefValid` says it does.
   // The window is in visible rows and bytes; `_windowActive` makes

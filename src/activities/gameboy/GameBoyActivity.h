@@ -67,7 +67,7 @@ class GameBoyActivity final : public Activity {
   };
 
   // The SETTINGS screen's rows, top to bottom.
-  enum class MenuItem : uint8_t { Orientation, Speed, Colours, Status, Save, Load, Back, Count };
+  enum class MenuItem : uint8_t { Orientation, Picture, Speed, Colours, Status, Save, Load, Back, Count };
 
   // One on-screen button, in logical coordinates for the current orientation.
   struct ControlButton {
@@ -184,6 +184,9 @@ class GameBoyActivity final : public Activity {
   // default: the tester found Smooth's fine dots busy), _SMOOTH or
   // _BRIGHTNESS (walnut_cgb_set_colours()).
   uint8_t colourMode = WALNUT_COLOURS_CONTRAST;
+  // SETTINGS > Picture: the game at x2 instead of x3 (fewer pixels to send,
+  // so the screen keeps up better).
+  bool smallPicture = false;
   bool stateExists = false;  // a quick save is there to load
   // An orientation chosen in SETTINGS, applied once the finger lifts: turning
   // the screen mid-tap makes the tap's two ends read as a Back swipe.
@@ -254,6 +257,7 @@ class GameBoyActivity final : public Activity {
   char perfText[2][48] = {};
   std::atomic<uint8_t> perfTextIdx{0};
   bool inTitleStrip(int x, int y) const;
+  int landscapeFrameY() const;
   uint64_t nextCleanUs = 0;
 
   void setLayout();

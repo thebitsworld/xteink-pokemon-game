@@ -621,29 +621,6 @@ void Uc8279X4Driver::loadPulseLut(EpdBus& bus, const uint8_t frames) {
   }
 }
 
-// xteink-pokemon: OLD plane of a pulse scan, the target with the driven
-// pixels flipped, so that exactly those pixels read as a transition.
-// Rows go out gathered into 1 KB writes: one SPI write per row cost more
-// than the bytes themselves.
-void Uc8279X4Driver::streamPulseOldPlane(EpdBus& bus, const uint8_t* target, const uint8_t* drive) {
-  uint8_t buf[1024];
-  uint16_t used = 0;
-  const uint16_t bytes = _winByte1 - _winByte0 + 1;
-  bus.cmd(CMD_DTM1);
-  bus.beginTxn();
-  for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
-    if (used + bytes > sizeof(buf)) {
-      bus.rawWriteBytes(buf, used);
-      used = 0;
-    }
-    const uint32_t at = static_cast<uint32_t>(r) * _wb + _winByte0;
-    for (uint16_t i = 0; i < bytes; ++i) buf[used + i] = static_cast<uint8_t>(target[at + i] ^ drive[at + i]);
-    used = static_cast<uint16_t>(used + bytes);
-  }
-  if (used) bus.rawWriteBytes(buf, used);
-  bus.endTxn();
-}
-
 // xteink-pokemon: see PanelDriver::pulseScan. Both planes of the window go
 // out (NEW = target, OLD = target with the driven pixels flipped), then a Fast
 // refresh runs the one-pulse LUT; power stays on between scans.
@@ -654,22 +631,28 @@ bool Uc8279X4Driver::pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t
   if (target == nullptr || drive == nullptr || row0 > row1 || row1 >= _h || byte0 > byte1 || byte1 >= _wb) {
     return false;
   }
+  // Both planes of the window are built first, into contiguous buffers, while
+  // the previous scan's waveform may still run; then they go out in a few
+  // long writes once it is done (sending during a waveform froze the screen
+  // in 1.8.6-beta.3).
+  const uint32_t prepStart = micros();
+  if (!preparePulsePlanes(target, drive, row0, row1, byte0, byte1)) return false;
+  const uint32_t prepUs = micros() - prepStart;
+  const uint32_t size = static_cast<uint32_t>(row1 - row0 + 1) * (byte1 - byte0 + 1);
   pulseFinish(bus);
   if (_pendingRefresh) displayFinish(bus, target);
   _phaseStartUs = micros();
   _timings = {};
+  _timings.copyUs = prepUs;
+  sendPulsePlanes(bus, row0, row1, byte0, byte1, size);
+  const uint32_t sendUs = phaseUs();
   _winRow0 = row0;
   _winRow1 = row1;
   _winByte0 = byte0;
   _winByte1 = byte1;
   _windowActive = true;
-  bus.cmd(CMD_PARTIAL_IN);
-  sendPartialWindow(bus);
-  streamWindow(bus, CMD_DTM2, target);
-  streamPulseOldPlane(bus, target, drive);
-  bus.cmd(CMD_PARTIAL_OUT);
-  _timings.newPlaneUs = phaseUs();
-  _timings.planeBytes = static_cast<uint32_t>(row1 - row0 + 1) * (byte1 - byte0 + 1);
+  _timings.newPlaneUs = sendUs;
+  _timings.planeBytes = size;
   _pulseFrames = frames;
   startBwRefresh(bus, true);
   _pulseFrames = 0;
@@ -679,6 +662,59 @@ bool Uc8279X4Driver::pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t
   _pulsePending = true;
   if (wait) pulseFinish(bus);
   return true;
+}
+
+// xteink-pokemon: the window's NEW plane (the target) and OLD plane (the
+// target with the driven pixels flipped), row after row in two PSRAM buffers
+// kept for the session.
+bool Uc8279X4Driver::preparePulsePlanes(const uint8_t* target, const uint8_t* drive, const uint16_t row0,
+                                        const uint16_t row1, const uint16_t byte0, const uint16_t byte1) {
+  if (_pulseNew == nullptr) {
+    _pulseNew = static_cast<uint8_t*>(heap_caps_malloc(_bufferSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    _pulseOld = static_cast<uint8_t*>(heap_caps_malloc(_bufferSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (_pulseNew == nullptr || _pulseOld == nullptr) {
+      heap_caps_free(_pulseNew);
+      heap_caps_free(_pulseOld);
+      _pulseNew = _pulseOld = nullptr;
+      return false;
+    }
+  }
+  const uint16_t bytes = byte1 - byte0 + 1;
+  uint8_t* n = _pulseNew;
+  uint8_t* o = _pulseOld;
+  for (uint16_t r = row0; r <= row1; ++r) {
+    const uint32_t at = static_cast<uint32_t>(r) * _wb + byte0;
+    memcpy(n, target + at, bytes);
+    for (uint16_t i = 0; i < bytes; ++i) o[i] = static_cast<uint8_t>(n[i] ^ drive[at + i]);
+    n += bytes;
+    o += bytes;
+  }
+  return true;
+}
+
+// xteink-pokemon: PTIN, the window, both prepared planes in long writes, PTOUT.
+void Uc8279X4Driver::sendPulsePlanes(EpdBus& bus, const uint16_t row0, const uint16_t row1, const uint16_t byte0,
+                                     const uint16_t byte1, const uint32_t size) {
+  _winRow0 = row0;
+  _winRow1 = row1;
+  _winByte0 = byte0;
+  _winByte1 = byte1;
+  _windowActive = true;
+  bus.cmd(CMD_PARTIAL_IN);
+  sendPartialWindow(bus);
+  const uint8_t* planes[2] = {_pulseNew, _pulseOld};
+  const uint8_t cmds[2] = {CMD_DTM2, CMD_DTM1};
+  for (int p = 0; p < 2; ++p) {
+    bus.cmd(cmds[p]);
+    bus.beginTxn();
+    for (uint32_t done = 0; done < size;) {
+      const uint32_t n = size - done < 32768 ? size - done : 32768;
+      bus.rawWriteBytes(planes[p] + done, static_cast<uint16_t>(n));
+      done += n;
+    }
+    bus.endTxn();
+  }
+  bus.cmd(CMD_PARTIAL_OUT);
 }
 
 // xteink-pokemon: waits out a pulse scan started without waiting.
@@ -698,6 +734,9 @@ void Uc8279X4Driver::pulseFinish(EpdBus& bus) {
 // refresh is a full one that redraws every pixel from the framebuffer.
 void Uc8279X4Driver::endPulseDrive(EpdBus& bus) {
   pulseFinish(bus);
+  heap_caps_free(_pulseNew);
+  heap_caps_free(_pulseOld);
+  _pulseNew = _pulseOld = nullptr;
   if (!_pulseDirty) return;
   _pulseDirty = false;
   _diffRefValid = false;

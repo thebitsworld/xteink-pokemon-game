@@ -751,7 +751,7 @@ void GameBoyActivity::writePerfLog() {
   }
   char line[360];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f,%s\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f,%s,%d\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
@@ -760,12 +760,12 @@ void GameBoyActivity::writePerfLog() {
       panel, preset, static_cast<unsigned long long>(perfTotalCleanRefreshes),
       perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
       perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv,
-      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv, coreName());
+      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv, coreName(), scale);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb,core\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb,core,scale\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -782,7 +782,7 @@ void GameBoyActivity::setLayout() {
     // 480x800: the game fills the width on top (y a multiple of 8 for
     // drawGameFramePortrait()), the D-pad and B/A below it as on the handheld,
     // then a row of EXIT, SELECT, START and ROTATE.
-    scale = std::max(1, std::min(MAX_GAME_SCALE, screenW / GAMEBOY_WIDTH));
+    scale = std::max(1, std::min(smallPicture ? 2 : MAX_GAME_SCALE, screenW / GAMEBOY_WIDTH));
     gameW = GAMEBOY_WIDTH * scale;
     gameH = GAMEBOY_HEIGHT * scale;
     gameX = (screenW - gameW) / 2;
@@ -815,7 +815,8 @@ void GameBoyActivity::setLayout() {
   // 800x480: the game in the middle, the D-pad and SETTINGS on the left, B/A,
   // SELECT/START and EXIT on the right.
   const int availableH = std::max(GAMEBOY_HEIGHT, screenH - 48);
-  scale = std::min({MAX_GAME_SCALE, std::max(GAMEBOY_WIDTH, screenW) / GAMEBOY_WIDTH, availableH / GAMEBOY_HEIGHT});
+  scale = std::min({smallPicture ? 2 : MAX_GAME_SCALE, std::max(GAMEBOY_WIDTH, screenW) / GAMEBOY_WIDTH,
+                    availableH / GAMEBOY_HEIGHT});
   scale = std::max(1, scale);
   gameW = GAMEBOY_WIDTH * scale;
   gameH = GAMEBOY_HEIGHT * scale;
@@ -824,14 +825,17 @@ void GameBoyActivity::setLayout() {
   titleX = 6;
   titleY = 18;
 
+  // The side panels keep the x3 picture's layout when the picture is smaller.
+  const int frameY = landscapeFrameY();
+  const int frameH = GAMEBOY_HEIGHT * MAX_GAME_SCALE;
   const int leftW = gameX;
-  const int panelY = gameY + 120;
+  const int panelY = frameY + 120;
   const int centerX = leftW / 2;
   addControl(TouchControl::Up, centerX - 35, panelY, 70, 58, "U");
   addControl(TouchControl::Down, centerX - 35, panelY + 140, 70, 58, "D");
   addControl(TouchControl::Left, 10, panelY + 58, 60, 82, "L");
   addControl(TouchControl::Right, leftW - 70, panelY + 58, 60, 82, "R");
-  addControl(TouchControl::Settings, 4, gameY + gameH - 52, leftW - 8, 48, "SETTINGS");
+  addControl(TouchControl::Settings, 4, frameY + frameH - 52, leftW - 8, 48, "SETTINGS");
 
   const int rightX = gameX + gameW;
   const int rightW = screenW - rightX;
@@ -840,15 +844,20 @@ void GameBoyActivity::setLayout() {
   const int secondX = firstX + buttonW + TOUCH_TARGET_GAP;
   addControl(TouchControl::B, firstX, panelY, buttonW, 70, "B");
   addControl(TouchControl::A, secondX, panelY, buttonW, 70, "A");
-  addControl(TouchControl::Select, firstX, gameY + 275, buttonW, 52, "SEL");
-  addControl(TouchControl::Start, secondX, gameY + 275, buttonW, 52, "START");
-  addControl(TouchControl::Exit, rightX + 4, gameY + gameH - 52, rightW - 8, 48, "EXIT");
+  addControl(TouchControl::Select, firstX, frameY + 275, buttonW, 52, "SEL");
+  addControl(TouchControl::Start, secondX, frameY + 275, buttonW, 52, "START");
+  addControl(TouchControl::Exit, rightX + 4, frameY + frameH - 52, rightW - 8, 48, "EXIT");
+}
+
+// Landscape: where an x3 picture's top would be, which the side panels follow.
+int GameBoyActivity::landscapeFrameY() const {
+  return std::max(0, (renderer.getScreenHeight() - GAMEBOY_HEIGHT * MAX_GAME_SCALE) / 2);
 }
 
 // Above the game in portrait; the left panel above the D-pad in landscape.
 bool GameBoyActivity::inTitleStrip(const int x, const int y) const {
   if (portrait) return y < gameY;
-  return x < gameX && y < gameY + 120;
+  return x < gameX && y < landscapeFrameY() + 120;
 }
 
 void GameBoyActivity::addControl(const TouchControl control, const int x, const int y, const int w, const int h,
@@ -979,6 +988,12 @@ void GameBoyActivity::menuActivate(const MenuItem item) {
       statusLineShown.store(!statusLineShown.load(std::memory_order_relaxed), std::memory_order_release);
       settingsDirty = true;
       break;
+    case MenuItem::Picture:
+      smallPicture = !smallPicture;
+      applyOrientation(orientation);  // lays the screen out again
+      settingsDirty = true;
+      break;
+
     case MenuItem::Save: {
       const bool ok = waitEmuIdle() && writeState(statePath);
       stateExists = stateExists || ok;
@@ -1061,6 +1076,11 @@ void GameBoyActivity::drawMenu() {
         label = "Status line";
         value = statusLineShown.load(std::memory_order_acquire) ? "On" : "Off";
         break;
+      case MenuItem::Picture:
+        label = "Picture";
+        value = smallPicture ? "Small (x2)" : "Large (x3)";
+        break;
+
       case MenuItem::Save:
         label = "Quick save";
         value = stateExists ? "Replaces the last one" : "";
@@ -1108,6 +1128,7 @@ void GameBoyActivity::applyOrientation(const uint8_t value) {
 // /.crosspoint/gameboy.cfg: "key=value" lines, shared by every game.
 void GameBoyActivity::loadSettings() {
   orientation = 0;
+  smallPicture = false;
   fastPreset = kDefaultFastPreset;
   romFolder.clear();
   colourMode = WALNUT_COLOURS_CONTRAST;
@@ -1134,6 +1155,9 @@ void GameBoyActivity::loadSettings() {
           }
         } else if (std::sscanf(line, "status=%u", &value) == 1) {
           status = value != 0;
+        } else if (std::sscanf(line, "small=%u", &value) == 1) {
+          smallPicture = value != 0;
+
         } else if (std::strncmp(line, "colours=", 8) == 0) {
           for (uint8_t i = 0; i < kColourModeCount; ++i) {
             if (std::strcmp(line + 8, kColourModes[i].key) == 0) colourMode = i;
@@ -1166,9 +1190,10 @@ std::string GameBoyActivity::lastRomFolder() {
 
 void GameBoyActivity::saveSettings() {
   char text[768];
-  const int len = snprintf(text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nromdir=%s\n",
-                           orientation, kRefreshPresets[fastPreset].key, kColourModes[colourMode].key,
-                           statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, romFolder.c_str());
+  const int len = snprintf(
+      text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nsmall=%u\nromdir=%s\n", orientation,
+      kRefreshPresets[fastPreset].key, kColourModes[colourMode].key,
+      statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, smallPicture ? 1u : 0u, romFolder.c_str());
   HalFile file;
   if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
     LOG_ERR(TAG, "Could not save %s", kSettingsPath);
