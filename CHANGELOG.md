@@ -1,3 +1,13 @@
+## [1.8.6-beta.1-x4pro] - 2026-10-15
+
+> **WARNING - DO NOT INSTALL THIS BUILD unless you were asked to test it.** X4 Pro-only test build: while a Game Boy game runs on a fast screen speed, the picture goes to the screen through a different SPI driver (DMA). If the screen stops updating, shows garbage or the game freezes, hold the power button to restart. Stay on [v1.8.5](https://github.com/thebitsworld/xteink-pokemon-game/releases/tag/v1.8.5) unless you test it. There is no X3/X4 file in this release.
+
+For the tester only (X4 Pro): play a few minutes on **D40, clean 60 s** and on **Pulse polish**, each time leaving with EXIT, then send `/.crosspoint/gameboy-perf.txt`. Its `new_ms` (time to send the picture) should be clearly lower than in 1.8.5 (about 21 ms on Pulse) and the updates per second a little higher. Also check that the reader itself (books, menus) still refreshes normally after leaving a game.
+
+### Changed
+
+- Game Boy (X4 Pro): on the fast screen speeds the picture is sent to the screen by DMA, faster than before.
+
 ## [1.8.5] - 2026-10-14
 
 ### Added
