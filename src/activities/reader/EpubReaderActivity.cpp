@@ -36,6 +36,11 @@
 #include "FeatureToggles.h"
 #include "DictionaryWordSelectActivity.h"
 #include "EpubGrayscale.h"
+#include "ReaderPerf.h"
+#ifndef SIMULATOR
+#include <BoardConfig.h>
+#include <HalDisplay.h>
+#endif
 #include "EpubReaderBookmarkListActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
@@ -2482,6 +2487,24 @@ void EpubReaderActivity::onEnter() {
 }
 
 void EpubReaderActivity::onExit() {
+#ifdef SIMULATOR
+  ReaderPerf::flush("simulator", 0);
+#else
+  {
+    // The panel and its SPI clock: how fast a page can be depends on both.
+    const char* name = "other";
+    switch (BoardConfig::ACTIVE.displayController) {
+      case BoardConfig::DisplayController::SSD1677: name = "SSD1677"; break;
+      case BoardConfig::DisplayController::UC8179: name = "UC8179"; break;
+      case BoardConfig::DisplayController::UC8279: name = "UC8279"; break;
+      case BoardConfig::DisplayController::UC8253: name = "UC8253"; break;
+      default: break;
+    }
+    char panel[24];
+    snprintf(panel, sizeof(panel), "%s-%02X", name, BoardConfig::ACTIVE.displayControllerVariant);
+    ReaderPerf::flush(panel, display.displaySpiHz());
+  }
+#endif
   sdFontSystem.setSettingsPersistenceCallback(nullptr, nullptr);
   // Drop the scalable-family catalog retained during reading. The active font
   // and its PSRAM face lifetime remain managed by SdCardFontSystem.
@@ -7278,6 +7301,14 @@ void EpubReaderActivity::prepareCurrentSectionForRelayout() {
 bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fontId, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft, const bool updatePanel) {
+  // reader-perf.txt: each phase of a page turn (ReaderPerf).
+  uint32_t perfUs[ReaderPerf::PhaseCount] = {};
+  uint32_t perfMark = micros();
+  const auto perfStep = [&perfUs, &perfMark](const ReaderPerf::Phase phase) {
+    const uint32_t now = micros();
+    perfUs[phase] += now - perfMark;
+    perfMark = now;
+  };
 #if CROSSINK_APP_CAP_TOUCH
   if (mappedInput.hasTouchHardware()) {
     if (!touchReaderPreviewAllocationAttempted) {
@@ -7440,6 +7471,7 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   if (!updatePanel) {
     return true;
   }
+  perfStep(ReaderPerf::Compose);
   const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
   const bool overlapRefresh =
@@ -7501,12 +7533,15 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   } else {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
+  perfStep(ReaderPerf::Base);
   if (needsAnyGrayscale) {
     ensureGrayscaleStripScratch();
   }
   if (EpubGrayscale::runTiledGrayscalePass(renderer, *page, fontId, orientedMarginLeft, orientedMarginTop,
                                            foregroundBlack, needsTextGrayscale, needsImageGrayscale,
                                            grayscaleStripScratch.get(), grayscaleStripScratchSize, overlapRefresh)) {
+    perfStep(ReaderPerf::GrayShow);  // strips render and show together
+    ReaderPerf::addPage(perfUs, needsAnyGrayscale);
     return true;
   }
 
@@ -7529,18 +7564,21 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
     composeGrayscaleBuffer();
     renderer.copyGrayscaleMsbBuffers();
+    perfStep(ReaderPerf::GrayRender);
 
     // display grayscale part
     renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
     // restore the bw data
     renderer.restoreBwBuffer();
+    perfStep(ReaderPerf::GrayShow);
   } else {
     if (storedBwBuffer) {
       // Restore the BW data when we skipped grayscale entirely.
       renderer.restoreBwBuffer();
     }
   }
+  ReaderPerf::addPage(perfUs, canApplyGrayscale);
   return true;
 }
 
