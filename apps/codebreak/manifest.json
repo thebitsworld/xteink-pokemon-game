@@ -1,0 +1,8 @@
+{
+  "id": "codebreak",
+  "name": "Code Breaker",
+  "version": "1.0.0",
+  "author": "xteink-pokemon-game",
+  "description": "Code Breaker (đoán mã): find a hidden code of 4 or 5 symbols from black and white peg scores, or let the device break yours. Easy, Normal and Hard plus custom sizes, stats and saved games",
+  "entry": "main.lua"
+}
