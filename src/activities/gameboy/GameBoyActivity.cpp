@@ -344,6 +344,7 @@ void GameBoyActivity::onExit() {
     display.setFastRefreshTuning(0, 0);  // the reader's own refreshes again
     display.setFastRefreshDuScale(0);
     display.setFastRefreshDiffWindow(false);
+    display.setDisplayDma(false);
     display.setDisplaySpiHz(0);
 #endif
   }
@@ -872,6 +873,9 @@ void GameBoyActivity::applyRefreshPreset() {
     display.setFastRefreshDuScale(p.duPct);
     display.setFastRefreshDiffWindow(p.diffWindow);
     display.setDisplaySpiHz(p.spiHz);
+    // The fast speeds also send the picture by DMA (the X4 Pro's display has
+    // its SPI host to itself).
+    if (!display.setDisplayDma(p.spiHz != 0)) LOG_ERR(TAG, "No DMA on the display bus");
 #else
     (void)p;
 #endif
