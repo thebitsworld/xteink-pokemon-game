@@ -44,6 +44,9 @@ Up/Down and Confirm), and **Back to game** or Back returns to the game.
 
 - **Orientation**: upright, sideways, upright upside down, or sideways the
   other way round.
+- **Picture**: **Large (x3)**, the default, or **Small (x2)**. The smaller
+  picture has fewer pixels to send, so the screen keeps up better - about 25%
+  more updates a second on the Pulse speeds, about 10% on the D speeds.
 - **Screen speed** (X4 Pros with a UC8279 screen only): how much the screen
   shortens each update - D50, D40, D30 or D25: D50 is the slowest but the
   sharpest with the least ghosting, the lower numbers faster with a little more
