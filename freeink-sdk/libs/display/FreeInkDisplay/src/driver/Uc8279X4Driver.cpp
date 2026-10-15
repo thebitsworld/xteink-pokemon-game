@@ -633,28 +633,19 @@ bool Uc8279X4Driver::pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t
   }
   // Both planes of the window are built first, into contiguous buffers, while
   // the previous scan's waveform may still run; then they go out in a few
-  // long writes.
-  const bool early = (frames & PanelDriver::kPulseEarlySend) != 0;
+  // long writes once it is done (sending during a waveform froze the screen
+  // in 1.8.6-beta.3).
   const uint32_t prepStart = micros();
   if (!preparePulsePlanes(target, drive, row0, row1, byte0, byte1)) return false;
   const uint32_t prepUs = micros() - prepStart;
   const uint32_t size = static_cast<uint32_t>(row1 - row0 + 1) * (byte1 - byte0 + 1);
-  uint32_t sendUs = 0;
-  if (early) {
-    // Experiment: the planes go out while the last waveform still runs.
-    const uint32_t sendStart = micros();
-    sendPulsePlanes(bus, row0, row1, byte0, byte1, size);
-    sendUs = micros() - sendStart;
-  }
   pulseFinish(bus);
   if (_pendingRefresh) displayFinish(bus, target);
   _phaseStartUs = micros();
   _timings = {};
   _timings.copyUs = prepUs;
-  if (!early) {
-    sendPulsePlanes(bus, row0, row1, byte0, byte1, size);
-    sendUs = phaseUs();
-  }
+  sendPulsePlanes(bus, row0, row1, byte0, byte1, size);
+  const uint32_t sendUs = phaseUs();
   _winRow0 = row0;
   _winRow1 = row1;
   _winByte0 = byte0;
@@ -662,7 +653,7 @@ bool Uc8279X4Driver::pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t
   _windowActive = true;
   _timings.newPlaneUs = sendUs;
   _timings.planeBytes = size;
-  _pulseFrames = static_cast<uint8_t>(frames & 0x3F);
+  _pulseFrames = frames;
   startBwRefresh(bus, true);
   _pulseFrames = 0;
   _timings.setupUs = phaseUs();

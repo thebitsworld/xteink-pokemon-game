@@ -582,9 +582,7 @@ void GameBoyActivity::render(RenderLock&&) {
       perfUnchanged.fetch_add(1, std::memory_order_relaxed);
       return;
     }
-    // 0x80: PanelDriver::kPulseEarlySend.
-    const uint8_t frames = static_cast<uint8_t>(preset.pulseFrames | (pulseEarly ? 0x80 : 0));
-    display.pulseScan(fb, pulseDrive, w.row0, w.row1, w.byte0, w.byte1, frames, false);
+    display.pulseScan(fb, pulseDrive, w.row0, w.row1, w.byte0, w.byte1, preset.pulseFrames, false);
     pulsePlanner.delivered(pulseDrive, w);
 #endif
   } else if (overlap) {
@@ -753,7 +751,7 @@ void GameBoyActivity::writePerfLog() {
   }
   char line[360];
   const int len = snprintf(
-      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f,%s,%d,%u\n", AppVersion::version(), title,
+      line, sizeof(line), "%s,%s,%.0f,%.1f,%.0f,%.2f,%.1f,%llu,%.2f,%.1f,%.0f,%.0f,%.0f,%u,%s,%s,%s,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%.1f,%s,%d\n", AppVersion::version(), title,
       seconds, fps, fps * 100.0f / 59.73f, static_cast<float>(perfTotalEmuUs) / perfTotalFrames / 1000.0f,
       perfTotalEmuMaxUs / 1000.0f, static_cast<unsigned long long>(perfTotalWaits), perfTotalDisplays / seconds,
       perfTotalDisplays ? perfTotalDrawUs / 1000.0f / perfTotalDisplays : 0.0f,
@@ -762,13 +760,12 @@ void GameBoyActivity::writePerfLog() {
       panel, preset, static_cast<unsigned long long>(perfTotalCleanRefreshes),
       perfTotalPhaseUs[0] / phaseDiv, perfTotalPhaseUs[1] / phaseDiv, perfTotalPhaseUs[2] / phaseDiv,
       perfTotalPhaseUs[3] / phaseDiv, perfTotalPhaseUs[4] / phaseDiv,
-      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv, coreName(), scale,
-      pulseEarly ? 1u : 0u);
+      static_cast<unsigned long long>(perfTotalUnchanged), perfTotalPhaseUs[5] / 1.024f / phaseDiv, coreName(), scale);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   static constexpr char kPerfLog[] = "/.crosspoint/gameboy-perf.txt";
   static constexpr char kHeader[] =
       "# version,rom,seconds,emu_fps,speed_pct,frame_ms_avg,frame_ms_max,waits,displays_per_s,draw_ms_avg,"
-      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb,core,scale,early\n";
+      "refresh_ms_avg,refresh_ms_max,loops_per_s,loop_gap_ms_max,orientation,panel,preset,clean_refreshes,copy_ms,new_ms,setup_ms,wave_ms,old_ms,unchanged,plane_kb,core,scale\n";
   HalFile file = Storage.open(kPerfLog, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
   if (file.size() == 0) file.write(kHeader, sizeof(kHeader) - 1);
@@ -996,10 +993,7 @@ void GameBoyActivity::menuActivate(const MenuItem item) {
       applyOrientation(orientation);  // lays the screen out again
       settingsDirty = true;
       break;
-    case MenuItem::Early:
-      pulseEarly = !pulseEarly;
-      settingsDirty = true;
-      break;
+
     case MenuItem::Save: {
       const bool ok = waitEmuIdle() && writeState(statePath);
       stateExists = stateExists || ok;
@@ -1086,11 +1080,7 @@ void GameBoyActivity::drawMenu() {
         label = "Picture";
         value = smallPicture ? "Small (x2)" : "Large (x3)";
         break;
-      case MenuItem::Early:
-        // Only the Pulse speeds use it.
-        label = "Early send (test)";
-        value = pulseEarly ? "On" : "Off";
-        break;
+
       case MenuItem::Save:
         label = "Quick save";
         value = stateExists ? "Replaces the last one" : "";
@@ -1139,7 +1129,6 @@ void GameBoyActivity::applyOrientation(const uint8_t value) {
 void GameBoyActivity::loadSettings() {
   orientation = 0;
   smallPicture = false;
-  pulseEarly = false;
   fastPreset = kDefaultFastPreset;
   romFolder.clear();
   colourMode = WALNUT_COLOURS_CONTRAST;
@@ -1168,8 +1157,7 @@ void GameBoyActivity::loadSettings() {
           status = value != 0;
         } else if (std::sscanf(line, "small=%u", &value) == 1) {
           smallPicture = value != 0;
-        } else if (std::sscanf(line, "early=%u", &value) == 1) {
-          pulseEarly = value != 0;
+
         } else if (std::strncmp(line, "colours=", 8) == 0) {
           for (uint8_t i = 0; i < kColourModeCount; ++i) {
             if (std::strcmp(line + 8, kColourModes[i].key) == 0) colourMode = i;
@@ -1203,10 +1191,9 @@ std::string GameBoyActivity::lastRomFolder() {
 void GameBoyActivity::saveSettings() {
   char text[768];
   const int len = snprintf(
-      text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nsmall=%u\nearly=%u\nromdir=%s\n",
-      orientation, kRefreshPresets[fastPreset].key, kColourModes[colourMode].key,
-      statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, smallPicture ? 1u : 0u, pulseEarly ? 1u : 0u,
-      romFolder.c_str());
+      text, sizeof(text), "orientation=%u\nspeed=%s\ncolours=%s\nstatus=%u\nsmall=%u\nromdir=%s\n", orientation,
+      kRefreshPresets[fastPreset].key, kColourModes[colourMode].key,
+      statusLineShown.load(std::memory_order_acquire) ? 1u : 0u, smallPicture ? 1u : 0u, romFolder.c_str());
   HalFile file;
   if (len <= 0 || len >= static_cast<int>(sizeof(text)) || !Storage.openFileForWrite(TAG, kSettingsPath, file)) {
     LOG_ERR(TAG, "Could not save %s", kSettingsPath);

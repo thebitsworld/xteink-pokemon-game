@@ -67,7 +67,7 @@ class GameBoyActivity final : public Activity {
   };
 
   // The SETTINGS screen's rows, top to bottom.
-  enum class MenuItem : uint8_t { Orientation, Picture, Speed, Early, Colours, Status, Save, Load, Back, Count };
+  enum class MenuItem : uint8_t { Orientation, Picture, Speed, Colours, Status, Save, Load, Back, Count };
 
   // One on-screen button, in logical coordinates for the current orientation.
   struct ControlButton {
@@ -187,9 +187,6 @@ class GameBoyActivity final : public Activity {
   // SETTINGS > Picture: the game at x2 instead of x3 (fewer pixels to send,
   // so the screen keeps up better).
   bool smallPicture = false;
-  // SETTINGS > Early send (test): pulse speeds send the next planes while the
-  // last waveform still runs (PanelDriver::kPulseEarlySend).
-  bool pulseEarly = false;
   bool stateExists = false;  // a quick save is there to load
   // An orientation chosen in SETTINGS, applied once the finger lifts: turning
   // the screen mid-tap makes the tap's two ends read as a Back swipe.

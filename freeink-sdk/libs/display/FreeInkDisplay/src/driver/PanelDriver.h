@@ -291,10 +291,7 @@ class PanelDriver {
   // row0..row1 and bytes byte0..byte1 of the framebuffer layout; false where
   // the driver cannot pulse. With `wait` it returns once the scan is done;
   // without, as soon as the waveform runs (both buffers may change then), and
-  // pulseFinish() - or the next scan or refresh - waits it out. `frames` may
-  // carry kPulseEarlySend (an experiment): the planes go to the controller
-  // while the previous scan's waveform still runs.
-  static constexpr uint8_t kPulseEarlySend = 0x80;
+  // pulseFinish() - or the next scan or refresh - waits it out.
   // endPulseDrive() hands the panel back to ordinary refreshes, the next of
   // which cleans the whole screen.
   virtual bool pulseScan(EpdBus& bus, const uint8_t* target, const uint8_t* drive, uint16_t row0, uint16_t row1,
