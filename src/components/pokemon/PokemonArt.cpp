@@ -3,6 +3,8 @@
 #include "PokemonArt.h"
 
 #include <Bitmap.h>
+
+#include <algorithm>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -86,6 +88,16 @@ bool drawPokemonTrainerArt(const GfxRenderer& renderer, const uint8_t gymIndex, 
                           const bool fallback) {
   char path[64]{};
   return drawPath(renderer, pokemonTrainerArtPath(gymIndex, path, sizeof(path)), bounds, fallback);
+}
+
+bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, const MoveEffect effect, const Rect bounds) {
+  constexpr int iconWidth = 96;
+  constexpr int iconHeight = 72;
+  const int width = std::min(iconWidth, std::min(bounds.width, bounds.height * iconWidth / iconHeight));
+  const int height = width * iconHeight / iconWidth;
+  const Rect centered{bounds.x + (bounds.width - width) / 2, bounds.y + (bounds.height - height) / 2, width, height};
+  char path[64]{};
+  return drawPath(renderer, pokemonMoveEffectArtPath(effect, path, sizeof(path)), centered, false);
 }
 
 bool drawPokemonTrainerClassArt(const GfxRenderer& renderer, const uint8_t classId, const Rect bounds,

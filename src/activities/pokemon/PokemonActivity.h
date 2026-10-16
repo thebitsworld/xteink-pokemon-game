@@ -14,6 +14,7 @@
 #include <span>
 
 #include "activities/Activity.h"
+#include "components/pokemon/PokemonMoveEffect.h"
 #include "components/themes/BaseTheme.h"
 #include "pokemon/PokemonService.h"
 #include "util/ButtonNavigator.h"
@@ -237,6 +238,13 @@ class PokemonActivity final : public Activity {
   int battlePlayerMoveCount() const;
   bool battlePlayerHasAnyUsablePp() const;
   void resolveBattlePlayerMoveTurn(uint8_t moveSlot);
+  // What follows a resolved move turn (win, faint, forced switch, back to
+  // the menu) - run right away, or once the move animation has played.
+  void finishBattlePlayerMoveTurn(const pokemon::BattleTurnResult& result);
+  // Queues the turn's move-effect frames; false when nothing visible happened.
+  bool startMoveAnimation(const pokemon::BattleTurnResult& result);
+  void setMoveAnimationLog();
+  void advanceMoveAnimation();
   // Trainer AI (gym/Elite Four only, not the Champion - see
   // gymTeamOrder_'s doc comment - and never a wild encounter): decides
   // whether the opponent should use a healing item or proactively switch
@@ -304,6 +312,20 @@ class PokemonActivity final : public Activity {
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};
   char battleLog_[160]{};
+  // Move animation (see startMoveAnimation()): each step is two frames - the
+  // effect icon in place of its target, then the target shaken - after which
+  // the turn's full log and its outcome are shown.
+  struct MoveAnimationStep {
+    pokemon::MoveEffectStep effect{};
+    bool byPlayer = false;
+  };
+  std::array<MoveAnimationStep, 2> animationSteps_{};
+  uint8_t animationStepCount_ = 0;
+  uint8_t animationFrame_ = 0;  // step * 2 + frame within the step
+  bool animating_ = false;
+  unsigned long animationNextFrameMs_ = 0;
+  pokemon::BattleTurnResult animationResult_{};
+  char animationFinalLog_[160]{};
   uint8_t gymChallengeIndex_ = 0;         // 0 = not fighting a gym/Elite Four right now
   // gymChallengeIndex_ while fighting a trainer met while reading; every
   // "trainer battle" rule (no catching, no running, trainer IVs and XP)
