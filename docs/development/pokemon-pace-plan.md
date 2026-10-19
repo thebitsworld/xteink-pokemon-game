@@ -113,3 +113,19 @@ already do, and the game shows a single summary screen listing in detail everyth
 queue then only holds encounters, road trainers, evolutions and moves to learn: ~1.84 events an hour
 without trainers (full after ~8.7 h); with trainers at half the wild rate ~7.6 h with at most 2
 trainers waiting, ~5.8 h with no trainer cap.
+
+Queue split agreed on 2026-10-19 (16 slots, no save format change):
+
+| Kind | Limit |
+|---|---|
+| Evolutions + moves to learn | 2 slots kept free for them (still one evolution per Pokémon) |
+| Road trainers | at most 2 waiting (as in the crosslingua fork); while 2 wait, the trainer roll keeps its pity so the next one comes as soon as there is room |
+| Wild encounters | no limit of their own: the remaining slots, at least 12 (full after ~7.6 h of reading without opening the game) |
+| Medicine, TM/HM, stones, Link Cable | 0 if items go straight to the bag (still undecided, see above) |
+
+Why not leave trainers unlimited too: HP only recovers while reading, and 4-5 queued trainer fights
+cost 7-9 HP bars against the 4 of a party of 4; and the queue is resolved front first, so a trainer the
+party cannot beat yet would block every encounter and evolution behind it. The reserved slots exist
+because today a full queue silently drops an evolution prompt until the next level-up.
+The item summary screen would keep "received since last viewed" in its own side file, so
+`PokemonState` stays as it is.
