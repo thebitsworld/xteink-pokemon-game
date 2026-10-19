@@ -15,6 +15,12 @@ from pathlib import Path, PurePosixPath
 
 ITEMS = ("moon-stone", "fire-stone", "thunder-stone", "water-stone", "leaf-stone")
 VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]*")
+# Battle move-effect animations: slug -> frame count (generate_pokemon_effect_art.py's
+# EFFECTS, and moveEffectFrameCount() in src/components/pokemon/PokemonMoveEffect.cpp).
+EFFECT_FRAMES = {
+    "hit": 3, "flame": 5, "water": 5, "ice": 4, "bolt": 5, "leaf": 3, "poison": 4,
+    "rock": 5, "wind": 5, "psychic": 3, "ghost": 5, "dragon": 5, "sparkle": 4,
+}
 
 
 def expected_art() -> dict[Path, tuple[int, int]]:
@@ -44,6 +50,10 @@ def expected_art() -> dict[Path, tuple[int, int]]:
     # the "<Class> wants to battle!" screen.
     for class_id in range(1, 13):
         files[Path("trainers/classes") / f"{class_id:02}.bmp"] = (112, 112)
+    # The battle move-effect animations, one folder of frames per effect.
+    for slug, frames in EFFECT_FRAMES.items():
+        for frame in range(1, frames + 1):
+            files[Path("effects") / slug / f"{frame:02}.bmp"] = (144, 108)
     return files
 
 

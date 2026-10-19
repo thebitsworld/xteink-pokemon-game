@@ -136,6 +136,11 @@ bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, const MoveEffect effe
   return drawn;
 }
 
+bool pokemonMoveEffectArtInstalled(const MoveEffect effect) {
+  char path[64]{};
+  return pokemonMoveEffectArtPath(effect, 0, path, sizeof(path)) != nullptr && Storage.exists(path);
+}
+
 bool drawPokemonTrainerClassArt(const GfxRenderer& renderer, const uint8_t classId, const Rect bounds,
                                 const bool fallback) {
   char path[64]{};

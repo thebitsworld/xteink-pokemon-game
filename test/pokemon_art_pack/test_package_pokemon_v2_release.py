@@ -53,8 +53,8 @@ class PokemonArtPackTest(unittest.TestCase):
         self.assertEqual(expected[Path("pokedex/landscape/151.bmp")], (288, 432))
         # 614 species/item/pokedex art (original) + 151 back sprites + 77 bag
         # item icons (ids 7-83) + 8 badge icons + 13 trainer portraits + 12
-        # trainer class portraits.
-        self.assertEqual(len(expected), 614 + 151 + 77 + 8 + 13 + 12)
+        # trainer class portraits + 56 move-effect frames.
+        self.assertEqual(len(expected), 614 + 151 + 77 + 8 + 13 + 12 + 56)
 
     def test_release_requires_back_sprites_bag_item_icons_badges_and_trainers(self) -> None:
         expected = PACKAGE.expected_art()
@@ -68,6 +68,9 @@ class PokemonArtPackTest(unittest.TestCase):
         self.assertEqual(expected[Path("trainers/13.bmp")], (32, 32))
         self.assertEqual(expected[Path("trainers/classes/01.bmp")], (112, 112))
         self.assertEqual(expected[Path("trainers/classes/12.bmp")], (112, 112))
+        self.assertEqual(expected[Path("effects/hit/03.bmp")], (144, 108))
+        self.assertEqual(expected[Path("effects/flame/05.bmp")], (144, 108))
+        self.assertNotIn(Path("effects/hit/04.bmp"), expected)
         self.assertNotIn(Path("items/006.bmp"), expected)  # Link Cable stays icon-less
 
     def test_bmp_validation_rejects_header_without_pixel_payload(self) -> None:

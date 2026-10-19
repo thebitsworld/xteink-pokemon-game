@@ -1450,10 +1450,15 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
 
 bool PokemonActivity::startMoveAnimation(const pokemon::BattleTurnResult& result) {
   animationStepCount_ = 0;
+  // An effect is only played when its frames are on the SD card - an older
+  // art pack keeps battles as they were, without animations.
+  const auto playable = [](const pokemon::MoveEffectStep& step) {
+    return step.effect != pokemon::MoveEffect::None && pokemon::pokemonMoveEffectArtInstalled(step.effect);
+  };
   const pokemon::MoveEffectStep playerStep = pokemon::moveEffectFor(battlePlayer_, result.player);
-  if (playerStep.effect != pokemon::MoveEffect::None) animationSteps_[animationStepCount_++] = {playerStep, true};
+  if (playable(playerStep)) animationSteps_[animationStepCount_++] = {playerStep, true};
   const pokemon::MoveEffectStep opponentStep = pokemon::moveEffectFor(battleOpponent_, result.opponent);
-  if (opponentStep.effect != pokemon::MoveEffect::None) animationSteps_[animationStepCount_++] = {opponentStep, false};
+  if (playable(opponentStep)) animationSteps_[animationStepCount_++] = {opponentStep, false};
   if (animationStepCount_ == 0) return false;
   animationResult_ = result;
   snprintf(animationFinalLog_, sizeof(animationFinalLog_), "%s", battleLog_);

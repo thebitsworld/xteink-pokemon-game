@@ -23,6 +23,8 @@ bool drawPokemonTrainerArt(const GfxRenderer& renderer, uint8_t gymIndex, Rect b
 // battle sprite's box) and a fifth larger than it, so effects around the
 // Pokemon fit.
 bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, MoveEffect effect, uint8_t frame, Rect bounds);
+// False when the SD-card art pack predates the move animations.
+bool pokemonMoveEffectArtInstalled(MoveEffect effect);
 bool drawPokemonTrainerClassArt(const GfxRenderer& renderer, uint8_t classId, Rect bounds,
                                 bool drawFallback = true);
 
