@@ -75,3 +75,20 @@ come from the gym team data: whatever the formula, Koga to the Champion tends to
 4. Stones and the Link Cable: hourly chance 1/20 -> 1/10, guaranteed after 9 misses instead of 19.
 
 No save change. The scripted random sequences in the Pokémon game tests need updating.
+
+## Pending event queue: items straight to the bag (written down 2026-10-19, not decided)
+
+The queue holds 16 events (`PENDING_EVENT_CAPACITY`; 16 is also the width of `inspectSnapshot()`'s
+bitmask, so more needs a save format change). Today it gets ~5.6 events per reading hour: wild
+encounters, medicine and TM/HM 1.84 each (15-minute rolls at 2/5, guaranteed after 3 misses), stones
+and the Link Cable ~0.08 (0.15 with the Pokédex plan above), plus evolutions and moves to learn. It is
+full after ~2.9 hours of reading without opening the game; road trainers on the wild schedule would
+bring that down to ~2.1 h (~2.5 h with at most 2 trainers waiting). While it is full, the encounter,
+medicine, TM/HM and stone rolls are skipped (their pity is set so the next roll after a slot frees
+hits), so encounters are lost.
+
+What the user wrote down: medicine, TM/HM and stones/Link Cable go straight into the bag, like balls
+already do, and the game shows a single summary screen listing in detail everything received. The
+queue then only holds encounters, road trainers, evolutions and moves to learn: ~1.84 events an hour
+without trainers (full after ~8.7 h), ~7.6 h with at most 2 trainers waiting, ~4.3 h with no trainer
+cap.
