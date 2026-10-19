@@ -51,24 +51,41 @@ Processes **one minute at a time** (never batched) so every random event lands o
 - Every minute, the Party leader (`leader`) gains +1 XP, capped at `MAXIMUM_TOTAL_XP = 8340` (level 100).
 - `xpRequired(level) = 10*n + 3*n²/4` where `n = level - 1`.
 - `levelForXp()` uses binary search to look up level from total XP.
-- **XP is driven purely by real reading time, independent of book length or chapter count.**
+- **XP is driven mainly by real reading time, independent of book length or chapter count.**
+- Battles add XP to the Pokémon that lands the KO: `battleVictoryXp(Lo, Lp) = Lo * ((2*Lo + 10) / (Lo + Lp + 10))^2.5`
+  (Gen 5 scaling, at least 1) for wild Pokémon and gym/Elite Four/Champion team members alike - the opponent's level
+  when both are equal, much less when the player's Pokémon is far stronger. A road trainer gives a fixed
+  `ROAD_TRAINER_VICTORY_XP = 10` per battle instead (its Pokémon give EVs only). Since 1.9.0; before that it was a flat
+  level x 6 (trainers) / x 4 (wild), which let one Pokémon reach level 100 on the gyms alone.
+  See [pokemon-pace-plan.md](pokemon-pace-plan.md) for the numbers.
 
 **Wild Encounter**
 - Rolled every 15 minutes (`ENCOUNTER_CHECK_MINUTES`) or every hour, at **2/5** odds.
 - Pity mechanic: 3 consecutive misses (`ENCOUNTER_MISSES_BEFORE_GUARANTEE = 3`) → the next roll is guaranteed to hit.
-- The species is chosen by weight based on its base `captureRate`; starters (Bulbasaur/Charmander/Squirtle/Pikachu) are forced to the lowest weight.
+- The species is chosen by weight based on its base `captureRate`; starters (Bulbasaur/Charmander/Squirtle/Pikachu) are forced to the lowest weight. A species not caught yet weighs 3x (`UNCAUGHT_WEIGHT_MULTIPLIER`), so the last Pokédex entries keep showing up.
+- No encounter is rolled while only the last `PENDING_EVENT_PROMPT_RESERVE = 2` queue slots are free (the pity is primed instead): those stay for evolutions and moves to learn.
 - **Gated by `bookProgressPercent`** (% progress through the *currently open book*, not total pages/minutes read overall):
   - Middle-stage evolutions only appear at `≥50%`.
   - Final-stage evolutions only at `≥75%`.
   - The wild Pokémon's level band also scales with this same progress band (`0%→lv2-6` ... `95%→lv18-30`).
   - ⚠️ Consequence: reading many short books (easy to reach a high `%`) yields noticeably better encounters than one long book, even for the same total reading time — because `%` is a function of progress through the current book, not of total time spent.
-- Legendaries (144-146 the bird trio, 150 Mewtwo): require both accumulated `lifetimeMinutes` across all time **and** the current book's `bookProgressPercent` to clear their thresholds.
+- Legendaries (144-146 the bird trio, 150 Mewtwo): require both accumulated `lifetimeMinutes` across all time **and** the current book's `bookProgressPercent` to clear their thresholds (birds: 1200 min and 75%; Mewtwo: 3000 min and 90%). Once eligible, 1 encounter in 10 (`LEGENDARY_CHANCE_DENOMINATOR`) is a legendary, an uncaught one first.
 - Mew (151): only appears once all other 150 species have been caught.
 - Gender is randomized according to the species' real `genderRate`.
 
-**Rare items**
-- Rolled every hour at 1/20 odds, with pity after 19 misses.
-- Prioritizes whichever item type the Party currently needs to evolve.
+**Items**
+- Evolution stones and the Link Cable: rolled every hour at 1/10 odds, with pity after 9 misses (1/20 and 19 before 1.9.0). Prioritizes whichever item an owned Pokémon currently needs to evolve.
+- Balls (3/5), medicine and TM/HM (2/5 each): rolled every 15 minutes, each with pity after 3 misses.
+- Every item goes **straight into the bag** and is counted in `PokemonState::receivedItems` (since 1.9.0; it used to queue an Item event). The game lists them once, on the "Items received" screen shown when the Pokémon app opens, and clears the list. The `ItemFound` notice is lit while the list has something and the queue is empty.
+
+**Road trainers** (since 1.9.0, ported from the xteink-pokemon-crosslingua fork; `lib/Pokemon/PokemonTrainers.*`)
+- Every `TRAINER_CHECK_MINUTES = 30` lifetime reading minutes, one chance at 2/5 with pity after 3 misses (`trainerMisses`, `rollRoadTrainer()`): about 0.92 trainers per reading hour, half the wild rate. Rolled in `PokemonService::creditMinutes()` with the service's own RNG, like shininess.
+- At most `MAX_PENDING_TRAINERS = 2` wait in the queue, and none is queued into the 2 reserved slots; while blocked the next chance becomes a sure one.
+- A `PendingEventKind::Trainer` event holds the class (`speciesId`, 12 Red/Blue route classes), the level (`trainerLevelFor()`: party average -4..+2, picked by book progress) and a team seed (`recordId`); `buildTrainerTeam()` rebuilds the 1-3 Pokémon team from those.
+- Fought like a gym (`gymChallengeIndex_ = ROAD_TRAINER_INDEX` in the activity, AI skill of the first gyms, no healing items). Winning gives 10 XP to the Pokémon that finished the battle and an item (`grantTrainerReward()`: ball/medicine/TM-HM/stone tracks weighted 246/184/184/15 by how often each pays out while reading). Losing, running or passing just removes the trainer.
+
+**HP and PP between battles**
+- Each party member heals `max(1 HP, 1.5% of max HP)` per reading minute (1 HP before 1.9.0, which fell behind as max HP grows), and recovers 1 PP per move every 10 minutes.
 
 **Evolution**
 - On level-up, `evolutionsFor(speciesId)` (static data in `PokemonSpecies.cpp`) is checked; if `minimumLevel` is reached, an event is queued for confirmation (unless `RecordFlag::EvolutionPromptsDisabled`).
@@ -76,7 +93,7 @@ Processes **one minute at a time** (never batched) so every random event lands o
 
 ## 4. Pending event queue
 
-`PokemonState.pendingEvents`: a FIFO capped at `PENDING_EVENT_CAPACITY = 16` (was 3 before save v8, 10 in v8). Once full, new encounters/items are dropped, but the pity counters (`encounterMisses`/`itemMisses`) still keep incrementing. `DashboardNotice` shows a `!` icon while an event is waiting.
+`PokemonState.pendingEvents`: a FIFO capped at `PENDING_EVENT_CAPACITY = 16` (was 3 before save v8, 10 in v8). It holds encounters, road trainers (at most 2), evolutions and moves to learn; items no longer queue (1.9.0). Encounters and trainers leave the last 2 slots free for evolutions and moves. While an encounter or trainer cannot queue, its pity counter is primed so the next chance after a slot frees hits. `DashboardNotice` shows a `!` icon while an event is waiting, or while the "items received" list has something.
 
 ## 5. Storage — double-buffer + CRC
 

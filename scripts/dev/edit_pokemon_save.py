@@ -7,7 +7,7 @@ set up scenarios (queue a wild encounter, wipe HP/PP/status back to full,
 clear gym progress, hand a Pokemon some items) without waiting on real
 gameplay/RNG. See docs/file-formats.md for the on-disk layout this assumes;
 this tool only understands the CURRENT save format used by this branch
-(main save version 10, 341-byte state; battle-store version 3, 21-byte
+(main save version 11, 437-byte state; battle-store version 3, 21-byte
 entries) and refuses to touch anything else rather than risk corrupting an
 unfamiliar layout.
 
@@ -57,6 +57,10 @@ STATE_BYTES_V7 = 210
 STATE_BYTES_V8 = 280  # v8 appends the pending-event slots past the original 3 (7 x 10 bytes)
 STATE_BYTES_V9 = 340  # v9 appends 6 more pending-event slots (10-15) after v8's own fixed region
 STATE_BYTES_V10 = 341  # v10 appends starterSpeciesId (1 byte) after v9's layout
+# v11 appends trainerMisses (1 byte) and receivedItems (95 x u8, index = item id - 1), and allows Trainer events.
+STATE_BYTES_V11 = STATE_BYTES_V10 + 1 + 95
+STATE_BYTES = STATE_BYTES_V11
+SNAPSHOT_VERSION = 11
 RECORD_BYTES = 48
 POKEMON_NICKNAME_BYTES = 33  # record bytes 14..46; byte 47 is reserved (must be 0)
 PENDING_EVENT_BYTES = 10
@@ -132,12 +136,14 @@ PENDING_KIND_ENCOUNTER = 1
 PENDING_KIND_ITEM = 2
 PENDING_KIND_EVOLUTION = 3
 PENDING_KIND_MOVE_LEARN = 4
+PENDING_KIND_TRAINER = 5  # save version 11+: speciesId = trainer class, level, recordId = team seed
 PENDING_KIND_NAMES = {
     PENDING_KIND_NONE: "None",
     PENDING_KIND_ENCOUNTER: "Encounter",
     PENDING_KIND_ITEM: "Item",
     PENDING_KIND_EVOLUTION: "Evolution",
     PENDING_KIND_MOVE_LEARN: "MoveLearn",
+    PENDING_KIND_TRAINER: "Trainer",
 }
 
 ORIGIN_UNKNOWN = 0
@@ -387,22 +393,22 @@ def load_save(path: Path) -> SaveFile:
     state_size, record_size = struct.unpack_from("<HH", data, 12)
     if header_size != HEADER_BYTES:
         raise ToolError(f"{path}: unexpected header size {header_size} (expected {HEADER_BYTES})")
-    if state_size in (STATE_BYTES_V7, STATE_BYTES_V8, STATE_BYTES_V9):
-        # A v7/v8/v9 save differs from v10 only by appended (empty) trailing bytes (extra pending-event
-        # slots, then starterSpeciesId = 0 = "not recorded") - upgrade it in memory; the file on disk is
-        # only rewritten when a command actually writes.
-        extra = STATE_BYTES_V10 - state_size
+    if state_size in (STATE_BYTES_V7, STATE_BYTES_V8, STATE_BYTES_V9, STATE_BYTES_V10):
+        # A v7-v10 save differs from v11 only by appended (empty) trailing bytes (extra pending-event
+        # slots, starterSpeciesId = 0 = "not recorded", trainerMisses, receivedItems) - upgrade it in
+        # memory; the file on disk is only rewritten when a command actually writes.
+        extra = STATE_BYTES - state_size
         data[HEADER_BYTES + state_size : HEADER_BYTES + state_size] = bytes(extra)
-        struct.pack_into("<H", data, 4, 10)
-        struct.pack_into("<H", data, 12, STATE_BYTES_V10)
+        struct.pack_into("<H", data, 4, SNAPSHOT_VERSION)
+        struct.pack_into("<H", data, 12, STATE_BYTES)
         payload, = struct.unpack_from("<I", data, 20)
         struct.pack_into("<I", data, 20, payload + extra)
-        state_size = STATE_BYTES_V10
+        state_size = STATE_BYTES
         save = SaveFile(path, data, sequence)
         recompute_crc(save)
-    if state_size != STATE_BYTES_V10:
+    if state_size != STATE_BYTES:
         raise ToolError(
-            f"{path}: this tool only understands version-7/8/9/10 saves (210/280/340/341-byte state), got "
+            f"{path}: this tool only understands version-7/8/9/10/11 saves (210/280/340/341/437-byte state), got "
             f"{state_size} bytes (version {version}) - refusing to touch an unfamiliar layout. A version-6 "
             f"save (205 bytes) is upgraded the next time the game writes it - run the game once first."
         )
@@ -429,7 +435,7 @@ def set_header_record_count(save: SaveFile, new_count: int) -> None:
     load - writing recordCount alone leaves a stale payload size and the
     device rejects the whole file as corrupt on next boot."""
     struct.pack_into("<I", save.data, OFF_HEADER_RECORD_COUNT, new_count)
-    payload_bytes = STATE_BYTES_V10 + new_count * RECORD_BYTES
+    payload_bytes = STATE_BYTES + new_count * RECORD_BYTES
     struct.pack_into("<I", save.data, OFF_HEADER_PAYLOAD_BYTES, payload_bytes)
 
 
@@ -688,7 +694,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     print("\nparty record ids:", [rid for rid in party_ids if rid != 0])
 
     header_record_count, = struct.unpack_from("<I", active.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V10
+    records_offset = HEADER_BYTES + STATE_BYTES
     print(f"\nrecords ({header_record_count}):")
     for i in range(header_record_count):
         offset = records_offset + i * RECORD_BYTES
@@ -755,7 +761,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
             print(f"  slot {slot}: empty")
             continue
         species = species_map.get(species_id)
-        species_name = species.name if species else f"?{species_id}"
+        species_name = (TRAINER_CLASS_NAMES[species_id - 1] if kind == PENDING_KIND_TRAINER and 1 <= species_id <= len(TRAINER_CLASS_NAMES) else species.name if species else f"?{species_id}")
         shiny_suffix = " [SHINY]" if is_shiny else ""
         print(
             f"  slot {slot}: {PENDING_KIND_NAMES.get(kind, kind)} - recordId={record_id}, species={species_name}{shiny_suffix}, "
@@ -825,7 +831,7 @@ def _dex_bits(count: int) -> bytes:
 
 def _owned_species(save: SaveFile) -> list[int]:
     record_count, = struct.unpack_from("<I", save.data, 16)
-    records_offset = HEADER_BYTES + STATE_BYTES_V10
+    records_offset = HEADER_BYTES + STATE_BYTES
     return [
         struct.unpack_from("<H", save.data, records_offset + i * RECORD_BYTES + 8)[0] for i in range(record_count)
     ]
@@ -888,6 +894,46 @@ def cmd_queue_encounter(args: argparse.Namespace) -> None:
     print(
         f"queued slot {slot}: wild {species.name}{shiny_suffix} (species {species.id}), level {args.level}, "
         f"gender {GENDER_NAMES[gender]}"
+    )
+    if not args.dry_run:
+        write_saves(saves, backup=not args.no_backup)
+
+
+TRAINER_CLASS_NAMES = [
+    "youngster", "bug-catcher", "lass", "hiker", "swimmer", "super-nerd",
+    "bird-keeper", "psychic", "channeler", "blackbelt", "fisherman", "beauty",
+]  # index + 1 = TrainerClass (lib/Pokemon/PokemonTrainers.h)
+
+
+def cmd_queue_trainer(args: argparse.Namespace) -> None:
+    query = args.trainer_class.lower()
+    if query.isdigit():
+        class_id = int(query)
+    elif query in TRAINER_CLASS_NAMES:
+        class_id = TRAINER_CLASS_NAMES.index(query) + 1
+    else:
+        raise ToolError(f"--class must be 1-{len(TRAINER_CLASS_NAMES)} or one of: {', '.join(TRAINER_CLASS_NAMES)}")
+    if not (1 <= class_id <= len(TRAINER_CLASS_NAMES)):
+        raise ToolError(f"--class must be 1-{len(TRAINER_CLASS_NAMES)}")
+    if not (1 <= args.level <= 100):
+        raise ToolError("--level must be 1-100")
+    if not (0 <= args.seed <= 0xFFFFFFFF):
+        raise ToolError("--seed must fit in 32 bits")
+
+    saves = load_saves(args.save_dir)
+    active = max(saves, key=lambda s: s.sequence)
+    slot = args.slot if args.slot is not None else first_empty_pending_slot(active)
+    if slot is None:
+        raise ToolError("every pending-event slot is already in use - pass --slot to overwrite one explicitly")
+    if not (0 <= slot < PENDING_EVENT_COUNT):
+        raise ToolError(f"--slot must be 0-{PENDING_EVENT_COUNT - 1}")
+
+    for save in saves:
+        write_pending_event(save, slot, args.seed, class_id, args.level, GENDER_UNKNOWN, 0, PENDING_KIND_TRAINER)
+        recompute_crc(save)
+    print(
+        f"queued slot {slot}: trainer {TRAINER_CLASS_NAMES[class_id - 1]} (class {class_id}), "
+        f"level {args.level}, team seed {args.seed}"
     )
     if not args.dry_run:
         write_saves(saves, backup=not args.no_backup)
@@ -974,7 +1020,7 @@ def cmd_set_record_xp(args: argparse.Namespace) -> None:
         raise ToolError("--xp must be >= 0")
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, 16)
-        records_offset = HEADER_BYTES + STATE_BYTES_V10
+        records_offset = HEADER_BYTES + STATE_BYTES
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES
@@ -1007,7 +1053,7 @@ def cmd_add_party_member(args: argparse.Namespace) -> None:
     nickname_bytes = nickname_text + b"\x00" * (POKEMON_NICKNAME_BYTES - len(nickname_text))
 
     saves = load_saves(args.save_dir)
-    records_offset = HEADER_BYTES + STATE_BYTES_V10
+    records_offset = HEADER_BYTES + STATE_BYTES
 
     # pokemon-a.bin and pokemon-b.bin can legitimately hold different
     # generations of state (that is the whole point of the double buffer),
@@ -1083,7 +1129,7 @@ def cmd_set_species(args: argparse.Namespace) -> None:
     saves = load_saves(args.save_dir)
     for save in saves:
         record_count, = struct.unpack_from("<I", save.data, OFF_HEADER_RECORD_COUNT)
-        records_offset = HEADER_BYTES + STATE_BYTES_V10
+        records_offset = HEADER_BYTES + STATE_BYTES
         found = False
         for i in range(record_count):
             offset = records_offset + i * RECORD_BYTES
@@ -1116,7 +1162,7 @@ def cmd_set_moves(args: argparse.Namespace) -> None:
     saves = load_saves(args.save_dir)
     active = max(saves, key=lambda s: s.sequence)
     record_count, = struct.unpack_from("<I", active.data, OFF_HEADER_RECORD_COUNT)
-    records_offset = HEADER_BYTES + STATE_BYTES_V10
+    records_offset = HEADER_BYTES + STATE_BYTES
     species_id = None
     total_xp = None
     for i in range(record_count):
@@ -1209,6 +1255,13 @@ def build_parser() -> argparse.ArgumentParser:
     queue.add_argument("--slot", type=int, help="pending-event slot 0-2 (default: first empty slot)")
     queue.add_argument("--shiny", action="store_true", help="mark this encounter shiny (RecordFlag::Shiny on catch)")
     queue.set_defaults(func=cmd_queue_encounter)
+
+    trainer = subparsers.add_parser("queue-trainer", help="queue a trainer met while reading, to test the trainer battle")
+    trainer.add_argument("--class", dest="trainer_class", required=True, help="class id 1-12 or name, e.g. youngster")
+    trainer.add_argument("--level", type=int, required=True, help="1-100")
+    trainer.add_argument("--seed", type=int, default=1, help="team seed (recordId), default 1")
+    trainer.add_argument("--slot", type=int, help="pending-event slot (default: first empty slot)")
+    trainer.set_defaults(func=cmd_queue_trainer)
 
     bag = subparsers.add_parser("set-bag-item", help="set an item's bag count directly (evolution stone or bag item)")
     bag.add_argument("--item", required=True, help="item id or name, e.g. 7 or poke-ball")

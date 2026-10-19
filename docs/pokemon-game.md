@@ -58,15 +58,21 @@ A few things worth knowing:
 - **Progress arrives in the background** while you read — there's nothing to start or stop.
   Every few minutes, the app quietly checks in and saves your progress, so you never lose
   more than a couple of minutes of credit even if you close the book without warning.
-- **Wild encounters and item finds happen the same way**, popping up every so often as you
-  read. A small `!` appears on your device's dashboard whenever something is waiting for
-  you in the Pokémon menu — a Pokémon to catch, an item you found, a move to learn, or a
-  Pokémon ready to evolve.
+- **Wild encounters, trainers and item finds happen the same way**, popping up every so
+  often as you read. A small `!` appears on your device's dashboard whenever something is
+  waiting for you in the Pokémon menu — a Pokémon to catch, a trainer who wants to battle,
+  items you found, a move to learn, or a Pokémon ready to evolve.
+- **Items go straight into your Bag.** The next time you open the Pokémon menu, an
+  **Items received** screen lists everything you found since your last visit.
+- **Pokémon you haven't caught yet turn up more often**, so the last few Pokédex entries
+  don't take forever.
 - **How far you are into a book matters.** The wild Pokémon and items you find while
   reading a longer or further-along book tend to be a bit tougher and rarer than what you'd
   find right at the start of a short one.
 - **Battling also grants experience**, in addition to reading — so any Pokémon you send out
-  to fight (not just your lead) has a way to catch up.
+  to fight (not just your lead) has a way to catch up. Beating a stronger opponent is worth
+  more than its level; beating a much weaker one is worth very little, so battles help but
+  reading stays the main way to grow.
 
 ## Getting started
 
@@ -92,7 +98,17 @@ Battles are full turn-based fights: pick a move, use an item, switch Pokémon, o
 Type match-ups, critical hits, status conditions (like Poison, Paralysis, or Sleep), stat
 boosts and drops, multi-hit moves, and two-turn moves like Fly or Solar Beam all work.
 A Pokémon that faints needs a Revive (or a trip back to full health) before it can fight
-again.
+again. Your Party heals while you read: at least 1 HP a minute, or 1.5% of its maximum HP
+when that is more, and its moves get their PP back.
+
+## Trainers on the road
+
+Every half hour of reading there's a chance (and after a few misses, a sure one) that a
+trainer — a Youngster, a Hiker, a Psychic and so on — wants to battle. Their team of one to
+three Pokémon is around your Party's level: a little easier at the start of a book, a little
+harder near its end. At most two trainers wait for you at a time. Choose **Fight** to battle
+them like a gym, or **Pass** to let them go. Beating one gives the Pokémon that finished the
+fight some experience and leaves you an item. Losing or running costs nothing.
 
 ## Gym Leaders, the Elite Four, and the Champion
 

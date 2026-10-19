@@ -17,7 +17,8 @@ constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V6 = 6;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V7 = 7;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V8 = 8;
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V9 = 9;
-constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 10;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V10 = 10;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 11;
 constexpr size_t POKEMON_STATE_V1_BYTES = 96;
 constexpr size_t POKEMON_STATE_V2_BYTES = 116;
 // v3 appends bagCounts[POKEMON_BAG_SLOT_COUNT] and battleProgress (uint16_t)
@@ -48,7 +49,11 @@ constexpr size_t POKEMON_STATE_V9_BYTES =
     POKEMON_STATE_V8_BYTES + (PENDING_EVENT_CAPACITY - PENDING_EVENT_V8_CAPACITY) * POKEMON_PENDING_EVENT_BYTES;
 // v10 (recorded starter species) appends starterSpeciesId (uint8_t) - see
 // PokemonState in PokemonTypes.h.
-constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V9_BYTES + 1;
+constexpr size_t POKEMON_STATE_V10_BYTES = POKEMON_STATE_V9_BYTES + 1;
+// v11 (road trainers, items straight to the bag) appends trainerMisses
+// (uint8_t) and receivedItems[POKEMON_ITEM_ID_MAX] (uint8_t each) - see
+// PokemonState in PokemonTypes.h. It also allows PendingEventKind::Trainer.
+constexpr size_t POKEMON_STATE_BYTES = POKEMON_STATE_V10_BYTES + 1 + POKEMON_ITEM_ID_MAX;
 using StateBytes = std::array<uint8_t, POKEMON_STATE_BYTES>;
 
 constexpr size_t POKEMON_SNAPSHOT_HEADER_BYTES = 24;

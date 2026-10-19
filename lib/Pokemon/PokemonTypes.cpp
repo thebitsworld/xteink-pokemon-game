@@ -120,6 +120,9 @@ bool validatePendingEvent(const PendingEvent& event) {
       return event.recordId != 0 && event.speciesId >= 1 && event.speciesId <= POKEMON_MOVE_ID_MAX &&
              event.level >= 1 && event.level <= 100 && event.gender == Gender::Unknown &&
              event.item == EvolutionItem::None;
+    case PendingEventKind::Trainer:
+      return event.speciesId >= 1 && event.speciesId <= TRAINER_CLASS_COUNT && event.level >= 1 && event.level <= 100 &&
+             event.gender == Gender::Unknown && event.item == EvolutionItem::None && !event.isShiny;
   }
   return false;
 }
@@ -321,7 +324,9 @@ bool validateState(const PokemonState& state) {
     return false;
   }
   if ((state.battleProgress & static_cast<uint16_t>(~POKEMON_GYM_PROGRESS_MASK)) != 0) return false;
-  if (state.ballMisses > 3 || state.medicineMisses > 3 || state.machineMisses > 3) return false;
+  if (state.ballMisses > 3 || state.medicineMisses > 3 || state.machineMisses > 3 || state.trainerMisses > 3) {
+    return false;
+  }
 
   bool foundEmptyEvent = false;
   for (const PendingEvent& event : state.pendingEvents) {

@@ -630,11 +630,12 @@ bool attemptRun(const BattleCombatant& player, const BattleCombatant& opponent, 
 
 // XP awarded to the Pokemon active when a battle is won (defeating or
 // catching a wild Pokemon, or defeating one gym/Elite Four/Champion team
-// member) - a deliberately simple `level * multiplier` rather than Gen 1's
-// real species-yield formula, scaled to stay a meaningful bonus on top of
-// reading-driven XP without dwarfing it (see docs/development's battle
-// roadmap for the reasoning). Trainer battles use a higher multiplier than
-// wild ones, loosely mirroring the real games' 1.5x trainer-battle bonus.
-uint32_t battleVictoryXp(uint8_t opponentLevel, bool isTrainerBattle);
+// member): the opponent's level scaled by the level gap the way Gen 5 does,
+// `Lo * ((2*Lo + 10) / (Lo + Lp + 10))^2.5`, at least 1. The same as the
+// opponent's level when both are equal; much less when the player's Pokemon
+// is far stronger, so battles cannot outpace reading (1 XP a minute) - see
+// docs/development/pokemon-pace-plan.md. Road trainers give a fixed
+// ROAD_TRAINER_VICTORY_XP per battle instead (PokemonTrainers.h).
+uint32_t battleVictoryXp(uint8_t opponentLevel, uint8_t playerLevel);
 
 }  // namespace pokemon

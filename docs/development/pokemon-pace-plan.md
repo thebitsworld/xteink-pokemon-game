@@ -1,6 +1,7 @@
 # Pokémon pace: how long the game takes
 
-Decided on 2026-10-19, not implemented yet. How many reading hours it takes to beat every gym and to fill
+Decided on 2026-10-19 and shipped in 1.9.0 (everything below, including road trainers and items straight to
+the bag). How many reading hours it takes to beat every gym and to fill
 the Pokédex, and the changes agreed to bring the Pokédex down to 0.5-1 year at an hour of reading a day.
 Numbers come from `scripts/dev/simulate_pokemon_pace.py` (Monte Carlo over the rules in
 `lib/Pokemon/PokemonGame.cpp`; run it from the repo root after a test build).

@@ -18,5 +18,7 @@ bool drawPokemonItemArt(const GfxRenderer& renderer, EvolutionItem item, bool he
 bool drawPokemonBagItemArt(const GfxRenderer& renderer, uint8_t itemId, Rect bounds, bool drawFallback = true);
 bool drawPokemonBadgeArt(const GfxRenderer& renderer, uint8_t gymIndex, Rect bounds, bool drawFallback = true);
 bool drawPokemonTrainerArt(const GfxRenderer& renderer, uint8_t gymIndex, Rect bounds, bool drawFallback = true);
+bool drawPokemonTrainerClassArt(const GfxRenderer& renderer, uint8_t classId, Rect bounds,
+                                bool drawFallback = true);
 
 }  // namespace pokemon

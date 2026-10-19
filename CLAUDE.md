@@ -5,13 +5,21 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-15, v1.8.6)
+## Where things stand (2026-10-19, v1.9.0)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
-  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.8.6; latest release `v1.8.6` (stable). Its
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.0; latest release `v1.9.0` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
+- Pokémon pace (1.9.0, plan and simulations in docs/development/pokemon-pace-plan.md, re-run with
+  `scripts/dev/simulate_pokemon_pace.py`): battle XP is Gen 5-scaled `battleVictoryXp(Lo, Lp)` (x1, gyms
+  and wild alike); road trainers from the crosslingua fork (`lib/Pokemon/PokemonTrainers.*`, 30-min roll
+  2/5 with pity, max 2 waiting, fixed 10 XP + an item); items go straight to the bag and are listed once
+  on an "Items received" Message screen (`PokemonState::receivedItems`); uncaught species x3, legendary
+  1/10, Mewtwo from 90%, stones 1/10 pity 9; HP heal max(1, 1.5% max HP)/min; 2 queue slots reserved for
+  evolutions/moves. Save format v11 (437-byte state). Trainer class art: pret/pokered gfx/trainers,
+  generated into `images/pokemon/trainers/classes/` (in the SD card assets ZIP).
 - Lua apps in `apps/` (the App Store installs straight from this folder on GitHub, so pushed apps are live
   without a firmware release): 52 apps - the CrossPlay-inspired games and tools written here (plus
   Tic-Tac-Toe and Xiangqi, 2026-10-13) plus 11 from

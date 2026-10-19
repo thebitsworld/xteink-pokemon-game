@@ -10,6 +10,8 @@ namespace pokemon {
 constexpr size_t POKEMON_RECORD_BYTES = 48;
 constexpr size_t POKEMON_NICKNAME_BYTES = 33;
 constexpr uint16_t KANTO_SPECIES_COUNT = 151;
+// Trainer classes met while reading - see TrainerClass in PokemonTrainers.h.
+constexpr uint8_t TRAINER_CLASS_COUNT = 12;
 constexpr uint32_t MAXIMUM_TOTAL_XP = 8340;
 constexpr size_t POKEDEX_BYTES = 19;
 constexpr size_t PARTY_SIZE = 6;
@@ -92,6 +94,11 @@ enum class PendingEventKind : uint8_t {
   // moveId being learned (1..POKEMON_MOVE_ID_MAX) and `level` holds the
   // level it was learned at. No size change to PendingEvent/PokemonState.
   MoveLearn = 4,
+  // A trainer met while reading (see PokemonTrainers.h), same 10-byte
+  // layout: `speciesId` holds its TrainerClass (1..TRAINER_CLASS_COUNT),
+  // `level` its level and `recordId` the seed its team is rebuilt from.
+  // Added in save version 11.
+  Trainer = 5,
 };
 
 enum class DashboardNotice : uint8_t {
@@ -196,6 +203,15 @@ struct PokemonState {
   // like any other Pokemon. 0 = not recorded (a pre-v10 save): the record is
   // then still around, and releaseRecord() records it just before it goes.
   uint8_t starterSpeciesId = 0;
+  // v11: appended after the v10 layout (PokemonStoreCodec.cpp's byte 341).
+  // Pity counter of the road-trainer roll (see TRAINER_CHECK_MINUTES in
+  // PokemonTrainers.h), the same shape as encounterMisses.
+  uint8_t trainerMisses = 0;
+  // v11: how many of each item (index = item id - 1) went into the bag since
+  // the player last looked at the "items received" summary. Items no longer
+  // queue a PendingEvent: they land in the bag at once and are only listed
+  // here (saturating at 255).
+  std::array<uint8_t, POKEMON_ITEM_ID_MAX> receivedItems{};
 
   bool operator==(const PokemonState&) const = default;
 };

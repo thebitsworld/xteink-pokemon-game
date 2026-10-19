@@ -8,6 +8,7 @@
 
 #include "pokemon/PokemonMovesetStore.h"
 #include "pokemon/PokemonService.h"
+#include "Pokemon/PokemonTrainers.h"
 
 namespace {
 
@@ -2434,13 +2435,24 @@ TEST(PokemonService, AwardBattleXpAppliesWildOrTrainerMultiplierAndCapsAtLevel10
   ASSERT_TRUE(store.readRecord(1, leader));
   const uint32_t startingXp = leader.totalXp;
 
-  ASSERT_EQ(service.awardBattleXp(1, 5, false, 4), pokemon::ServiceStatus::Ok);  // wild win: 5*4=20 XP
+  ASSERT_EQ(service.awardBattleXp(1, 5, false, 4), pokemon::ServiceStatus::Ok);  // same level: 5 XP
   ASSERT_TRUE(store.readRecord(1, leader));
-  EXPECT_EQ(leader.totalXp, startingXp + 20U);
+  EXPECT_EQ(leader.totalXp, startingXp + 5U);
 
-  ASSERT_EQ(service.awardBattleXp(1, 12, true, 4), pokemon::ServiceStatus::Ok);  // trainer win: 12*6=72 XP
+  // Scaled by the level gap: a level-12 opponent is worth more to a level-5 Pokemon.
+  const uint32_t scaled = pokemon::battleVictoryXp(12, 5);
+  EXPECT_GT(scaled, 12U);
+  ASSERT_EQ(service.awardBattleXp(1, 12, false, 4), pokemon::ServiceStatus::Ok);
   ASSERT_TRUE(store.readRecord(1, leader));
-  EXPECT_EQ(leader.totalXp, startingXp + 20U + 72U);
+  EXPECT_EQ(leader.totalXp, startingXp + 5U + scaled);
+
+  // A road trainer's Pokemon gives EVs only; the battle's fixed XP comes once.
+  ASSERT_EQ(service.awardBattleXp(1, 12, true, 4), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(leader.totalXp, startingXp + 5U + scaled);
+  ASSERT_EQ(service.awardFixedXp(1, 10), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(leader.totalXp, startingXp + 5U + scaled + 10U);
 
   // A gain that would overshoot the level-100 ceiling clamps exactly to it,
   // matching how reading credit (applyCreditedMinutes) never exceeds it either.
@@ -2448,13 +2460,13 @@ TEST(PokemonService, AwardBattleXpAppliesWildOrTrainerMultiplierAndCapsAtLevel10
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
   ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
-  ASSERT_EQ(service.awardBattleXp(1, 65, true, 4), pokemon::ServiceStatus::Ok);  // 65*6=390, far past the remaining 10
+  ASSERT_EQ(service.awardBattleXp(1, 65, false, 4), pokemon::ServiceStatus::Ok);  // ~38 XP, past the remaining 10
   ASSERT_TRUE(store.readRecord(1, leader));
   EXPECT_EQ(leader.totalXp, pokemon::xpRequired(100));
   EXPECT_EQ(pokemon::levelForXp(leader.totalXp), 100U);
 
   // Already at level 100 - a further award is a no-op, not an error.
-  ASSERT_EQ(service.awardBattleXp(1, 65, true, 4), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.awardBattleXp(1, 65, false, 4), pokemon::ServiceStatus::Ok);
   ASSERT_TRUE(store.readRecord(1, leader));
   EXPECT_EQ(leader.totalXp, pokemon::xpRequired(100));
 }
@@ -2479,8 +2491,8 @@ TEST(PokemonService, AwardBattleXpQueuesEvolutionPromptOncePastTheLevelRule) {
   ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 43));
   ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, record, pokemon::RecordMutationKind::Replace}));
 
-  // A trainer win at level 30 is 180 XP, far more than one level: crosses 21.
-  ASSERT_EQ(service.awardBattleXp(1, 30, true, 4), pokemon::ServiceStatus::Ok);
+  // A level-30 opponent is ~44 XP to a level-20 Pokemon, more than the 40 to level 21.
+  ASSERT_EQ(service.awardBattleXp(1, 30, false, 4), pokemon::ServiceStatus::Ok);
   ASSERT_TRUE(store.loadState(state));
   const pokemon::PendingEvent* pending = pokemon::pendingEventFront(state);
   ASSERT_NE(pending, nullptr);
@@ -2509,7 +2521,7 @@ TEST(PokemonService, AwardBattleXpDoesNotReAskForAnEvolutionThatWasAlreadyCancel
   ASSERT_TRUE(pokemon::markSpecies(state.seenSpecies, 43));
   ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, record, pokemon::RecordMutationKind::Replace}));
 
-  ASSERT_EQ(service.awardBattleXp(1, 30, true, 4), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.awardBattleXp(1, 30, false, 4), pokemon::ServiceStatus::Ok);
   ASSERT_TRUE(store.loadState(state));
   EXPECT_EQ(pokemon::pendingEventFront(state), nullptr);  // no level gained -> no prompt ("Evolve now" covers it)
 }
@@ -2683,7 +2695,7 @@ TEST(PokemonService, AwardBattleXpAccumulatesEvYieldAndSaturatesAt255) {
 
   // Charizard (species 6) yields 3 Special EV per real PokeAPI data (see
   // scripts/data/pokemon-stats.csv).
-  ASSERT_EQ(service.awardBattleXp(1, 50, true, 6), pokemon::ServiceStatus::Ok);
+  ASSERT_EQ(service.awardBattleXp(1, 50, false, 6), pokemon::ServiceStatus::Ok);
   pokemon::IvEvEntry ivEv = service.peekIvEv(1);
   constexpr size_t specialIndex = 3;  // HP/Attack/Defense/Special/Speed order
   EXPECT_EQ(ivEv.ev[specialIndex], 3U);
@@ -2692,7 +2704,7 @@ TEST(PokemonService, AwardBattleXpAccumulatesEvYieldAndSaturatesAt255) {
   // - and this keeps happening even once totalXp itself has capped at level
   // 100, since EVs are independent of the XP/level cap.
   for (int i = 0; i < 100; ++i) {
-    ASSERT_EQ(service.awardBattleXp(1, 50, true, 6), pokemon::ServiceStatus::Ok);
+    ASSERT_EQ(service.awardBattleXp(1, 50, false, 6), pokemon::ServiceStatus::Ok);
   }
   ivEv = service.peekIvEv(1);
   EXPECT_EQ(ivEv.ev[specialIndex], 255U);
@@ -2779,7 +2791,7 @@ TEST(PokemonService, LevelUpFromRareCandyAndBattleXpAddsTheMaxHpGainToCurrentHp)
   ASSERT_TRUE(store.loadState(state));
   ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, record, pokemon::RecordMutationKind::Replace}));
   const uint16_t maxAt7 = pokemon::battleMaxHp(stats->hp, 7, ivEv.iv[hp], ivEv.ev[hp]);
-  ASSERT_EQ(service.awardBattleXp(1, 1, false, 4), pokemon::ServiceStatus::Ok);  // +4 XP crosses level 7 only
+  ASSERT_EQ(service.awardBattleXp(1, 1, false, 4), pokemon::ServiceStatus::Ok);  // at least 1 XP: crosses level 7 only
   ASSERT_TRUE(store.readRecord(1, record));
   ASSERT_EQ(pokemon::levelForXp(record.totalXp), 7U);
   EXPECT_EQ(battleStore.findEntry(1)->currentHp, hpBeforeWin + (maxAt7 - maxAt6));
@@ -3261,8 +3273,9 @@ TEST(PokemonService, HourlyItemDropPrefersAnOwnedPokemonsEvolutionNeed) {
 
   pokemon::PokemonState state{};
   ASSERT_TRUE(store.loadState(state));
-  EXPECT_EQ(state.pendingEvents[0].kind, pokemon::PendingEventKind::Item);
-  EXPECT_EQ(state.pendingEvents[0].item, pokemon::EvolutionItem::ThunderStone);
+  // Straight into the bag, listed on the "items received" summary.
+  for (const pokemon::PendingEvent& event : state.pendingEvents) EXPECT_NE(event.kind, pokemon::PendingEventKind::Item);
+  EXPECT_EQ(state.receivedItems[2], 1U);  // Thunder Stone
   EXPECT_EQ(state.itemCounts[2], 1U);
 }
 
@@ -3314,3 +3327,85 @@ TEST(PokemonService, PeekHallOfFameIsUnclearedBeforeAnyCapture) {
 }
 
 }  // namespace
+
+// 2026-10 pace changes (docs/development/pokemon-pace-plan.md).
+TEST(PokemonService, ReadingHealsOnePointFivePercentOfMaxHpAMinuteAtHighLevels) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  leader.totalXp = pokemon::xpRequired(80);
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_TRUE(store.commit(state, pokemon::RecordMutation{1, leader, pokemon::RecordMutationKind::Replace}));
+
+  pokemon::BattleRecordEntry entry{};
+  ASSERT_EQ(service.loadBattleEntry(1, entry), pokemon::ServiceStatus::Ok);
+  const uint16_t maxHp = entry.currentHp;
+  ASSERT_GT(maxHp, 100U);  // where 1.5% beats 1 HP a minute
+  entry.currentHp = 1;
+  ASSERT_EQ(service.saveBattleEntry(entry), pokemon::ServiceStatus::Ok);
+
+  ASSERT_TRUE(service.creditMinutes(10, 10));
+  const pokemon::BattleRecordEntry* healed = battleStore.findEntry(1);
+  ASSERT_NE(healed, nullptr);
+  EXPECT_EQ(healed->currentHp, 1U + static_cast<uint32_t>(maxHp) * 10U * 15U / 1000U);
+}
+
+TEST(PokemonService, ATrainerShowsUpEveryThirtyMinutesAndLeavesAnItemWhenBeaten) {
+  Storage.clear();
+  pokemon::PokemonStore store;
+  pokemon::PokemonBattleStore battleStore;
+  pokemon::PokemonIvEvStore ivEvStore;
+  seedStarter(store);  // Pikachu, level 5
+  pokemon::PokemonHallOfFameStore hallOfFameStore;
+  // Draws of 0 hit every roll: the encounter at 15 minutes, the trainer at 30.
+  pokemon::PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, zeroRandom});
+  ASSERT_TRUE(service.beginReadingSession());
+
+  ASSERT_TRUE(service.creditMinutes(29, 50));
+  pokemon::PokemonState state{};
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(pokemon::pendingTrainerCount(state), 0U);
+
+  ASSERT_TRUE(service.creditMinutes(1, 50));
+  ASSERT_TRUE(store.loadState(state));
+  ASSERT_EQ(pokemon::pendingTrainerCount(state), 1U);
+  const pokemon::PendingEvent* trainer = nullptr;
+  for (const pokemon::PendingEvent& event : state.pendingEvents) {
+    if (event.kind == pokemon::PendingEventKind::Trainer) trainer = &event;
+  }
+  ASSERT_NE(trainer, nullptr);
+  EXPECT_EQ(trainer->speciesId, 1U);                            // Youngster
+  pokemon::PokemonRecord leader{};
+  ASSERT_TRUE(store.readRecord(1, leader));
+  EXPECT_EQ(trainer->level, pokemon::trainerLevelFor(50, pokemon::levelForXp(leader.totalXp)));  // around the party
+  pokemon::TrainerTeam team;
+  EXPECT_TRUE(pokemon::buildTrainerTeam(trainer->speciesId, trainer->level, trainer->recordId, team));
+  EXPECT_GE(team.count, 1U);
+
+  // Clear what queued ahead of it, then beat it.
+  while (pokemon::pendingEventFront(state) != nullptr &&
+         pokemon::pendingEventFront(state)->kind != pokemon::PendingEventKind::Trainer) {
+    ASSERT_TRUE(pokemon::discardFrontPendingEvent(state));
+  }
+  ASSERT_TRUE(store.commit(state));
+  const auto receivedBefore = state.receivedItems;
+  uint8_t reward = 0;
+  ASSERT_EQ(service.resolveTrainer(/*won=*/true, reward), pokemon::ServiceStatus::Ok);
+  ASSERT_NE(reward, 0U);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(pokemon::pendingTrainerCount(state), 0U);
+  EXPECT_EQ(state.receivedItems[reward - 1U], receivedBefore[reward - 1U] + 1U);
+
+  ASSERT_EQ(service.clearReceivedItems(), pokemon::ServiceStatus::Ok);
+  ASSERT_TRUE(store.loadState(state));
+  EXPECT_EQ(state.receivedItems, (std::array<uint8_t, pokemon::POKEMON_ITEM_ID_MAX>{}));
+  EXPECT_EQ(service.clearReceivedItems(), pokemon::ServiceStatus::NotApplicable);
+}

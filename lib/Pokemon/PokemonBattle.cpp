@@ -3,6 +3,7 @@
 #include "PokemonBattle.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "PokemonSpecies.h"
 
@@ -2391,10 +2392,13 @@ bool attemptRun(const BattleCombatant& player, const BattleCombatant& opponent, 
   return roll < f;
 }
 
-uint32_t battleVictoryXp(const uint8_t opponentLevel, const bool isTrainerBattle) {
-  constexpr uint32_t WILD_MULTIPLIER = 4U;
-  constexpr uint32_t TRAINER_MULTIPLIER = 6U;
-  return static_cast<uint32_t>(opponentLevel) * (isTrainerBattle ? TRAINER_MULTIPLIER : WILD_MULTIPLIER);
+uint32_t battleVictoryXp(const uint8_t opponentLevel, const uint8_t playerLevel) {
+  if (opponentLevel == 0) return 0;
+  // Gen 5's level scaling: ((2*Lo + 10) / (Lo + Lp + 10))^2.5.
+  const float opponent = static_cast<float>(opponentLevel);
+  const float ratio = (2.0F * opponent + 10.0F) / (opponent + static_cast<float>(playerLevel) + 10.0F);
+  const float xp = opponent * ratio * ratio * std::sqrt(ratio);
+  return std::max<uint32_t>(1U, static_cast<uint32_t>(xp + 0.5F));
 }
 
 }  // namespace pokemon

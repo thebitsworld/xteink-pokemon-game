@@ -48,7 +48,7 @@ void writeHeader32(pokemon::HeaderBytes& bytes, const size_t offset, const uint3
   bytes[offset + 3] = static_cast<uint8_t>(value >> 24U);
 }
 
-void stateCodecUsesTheCanonicalV10Layout() {
+void stateCodecUsesTheCanonicalV11Layout() {
   static_assert(pokemon::POKEMON_STATE_V2_BYTES == 116);
   static_assert(pokemon::POKEMON_STATE_V3_BYTES == 116 + pokemon::POKEMON_BAG_SLOT_COUNT + 2);
   static_assert(pokemon::POKEMON_STATE_V4_BYTES == pokemon::POKEMON_STATE_V3_BYTES + 3);
@@ -63,8 +63,10 @@ void stateCodecUsesTheCanonicalV10Layout() {
   static_assert(pokemon::PENDING_EVENT_V8_CAPACITY == 10);
   static_assert(pokemon::POKEMON_STATE_V9_BYTES == pokemon::POKEMON_STATE_V8_BYTES + 6 * 10);
   static_assert(pokemon::POKEMON_STATE_V9_BYTES == 340);
-  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V9_BYTES + 1);
-  static_assert(pokemon::POKEMON_STATE_BYTES == 341);
+  static_assert(pokemon::POKEMON_STATE_V10_BYTES == pokemon::POKEMON_STATE_V9_BYTES + 1);
+  static_assert(pokemon::POKEMON_STATE_V10_BYTES == 341);
+  static_assert(pokemon::POKEMON_STATE_BYTES == pokemon::POKEMON_STATE_V10_BYTES + 1 + pokemon::POKEMON_ITEM_ID_MAX);
+  static_assert(pokemon::POKEMON_STATE_BYTES == 437);
   static_assert(pokemon::PENDING_EVENT_CAPACITY == 16);
   static_assert(pokemon::POKEMON_STATE_V1_BYTES == 96);
   pokemon::PokemonState state{};
@@ -95,7 +97,13 @@ void stateCodecUsesTheCanonicalV10Layout() {
   state.battleBoostCounts = {1, 2, 3, 4, 5, 6};
   state.vitaminCounts = {7, 8, 9, 10, 11};
   state.starterSpeciesId = 25;
-  for (size_t slot = 3; slot < 15; ++slot) {  // the queue must stay compacted, so fill every slot up to the last
+  state.trainerMisses = 3;
+  state.receivedItems[0] = 1;
+  state.receivedItems[6] = 200;  // Poke Balls
+  state.receivedItems[pokemon::POKEMON_ITEM_ID_MAX - 1] = 255;
+  state.pendingEvents[3] = {0x12345678U, 4, 30, pokemon::Gender::Unknown, pokemon::EvolutionItem::None,
+                            pokemon::PendingEventKind::Trainer};
+  for (size_t slot = 4; slot < 15; ++slot) {  // the queue must stay compacted, so fill every slot up to the last
     state.pendingEvents[slot] = {
         0, 0, 0, pokemon::Gender::Unknown, pokemon::EvolutionItem::MoonStone, pokemon::PendingEventKind::Item};
   }
@@ -136,15 +144,63 @@ void stateCodecUsesTheCanonicalV10Layout() {
 
   // Slots 3-9 (v8's own region) live after the v7 layout, in order; slots
   // 10-15 (v9's further region) live after v8's own fixed region.
-  CHECK(bytes[pokemon::POKEMON_STATE_V7_BYTES + 9] == static_cast<uint8_t>(pokemon::PendingEventKind::Item));
+  CHECK(bytes[pokemon::POKEMON_STATE_V7_BYTES + 10 + 9] == static_cast<uint8_t>(pokemon::PendingEventKind::Item));
   CHECK(bytes[pokemon::POKEMON_STATE_V8_BYTES + 5 * 10 + 9] ==
         static_cast<uint8_t>(pokemon::PendingEventKind::Encounter));
 
   CHECK(bytes[pokemon::POKEMON_STATE_V9_BYTES] == 25);
+  CHECK(bytes[pokemon::POKEMON_STATE_V10_BYTES] == 3);
+  CHECK(bytes[pokemon::POKEMON_STATE_V10_BYTES + 1] == 1);
+  CHECK(bytes[pokemon::POKEMON_STATE_V10_BYTES + 1 + 6] == 200);
+  CHECK(bytes[pokemon::POKEMON_STATE_BYTES - 1] == 255);
+  CHECK(bytes[pokemon::POKEMON_STATE_V7_BYTES + 9] == static_cast<uint8_t>(pokemon::PendingEventKind::Trainer));
 
   pokemon::PokemonState decoded{};
   CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION, decoded));
   CHECK(decoded == state);
+}
+
+void v10StateDecodesWithZeroedTrainerAndReceivedItems() {
+  pokemon::PokemonState v10State{};
+  v10State.partyRecordIds[0] = 3;
+  v10State.starterSpeciesId = 7;
+  v10State.trainerMisses = 2;
+  v10State.receivedItems[3] = 9;
+  pokemon::StateBytes v11Bytes{};
+  CHECK(pokemon::encodeState(v10State, v11Bytes));
+
+  // A v10 file is exactly the v11 bytes minus trainerMisses and receivedItems.
+  std::array<uint8_t, pokemon::POKEMON_STATE_V10_BYTES> bytes{};
+  for (size_t index = 0; index < bytes.size(); ++index) bytes[index] = v11Bytes[index];
+
+  pokemon::PokemonState decoded{};
+  decoded.trainerMisses = 1;  // must be reset, not left stale
+  decoded.receivedItems[0] = 5;
+  CHECK(pokemon::decodeState(bytes.data(), bytes.size(), pokemon::POKEMON_SNAPSHOT_VERSION_V10, decoded));
+  CHECK(decoded.starterSpeciesId == 7);
+  CHECK(decoded.trainerMisses == 0);
+  CHECK(decoded.receivedItems == (std::array<uint8_t, pokemon::POKEMON_ITEM_ID_MAX>{}));
+}
+
+void trainerEventsAndMissesAreValidated() {
+  pokemon::PokemonState state{};
+  state.partyRecordIds[0] = 1;
+  state.pendingEvents[0] = {77, pokemon::TRAINER_CLASS_COUNT, 12, pokemon::Gender::Unknown,
+                            pokemon::EvolutionItem::None, pokemon::PendingEventKind::Trainer};
+  CHECK(pokemon::validateState(state));
+  state.pendingEvents[0].speciesId = pokemon::TRAINER_CLASS_COUNT + 1;  // no such class
+  CHECK(!pokemon::validateState(state));
+  state.pendingEvents[0].speciesId = 1;
+  state.pendingEvents[0].level = 0;
+  CHECK(!pokemon::validateState(state));
+  state.pendingEvents[0].level = 12;
+  state.pendingEvents[0].isShiny = true;
+  CHECK(!pokemon::validateState(state));
+  state.pendingEvents[0].isShiny = false;
+  state.trainerMisses = 3;
+  CHECK(pokemon::validateState(state));
+  state.trainerMisses = 4;
+  CHECK(!pokemon::validateState(state));
 }
 
 void v9StateDecodesWithStarterNotRecorded() {
@@ -483,7 +539,9 @@ void crc32MatchesTheStandardVectorAcrossChunks() {
 }  // namespace
 
 int main() {
-  stateCodecUsesTheCanonicalV10Layout();
+  stateCodecUsesTheCanonicalV11Layout();
+  v10StateDecodesWithZeroedTrainerAndReceivedItems();
+  trainerEventsAndMissesAreValidated();
   v3StateDecodesWithZeroedMissCounters();
   v4StateDecodesWithZeroedPpUpCount();
   v5StateDecodesWithZeroedBattleBoostCounts();

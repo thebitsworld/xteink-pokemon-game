@@ -139,6 +139,14 @@ class PokemonService {
   ServiceStatus resolveEncounter(EncounterChoice choice, uint32_t& caughtRecordId,
                                  const std::array<uint8_t, STAT_COUNT>* battleIvs = nullptr);
   ServiceStatus acknowledgeItem();
+  // Ends the front Trainer event (PendingEventKind::Trainer) after its
+  // battle, or when the player declines it. A won battle leaves an item
+  // (grantTrainerReward()) in the bag in the same write; `rewardItemId` is
+  // that item, or 0.
+  ServiceStatus resolveTrainer(bool won, uint8_t& rewardItemId);
+  // Empties the "items received" summary once the player has seen it
+  // (NotApplicable when it was already empty).
+  ServiceStatus clearReceivedItems();
   ServiceStatus resolveEvolution(EvolutionChoice choice);
   // Resolves the front MoveLearn event (PendingEventKind::MoveLearn):
   // replaceSlot in [0, BATTLE_MOVE_SLOTS) teaches the move into that slot,
@@ -305,16 +313,22 @@ class PokemonService {
   // `battleIvs`). `shiny` selects rollShinyIvSet() (12-15
   // per stat) instead of the normal 0-15 roll.
   std::array<uint8_t, STAT_COUNT> rollWildIv(bool shiny = false);
-  // Grants battleVictoryXp(opponentLevel, isTrainerBattle) to recordId (the
+  // Grants battleVictoryXp(opponentLevel, its own level) to recordId (the
   // Pokemon active when the battle was won), capped at MAXIMUM_TOTAL_XP same
   // as reading credit, and queues any move newly available from the level(s)
   // gained - a no-op for the XP/level part (still ServiceStatus::Ok) once
   // already at level 100. Also accumulates EVs from opponentSpeciesId's
   // per-stat EV yield (BaseStats::evHp/.../evSpeed), saturating at 255 per
   // stat - this part is NOT gated by the level-100 XP cap, matching how EVs
-  // and XP are independent quantities in the real games.
-  ServiceStatus awardBattleXp(uint32_t recordId, uint8_t opponentLevel, bool isTrainerBattle,
+  // and XP are independent quantities in the real games. `evOnly` (a road
+  // trainer's Pokemon, whose XP comes once per battle via awardFixedXp())
+  // grants the EVs alone.
+  ServiceStatus awardBattleXp(uint32_t recordId, uint8_t opponentLevel, bool evOnly,
                              uint16_t opponentSpeciesId);
+  // Grants a fixed amount of XP to recordId with the same level-up handling
+  // as awardBattleXp() (moves to learn, evolution prompt, HP raised by the
+  // max-HP gain) - a beaten road trainer's ROAD_TRAINER_VICTORY_XP.
+  ServiceStatus awardFixedXp(uint32_t recordId, uint32_t xp);
 
   // A Pokemon's permanent IV/EV pair (see PokemonIvEvStoreCodec.h). Rolls a
   // fresh IV set (EV all 0) and persists it the first time this is called
@@ -388,6 +402,17 @@ class PokemonService {
   // touching the bag without duplicating all of that branching.
   UseConsumableOutcome useConsumableImpl(uint32_t recordId, uint8_t itemId, bool dryRun, ConsumableUse use);
   void healPartyOnRead(const PokemonState& state, uint16_t minutes, uint8_t previousMinuteRemainder);
+  // awardBattleXp()/awardFixedXp()'s shared tail: adds xpGained (capped at
+  // MAXIMUM_TOTAL_XP), queues moves/evolution for a level gained, commits,
+  // and raises current HP by the max-HP gain over `oldMaxHp`.
+  ServiceStatus grantXp(PokemonRecord record, uint32_t xpGained, uint16_t oldMaxHp);
+  uint16_t currentMaxHp(const PokemonRecord& record);
+  // Every TRAINER_CHECK_MINUTES of lifetime reading, one chance of meeting a
+  // road trainer (rollRoadTrainer()), levelled by the book's progress and
+  // the party's average level (trainerLevelFor()). `leader` is the in-memory
+  // leader, possibly just levelled up by this credit.
+  void maybeQueueTrainer(PokemonState& state, const PokemonRecord& leader, uint32_t lifetimeMinutesBefore,
+                         uint8_t bookProgressPercent);
   // Checks the leader's learnset for any move newly available between
   // previousLevel (exclusive) and currentLevel (inclusive): auto-fills an
   // empty move slot if there's room, or queues a MoveLearn event for the UI

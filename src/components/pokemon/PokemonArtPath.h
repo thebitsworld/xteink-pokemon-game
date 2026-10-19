@@ -14,5 +14,7 @@ const char* pokemonItemArtPath(EvolutionItem item, bool hero, char* output, size
 const char* pokemonBagItemArtPath(uint8_t itemId, char* output, size_t outputSize);
 const char* pokemonBadgeArtPath(uint8_t gymIndex, char* output, size_t outputSize);
 const char* pokemonTrainerArtPath(uint8_t gymIndex, char* output, size_t outputSize);
+// Portrait of a trainer class met while reading (trainers/classes/NN.bmp, see TrainerClass).
+const char* pokemonTrainerClassArtPath(uint8_t classId, char* output, size_t outputSize);
 
 }  // namespace pokemon
