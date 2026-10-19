@@ -604,8 +604,10 @@ void moveInfoText(const pokemon::MoveData& move, const unsigned maxPp, char* buf
 // pokemon::STRUGGLE_MOVE_ID's doc comment) never touched a real slot in
 // `actor.moves`, so indexing that array directly would read out of bounds;
 // resolve to the real Struggle move id instead in that case.
-// How long each move-animation frame stays on screen.
-constexpr unsigned long MOVE_ANIMATION_FRAME_MS = 450;
+// How long each move-animation frame stays on screen, and how many frames the
+// target blinks for after a hit (out, then back).
+constexpr unsigned long MOVE_ANIMATION_FRAME_MS = 250;
+constexpr uint8_t MOVE_ANIMATION_BLINK_FRAMES = 2;
 
 uint8_t resolvedMoveId(const pokemon::BattleCombatant& actor, const pokemon::BattleActionResult& action) {
   if (action.moveSlot >= pokemon::BATTLE_MOVE_SLOTS) return pokemon::STRUGGLE_MOVE_ID;
@@ -1455,6 +1457,7 @@ bool PokemonActivity::startMoveAnimation(const pokemon::BattleTurnResult& result
   if (animationStepCount_ == 0) return false;
   animationResult_ = result;
   snprintf(animationFinalLog_, sizeof(animationFinalLog_), "%s", battleLog_);
+  animationStep_ = 0;
   animationFrame_ = 0;
   animating_ = true;
   setMoveAnimationLog();
@@ -1464,10 +1467,16 @@ bool PokemonActivity::startMoveAnimation(const pokemon::BattleTurnResult& result
   return true;
 }
 
+uint8_t PokemonActivity::moveAnimationStepFrames(const uint8_t step) const {
+  const pokemon::MoveEffectStep& effect = animationSteps_[step].effect;
+  // A move that lands on the other side ends with the target blinking out and back.
+  return pokemon::moveEffectFrameCount(effect.effect) + (effect.onSelf ? 0 : MOVE_ANIMATION_BLINK_FRAMES);
+}
+
 // "<Pokemon> used <move>!" for the step being shown, so the full turn log
 // does not give away what happens before it is animated.
 void PokemonActivity::setMoveAnimationLog() {
-  const MoveAnimationStep& step = animationSteps_[animationFrame_ / 2];
+  const MoveAnimationStep& step = animationSteps_[animationStep_];
   const pokemon::BattleCombatant& actor = step.byPlayer ? battlePlayer_ : battleOpponent_;
   const pokemon::BattleActionResult& action = step.byPlayer ? animationResult_.player : animationResult_.opponent;
   const pokemon::MoveData* move = pokemon::moveData(resolvedMoveId(actor, action));
@@ -1478,8 +1487,12 @@ void PokemonActivity::setMoveAnimationLog() {
 void PokemonActivity::advanceMoveAnimation() {
   if (static_cast<long>(millis() - animationNextFrameMs_) < 0) return;
   ++animationFrame_;
-  if (animationFrame_ < animationStepCount_ * 2) {
-    if (animationFrame_ % 2 == 0) setMoveAnimationLog();
+  if (animationFrame_ >= moveAnimationStepFrames(animationStep_)) {
+    animationFrame_ = 0;
+    ++animationStep_;
+    if (animationStep_ < animationStepCount_) setMoveAnimationLog();
+  }
+  if (animationStep_ < animationStepCount_) {
     animationNextFrameMs_ = millis() + MOVE_ANIMATION_FRAME_MS;
     requestUpdate();
     return;
@@ -5330,34 +5343,34 @@ void PokemonActivity::renderBattleHud() {
   const char* playerNickname = playerHasRecord ? snapshot_.party[battlePartySlot_].nickname.data() : "";
   const char* playerName = playerNickname[0] == '\0' ? speciesName(battlePlayer_.speciesId) : playerNickname;
 
-  // A side's sprite, as the move animation wants it this frame: the first
-  // frame of a step shows the effect icon in place of its target, the
-  // second shakes the target sideways.
+  // A side's sprite, as the move animation wants it this frame: the effect's
+  // frames are drawn over the Pokemon they land on, then a hit target blinks
+  // (hidden for one frame, back for the next).
   const auto drawBattleSprite = [&](const bool player, const Rect bounds) {
-    const auto drawSprite = [&](const Rect at) {
+    const auto drawSprite = [&]() {
       if (player) {
-        pokemon::drawPokemonSpeciesBackArt(renderer, battlePlayer_.speciesId, at);
+        pokemon::drawPokemonSpeciesBackArt(renderer, battlePlayer_.speciesId, bounds);
       } else {
-        pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true, at);
+        pokemon::drawPokemonSpeciesArt(renderer, battleOpponent_.speciesId, true, bounds);
       }
     };
-    if (!animating_) {
-      drawSprite(bounds);
+    if (!animating_ || animationStep_ >= animationStepCount_) {
+      drawSprite();
       return;
     }
-    const MoveAnimationStep& step = animationSteps_[animationFrame_ / 2];
+    const MoveAnimationStep& step = animationSteps_[animationStep_];
     const bool targetIsPlayer = step.effect.onSelf ? step.byPlayer : !step.byPlayer;
     if (targetIsPlayer != player) {
-      drawSprite(bounds);
+      drawSprite();
       return;
     }
-    if (animationFrame_ % 2 == 0) {
-      if (step.effect.onSelf) drawSprite(bounds);
-      pokemon::drawPokemonMoveEffectArt(renderer, step.effect.effect, bounds);
+    const uint8_t effectFrames = pokemon::moveEffectFrameCount(step.effect.effect);
+    if (animationFrame_ < effectFrames) {
+      drawSprite();
+      pokemon::drawPokemonMoveEffectArt(renderer, step.effect.effect, animationFrame_, bounds);
       return;
     }
-    const int shake = step.effect.onSelf ? 0 : bounds.width / 12;
-    drawSprite(Rect{bounds.x + shake, bounds.y, bounds.width, bounds.height});
+    if ((animationFrame_ - effectFrames) % 2 == 1) drawSprite();
   };
 
   int messageY;

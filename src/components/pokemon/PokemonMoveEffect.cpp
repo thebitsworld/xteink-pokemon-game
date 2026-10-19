@@ -99,12 +99,38 @@ const char* moveEffectSlug(const MoveEffect effect) {
   return nullptr;
 }
 
-const char* pokemonMoveEffectArtPath(const MoveEffect effect, char* output, const size_t outputSize) {
+uint8_t moveEffectFrameCount(const MoveEffect effect) {
+  switch (effect) {
+    case MoveEffect::Hit:
+    case MoveEffect::Leaf:
+    case MoveEffect::Psychic:
+      return 3;
+    case MoveEffect::Ice:
+    case MoveEffect::Poison:
+    case MoveEffect::Sparkle:
+      return 4;
+    case MoveEffect::Flame:
+    case MoveEffect::Water:
+    case MoveEffect::Bolt:
+    case MoveEffect::Rock:
+    case MoveEffect::Wind:
+    case MoveEffect::Ghost:
+    case MoveEffect::Dragon:
+      return 5;
+    case MoveEffect::None:
+      break;
+  }
+  return 0;
+}
+
+const char* pokemonMoveEffectArtPath(const MoveEffect effect, const uint8_t frame, char* output,
+                                     const size_t outputSize) {
   if (output == nullptr || outputSize == 0) return nullptr;
   output[0] = '\0';
   const char* slug = moveEffectSlug(effect);
-  if (slug == nullptr) return nullptr;
-  const int written = std::snprintf(output, outputSize, "/pokemon/effects/%s.bmp", slug);
+  if (slug == nullptr || frame >= moveEffectFrameCount(effect)) return nullptr;
+  const int written =
+      std::snprintf(output, outputSize, "/pokemon/effects/%s/%02u.bmp", slug, static_cast<unsigned>(frame + 1));
   if (written < 0 || static_cast<size_t>(written) >= outputSize) {
     output[0] = '\0';
     return nullptr;

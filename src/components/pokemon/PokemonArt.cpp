@@ -3,10 +3,11 @@
 #include "PokemonArt.h"
 
 #include <Bitmap.h>
-
-#include <algorithm>
 #include <HalStorage.h>
 #include <Logging.h>
+
+#include <algorithm>
+#include <vector>
 
 #include "PokemonArtPath.h"
 #include "fontIds.h"
@@ -90,14 +91,49 @@ bool drawPokemonTrainerArt(const GfxRenderer& renderer, const uint8_t gymIndex, 
   return drawPath(renderer, pokemonTrainerArtPath(gymIndex, path, sizeof(path)), bounds, fallback);
 }
 
-bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, const MoveEffect effect, const Rect bounds) {
-  constexpr int iconWidth = 96;
-  constexpr int iconHeight = 72;
-  const int width = std::min(iconWidth, std::min(bounds.width, bounds.height * iconWidth / iconHeight));
-  const int height = width * iconHeight / iconWidth;
-  const Rect centered{bounds.x + (bounds.width - width) / 2, bounds.y + (bounds.height - height) / 2, width, height};
+bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, const MoveEffect effect, const uint8_t frame,
+                              const Rect bounds) {
+  constexpr int frameWidth = 144;
+  constexpr int frameHeight = 108;
+  const int width = std::min(frameWidth, bounds.width * 6 / 5);
+  const int height = width * frameHeight / frameWidth;
+  const int left = bounds.x + (bounds.width - width) / 2;
+  const int top = bounds.y + (bounds.height - height) / 2;
   char path[64]{};
-  return drawPath(renderer, pokemonMoveEffectArtPath(effect, path, sizeof(path)), centered, false);
+  if (pokemonMoveEffectArtPath(effect, frame, path, sizeof(path)) == nullptr) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("PKART", path, file)) {
+    LOG_ERR("PKART", "Missing Pokemon art: %s", path);
+    return false;
+  }
+  Bitmap bitmap(file);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+    LOG_ERR("PKART", "Invalid Pokemon art: %s", path);
+    file.close();
+    return false;
+  }
+  // First a white outline around every inked pixel, so the effect still
+  // reads where it lands on the (equally dithered) Pokemon sprite, then the
+  // effect itself.
+  const float scale = std::min(1.0f, std::min(static_cast<float>(width) / static_cast<float>(bitmap.getWidth()),
+                                              static_cast<float>(height) / static_cast<float>(bitmap.getHeight())));
+  const int halo = scale >= 0.75f ? 2 : 1;
+  std::vector<uint8_t> outputRow(static_cast<size_t>((bitmap.getWidth() + 3) / 4));
+  std::vector<uint8_t> rowBytes(static_cast<size_t>(bitmap.getRowBytes()));
+  for (int bmpY = 0; bmpY < bitmap.getHeight(); ++bmpY) {
+    if (bitmap.readNextRow(outputRow.data(), rowBytes.data()) != BmpReaderError::Ok) break;
+    const int sourceY = bitmap.isTopDown() ? bmpY : bitmap.getHeight() - 1 - bmpY;
+    const int screenY = top + static_cast<int>(sourceY * scale);
+    for (int bmpX = 0; bmpX < bitmap.getWidth(); ++bmpX) {
+      const uint8_t value = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
+      if (value >= 3) continue;
+      const int screenX = left + static_cast<int>(bmpX * scale);
+      renderer.fillRect(screenX - halo, screenY - halo, 2 * halo + 1, 2 * halo + 1, false);
+    }
+  }
+  const bool drawn = bitmap.rewindToData() == BmpReaderError::Ok && renderer.drawBitmap(bitmap, left, top, width, height);
+  file.close();
+  return drawn;
 }
 
 bool drawPokemonTrainerClassArt(const GfxRenderer& renderer, const uint8_t classId, const Rect bounds,

@@ -8,8 +8,9 @@
 
 namespace pokemon {
 
-// Battle move-effect icons (pokemon/effects/<slug>.bmp, drawn by
-// scripts/generate_pokemon_effect_art.py), shown over a move's target.
+// Battle move-effect animations: the frames of an original Red/Blue move
+// animation (pokemon/effects/<slug>/NN.bmp, 144x108, built by
+// scripts/generate_pokemon_effect_art.py), played over a move's target.
 enum class MoveEffect : uint8_t {
   None = 0,
   Hit,
@@ -39,7 +40,10 @@ struct MoveEffectStep {
 MoveEffectStep moveEffectFor(const BattleCombatant& actor, const BattleActionResult& action);
 
 const char* moveEffectSlug(MoveEffect effect);
-const char* pokemonMoveEffectArtPath(MoveEffect effect, char* output, size_t outputSize);
+// How many frames an effect has - EFFECTS' `frames` in the generator script.
+uint8_t moveEffectFrameCount(MoveEffect effect);
+// Path of frame `frame` (0-based) of an effect.
+const char* pokemonMoveEffectArtPath(MoveEffect effect, uint8_t frame, char* output, size_t outputSize);
 
 }  // namespace pokemon
 

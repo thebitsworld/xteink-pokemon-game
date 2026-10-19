@@ -243,6 +243,8 @@ class PokemonActivity final : public Activity {
   void finishBattlePlayerMoveTurn(const pokemon::BattleTurnResult& result);
   // Queues the turn's move-effect frames; false when nothing visible happened.
   bool startMoveAnimation(const pokemon::BattleTurnResult& result);
+  // Frames step `step` of the move animation shows.
+  uint8_t moveAnimationStepFrames(uint8_t step) const;
   void setMoveAnimationLog();
   void advanceMoveAnimation();
   // Trainer AI (gym/Elite Four only, not the Champion - see
@@ -312,16 +314,17 @@ class PokemonActivity final : public Activity {
   pokemon::BattleCombatant battlePlayer_{};
   pokemon::BattleCombatant battleOpponent_{};
   char battleLog_[160]{};
-  // Move animation (see startMoveAnimation()): each step is two frames - the
-  // effect icon in place of its target, then the target shaken - after which
-  // the turn's full log and its outcome are shown.
+  // Move animation (see startMoveAnimation()): each step plays its effect's
+  // frames over the target, then - for a move that hit - the target blinks
+  // out and back, as in Red/Blue. The turn's full log and its outcome follow.
   struct MoveAnimationStep {
     pokemon::MoveEffectStep effect{};
     bool byPlayer = false;
   };
   std::array<MoveAnimationStep, 2> animationSteps_{};
   uint8_t animationStepCount_ = 0;
-  uint8_t animationFrame_ = 0;  // step * 2 + frame within the step
+  uint8_t animationStep_ = 0;
+  uint8_t animationFrame_ = 0;  // within the current step
   bool animating_ = false;
   unsigned long animationNextFrameMs_ = 0;
   pokemon::BattleTurnResult animationResult_{};

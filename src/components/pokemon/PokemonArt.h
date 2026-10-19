@@ -19,8 +19,10 @@ bool drawPokemonItemArt(const GfxRenderer& renderer, EvolutionItem item, bool he
 bool drawPokemonBagItemArt(const GfxRenderer& renderer, uint8_t itemId, Rect bounds, bool drawFallback = true);
 bool drawPokemonBadgeArt(const GfxRenderer& renderer, uint8_t gymIndex, Rect bounds, bool drawFallback = true);
 bool drawPokemonTrainerArt(const GfxRenderer& renderer, uint8_t gymIndex, Rect bounds, bool drawFallback = true);
-// A move-effect icon (96x72), centered in `bounds` and shrunk to fit it.
-bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, MoveEffect effect, Rect bounds);
+// Frame `frame` of a move-effect animation (144x108), centred on `bounds` (a
+// battle sprite's box) and a fifth larger than it, so effects around the
+// Pokemon fit.
+bool drawPokemonMoveEffectArt(const GfxRenderer& renderer, MoveEffect effect, uint8_t frame, Rect bounds);
 bool drawPokemonTrainerClassArt(const GfxRenderer& renderer, uint8_t classId, Rect bounds,
                                 bool drawFallback = true);
 
