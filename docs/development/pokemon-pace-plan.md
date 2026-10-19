@@ -32,10 +32,39 @@ not caught yet), legendaries at 1/20 per encounter with Mewtwo only in the last 
 stone/Link Cable evolutions at one item per ~13 hours. Training evolutions instead of waiting for wild
 middle/final stages cuts the time about four times.
 
-Battle XP was checked too and stays as it is: today's formula already gets the gyms done in 10-20 hours
-of reading, and a Pokémon soloing every gym reaches level 100 only around the Elite Four. Road trainers
-must NOT scale their XP with the party's level the way the crosslingua fork does (level x 6 per member):
-that would finish the gyms in ~2 hours.
+## Battle XP and road trainers: option under consideration (not decided)
+
+Today's battle XP (`battleVictoryXp`: opponent level x 6 for gym/E4/Champion, x 4 for wild) lets one
+Pokémon solo every gym in ~6 hours of reading: from Koga on, the gyms' own XP lifts it past the next
+gym, and it reaches level 100 at Bruno. Road trainers must NOT scale their XP with the party's level the
+way the crosslingua fork does (level x 6 per member): that would finish the gyms in ~2 hours.
+
+The option the user wrote down on 2026-10-19 to think about:
+
+- Gym/E4/Champion: opponent level x 1, scaled by level difference.
+- Wild: opponent level x 1, scaled by level difference.
+- Scaling (Gen 5 style): XP x `((2*Lo + 10) / (Lo + Lp + 10))^2.5`, with `Lo` the opponent's level and
+  `Lp` the player's. 1 at the same level; e.g. a level 24 Pokémon beating a level 14 one gets x0.56,
+  a level 40 one beating a level 50 one x1.27.
+- Road trainers: 10 XP for each win (fixed, not scaled), on the wild encounter schedule (a roll every 15
+  minutes at 2/5, guaranteed after 3 misses), teams of 1-3 at the party's average level -4..+2, and a
+  win gives a random item with today's item-kind odds.
+
+Simulated (median of 100 runs, one Pokémon soloing from level 5, challenging each gym 5 levels above its
+strongest member; reading hours and the solo Pokémon's level after the fight):
+
+| Gym | Strongest | Today (x6 / x4, trainers 10 XP) | Option above |
+|---|---|---|---|
+| Brock | 14 | 3.2 h, lv 23 | 4.5 h, lv 19 |
+| Erika | 29 | 4.2 h, lv 44 | 11.5 h, lv 35 |
+| Koga | 43 | 6.0 h, lv 58 | 22.5 h, lv 49 |
+| Giovanni | 50 | 6.0 h, lv 86 | 25.3 h, lv 57 |
+| Bruno | 58 | 6.0 h, lv 100 | 30.3 h, lv 65 |
+| Champion | 65 | 6.0 h, lv 100 | 30.5 h, lv 72 |
+
+Other variants simulated: gym x2 scaled with wild x1 scaled ends at ~22 h, level 81; gym x2 scaled with
+wild x4 unscaled at ~13 h, level 81. The jump from Erika (29) to Koga (43) and the slow climb after it
+come from the gym team data: whatever the formula, Koga to the Champion tends to fall in one sitting.
 
 ## Agreed changes (all in `lib/Pokemon/PokemonGame.cpp`)
 
