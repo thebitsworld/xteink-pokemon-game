@@ -1,3 +1,9 @@
+## [1.9.1] - 2026-10-19
+
+### Fixed
+
+- Pokémon (X4 Pro): the Items received list now ends with an **OK** button, and only that button closes it, so nobody has to guess and press the physical Back or Home key.
+
 ## [1.9.0] - 2026-10-19
 
 ### Added

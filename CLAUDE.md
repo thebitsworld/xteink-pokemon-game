@@ -5,11 +5,11 @@ Notes for Claude in a later session (or on another machine). Not project documen
 needs and would otherwise rediscover the hard way. The long session-by-session narrative it used to hold
 is in git history (before 2026-10-08).
 
-## Where things stand (2026-10-19, v1.9.0)
+## Where things stand (2026-10-19, v1.9.1)
 
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
-  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.0; latest release `v1.9.0` (stable). Its
+  X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.1; latest release `v1.9.1` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
 - Pokémon pace (1.9.0, plan and simulations in docs/development/pokemon-pace-plan.md, re-run with
