@@ -46,27 +46,48 @@ The option the user wrote down on 2026-10-19 to think about:
 - Scaling (Gen 5 style): XP x `((2*Lo + 10) / (Lo + Lp + 10))^2.5`, with `Lo` the opponent's level and
   `Lp` the player's. 1 at the same level; e.g. a level 24 Pokémon beating a level 14 one gets x0.56,
   a level 40 one beating a level 50 one x1.27.
-- Road trainers: 10 XP for each win (fixed, not scaled), on the wild encounter schedule (a roll every 15
-  minutes at 2/5, guaranteed after 3 misses), teams of 1-3 at the party's average level -4..+2, and a
-  win gives a random item with today's item-kind odds.
+- Road trainers: 10 XP for each win (fixed, not scaled), at half the wild encounter rate (agreed
+  2026-10-19: a roll every 30 minutes at 2/5, guaranteed after 3 misses, ~0.92 a reading hour), teams
+  of 1-3 at the party's average level -4..+2, and a win gives a random item with today's item-kind
+  odds.
 
 Simulated (median of 100 runs, one Pokémon soloing from level 5, challenging each gym 5 levels above its
 strongest member; reading hours and the solo Pokémon's level after the fight):
 
-| Gym | Strongest | Today (x6 / x4, trainers 10 XP) | Option above |
+| Gym | Strongest | Today (x6 / x4, trainers 10 XP at the wild rate) | Option above (trainers at half rate) |
 |---|---|---|---|
-| Brock | 14 | 3.2 h, lv 23 | 4.5 h, lv 19 |
-| Erika | 29 | 4.2 h, lv 44 | 11.5 h, lv 35 |
-| Koga | 43 | 6.0 h, lv 58 | 22.5 h, lv 49 |
-| Giovanni | 50 | 6.0 h, lv 86 | 25.3 h, lv 57 |
-| Bruno | 58 | 6.0 h, lv 100 | 30.3 h, lv 65 |
-| Champion | 65 | 6.0 h, lv 100 | 30.5 h, lv 72 |
+| Brock | 14 | 3.2 h, lv 23 | 5.0 h, lv 19 |
+| Erika | 29 | 4.2 h, lv 44 | 13.0 h, lv 35 |
+| Koga | 43 | 6.0 h, lv 58 | 25.0 h, lv 49 |
+| Giovanni | 50 | 6.0 h, lv 86 | 28.5 h, lv 56 |
+| Bruno | 58 | 6.0 h, lv 100 | 34.0 h, lv 65 |
+| Champion | 65 | 6.0 h, lv 100 | 34.3 h, lv 72 |
 
 Other variants simulated: gym x2 scaled with wild x1 scaled ends at ~22 h, level 81; gym x2 scaled with
 wild x4 unscaled at ~13 h, level 81. The jump from Erika (29) to Koga (43) and the slow climb after it
 come from the gym team data: whatever the formula, Koga to the Champion tends to fall in one sitting.
 
-## Agreed changes (all in `lib/Pokemon/PokemonGame.cpp`)
+## HP between fights (agreed 2026-10-19)
+
+Measured with the real battle engine (`lib/Pokemon`, 3000 fights per level; a party of 4 at one level,
+the next member in when one faints, always the most damaging move, no switching for type, no items):
+a road trainer fight (1-3 Pokémon at -4..+2) costs 1.6-1.8 full HP bars of one Pokémon, faints 1.3-1.5
+of the party and is won 86-89% of the time; a wild fight costs 0.75 bars at level 20 but under 0.1
+from level 45 (wild levels stop at 30). PP is never short: 5-7 PP per trainer fight against ~96 PP an
+hour recovered by a party of 4 (1 PP per move every 10 minutes).
+
+HP today is 1 HP a minute for each party member (`PokemonService::healPartyOnRead`), flat, so it falls
+behind as max HP grows: with trainers at the wild rate a party of 4 would lack ~20% at level 45, ~40%
+at 60 and ~50% at 75 (medicine included, ~76 HP an hour on average).
+
+Agreed:
+- Road trainers at half the wild rate (~0.92 a reading hour, see above).
+- HP recovers `max(1 HP, 1.5% of max HP)` a minute: the same as today up to level ~35-45, and a
+  fainted Pokémon is full again after ~67 minutes of reading, about the gap between two trainers.
+  A party of 4 then recovers 2.3-2.4 times what it loses at levels 45-75 (1% would be 1.6-1.7 times,
+  but a Pokémon fainted in one trainer fight would be only ~65% back by the next one).
+
+## Agreed Pokédex changes (all in `lib/Pokemon/PokemonGame.cpp`)
 
 1. A species not caught yet weighs x3 when a wild Pokémon is picked. Early on nearly every species is
    new, so little changes; late in the game the missing ones show up far more often.
@@ -90,5 +111,5 @@ hits), so encounters are lost.
 What the user wrote down: medicine, TM/HM and stones/Link Cable go straight into the bag, like balls
 already do, and the game shows a single summary screen listing in detail everything received. The
 queue then only holds encounters, road trainers, evolutions and moves to learn: ~1.84 events an hour
-without trainers (full after ~8.7 h), ~7.6 h with at most 2 trainers waiting, ~4.3 h with no trainer
-cap.
+without trainers (full after ~8.7 h); with trainers at half the wild rate ~7.6 h with at most 2
+trainers waiting, ~5.8 h with no trainer cap.
