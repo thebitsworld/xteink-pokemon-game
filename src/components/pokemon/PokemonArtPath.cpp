@@ -102,4 +102,13 @@ const char* pokemonTrainerArtPath(const uint8_t gymIndex, char* output, const si
                     std::snprintf(output, outputSize, "/pokemon/trainers/%02u.bmp", static_cast<unsigned>(gymIndex)));
 }
 
+const char* pokemonTrainerClassArtPath(const uint8_t classId, char* output, const size_t outputSize) {
+  if (output == nullptr || outputSize == 0) return nullptr;
+  output[0] = '\0';
+  if (classId == 0 || classId > TRAINER_CLASS_COUNT) return nullptr;
+  return finishPath(output, outputSize,
+                    std::snprintf(output, outputSize, "/pokemon/trainers/classes/%02u.bmp",
+                                  static_cast<unsigned>(classId)));
+}
+
 }  // namespace pokemon

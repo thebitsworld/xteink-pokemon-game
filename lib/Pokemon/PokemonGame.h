@@ -20,9 +20,21 @@ constexpr uint8_t BALL_MISSES_BEFORE_GUARANTEE = 3;
 // processTrackDrop() in PokemonGame.cpp) but share this same threshold.
 constexpr uint8_t ITEM_TRACK_MISSES_BEFORE_GUARANTEE = 3;
 // The hourly evolution-stone/Link Cable roll (processHourlyItem()) checks
-// far less often than the other 4 tracks, so it tolerates a much longer
-// losing streak before guaranteeing a hit.
-constexpr uint8_t HOURLY_ITEM_MISSES_BEFORE_GUARANTEE = 19;
+// far less often than the other 4 tracks, so it tolerates a longer losing
+// streak before guaranteeing a hit (19 before the 2026-10 pace changes; a
+// save may still hold up to 19 misses, which just means "guaranteed").
+constexpr uint8_t HOURLY_ITEM_MISSES_BEFORE_GUARANTEE = 9;
+// Queue slots that wild encounters and road trainers leave free, so an
+// evolution or a move to learn always has room (a full queue drops them until
+// the next level-up).
+constexpr size_t PENDING_EVENT_PROMPT_RESERVE = 2;
+// Road trainers met while reading (see PokemonTrainers.h): a chance every
+// TRAINER_CHECK_MINUTES of reading, half the wild encounter rate.
+constexpr uint16_t TRAINER_CHECK_MINUTES = 30;
+constexpr uint32_t TRAINER_CHANCE_NUMERATOR = 2;
+constexpr uint32_t TRAINER_CHANCE_DENOMINATOR = 5;
+constexpr uint8_t TRAINER_MISSES_BEFORE_GUARANTEE = 3;
+constexpr size_t MAX_PENDING_TRAINERS = 2;
 
 enum class CreditStatus : uint8_t {
   Rejected = 0,
@@ -130,6 +142,24 @@ bool resolveEncounter(PokemonState& state, const PokemonRecord& leader, Encounte
 // Pokedex forever, matching every mainline game.
 bool releaseRecord(PokemonState& state, const PokemonRecord& record, RecordMutation& mutation);
 bool resolveEvolution(PokemonState& state, PokemonRecord& record, EvolutionChoice choice, RecordMutation& mutation);
+// Empties the "items received" summary (PokemonState::receivedItems) once the
+// player has seen it. False when it was already empty.
+bool clearReceivedItems(PokemonState& state);
+// Road trainers (PokemonTrainers.h) waiting in the queue.
+size_t pendingTrainerCount(const PokemonState& state);
+// One chance of meeting a road trainer (every TRAINER_CHECK_MINUTES of
+// reading): TRAINER_CHANCE_NUMERATOR in TRAINER_CHANCE_DENOMINATOR, sure after
+// TRAINER_MISSES_BEFORE_GUARANTEE misses. With MAX_PENDING_TRAINERS already
+// waiting, or no queue room outside PENDING_EVENT_PROMPT_RESERVE, nobody shows
+// up and the next chance becomes a sure one. Returns false only on RNG failure.
+bool rollRoadTrainer(PokemonState& state, const RandomSource& random, bool& meet);
+// The item a beaten road trainer leaves behind, straight into the bag (and the
+// "items received" summary): a ball, medicine, TM/HM or stone/Link Cable,
+// picked in proportion to how often each track pays out while reading, then by
+// that track's own odds. itemId is 0 when the picked track had nothing left
+// with room. Returns false only on RNG failure.
+bool grantTrainerReward(PokemonState& state, uint8_t trainerLevel, OwnedEvolutionNeeds ownedEvolutionNeeds,
+                        const RandomSource& random, uint8_t& itemId);
 // Drops the front pending event unconditionally (refreshing the dashboard notice). Used to clear a stale
 // prompt whose record no longer exists, so it can't block the rest of the queue.
 bool discardFrontPendingEvent(PokemonState& state);

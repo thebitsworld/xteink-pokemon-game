@@ -29,6 +29,11 @@ constexpr uint32_t BALL_CHANCE_NUMERATOR = 3;
 constexpr uint32_t BALL_CHANCE_DENOMINATOR = 5;
 constexpr uint32_t ITEM_TRACK_CHANCE_NUMERATOR = 2;
 constexpr uint32_t ITEM_TRACK_CHANCE_DENOMINATOR = 5;
+// One wild encounter in LEGENDARY_CHANCE_DENOMINATOR is a legendary once one is
+// eligible (chooseLegendary()); the hourly stone/Link Cable roll hits 1 in
+// HOURLY_ITEM_CHANCE_DENOMINATOR (pity: HOURLY_ITEM_MISSES_BEFORE_GUARANTEE).
+constexpr uint32_t LEGENDARY_CHANCE_DENOMINATOR = 10;
+constexpr uint32_t HOURLY_ITEM_CHANCE_DENOMINATOR = 10;
 
 bool randomBelow(const RandomSource& random, const uint32_t upperExclusive, uint32_t& output) {
   if (random.below == nullptr || upperExclusive == 0) return false;
@@ -81,12 +86,23 @@ uint8_t encounterWeight(const SpeciesData& species) {
   return 1;
 }
 
-bool chooseRegularSpecies(const uint8_t bookProgressPercent, const RandomSource& random, uint16_t& speciesId) {
+// A species the player has not caught yet weighs UNCAUGHT_WEIGHT_MULTIPLIER
+// times its usual encounterWeight(), so the last missing Pokedex entries do not
+// take years of reading to show up (docs/development/pokemon-pace-plan.md).
+constexpr uint8_t UNCAUGHT_WEIGHT_MULTIPLIER = 3;
+
+uint32_t regularEncounterWeight(const PokemonState& state, const SpeciesData& species) {
+  const uint32_t weight = encounterWeight(species);
+  return isSpeciesMarked(state.caughtSpecies, species.speciesId) ? weight : weight * UNCAUGHT_WEIGHT_MULTIPLIER;
+}
+
+bool chooseRegularSpecies(const PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random,
+                          uint16_t& speciesId) {
   uint32_t totalWeight = 0;
   for (uint16_t candidateId = 1; candidateId <= KANTO_SPECIES_COUNT; ++candidateId) {
     const SpeciesData* candidate = speciesData(candidateId);
     if (candidate != nullptr && regularEncounterEligible(*candidate, bookProgressPercent)) {
-      totalWeight += encounterWeight(*candidate);
+      totalWeight += regularEncounterWeight(state, *candidate);
     }
   }
 
@@ -95,7 +111,7 @@ bool chooseRegularSpecies(const uint8_t bookProgressPercent, const RandomSource&
   for (uint16_t candidateId = 1; candidateId <= KANTO_SPECIES_COUNT; ++candidateId) {
     const SpeciesData* candidate = speciesData(candidateId);
     if (candidate == nullptr || !regularEncounterEligible(*candidate, bookProgressPercent)) continue;
-    const uint8_t weight = encounterWeight(*candidate);
+    const uint32_t weight = regularEncounterWeight(state, *candidate);
     if (selectedWeight < weight) {
       speciesId = candidateId;
       return true;
@@ -153,13 +169,30 @@ DashboardNotice noticeForEvent(const PendingEvent* event) {
       // Reuses the same notice as Evolution for now; a dedicated icon is a
       // Stage 7 (UI) concern, not a storage-layer one.
       return DashboardNotice::WhatsThis;
+    case PendingEventKind::Trainer:
+      // Same "!" as a wild Pokemon: someone wants to battle.
+      return DashboardNotice::NewPokemon;
     case PendingEventKind::None:
       return DashboardNotice::None;
   }
   return DashboardNotice::None;
 }
 
-void refreshDashboardNotice(PokemonState& state) { state.dashboardNotice = noticeForEvent(pendingEventFront(state)); }
+bool hasReceivedItems(const PokemonState& state) {
+  for (const uint8_t count : state.receivedItems) {
+    if (count != 0) return true;
+  }
+  return false;
+}
+
+// The front pending event's notice; with the queue empty, ItemFound while the
+// "items received" summary has something to show.
+void refreshDashboardNotice(PokemonState& state) {
+  const PendingEvent* front = pendingEventFront(state);
+  state.dashboardNotice = front != nullptr      ? noticeForEvent(front)
+                          : hasReceivedItems(state) ? DashboardNotice::ItemFound
+                                                    : DashboardNotice::None;
+}
 
 bool popPendingEvent(PokemonState& state) {
   if (!dequeuePendingEvent(state)) return false;
@@ -253,7 +286,7 @@ bool chooseLegendary(const PokemonState& state, const uint8_t bookProgressPercen
     eligible[eligibleCount++] = 145;
     eligible[eligibleCount++] = 146;
   }
-  if (state.lifetimeMinutes >= 3000U && bookProgressPercent >= 95U) eligible[eligibleCount++] = 150;
+  if (state.lifetimeMinutes >= 3000U && bookProgressPercent >= 90U) eligible[eligibleCount++] = 150;
   if (eligibleCount == 0) return false;
 
   std::array<uint16_t, 4> uncaught{};
@@ -273,12 +306,12 @@ bool createEncounter(PokemonState& state, const uint8_t bookProgressPercent, con
   if (mewIsReady(state)) return finalizeEncounter(state, 151, bookProgressPercent, random);
 
   uint32_t legendaryRoll = 0;
-  if (!randomBelow(random, 20, legendaryRoll)) return false;
+  if (!randomBelow(random, LEGENDARY_CHANCE_DENOMINATOR, legendaryRoll)) return false;
   uint16_t speciesId = 0;
   if (legendaryRoll == 0 && chooseLegendary(state, bookProgressPercent, random, speciesId)) {
     return finalizeEncounter(state, speciesId, bookProgressPercent, random);
   }
-  if (!chooseRegularSpecies(bookProgressPercent, random, speciesId)) return false;
+  if (!chooseRegularSpecies(state, bookProgressPercent, random, speciesId)) return false;
   return finalizeEncounter(state, speciesId, bookProgressPercent, random);
 }
 
@@ -306,6 +339,14 @@ void incrementItemCount(PokemonState& state, const uint8_t itemId) {
   } else {
     ++state.bagCounts[itemId - EVOLUTION_ITEM_COUNT - 1U];
   }
+}
+
+// Puts one item straight into the bag and lists it on the "items received"
+// summary (PokemonState::receivedItems). Items no longer queue a PendingEvent.
+void creditItem(PokemonState& state, const uint8_t itemId) {
+  incrementItemCount(state, itemId);
+  incrementCapped(state.receivedItems[itemId - 1U], UINT8_MAX);
+  refreshDashboardNotice(state);
 }
 
 bool isStoneCategory(const ItemCategory category) { return category == ItemCategory::Stone; }
@@ -398,7 +439,7 @@ bool pickWeightedItem(std::span<const uint8_t> candidateItemIds, std::span<const
 }
 
 bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNeeds, const RandomSource& random,
-                bool& created) {
+                bool& created, uint8_t* createdItemId = nullptr) {
   created = false;
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
@@ -423,12 +464,9 @@ bool createItem(PokemonState& state, const OwnedEvolutionNeeds ownedEvolutionNee
     return false;
   }
 
-  incrementItemCount(state, selectedItemId);
-  const PendingEvent event{
-      0, 0, 0, Gender::Unknown, static_cast<EvolutionItem>(selectedItemId), PendingEventKind::Item};
-  if (!enqueuePendingEvent(state, event)) return false;
-  refreshDashboardNotice(state);
+  creditItem(state, selectedItemId);
   created = true;
+  if (createdItemId != nullptr) *createdItemId = selectedItemId;
   return true;
 }
 
@@ -469,14 +507,9 @@ bool ballKindDroppable(const PokemonState& state, const uint8_t itemId, const ui
 // they matter most. They land straight in the bag the way buying a stack at a
 // Mart would, and the player reads the count in Bag > Balls or on the throw
 // screen.
-bool grantBall(PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random) {
-  bool triggered = false;
-  if (!rollPityGate(random, state.ballMisses, BALL_MISSES_BEFORE_GUARANTEE, BALL_CHANCE_NUMERATOR,
-                    BALL_CHANCE_DENOMINATOR, triggered)) {
-    return false;
-  }
-  if (!triggered) return true;
-
+// Credits one ball droppable at `bookProgressPercent` (itemId 0 when none is).
+bool dropBall(PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random, uint8_t& itemId) {
+  itemId = 0;
   std::array<uint8_t, BALL_KIND_COUNT> candidateItemIds{};
   std::array<uint32_t, BALL_KIND_COUNT> candidateWeights{};
   size_t candidateCount = 0;
@@ -498,27 +531,29 @@ bool grantBall(PokemonState& state, const uint8_t bookProgressPercent, const Ran
                         std::span{candidateWeights}.first(candidateCount), totalWeight, random, selectedItemId)) {
     return false;
   }
-  incrementItemCount(state, selectedItemId);
+  creditItem(state, selectedItemId);
+  itemId = selectedItemId;
   return true;
+}
+
+bool grantBall(PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random) {
+  bool triggered = false;
+  if (!rollPityGate(random, state.ballMisses, BALL_MISSES_BEFORE_GUARANTEE, BALL_CHANCE_NUMERATOR,
+                    BALL_CHANCE_DENOMINATOR, triggered)) {
+    return false;
+  }
+  if (!triggered) return true;
+  uint8_t itemId = 0;
+  return dropBall(state, bookProgressPercent, random, itemId);
 }
 
 // Medicine and TM/HM each get their own 15-minute-cadence pity roll rather
 // than competing for one shared slot, so tuning either leaves the other (and
 // the stone track, and the ball track) untouched.
-bool processTrackDrop(PokemonState& state, uint8_t& misses, bool (*categoryMatches)(ItemCategory),
-                      uint32_t (*weightOverride)(const ItemData&), const RandomSource& random,
-                      PendingEventKind& generatedEvent) {
-  if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) {
-    misses = ITEM_TRACK_MISSES_BEFORE_GUARANTEE;
-    return true;
-  }
-  bool triggered = false;
-  if (!rollPityGate(random, misses, ITEM_TRACK_MISSES_BEFORE_GUARANTEE, ITEM_TRACK_CHANCE_NUMERATOR,
-                    ITEM_TRACK_CHANCE_DENOMINATOR, triggered)) {
-    return false;
-  }
-  if (!triggered) return true;
-
+// Credits one item of the track's categories (itemId 0 when none has room).
+bool dropTrackItem(PokemonState& state, bool (*categoryMatches)(ItemCategory),
+                   uint32_t (*weightOverride)(const ItemData&), const RandomSource& random, uint8_t& itemId) {
+  itemId = 0;
   std::array<uint8_t, ITEM_COUNT> candidateItemIds{};
   std::array<uint32_t, ITEM_COUNT> candidateWeights{};
   size_t candidateCount = 0;
@@ -532,18 +567,29 @@ bool processTrackDrop(PokemonState& state, uint8_t& misses, bool (*categoryMatch
     return false;
   }
 
-  incrementItemCount(state, selectedItemId);
-  const PendingEvent event{
-      0, 0, 0, Gender::Unknown, static_cast<EvolutionItem>(selectedItemId), PendingEventKind::Item};
-  if (!enqueuePendingEvent(state, event)) return false;
-  refreshDashboardNotice(state);
-  generatedEvent = PendingEventKind::Item;
+  creditItem(state, selectedItemId);
+  itemId = selectedItemId;
+  return true;
+}
+
+bool processTrackDrop(PokemonState& state, uint8_t& misses, bool (*categoryMatches)(ItemCategory),
+                      uint32_t (*weightOverride)(const ItemData&), const RandomSource& random,
+                      PendingEventKind& generatedEvent) {
+  bool triggered = false;
+  if (!rollPityGate(random, misses, ITEM_TRACK_MISSES_BEFORE_GUARANTEE, ITEM_TRACK_CHANCE_NUMERATOR,
+                    ITEM_TRACK_CHANCE_DENOMINATOR, triggered)) {
+    return false;
+  }
+  if (!triggered) return true;
+  uint8_t itemId = 0;
+  if (!dropTrackItem(state, categoryMatches, weightOverride, random, itemId)) return false;
+  if (itemId != 0) generatedEvent = PendingEventKind::Item;
   return true;
 }
 
 bool processEncounterCheck(PokemonState& state, const uint8_t bookProgressPercent, const RandomSource& random,
                            PendingEventKind& generatedEvent) {
-  if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) {
+  if (pendingEventCount(state) >= PENDING_EVENT_CAPACITY - PENDING_EVENT_PROMPT_RESERVE) {
     state.encounterMisses = ENCOUNTER_MISSES_BEFORE_GUARANTEE;
     return true;
   }
@@ -560,12 +606,11 @@ bool processEncounterCheck(PokemonState& state, const uint8_t bookProgressPercen
 
 bool processHourlyItem(PokemonState& state, const RandomSource& random, const OwnedEvolutionNeeds ownedEvolutionNeeds,
                        PendingEventKind& generatedEvent) {
-  if (pendingEventCount(state) == PENDING_EVENT_CAPACITY) {
-    state.itemMisses = HOURLY_ITEM_MISSES_BEFORE_GUARANTEE;
-    return true;
-  }
   bool triggered = false;
-  if (!rollPityGate(random, state.itemMisses, HOURLY_ITEM_MISSES_BEFORE_GUARANTEE, 1, 20, triggered)) return false;
+  if (!rollPityGate(random, state.itemMisses, HOURLY_ITEM_MISSES_BEFORE_GUARANTEE, 1, HOURLY_ITEM_CHANCE_DENOMINATOR,
+                    triggered)) {
+    return false;
+  }
   if (!triggered) return true;
   bool itemCreated = false;
   if (!createItem(state, ownedEvolutionNeeds, random, itemCreated)) return false;
@@ -909,6 +954,60 @@ bool chooseGenderForSpecies(const uint16_t speciesId, const RandomSource& random
   const SpeciesData* species = speciesData(speciesId);
   if (species == nullptr) return false;
   return chooseGender(*species, random, gender);
+}
+
+bool clearReceivedItems(PokemonState& state) {
+  if (!hasReceivedItems(state)) return false;
+  state.receivedItems = {};
+  refreshDashboardNotice(state);
+  return true;
+}
+
+size_t pendingTrainerCount(const PokemonState& state) {
+  size_t trainers = 0;
+  for (const PendingEvent& event : state.pendingEvents) {
+    if (event.kind == PendingEventKind::Trainer) ++trainers;
+  }
+  return trainers;
+}
+
+bool rollRoadTrainer(PokemonState& state, const RandomSource& random, bool& meet) {
+  meet = false;
+  if (pendingTrainerCount(state) >= MAX_PENDING_TRAINERS ||
+      pendingEventCount(state) >= PENDING_EVENT_CAPACITY - PENDING_EVENT_PROMPT_RESERVE) {
+    // No room: the next chance once there is room is a sure one, like a full
+    // queue does to the encounter roll.
+    state.trainerMisses = TRAINER_MISSES_BEFORE_GUARANTEE;
+    return true;
+  }
+  return rollPityGate(random, state.trainerMisses, TRAINER_MISSES_BEFORE_GUARANTEE, TRAINER_CHANCE_NUMERATOR,
+                      TRAINER_CHANCE_DENOMINATOR, meet);
+}
+
+bool grantTrainerReward(PokemonState& state, const uint8_t trainerLevel, const OwnedEvolutionNeeds ownedEvolutionNeeds,
+                        const RandomSource& random, uint8_t& itemId) {
+  itemId = 0;
+  // The four drop tracks weighted by how often each pays out while reading:
+  // balls ~2.46 an hour, medicine and TM/HM ~1.84 each, stones ~0.15.
+  constexpr uint32_t BALL_WEIGHT = 246;
+  constexpr uint32_t MEDICINE_WEIGHT = 184;
+  constexpr uint32_t MACHINE_WEIGHT = 184;
+  constexpr uint32_t STONE_WEIGHT = 15;
+  uint32_t roll = 0;
+  if (!randomBelow(random, BALL_WEIGHT + MEDICINE_WEIGHT + MACHINE_WEIGHT + STONE_WEIGHT, roll)) return false;
+  if (roll < BALL_WEIGHT) {
+    // Better balls from stronger trainers, never a Master Ball.
+    const uint8_t ballProgress = trainerLevel >= 40 ? 75 : trainerLevel >= 20 ? 50 : 0;
+    if (!dropBall(state, ballProgress, random, itemId)) return false;
+  } else if (roll < BALL_WEIGHT + MEDICINE_WEIGHT) {
+    if (!dropTrackItem(state, isMedicineCategory, medicineItemWeight, random, itemId)) return false;
+  } else if (roll < BALL_WEIGHT + MEDICINE_WEIGHT + MACHINE_WEIGHT) {
+    if (!dropTrackItem(state, isMachineCategory, nullptr, random, itemId)) return false;
+  } else {
+    bool created = false;
+    if (!createItem(state, ownedEvolutionNeeds, random, created, &itemId)) return false;
+  }
+  return true;
 }
 
 }  // namespace pokemon

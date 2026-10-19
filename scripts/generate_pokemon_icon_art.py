@@ -27,6 +27,16 @@ TRAINER_SLUGS = (
     "lorelei", "bruno", "agatha", "lance", "blue",
 )
 
+# The 12 trainer classes met while reading, in TrainerClass order
+# (lib/Pokemon/PokemonTrainers.h). Filenames match the pret/pokered
+# disassembly's gfx/trainers/<slug>.png (56x56 Red/Blue sprites).
+TRAINER_CLASS_SLUGS = (
+    "youngster", "bugcatcher", "lass", "hiker", "swimmer", "supernerd",
+    "birdkeeper", "psychic", "channeler", "blackbelt", "fisher", "beauty",
+)
+# Twice the original 56x56, so every source pixel stays a crisp 2x2 block.
+TRAINER_CLASS_SIZE = (112, 112)
+
 # Ids 7-83: every non-evolution bag item (Ball/Medicine/StatusCure/Candy/
 # PPRestore/Machine) - see scripts/data/pokemon-items.csv. Evolution items
 # (ids 1-6) keep using the separate --item-source/ITEMS pipeline above,
@@ -105,6 +115,14 @@ def trainer_source(root: Path, gym_index: int) -> Path:
     candidate = root / f"{slug}.png"
     if not candidate.is_file():
         raise ValueError(f"missing trainer portrait {gym_index} ({slug}.png)")
+    return candidate
+
+
+def trainer_class_source(root: Path, class_id: int) -> Path:
+    slug = TRAINER_CLASS_SLUGS[class_id - 1]
+    candidate = root / f"{slug}.png"
+    if not candidate.is_file():
+        raise ValueError(f"missing trainer class portrait {class_id} ({slug}.png)")
     return candidate
 
 
@@ -200,6 +218,16 @@ def build_trainers(trainer_source_root: Path, output: Path, trainer_count: int =
         )
 
 
+def build_trainer_classes(trainer_class_source_root: Path, output: Path) -> None:
+    for class_id in range(1, len(TRAINER_CLASS_SLUGS) + 1):
+        save_bmp(
+            trainer_class_source(trainer_class_source_root, class_id),
+            output / "trainers/classes" / f"{class_id:02}.bmp",
+            TRAINER_CLASS_SIZE,
+            allow_upscale=True,
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -240,6 +268,13 @@ def main() -> None:
         "expected <slug>.png filenames, matching pokemondb.net's Red/Blue trainer page) - optional, "
         "skips trainer portrait generation if omitted",
     )
+    parser.add_argument(
+        "--trainer-class-source",
+        type=Path,
+        help="Local folder containing the 12 trainer class sprites met while reading (see "
+        "TRAINER_CLASS_SLUGS for the expected <slug>.png filenames, matching pret/pokered's "
+        "gfx/trainers/) - optional, skips trainer class portrait generation if omitted",
+    )
     args = parser.parse_args()
     output = args.output.resolve()
     build_icons(args.pokemon_source.resolve(), args.item_source.resolve(), output)
@@ -251,6 +286,8 @@ def main() -> None:
         build_badges(args.badge_source.resolve(), output)
     if args.trainer_source is not None:
         build_trainers(args.trainer_source.resolve(), output)
+    if args.trainer_class_source is not None:
+        build_trainer_classes(args.trainer_class_source.resolve(), output)
     print(f"Generated species and item artwork in {output}")
 
 

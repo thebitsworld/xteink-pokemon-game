@@ -58,6 +58,37 @@ const char* settingsActionLabel(const int index) {
   return index == 1 ? tr(STR_POKEMON_SEND_SAVE) : index == 2 ? tr(STR_POKEMON_RECEIVE_SAVE) : tr(STR_POKEMON_RESET);
 }
 
+// A trainer class's name (trainers met while reading), translated.
+const char* trainerClassName(const uint8_t classId) {
+  switch (static_cast<pokemon::TrainerClass>(classId)) {
+    case pokemon::TrainerClass::Youngster:
+      return tr(STR_POKEMON_TRAINER_YOUNGSTER);
+    case pokemon::TrainerClass::BugCatcher:
+      return tr(STR_POKEMON_TRAINER_BUG_CATCHER);
+    case pokemon::TrainerClass::Lass:
+      return tr(STR_POKEMON_TRAINER_LASS);
+    case pokemon::TrainerClass::Hiker:
+      return tr(STR_POKEMON_TRAINER_HIKER);
+    case pokemon::TrainerClass::Swimmer:
+      return tr(STR_POKEMON_TRAINER_SWIMMER);
+    case pokemon::TrainerClass::SuperNerd:
+      return tr(STR_POKEMON_TRAINER_SUPER_NERD);
+    case pokemon::TrainerClass::BirdKeeper:
+      return tr(STR_POKEMON_TRAINER_BIRD_KEEPER);
+    case pokemon::TrainerClass::Psychic:
+      return tr(STR_POKEMON_TRAINER_PSYCHIC);
+    case pokemon::TrainerClass::Channeler:
+      return tr(STR_POKEMON_TRAINER_CHANNELER);
+    case pokemon::TrainerClass::Blackbelt:
+      return tr(STR_POKEMON_TRAINER_BLACKBELT);
+    case pokemon::TrainerClass::Fisherman:
+      return tr(STR_POKEMON_TRAINER_FISHERMAN);
+    case pokemon::TrainerClass::Beauty:
+      return tr(STR_POKEMON_TRAINER_BEAUTY);
+  }
+  return "?";
+}
+
 const char* speciesName(const uint16_t id) {
   const pokemon::SpeciesData* species = pokemon::speciesData(id);
   return species == nullptr ? "???" : species->name;
@@ -767,9 +798,23 @@ void PokemonActivity::loadInitialScreen() {
     setScreen(Screen::Starter);
   } else if (status != pokemon::ServiceStatus::Ok) {
     showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
-  } else {
+  } else if (!showReceivedItems()) {
     setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
   }
+}
+
+bool PokemonActivity::showReceivedItems() {
+  bool any = false;
+  for (const uint8_t count : snapshot_.state.receivedItems) any = any || count != 0;
+  if (!any) return false;
+  const auto received = snapshot_.state.receivedItems;
+  // Cleared as it is shown: the list lives on in receivedSummary_ until the
+  // player dismisses the screen.
+  if (service_.clearReceivedItems() != pokemon::ServiceStatus::Ok || !refreshSnapshot()) return false;
+  showMessage("", pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+  receivedSummary_ = received;
+  showingReceived_ = true;
+  return true;
 }
 
 bool PokemonActivity::refreshSnapshot() {
@@ -1162,6 +1207,7 @@ pokemon::PokemonRecord PokemonActivity::selectedRecord() const {
 }
 
 void PokemonActivity::showMessage(const char* message, const Screen returnScreen) {
+  showingReceived_ = false;
   snprintf(message_, sizeof(message_), "%s", message == nullptr ? "" : message);
   returnScreen_ = returnScreen;
   setScreen(Screen::Message);
@@ -1292,8 +1338,7 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
       battleOpponent_.bideTurnsRemaining > 0 || battleOpponent_.mustRecharge) {
     return false;
   }
-  const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
-  const char* leaderName = gym == nullptr ? "?" : gym->leaderName;
+  const char* leaderName = challengeTrainerName();
 
   // Heal: fully restore (HP and status) a Pokemon that is low, or that the
   // player's best attack would knock out next turn - a simplified stand-in
@@ -1323,7 +1368,7 @@ bool PokemonActivity::trainerAiShouldActInsteadOfMoveThisTurn(char* const buffer
   // rules: stat stages and confusion reset on a switch, bad poison becomes
   // regular poison).
   if (gymChallengeIndex_ == pokemon::CHAMPION_GYM_INDEX) return false;
-  const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+  const auto team = challengeTeam();
   if (gymChallengeTeamProgress_ + 1U >= team.size()) return false;
   const pokemon::SpeciesData* playerSpecies = pokemon::speciesData(battlePlayer_.speciesId);
   const pokemon::SpeciesData* currentSpecies = pokemon::speciesData(battleOpponent_.speciesId);
@@ -1409,7 +1454,7 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
   } else if (result.player.event == pokemon::BattleLogEvent::ForcedSwitch) {
     // The player's own Whirlwind/Roar connected.
     if (gymChallengeIndex_ != 0) {
-      const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+      const auto team = challengeTeam();
       if (gymChallengeTeamProgress_ + 1 < team.size()) {
         advanceGymOpponentOrFinish();
       } else {
@@ -1626,7 +1671,11 @@ void PokemonActivity::setupGymOpponent(const uint8_t teamIndex, const pokemon::G
                       /*isShiny=*/false, preserveSideEffects);
   // Gyms 1-3 make the most mistakes, gyms 4-8 fewer, the Elite Four and the
   // Champion almost none - see BattleCombatant::aiSkill.
-  battleOpponent_.aiSkill = gymChallengeIndex_ <= 3 ? 1 : gymChallengeIndex_ <= 8 ? 2 : 3;
+  // Trainers met while reading make as many mistakes as the first gyms.
+  battleOpponent_.aiSkill = gymChallengeIndex_ == ROAD_TRAINER_INDEX ? 1
+                            : gymChallengeIndex_ <= 3                ? 1
+                            : gymChallengeIndex_ <= 8                ? 2
+                                                                     : 3;
   if (teamIndex >= gymBench_.size() || !gymBench_[teamIndex].saved) return;
   const GymBenchState& bench = gymBench_[teamIndex];
   battleOpponent_.currentHp = std::min(bench.currentHp, battleOpponent_.maxHp);
@@ -1634,6 +1683,74 @@ void PokemonActivity::setupGymOpponent(const uint8_t teamIndex, const pokemon::G
   battleOpponent_.statusTurns = bench.statusTurns;
   for (size_t i = 0; i < pokemon::BATTLE_MOVE_SLOTS; ++i) battleOpponent_.moves[i].currentPp = bench.pp[i];
   gymBench_[teamIndex] = {};
+}
+
+std::span<const pokemon::GymTeamMember> PokemonActivity::challengeTeam() const {
+  if (gymChallengeIndex_ == ROAD_TRAINER_INDEX) return {roadTeam_.members.data(), roadTeam_.count};
+  return pokemon::gymTeamFor(gymChallengeIndex_);
+}
+
+const char* PokemonActivity::challengeTrainerName() const {
+  if (gymChallengeIndex_ == ROAD_TRAINER_INDEX) return trainerClassName(roadTrainerClass_);
+  const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
+  return gym == nullptr ? "?" : gym->leaderName;
+}
+
+bool PokemonActivity::enterTrainerBattle(const pokemon::PendingEvent& pending) {
+  pokemon::TrainerTeam team;
+  if (!pokemon::buildTrainerTeam(pending.speciesId, pending.level, pending.recordId, team)) return false;
+  const int slot = firstUsablePartySlot();
+  if (slot < 0 || !setupBattlePlayer(slot)) return false;
+  roadTeam_ = team;
+  roadTrainerClass_ = static_cast<uint8_t>(pending.speciesId);
+  gymChallengeIndex_ = ROAD_TRAINER_INDEX;
+  gymChallengeTeamProgress_ = 0;
+  for (size_t i = 0; i < pokemon::MAX_GYM_TEAM_SIZE; ++i) gymTeamOrder_[i] = static_cast<uint8_t>(i);
+  gymBench_ = {};
+  setupGymOpponent(0, roadTeam_.members[0], /*preserveSideEffects=*/false);
+  // Road trainers carry no healing items.
+  opponentHealChargesRemaining_ = 0;
+  forcedBattleSwitch_ = false;
+  battleRunAttempts_ = 0;
+  char sentOut[96];
+  snprintf(sentOut, sizeof(sentOut), tr(STR_POKEMON_SENT_OUT), challengeTrainerName(),
+           speciesName(battleOpponent_.speciesId));
+  char go[64];
+  snprintf(go, sizeof(go), tr(STR_POKEMON_GO), speciesName(battlePlayer_.speciesId));
+  snprintf(battleLog_, sizeof(battleLog_), "%s\n%s", sentOut, go);
+  setScreen(Screen::Battle);
+  return true;
+}
+
+void PokemonActivity::finishTrainerBattle(const bool won, const bool playerAlsoFainted) {
+  const char* trainerName = trainerClassName(roadTrainerClass_);
+  gymChallengeIndex_ = 0;
+  gymChallengeTeamProgress_ = 0;
+  // A road trainer's XP comes once per battle, to the Pokemon that finished
+  // it (its Pokemon only gave EVs - see finishBattleAfterWildFainted()).
+  if (won && battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
+    service_.awardFixedXp(snapshot_.party[battlePartySlot_].recordId, pokemon::ROAD_TRAINER_VICTORY_XP);
+  }
+  uint8_t reward = 0;
+  if (service_.resolveTrainer(won, reward) != pokemon::ServiceStatus::Ok) {
+    showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
+    return;
+  }
+  if (!refreshSnapshot()) return;
+  char line[192];
+  int length = won ? snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_DEFEATED), trainerName)
+                   : snprintf(line, sizeof(line), "%s", tr(STR_POKEMON_GYM_CHALLENGE_LOST));
+  if (won && playerAlsoFainted && length > 0 && static_cast<size_t>(length) < sizeof(line)) {
+    length += snprintf(line + length, sizeof(line) - length, "\n");
+    length += snprintf(line + length, sizeof(line) - length, tr(STR_POKEMON_YOUR_POKEMON_FAINTED),
+                       speciesName(battlePlayer_.speciesId));
+  }
+  if (reward != 0 && length > 0 && static_cast<size_t>(length) < sizeof(line)) {
+    length += snprintf(line + length, sizeof(line) - length, "\n");
+    snprintf(line + length, sizeof(line) - length, tr(STR_POKEMON_TRAINER_LEFT_ITEM), trainerName,
+             itemName(static_cast<pokemon::EvolutionItem>(reward)));
+  }
+  showMessage(line, pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
 }
 
 bool PokemonActivity::enterGymBattle(const uint8_t gymIndex) {
@@ -1747,6 +1864,12 @@ void PokemonActivity::savePlayerBattleEntry() {
 
 void PokemonActivity::resolveBattleAsPass() {
   savePlayerBattleEntry();
+  if (gymChallengeIndex_ == ROAD_TRAINER_INDEX) {
+    // Walking away from a trainer met while reading counts as a loss: the
+    // trainer leaves, with nothing gained or lost.
+    finishTrainerBattle(/*won=*/false, /*playerAlsoFainted=*/false);
+    return;
+  }
   if (gymChallengeIndex_ != 0) {
     // Forfeiting a gym challenge (RUN, or hardware Back) costs nothing and
     // records nothing - unlike a wild encounter there is no PendingEvent to
@@ -1887,8 +2010,10 @@ void PokemonActivity::finishBattleAfterWildFainted() {
   // battlePartySlot_ - both branches (wild faint and one gym opponent down)
   // reach here with the just-defeated opponent's level still valid.
   if (battlePartySlot_ >= 0 && battlePartySlot_ < snapshot_.partyCount) {
+    // A road trainer's Pokemon gives EVs only: its XP comes once, at the end
+    // of the battle (finishTrainerBattle()).
     service_.awardBattleXp(snapshot_.party[battlePartySlot_].recordId, battleOpponent_.level,
-                           gymChallengeIndex_ != 0, battleOpponent_.realSpeciesId());
+                           /*evOnly=*/gymChallengeIndex_ == ROAD_TRAINER_INDEX, battleOpponent_.realSpeciesId());
     // A gym fight goes on with the same live combatant; without this it keeps
     // its pre-XP level/max HP/EVs, and the next savePlayerBattleEntry() rebuilds
     // the persisted entry from its stale moveset, silently undoing a move it
@@ -1941,7 +2066,7 @@ void PokemonActivity::finishBattleAfterPlayerFainted() {
 }
 
 void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
-  const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+  const auto team = challengeTeam();
   ++gymChallengeTeamProgress_;
   if (gymChallengeTeamProgress_ < team.size()) {
     // gymTeamOrder_ is identity for every trainer except when the AI has
@@ -1970,8 +2095,7 @@ void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
     // Screen/Mist must survive this (see setupBattleOpponent()'s
     // preserveSideEffects doc comment).
     setupGymOpponent(gymTeamOrder_[gymChallengeTeamProgress_], next, /*preserveSideEffects=*/true);
-    const pokemon::GymData* gym = pokemon::gymData(gymChallengeIndex_);
-    snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), gym == nullptr ? "?" : gym->leaderName,
+    snprintf(battleLog_, sizeof(battleLog_), tr(STR_POKEMON_SENT_OUT), challengeTrainerName(),
              speciesName(battleOpponent_.speciesId));
     if (playerAlsoFainted) {
       // The player's own Pokemon can't face the next opponent as-is - force
@@ -1993,6 +2117,10 @@ void PokemonActivity::advanceGymOpponentOrFinish(const bool playerAlsoFainted) {
 }
 
 void PokemonActivity::finishGymChallenge(const bool won, const bool playerAlsoFainted) {
+  if (gymChallengeIndex_ == ROAD_TRAINER_INDEX) {
+    finishTrainerBattle(won, playerAlsoFainted);
+    return;
+  }
   const uint8_t gymIndex = gymChallengeIndex_;
   gymChallengeIndex_ = 0;
   gymChallengeTeamProgress_ = 0;
@@ -2508,6 +2636,23 @@ void PokemonActivity::activate() {
           if (!refreshSnapshot()) return;
           setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
         }
+      } else if (pending.kind == pokemon::PendingEventKind::Trainer) {
+        if (selected_ == 0) {
+          if (firstUsablePartySlot() < 0) {
+            showMessage(tr(STR_POKEMON_NO_USABLE_POKEMON), Screen::Event);
+          } else if (!enterTrainerBattle(pending)) {
+            showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
+          }
+          return;
+        }
+        // Declined: the trainer walks away, no reward.
+        uint8_t reward = 0;
+        if (service_.resolveTrainer(/*won=*/false, reward) != pokemon::ServiceStatus::Ok) {
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
+          return;
+        }
+        if (!refreshSnapshot()) return;
+        setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
       } else if (pending.kind == pokemon::PendingEventKind::MoveLearn) {
         // selected_ < BATTLE_MOVE_SLOTS picks which existing move to
         // overwrite; the last row (index BATTLE_MOVE_SLOTS) skips learning
@@ -3656,6 +3801,8 @@ void PokemonActivity::buildRows() {
         if (const pokemon::PendingEvent* pending = pokemon::pendingEventFront(snapshot_.state);
             pending != nullptr && pending->kind == pokemon::PendingEventKind::Encounter) {
           row(local, index == 0 ? tr(STR_POKEMON_CATCH) : tr(STR_POKEMON_PASS));
+        } else if (pending != nullptr && pending->kind == pokemon::PendingEventKind::Trainer) {
+          row(local, index == 0 ? tr(STR_POKEMON_FIGHT) : tr(STR_POKEMON_PASS));
         } else if (pending != nullptr && pending->kind == pokemon::PendingEventKind::Evolution) {
           row(local, index == 0 ? tr(STR_POKEMON_EVOLVE) : tr(STR_POKEMON_CANCEL));
         } else if (pending != nullptr && pending->kind == pokemon::PendingEventKind::MoveLearn) {
@@ -3912,17 +4059,29 @@ void PokemonActivity::renderFocused() {
     return;
   }
   const int contentTop = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + 14;
+  if (screen_ == Screen::Message && showingReceived_) {
+    renderReceivedItems(contentTop);
+    return;
+  }
   if (screen_ == Screen::Message) {
     // message_ is an arbitrary sentence (up to 96 chars, e.g. "None of your
     // Pokémon can battle right now!") - centered() alone only understands a
     // single already-embedded '\n', so a long line with none would just run
     // past the screen edge in portrait. Word-wrap it first.
+    // Each '\n'-separated sentence (a win plus a fainted Pokemon, an item
+    // left behind, ...) is wrapped on its own: wrappedText() does not break
+    // at '\n', so two sentences used to be drawn over each other.
     const int maxWidth = renderer.getScreenWidth() - 48;
-    const auto lines = renderer.wrappedText(UI_12_FONT_ID, message_, maxWidth, 6, EpdFontFamily::BOLD);
     int messageLineY = contentTop + 100;
-    for (const auto& line : lines) {
-      centered(renderer, UI_12_FONT_ID, messageLineY, line.c_str(), EpdFontFamily::BOLD);
-      messageLineY += 28;
+    const char* paragraph = message_;
+    while (paragraph != nullptr && *paragraph != '\0') {
+      const char* end = std::strchr(paragraph, '\n');
+      const std::string text = end == nullptr ? std::string(paragraph) : std::string(paragraph, end);
+      for (const auto& line : renderer.wrappedText(UI_12_FONT_ID, text.c_str(), maxWidth, 6, EpdFontFamily::BOLD)) {
+        centered(renderer, UI_12_FONT_ID, messageLineY, line.c_str(), EpdFontFamily::BOLD);
+        messageLineY += 28;
+      }
+      paragraph = end == nullptr ? nullptr : end + 1;
     }
     return;
   }
@@ -4190,6 +4349,23 @@ void PokemonActivity::renderFocused() {
                                 Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 8, 120, 90}, false);
     snprintf(line, sizeof(line), tr(STR_POKEMON_FOUND_ITEM), itemName(pending.item));
     centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
+  } else if (pending.kind == pokemon::PendingEventKind::Trainer) {
+    // The trainer's portrait (the Pokemon it sends out first when the art
+    // pack predates the class portraits), then who wants to battle.
+    pokemon::TrainerTeam team;
+    if (!pokemon::buildTrainerTeam(pending.speciesId, pending.level, pending.recordId, team)) return;
+    constexpr int portraitSize = 112;
+    const uint8_t classId = static_cast<uint8_t>(pending.speciesId);
+    if (!pokemon::drawPokemonTrainerClassArt(
+            renderer, classId,
+            Rect{(renderer.getScreenWidth() - portraitSize) / 2, contentTop + 4, portraitSize, portraitSize}, false)) {
+      pokemon::drawPokemonSpeciesArt(renderer, team.members[0].speciesId, true,
+                                     Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 15, 120, 90});
+    }
+    snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_WANTS_TO_BATTLE), trainerClassName(classId));
+    centered(renderer, UI_12_FONT_ID, contentTop + 132, line, EpdFontFamily::BOLD);
+    snprintf(line, sizeof(line), tr(STR_POKEMON_TRAINER_TEAM_INFO), pending.level, static_cast<unsigned>(team.count));
+    centered(renderer, UI_10_FONT_ID, contentTop + 168, line);
   } else if (pending.kind == pokemon::PendingEventKind::Evolution) {
     pokemon::PokemonRecord record{};
     if (service_.readRecord(pending.recordId, record) != pokemon::ServiceStatus::Ok) return;
@@ -4315,7 +4491,33 @@ void PokemonActivity::renderMenuGrid() {
 // ballMisses/medicineMisses/machineMisses/itemMisses - and their public
 // thresholds (PokemonGame.h), so a player can see how close they are to a
 // guaranteed wild encounter/Ball/Medicine/TM-HM/evolution-stone drop instead
-// of that progress being invisible engine-only state.
+// of that progress being invisible engine-only state. The Fight row is the
+// road-trainer roll's own pity counter (trainerMisses, see rollRoadTrainer()).
+// The "items received" summary (showReceivedItems()): one "Name x count" line
+// per item, in item-id order, as many as fit, then "+N more".
+void PokemonActivity::renderReceivedItems(const int contentTop) {
+  centered(renderer, UI_12_FONT_ID, contentTop + 8, tr(STR_POKEMON_ITEMS_RECEIVED), EpdFontFamily::BOLD);
+  constexpr int lineHeight = 26;
+  int y = contentTop + 48;
+  const int bottom = renderer.getScreenHeight() - 70;
+  size_t remaining = 0;
+  for (const uint8_t count : receivedSummary_) remaining += count != 0 ? 1 : 0;
+  char line[96];
+  for (size_t index = 0; index < receivedSummary_.size(); ++index) {
+    if (receivedSummary_[index] == 0) continue;
+    if (y + lineHeight > bottom && remaining > 1) {
+      snprintf(line, sizeof(line), tr(STR_POKEMON_ITEMS_MORE), static_cast<unsigned>(remaining));
+      centered(renderer, UI_10_FONT_ID, y, line);
+      break;
+    }
+    const auto itemId = static_cast<pokemon::EvolutionItem>(index + 1U);
+    snprintf(line, sizeof(line), "%s  x%u", itemName(itemId), static_cast<unsigned>(receivedSummary_[index]));
+    centered(renderer, UI_10_FONT_ID, y, line);
+    y += lineHeight;
+    --remaining;
+  }
+}
+
 void PokemonActivity::renderMenuPityBars() {
   if (snapshot_.partyCount == 0) return;
 
@@ -4324,12 +4526,16 @@ void PokemonActivity::renderMenuPityBars() {
     uint8_t misses;
     uint8_t threshold;
   };
-  const std::array<PityRow, 5> rows{{
+  const std::array<PityRow, 6> rows{{
       {tr(STR_POKEMON_ENCOUNTER), snapshot_.state.encounterMisses, pokemon::ENCOUNTER_MISSES_BEFORE_GUARANTEE},
+      {tr(STR_POKEMON_FIGHT), snapshot_.state.trainerMisses, pokemon::TRAINER_MISSES_BEFORE_GUARANTEE},
       {tr(STR_POKEMON_BAG_BALLS), snapshot_.state.ballMisses, pokemon::BALL_MISSES_BEFORE_GUARANTEE},
       {tr(STR_POKEMON_BAG_MEDICINE), snapshot_.state.medicineMisses, pokemon::ITEM_TRACK_MISSES_BEFORE_GUARANTEE},
       {tr(STR_POKEMON_BAG_MACHINES), snapshot_.state.machineMisses, pokemon::ITEM_TRACK_MISSES_BEFORE_GUARANTEE},
-      {tr(STR_POKEMON_BAG_EVOLUTION), snapshot_.state.itemMisses, pokemon::HOURLY_ITEM_MISSES_BEFORE_GUARANTEE},
+      // A save from before the 2026-10 pace changes may hold up to 19 misses.
+      {tr(STR_POKEMON_BAG_EVOLUTION),
+       std::min<uint8_t>(snapshot_.state.itemMisses, pokemon::HOURLY_ITEM_MISSES_BEFORE_GUARANTEE),
+       pokemon::HOURLY_ITEM_MISSES_BEFORE_GUARANTEE},
   }};
   const int rowCount = static_cast<int>(rows.size());
 
@@ -4878,6 +5084,8 @@ void PokemonActivity::renderChoiceButtons() {
           label = tr(STR_OK);
         } else if (pending->kind == pokemon::PendingEventKind::Encounter) {
           label = index == 0 ? tr(STR_POKEMON_CATCH) : tr(STR_POKEMON_PASS);
+        } else if (pending->kind == pokemon::PendingEventKind::Trainer) {
+          label = index == 0 ? tr(STR_POKEMON_FIGHT) : tr(STR_POKEMON_PASS);
         } else if (pending->kind == pokemon::PendingEventKind::Evolution) {
           label = index == 0 ? tr(STR_POKEMON_EVOLVE) : tr(STR_POKEMON_CANCEL);
         } else if (pending->kind == pokemon::PendingEventKind::MoveLearn) {
@@ -5023,7 +5231,7 @@ void PokemonActivity::renderBattleHud() {
   int opponentCount = 1;
   uint32_t opponentAliveMask = battleOpponent_.currentHp > 0 ? 1U : 0U;
   if (gymChallengeIndex_ != 0) {
-    const auto team = pokemon::gymTeamFor(gymChallengeIndex_);
+    const auto team = challengeTeam();
     opponentCount = static_cast<int>(team.size());
     opponentAliveMask = 0;
     for (int i = 0; i < opponentCount; ++i) {

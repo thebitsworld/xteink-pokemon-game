@@ -4,6 +4,7 @@
 
 #include <Logging.h>
 #include <PokemonSpecies.h>
+#include <PokemonTrainers.h>
 
 #include <algorithm>
 #include <limits>
@@ -365,6 +366,73 @@ ServiceStatus PokemonService::resolveEncounter(const EncounterChoice choice, uin
     } else {
       ensureIvEv(caughtRecordId);
     }
+  }
+  return ServiceStatus::Ok;
+}
+
+void PokemonService::maybeQueueTrainer(PokemonState& state, const PokemonRecord& leader,
+                                       const uint32_t lifetimeMinutesBefore, const uint8_t bookProgressPercent) {
+  // Drawn here with this service's own random_, like shininess, so the
+  // scripted draw sequences of applyCreditedMinutes()'s tests stay intact.
+  if (random_.below == nullptr) return;
+  const uint32_t chances =
+      state.lifetimeMinutes / TRAINER_CHECK_MINUTES - lifetimeMinutesBefore / TRAINER_CHECK_MINUTES;
+  for (uint32_t chance = 0; chance < chances; ++chance) {
+    bool meet = false;
+    if (!rollRoadTrainer(state, random_, meet) || !meet) continue;
+
+    uint32_t levelSum = 0;
+    uint32_t members = 0;
+    for (const uint32_t recordId : state.partyRecordIds) {
+      if (recordId == 0) continue;
+      PokemonRecord record = leader;
+      if (recordId != leader.recordId && !store_.readRecord(recordId, record)) continue;
+      levelSum += levelForXp(record.totalXp);
+      ++members;
+    }
+    if (members == 0) return;
+    const auto averageLevel = static_cast<uint8_t>((levelSum + members / 2) / members);
+
+    PendingEvent trainer{};
+    trainer.kind = PendingEventKind::Trainer;
+    trainer.speciesId = static_cast<uint16_t>(1 + random_.below(random_.context, TRAINER_CLASS_COUNT));
+    trainer.level = trainerLevelFor(bookProgressPercent, averageLevel);
+    trainer.recordId = (random_.below(random_.context, 0x10000U) << 16) | random_.below(random_.context, 0x10000U);
+    if (enqueuePendingEvent(state, trainer)) syncDashboardNotice(state);
+  }
+}
+
+ServiceStatus PokemonService::resolveTrainer(const bool won, uint8_t& rewardItemId) {
+  rewardItemId = 0;
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  const PendingEvent* front = pendingEventFront(state);
+  if (front == nullptr || front->kind != PendingEventKind::Trainer) return ServiceStatus::NotApplicable;
+  const uint8_t level = front->level;
+  if (!discardFrontPendingEvent(state)) return ServiceStatus::NotApplicable;
+  if (won && random_.below != nullptr) {
+    // Every beaten trainer leaves an item, straight into the bag.
+    OwnedEvolutionNeeds needs{};
+    if (!store_.loadOwnedEvolutionNeeds(needs)) needs = {};
+    if (!grantTrainerReward(state, level, needs, random_, rewardItemId)) rewardItemId = 0;
+  }
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to resolve trainer");
+    rewardItemId = 0;
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
+ServiceStatus PokemonService::clearReceivedItems() {
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  if (!pokemon::clearReceivedItems(state)) return ServiceStatus::NotApplicable;
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to clear received items");
+    return ServiceStatus::StorageError;
   }
   return ServiceStatus::Ok;
 }
@@ -1199,7 +1267,10 @@ ServiceStatus PokemonService::saveBattleEntry(const BattleRecordEntry& entry) {
 
 void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t minutes,
                                      const uint8_t previousMinuteRemainder) {
-  constexpr uint16_t HP_HEAL_PER_MINUTE = 1;
+  // Each minute heals max(1 HP, 1.5% of max HP): 1 HP a minute fell behind as
+  // max HP grows with level (docs/development/pokemon-pace-plan.md).
+  constexpr uint32_t MIN_HP_HEAL_PER_MINUTE = 1;
+  constexpr uint32_t HEAL_PER_MILLE_PER_MINUTE = 15;
   constexpr uint16_t MINUTES_PER_PP_TICK = 10;
 
   // Collected here and written once at the end (upsertEntries()) instead of
@@ -1240,8 +1311,9 @@ void PokemonService::healPartyOnRead(const PokemonState& state, const uint16_t m
     const uint16_t maxHp = battleMaxHp(stats->hp, levelForXp(record.totalXp), ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
 
     BattleRecordEntry healed = *existing;
-    const uint32_t healedHp =
-        static_cast<uint32_t>(healed.currentHp) + static_cast<uint32_t>(HP_HEAL_PER_MINUTE) * minutes;
+    const uint32_t heal = std::max<uint32_t>(MIN_HP_HEAL_PER_MINUTE * minutes,
+                                             static_cast<uint32_t>(maxHp) * minutes * HEAL_PER_MILLE_PER_MINUTE / 1000U);
+    const uint32_t healedHp = static_cast<uint32_t>(healed.currentHp) + heal;
     healed.currentHp = static_cast<uint16_t>(std::min<uint32_t>(maxHp, healedHp));
 
     // Credits arrive in ~5-minute checkpoints, so `minutes / 10` alone is
@@ -1379,19 +1451,12 @@ std::array<uint8_t, STAT_COUNT> PokemonService::rollWildIv(const bool shiny) {
   return iv;
 }
 
-ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8_t opponentLevel,
-                                            const bool isTrainerBattle, const uint16_t opponentSpeciesId) {
+ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8_t opponentLevel, const bool evOnly,
+                                            const uint16_t opponentSpeciesId) {
   PokemonRecord record{};
   const ServiceStatus readStatus = readRecord(recordId, record);
   if (readStatus != ServiceStatus::Ok) return readStatus;
-
-  const BaseStats* ownStats = baseStatsFor(record.speciesId);
-  constexpr size_t ownHpIndex = static_cast<size_t>(StatIndex::Hp);
-  const IvEvEntry ivEvBefore = ensureIvEv(recordId);
-  const uint16_t oldMaxHp =
-      ownStats == nullptr
-          ? 0
-          : battleMaxHp(ownStats->hp, levelForXp(record.totalXp), ivEvBefore.iv[ownHpIndex], ivEvBefore.ev[ownHpIndex]);
+  const uint16_t oldMaxHp = currentMaxHp(record);
 
   // EVs accumulate independently of the XP/level cap below - unlike XP,
   // real Gen 1 EVs keep accruing even once a Pokemon is at its maximum
@@ -1409,10 +1474,33 @@ ServiceStatus PokemonService::awardBattleXp(const uint32_t recordId, const uint8
     }
   }
 
+  if (evOnly) return ServiceStatus::Ok;
+  return grantXp(record, battleVictoryXp(opponentLevel, levelForXp(record.totalXp)), oldMaxHp);
+}
+
+ServiceStatus PokemonService::awardFixedXp(const uint32_t recordId, const uint32_t xp) {
+  PokemonRecord record{};
+  const ServiceStatus readStatus = readRecord(recordId, record);
+  if (readStatus != ServiceStatus::Ok) return readStatus;
+  return grantXp(record, xp, currentMaxHp(record));
+}
+
+uint16_t PokemonService::currentMaxHp(const PokemonRecord& record) {
+  const BaseStats* stats = baseStatsFor(record.speciesId);
+  if (stats == nullptr) return 0;
+  constexpr size_t hpIndex = static_cast<size_t>(StatIndex::Hp);
+  const IvEvEntry ivEv = ensureIvEv(record.recordId);
+  return battleMaxHp(stats->hp, levelForXp(record.totalXp), ivEv.iv[hpIndex], ivEv.ev[hpIndex]);
+}
+
+ServiceStatus PokemonService::grantXp(PokemonRecord record, const uint32_t xpGained, const uint16_t oldMaxHp) {
+  const uint32_t recordId = record.recordId;
+  const BaseStats* ownStats = baseStatsFor(record.speciesId);
+  constexpr size_t ownHpIndex = static_cast<size_t>(StatIndex::Hp);
+
   const uint8_t previousLevel = levelForXp(record.totalXp);
   if (record.totalXp >= MAXIMUM_TOTAL_XP) return ServiceStatus::Ok;  // already level 100 - nothing to gain
 
-  const uint32_t xpGained = battleVictoryXp(opponentLevel, isTrainerBattle);
   record.totalXp = std::min<uint32_t>(record.totalXp + xpGained, MAXIMUM_TOTAL_XP);
   const uint8_t currentLevel = levelForXp(record.totalXp);
 
@@ -1536,6 +1624,7 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
   const uint32_t originalLeaderXp = leader.totalXp;
   const size_t pendingBefore = pendingEventCount(state);
   const uint8_t previousMinuteRemainder = state.readingMinuteRemainder;
+  const uint32_t lifetimeMinutesBefore = state.lifetimeMinutes;
   const CreditResult result =
       applyCreditedMinutes(state, leader, minutes, bookProgressPercent, ownedEvolutionNeeds, random_);
   if (result.status != CreditStatus::Applied) return false;
@@ -1559,6 +1648,8 @@ bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookPro
       }
     }
   }
+
+  maybeQueueTrainer(state, leader, lifetimeMinutesBefore, bookProgressPercent);
 
   RecordMutation mutation{};
   if (leader.totalXp != originalLeaderXp) {

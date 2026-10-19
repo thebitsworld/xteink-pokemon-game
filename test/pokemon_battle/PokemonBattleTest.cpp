@@ -798,12 +798,15 @@ void maxPpForMatchesTheRealGen1PpUpProgression() {
   CHECK(pokemon::maxPpFor(17, 1) == 20);  // floor(17/5)=3
 }
 
-void battleVictoryXpScalesWithLevelAndTrainerBonus() {
-  CHECK(pokemon::battleVictoryXp(5, false) == 20);    // wild: level * 4
-  CHECK(pokemon::battleVictoryXp(25, false) == 100);
-  CHECK(pokemon::battleVictoryXp(12, true) == 72);    // trainer: level * 6
-  CHECK(pokemon::battleVictoryXp(65, true) == 390);
-  CHECK(pokemon::battleVictoryXp(0, false) == 0);
+void battleVictoryXpScalesWithTheLevelGap() {
+  // Lo * ((2*Lo + 10) / (Lo + Lp + 10))^2.5, rounded, at least 1.
+  CHECK(pokemon::battleVictoryXp(5, 5) == 5);     // same level: the opponent's level
+  CHECK(pokemon::battleVictoryXp(65, 65) == 65);
+  CHECK(pokemon::battleVictoryXp(14, 24) == 8);   // 10 levels above: x0.56
+  CHECK(pokemon::battleVictoryXp(50, 40) == 63);  // 10 levels below: x1.27
+  CHECK(pokemon::battleVictoryXp(65, 95) == 40);
+  CHECK(pokemon::battleVictoryXp(2, 100) == 1);   // never 0 for a real win
+  CHECK(pokemon::battleVictoryXp(0, 50) == 0);
 }
 
 // Move ids for the fixed-damage moves below (PokeAPI's own data stores
@@ -2640,7 +2643,7 @@ int main() {
   outOfRangeIvIsClampedToTheRealGen1Ceiling();
   rollIvSetProducesValuesInTheRealGen1Range();
   maxPpForMatchesTheRealGen1PpUpProgression();
-  battleVictoryXpScalesWithLevelAndTrainerBonus();
+  battleVictoryXpScalesWithTheLevelGap();
   ohkoMoveInstantlyFaintsWhenAttackerLevelIsAtLeastDefenders();
   ohkoMoveNeverConnectsWhenAttackerIsALowerLevel();
   ohkoMoveHasNoEffectOnAnImmuneType();

@@ -40,6 +40,10 @@ def expected_art() -> dict[Path, tuple[int, int]]:
     # order (see scripts/data/pokemon-gyms.csv / TRAINER_SLUGS).
     for gym_index in range(1, 14):
         files[Path("trainers") / f"{gym_index:02}.bmp"] = (32, 32)
+    # The 12 trainer classes met while reading (TRAINER_CLASS_SLUGS), shown on
+    # the "<Class> wants to battle!" screen.
+    for class_id in range(1, 13):
+        files[Path("trainers/classes") / f"{class_id:02}.bmp"] = (112, 112)
     return files
 
 

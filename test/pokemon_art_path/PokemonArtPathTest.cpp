@@ -88,3 +88,15 @@ TEST(PokemonArtPath, BuildsBadgePathsForTheEightKantoGyms) {
   EXPECT_EQ(pokemon::pokemonBadgeArtPath(9, path, sizeof(path)), nullptr);
   EXPECT_STREQ(path, "");
 }
+
+TEST(PokemonArtPath, BuildsTrainerClassPathsForTheTwelveClasses) {
+  char path[64]{};
+  ASSERT_NE(pokemon::pokemonTrainerClassArtPath(1, path, sizeof(path)), nullptr);
+  EXPECT_STREQ(path, "/pokemon/trainers/classes/01.bmp");
+  ASSERT_NE(pokemon::pokemonTrainerClassArtPath(pokemon::TRAINER_CLASS_COUNT, path, sizeof(path)), nullptr);
+  EXPECT_STREQ(path, "/pokemon/trainers/classes/12.bmp");
+  EXPECT_EQ(pokemon::pokemonTrainerClassArtPath(0, path, sizeof(path)), nullptr);
+  EXPECT_STREQ(path, "");
+  EXPECT_EQ(pokemon::pokemonTrainerClassArtPath(pokemon::TRAINER_CLASS_COUNT + 1, path, sizeof(path)), nullptr);
+  EXPECT_STREQ(path, "");
+}
