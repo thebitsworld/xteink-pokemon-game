@@ -1,3 +1,22 @@
+## [1.9.0] - 2026-10-19
+
+### Added
+
+- Pokémon: **trainers on the road**. Every half hour of reading there is a chance (sure after three misses) that a trainer wants to battle - one of 12 Red/Blue classes, from Youngster to Beauty, with one to three Pokémon around your Party's level. Fight them like a gym or pass. A win gives the Pokémon that finished the fight 10 XP and leaves an item. At most two wait at a time. Ported from the xteink-pokemon-crosslingua fork, with its trainer portraits (new in the SD card assets: `pokemon/trainers/classes/`).
+- Pokémon: **Items received**. Items you find while reading (balls, medicine, TMs and HMs, stones) go straight into the Bag instead of waiting in the queue one by one; the next time you open the Pokémon menu, one screen lists everything found since your last visit.
+
+### Changed
+
+- Pokémon: battle experience now depends on the level gap, the way later Pokémon games do it: the opponent's level when both are equal, more for beating a stronger one, much less for a weaker one. Gyms, the Elite Four and the Champion used to give six times the opponent's level whatever your level, so one Pokémon soloing them reached level 100 by the Elite Four; now it ends around level 70-75, and reading stays the main way to grow. Experience already earned is kept.
+- Pokémon: completing the Pokédex takes about half as long. Species you have not caught yet turn up three times as often, legendaries come twice as often (1 in 10 encounters once they can appear), Mewtwo can appear from 90% of a book (was 95%), and evolution stones and the Link Cable drop twice as often (sure after 9 hours without one, was 19).
+- Pokémon: your Party heals faster at higher levels while you read - 1.5% of its maximum HP a minute, or 1 HP when that is more (was always 1 HP).
+- Pokémon: the last two slots of the waiting queue are kept for evolutions and moves to learn, so a full queue no longer drops an evolution.
+- The save format moves to version 11. Older saves are upgraded on first use; a save used with 1.9.0 cannot be opened by an older version.
+
+### Fixed
+
+- Pokémon: a message of two sentences (a win and a fainted Pokémon, for example) no longer draws the second over the first.
+
 ## [1.8.6] - 2026-10-15
 
 ### Added
