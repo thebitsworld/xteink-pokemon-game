@@ -902,6 +902,10 @@ bool PokemonActivity::isChoiceButtonScreen() const {
     case Screen::PpUpSlot:
     case Screen::EtherSlot:
       return true;
+    case Screen::Message:
+      // The "items received" list ends with its own OK button, so on the X4
+      // Pro nobody reaches for the physical Back or Home key to leave it.
+      return showingReceived_;
     default:
       return false;
   }
@@ -910,7 +914,7 @@ bool PokemonActivity::isChoiceButtonScreen() const {
 // Settings and the single "OK" of a found item are one wide column; every
 // other choice screen is a 2-column grid like the main menu.
 int PokemonActivity::choiceColumns() const {
-  if (screen_ == Screen::Settings) return 1;
+  if (screen_ == Screen::Settings || screen_ == Screen::Message) return 1;
   if (screen_ == Screen::Event) {
     const pokemon::PendingEvent* pending = pokemon::pendingEventFront(snapshot_.state);
     if (pending == nullptr || pending->kind == pokemon::PendingEventKind::Item) return 1;
@@ -930,7 +934,7 @@ Rect PokemonActivity::choiceCellRect(const int index) const {
   const int columns = choiceColumns();
   const int rows = (count + columns - 1) / columns;
   int top = listTop();
-  if (screen_ == Screen::Event) {
+  if (screen_ == Screen::Event || screen_ == Screen::Message) {
     const auto& metrics = UITheme::getInstance().getMetrics();
     top = renderer.getScreenHeight() - metrics.buttonHintsHeight - rows * MENU_GRID_ROW_HEIGHT - 8;
   }
@@ -1116,8 +1120,9 @@ int PokemonActivity::logicalCount() const {
     case Screen::HallOfFame:  // display-only, no selectable rows
     case Screen::Summary:
     case Screen::PokedexDetail:
-    case Screen::Message:
       return 0;
+    case Screen::Message:
+      return showingReceived_ ? 1 : 0;  // the items-received list's OK
   }
   return 0;
 }
@@ -3190,7 +3195,9 @@ void PokemonActivity::loop() {
   // button or by leaving via the header's Back tap - not by tapping the
   // message itself, unlike every other screen. wasScreenTapped() is a no-op
   // stub on CAP_TOUCH=0 builds (X3), so this compiles to nothing there.
-  if (screen_ == Screen::Message) {
+  // The items-received list closes from its OK button only (the choice-button
+  // dispatch below), so a stray tap on the list does not skip it.
+  if (screen_ == Screen::Message && !showingReceived_) {
     int x = 0, y = 0;
     if (mappedInput.wasScreenTapped(x, y)) {
       activate();
@@ -4499,7 +4506,7 @@ void PokemonActivity::renderReceivedItems(const int contentTop) {
   centered(renderer, UI_12_FONT_ID, contentTop + 8, tr(STR_POKEMON_ITEMS_RECEIVED), EpdFontFamily::BOLD);
   constexpr int lineHeight = 26;
   int y = contentTop + 48;
-  const int bottom = renderer.getScreenHeight() - 70;
+  const int bottom = choiceCellRect(0).y - 8;  // above the OK button
   size_t remaining = 0;
   for (const uint8_t count : receivedSummary_) remaining += count != 0 ? 1 : 0;
   char line[96];
@@ -5078,6 +5085,9 @@ void PokemonActivity::renderChoiceButtons() {
         break;
       case Screen::MovesetPick:
         label = tr(STR_POKEMON_FORGET);
+        break;
+      case Screen::Message:
+        label = tr(STR_OK);
         break;
       case Screen::Event:
         if (pending == nullptr) {
