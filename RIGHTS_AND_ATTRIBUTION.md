@@ -29,6 +29,11 @@ redistribution permission.
   Beauty) from the [pret/pokered](https://github.com/pret/pokered) disassembly,
   `gfx/trainers/`, revision `af519899719f0754965776faac0e836a3b906e6d`. The X3 package contains one-bit
   adaptations at twice the original size.
+- **Battle move animations:** frames rebuilt from the original Red/Blue move
+  animations of the [pret/pokered](https://github.com/pret/pokered)
+  disassembly (`gfx/battle/move_anim_0.png`, `move_anim_1.png` and
+  `data/battle_anims/`), revision `af519899719f0754965776faac0e836a3b906e6d`, as one-bit images at twice the
+  original size.
 - **Pokédex layout and X3 renders:**
   [dmellok / u/xDaftTurtle](https://github.com/dmellok), shared in the
   [original Reddit post](https://www.reddit.com/r/XTEINK/comments/1ve0pr4/comment/p1lpy0w/?context=3).

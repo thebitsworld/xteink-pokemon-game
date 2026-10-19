@@ -128,6 +128,34 @@ fisher.png
 beauty.png
 ```
 
+### Battle move animations
+
+Use a [pret/pokered](https://github.com/pret/pokered) checkout (revision
+`af519899719f0754965776faac0e836a3b906e6d` was used for the published pack). The generator reads these files
+from it, keeping their paths:
+
+```text
+gfx/battle/move_anim_0.png
+gfx/battle/move_anim_1.png
+data/battle_anims/frame_blocks.asm
+data/battle_anims/base_coords.asm
+data/battle_anims/subanimations.asm
+constants/move_animation_constants.asm
+```
+
+It replays the original Red/Blue move animations from them, so nothing else
+needs to be drawn or downloaded:
+
+```sh
+python scripts/generate_pokemon_effect_art.py \
+  --source pokemon-art-source/pokered \
+  --output pokemon-art-output
+```
+
+This writes `effects/<effect>/01.bmp`, `02.bmp`… - 13 effects (hit, flame,
+water, ice, bolt, leaf, poison, rock, wind, psychic, ghost, dragon, sparkle)
+with 3 to 5 one-bit 144×108 frames each, 56 frames in all.
+
 ### Pokédex cards
 
 The original X3 card set was shared by dmellok/xDaftTurtle in
@@ -200,6 +228,13 @@ pokemon-art-output/
 ├── badges/              # 01.bmp–08.bmp, 32×32, the 8 Kanto gym badges in order
 └── trainers/            # 01.bmp–13.bmp, 32×32, the 8 Gym Leaders + 4 Elite Four + the Champion
     └── classes/         # 01.bmp–12.bmp, 112×112, the trainer classes met while reading
+```
+
+The move animations (see above) add:
+
+```text
+pokemon-art-output/
+└── effects/             # <effect>/01.bmp…, 144×108, 3-5 frames for each of the 13 effects
 ```
 
 ## 4. Convert Pokédex cards
@@ -275,6 +310,7 @@ paths are:
 /pokemon/badges/
 /pokemon/trainers/
 /pokemon/trainers/classes/
+/pokemon/effects/
 /pokemon/pokedex/portrait/
 /pokemon/pokedex/landscape/
 /pokemon/manifest.json
