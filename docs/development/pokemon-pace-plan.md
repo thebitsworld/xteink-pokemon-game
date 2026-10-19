@@ -108,7 +108,7 @@ Agreed:
 
 No save change. The scripted random sequences in the Pokémon game tests need updating.
 
-## Pending event queue: items straight to the bag (written down 2026-10-19, not decided)
+## Pending event queue: items straight to the bag (agreed 2026-10-19)
 
 The queue holds 16 events (`PENDING_EVENT_CAPACITY`; 16 is also the width of `inspectSnapshot()`'s
 bitmask, so more needs a save format change). Today it gets ~5.6 events per reading hour: wild
@@ -119,8 +119,9 @@ bring that down to ~2.1 h (~2.5 h with at most 2 trainers waiting). While it is 
 medicine, TM/HM and stone rolls are skipped (their pity is set so the next roll after a slot frees
 hits), so encounters are lost.
 
-What the user wrote down: medicine, TM/HM and stones/Link Cable go straight into the bag, like balls
-already do, and the game shows a single summary screen listing in detail everything received. The
+Agreed: medicine, TM/HM and stones/Link Cable go straight into the bag, like balls already do, and take
+no queue slot. One summary screen lists in detail every item received since it was last viewed, balls
+included (road trainer rewards too). The
 queue then only holds encounters, road trainers, evolutions and moves to learn: ~1.84 events an hour
 without trainers (full after ~8.7 h); with trainers at half the wild rate ~7.6 h with at most 2
 trainers waiting, ~5.8 h with no trainer cap.
@@ -132,7 +133,7 @@ Queue split agreed on 2026-10-19 (16 slots, no save format change):
 | Evolutions + moves to learn | 2 slots kept free for them (still one evolution per Pokémon) |
 | Road trainers | at most 2 waiting (as in the crosslingua fork); while 2 wait, the trainer roll keeps its pity so the next one comes as soon as there is room |
 | Wild encounters | no limit of their own: the remaining slots, at least 12 (full after ~7.6 h of reading without opening the game) |
-| Medicine, TM/HM, stones, Link Cable | 0 if items go straight to the bag (still undecided, see above) |
+| Medicine, TM/HM, stones, Link Cable, balls | 0: straight to the bag, listed on the summary screen |
 
 Why not leave trainers unlimited too: HP only recovers while reading, and 4-5 queued trainer fights
 cost 7-9 HP bars against the 4 of a party of 4; and the queue is resolved front first, so a trainer the
