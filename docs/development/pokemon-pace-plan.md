@@ -32,14 +32,14 @@ not caught yet), legendaries at 1/20 per encounter with Mewtwo only in the last 
 stone/Link Cable evolutions at one item per ~13 hours. Training evolutions instead of waiting for wild
 middle/final stages cuts the time about four times.
 
-## Battle XP and road trainers: option under consideration (not decided)
+## Battle XP and road trainers (agreed 2026-10-19: option D)
 
 Today's battle XP (`battleVictoryXp`: opponent level x 6 for gym/E4/Champion, x 4 for wild) lets one
 Pokémon solo every gym in ~6 hours of reading: from Koga on, the gyms' own XP lifts it past the next
 gym, and it reaches level 100 at Bruno. Road trainers must NOT scale their XP with the party's level the
 way the crosslingua fork does (level x 6 per member): that would finish the gyms in ~2 hours.
 
-The option the user wrote down on 2026-10-19 to think about:
+Agreed on 2026-10-19 (option D):
 
 - Gym/E4/Champion: opponent level x 1, scaled by level difference.
 - Wild: opponent level x 1, scaled by level difference.
@@ -63,8 +63,19 @@ strongest member; reading hours and the solo Pokémon's level after the fight):
 | Bruno | 58 | 6.0 h, lv 100 | 34.0 h, lv 65 |
 | Champion | 65 | 6.0 h, lv 100 | 34.3 h, lv 72 |
 
-Other variants simulated: gym x2 scaled with wild x1 scaled ends at ~22 h, level 81; gym x2 scaled with
-wild x4 unscaled at ~13 h, level 81. The jump from Erika (29) to Koga (43) and the slow climb after it
+All four formulas compared with road trainers at half the wild rate (median of 100 runs; "battle
+share" is how much of the solo Pokémon's XP up to level 100 came from battles):
+
+| Formula | Erika | Giovanni | Champion | Level 100 after | Battle share |
+|---|---|---|---|---|---|
+| A, today: gym x6, wild x4 | 4 h, lv 44 | 6 h, lv 87 | 6 h, lv 100 | 6 h | 98% |
+| B: gym x2 scaled, wild x4 | 7 h, lv 36 | 13 h, lv 60 | 14 h, lv 81 | 31 h | 78% |
+| C: gym x2 scaled, wild x1 scaled | 12 h, lv 36 | 23 h, lv 59 | 25 h, lv 81 | 64 h | 54% |
+| **D (agreed): gym x1 scaled, wild x1 scaled** | 13 h, lv 35 | 28 h, lv 56 | 34 h, lv 72 | 88 h | 36% |
+
+Reading alone takes 139 h to level 100. Battle XP goes to the Pokémon that lands the KO and reading XP
+to the party leader only, so a whole team of 3-4 around level 60-65 takes longer than the solo numbers:
+roughly 50-70 hours of reading with D. The jump from Erika (29) to Koga (43) and the slow climb after it
 come from the gym team data: whatever the formula, Koga to the Champion tends to fall in one sitting.
 
 ## HP between fights (agreed 2026-10-19)
