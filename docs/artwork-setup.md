@@ -107,6 +107,27 @@ lance.png
 blue.png
 ```
 
+### Trainer class portraits
+
+Use the [pret/pokered](https://github.com/pret/pokered) disassembly, folder
+`gfx/trainers/`. Copy these 12 files (the trainer classes met while reading, in
+order) into one folder, keeping their names:
+
+```text
+youngster.png
+bugcatcher.png
+lass.png
+hiker.png
+swimmer.png
+supernerd.png
+birdkeeper.png
+psychic.png
+channeler.png
+blackbelt.png
+fisher.png
+beauty.png
+```
+
 ### Pokédex cards
 
 The original X3 card set was shared by dmellok/xDaftTurtle in
@@ -159,11 +180,12 @@ python scripts/generate_pokemon_icon_art.py \
   --bag-item-source pokemon-art-source/pokeapi-sprites/sprites/items \
   --badge-source pokemon-art-source/pokeapi-sprites/sprites/badges \
   --trainer-source pokemon-art-source/trainers \
+  --trainer-class-source pokemon-art-source/trainer-classes \
   --output pokemon-art-output
 ```
 
-`--pokemon-back-source`, `--bag-item-source`, `--badge-source`, and
-`--trainer-source` are optional - omit any of them to skip generating that
+`--pokemon-back-source`, `--bag-item-source`, `--badge-source`,
+`--trainer-source`, and `--trainer-class-source` are optional - omit any of them to skip generating that
 category (e.g. if you only have the original species/stone sources on hand).
 
 This produces one-bit BMPs without contacting the network:
@@ -177,6 +199,7 @@ pokemon-art-output/
 ├── heroes/items/        # five stones, 64×64
 ├── badges/              # 01.bmp–08.bmp, 32×32, the 8 Kanto gym badges in order
 └── trainers/            # 01.bmp–13.bmp, 32×32, the 8 Gym Leaders + 4 Elite Four + the Champion
+    └── classes/         # 01.bmp–12.bmp, 112×112, the trainer classes met while reading
 ```
 
 ## 4. Convert Pokédex cards
@@ -251,6 +274,7 @@ paths are:
 /pokemon/heroes/items/
 /pokemon/badges/
 /pokemon/trainers/
+/pokemon/trainers/classes/
 /pokemon/pokedex/portrait/
 /pokemon/pokedex/landscape/
 /pokemon/manifest.json

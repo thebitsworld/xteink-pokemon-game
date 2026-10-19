@@ -43,6 +43,18 @@ python3 scripts/dev/edit_pokemon_save.py queue-encounter --species pidgey --leve
 - `--gender` (`female`/`genderless`/`male`) — defaults to auto-picking a value valid for the species (rejects a gender you specify if it doesn't match the species' `gender_rate`, e.g. Chansey can't be `male`)
 - `--slot` — pending-event slot 0-2, defaults to the first empty slot (a clear error if all 3 slots are full)
 
+### `queue-trainer`
+Queues a trainer met while reading (pending event kind 5), so you can test the trainer battle without reading 30 minutes. The team is rebuilt from class, level and seed, exactly as the firmware does. The save is marked as version 11.
+
+```sh
+python3 scripts/dev/edit_pokemon_save.py queue-trainer --class hiker --level 22 --seed 1
+```
+
+- `--class` — class id 1-12 or name (`youngster`, `bug-catcher`, `lass`, `hiker`, `swimmer`, `super-nerd`, `bird-keeper`, `psychic`, `channeler`, `blackbelt`, `fisherman`, `beauty`)
+- `--level` — 1-100; the team has 1 Pokémon below level 10, 1-2 below 20 and 2-3 from 20
+- `--seed` — team seed (stored as the event's `recordId`), default `1`; another seed gives another team
+- `--slot` — pending-event slot, defaults to the first empty slot
+
 ### `reset-battle-store`
 Deletes the auxiliary file holding battle HP/PP/moveset/status (`pokemon-battle-{a,b}.bin` plus the older single file if it still exists, and `pokemon-moves-{a,b}.bin` - the saved movesets/PP Ups) — each Pokémon's next battle will rebuild full HP/PP with no status ailment.
 

@@ -86,10 +86,10 @@ written. The file is:
 | Offset | Size | Field |
 | ---: | ---: | --- |
 | 0 | 4 | Magic `PKV2` |
-| 4 | 2 | Format version (`1` through `7`; a build always writes the newest it knows) |
+| 4 | 2 | Format version (`1` through `11`; a build always writes the newest it knows) |
 | 6 | 2 | Header size (`24`) |
 | 8 | 4 | Non-zero snapshot sequence |
-| 12 | 2 | State size (`116` for version 2 up to `341` for version 10 — see the version table below) |
+| 12 | 2 | State size (`116` for version 2 up to `437` for version 11 — see the version table below) |
 | 14 | 2 | Record size (`48`) |
 | 16 | 4 | Record count |
 | 20 | 4 | Payload size (`116 + recordCount * 48`) |
@@ -110,13 +110,16 @@ The 116-byte state payload is:
 | 108 | 4 | Snapshot sequence (must match the header) |
 | 112 | 1 | Reading-minute remainder (`0-59`) |
 | 113 | 1 | Encounter misses (`0-5`; current guarantee threshold is `3`) |
-| 114 | 1 | Item misses (`0-19`) |
-| 115 | 1 | Dashboard notice for the first queued event |
+| 114 | 1 | Hourly stone/Link Cable misses (`0-19`; current guarantee threshold is `9`) |
+| 115 | 1 | Dashboard notice for the first queued event (or Item found while the version-11 received-items list is not empty) |
 
 The pending-event queue holds 16 events in total: slots 1-3 sit here, slots 4-10 at
 bytes 210-279 (version 8) and slots 11-16 at bytes 280-339 (version 9). Each 10-byte pending event contains record ID at offset 0, species ID at 4,
-level at 6, gender at 7, item at 8, and kind at 9. Empty entries follow all
-populated entries. Index zero is the event currently shown to the user.
+level at 6, gender at 7, item at 8, and kind at 9 (1 encounter, 2 item - no longer
+written since version 11, 3 evolution, 4 move to learn, 5 road trainer from version
+11: species ID = trainer class 1-12, level = its level, record ID = team seed). Empty
+entries follow all populated entries. Index zero is the event currently shown to the
+user.
 
 ### State bytes appended by later versions (append-only)
 
@@ -134,6 +137,7 @@ size) and treats the fields a file predates as zero; it always writes the newest
 | 8 | 280 | 210-279: pending-event slots 4-10 (`10` bytes each, same compacted queue as the first three) |
 | 9 | 340 | 280-339: pending-event slots 11-16 (`10` bytes each, same compacted queue) |
 | 10 | 341 | 340: starter species id (`u8`, 0 = not recorded; set at starter creation, picks the Champion's counter Pokémon) |
+| 11 | 437 | 341: road-trainer pity counter (`0-3`); 342-436: items received since the player last saw the list (`u8` x 95, index = item id - 1, saturating at 255). Also allows pending-event kind 5 (road trainer), so an older build refuses the save instead of misreading it |
 
 ### Legacy version 1
 

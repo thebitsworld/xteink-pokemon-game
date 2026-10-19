@@ -65,9 +65,10 @@ artwork archive (`xteink-pokemon-sd-card-assets.zip`) contains only the
 - [ ] The source revisions match `docs/third-party-assets.md`.
 - [ ] `scripts/generate_pokemon_icon_art.py` completed locally.
 - [ ] `scripts/generate_pokemon_pokedex_art.py` completed locally.
-- [ ] The canonical local artwork directory contains all 850 required one-bit
+- [ ] The canonical local artwork directory contains all 875 required one-bit
       BMPs with the documented dimensions (614 species/item/Pokédex art + 151
-      back sprites + 77 bag item icons + 8 badge icons).
+      back sprites + 77 bag item icons + 8 badge icons + 13 trainer portraits +
+      12 trainer class portraits).
 - [ ] The native artwork-generator/packager tests pass (`ctest -R
       PokemonArtPack`), confirming the pack against `RIGHTS_AND_ATTRIBUTION.md`
       and the manifest/checksum rules `scripts/package_pokemon_v2_release.py`

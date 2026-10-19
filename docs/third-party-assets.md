@@ -74,6 +74,18 @@ with direct credit to Pokémon Database and the same documented removal or
 credit-correction process as the other community-sourced art on this page
 (see [Rights and attribution](../RIGHTS_AND_ATTRIBUTION.md)).
 
+## Trainer class portraits
+
+The local pack uses the 12 original Red/Blue trainer sprites from the
+[pret/pokered](https://github.com/pret/pokered) disassembly
+(`gfx/trainers/<slug>.png`, revision `af519899719f0754965776faac0e836a3b906e6d`), one per trainer class met while
+reading, shown on the "<Class> wants to battle!" screen.
+
+The disassembly does not state a licence for the extracted game graphics.
+Complete X3 installation releases include the adapted portraits with direct
+credit to pret/pokered and the same removal or credit-correction process as the
+other art on this page (see [Rights and attribution](../RIGHTS_AND_ATTRIBUTION.md)).
+
 ## Evolution-stone icons
 
 The local pack uses Moon, Fire, Thunder, Water, and Leaf Stone files from
@@ -118,10 +130,12 @@ The offline tools create only the files needed by the X3:
 - Badge icons (8 Kanto gyms): one-bit 32×32 BMPs.
 - Trainer portraits (8 Gym Leaders + 4 Elite Four + the Champion): one-bit
   32×32 BMPs.
+- Trainer class portraits (the 12 classes met while reading): one-bit 112×112
+  BMPs.
 - Pokédex cards: one-bit 472×708 portrait and 288×432 landscape BMPs.
 
 The validator accepts IDs 001–151, the five named evolution stones, bag item
-ids 007-083, badge ids 01-08, and trainer ids 01-13. Eggs, later-generation
+ids 007-083, badge ids 01-08, trainer ids 01-13, and trainer class ids 01-12. Eggs, later-generation
 Pokémon, extra BMPs, and incorrectly sized files are rejected.
 The public ZIP contains only this generated tree, the tested firmware, internal
 checksums, and [the rights notice](../RIGHTS_AND_ATTRIBUTION.md). It contains no
