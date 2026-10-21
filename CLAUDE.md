@@ -69,6 +69,9 @@ is in git history (before 2026-10-08).
   `CROSSPOINT_SIM_INPUT_SCRIPT` (`ms:DOWN;ms:CONFIRM:1000;ms:TAP:x,y;...;ms:QUIT`) and
   `CROSSPOINT_SIM_SCREENSHOTS` (`ms:path.bmp`); the app's peak lands in `fs_/.crosspoint/apps-memory.txt`
   when it exits cleanly (Back out of it). `SDL_VIDEODRIVER=dummy` gives no screenshots.
+- Metalio E-INK4 Plus (2026-10-21, research only, nothing built): ESP32-S31 + 4.7" ED047TC2 on a
+  parallel bus via EPDiy (no controller), so a PaperBoy/InkBoy-style per-pixel pulse scan could reach
+  ~30 scans/s (estimate). Notes: docs/development/metalio-e-ink4-plus.md. kuslota/InkBoy is not Ink-boy.
 - Open, undecided: a translation mechanism for Lua apps (all English today; the user wants to discuss it
   first). Firmware strings: the fork's own Pokémon strings are untranslated in most languages (fall back
   to English); Vietnamese is complete.

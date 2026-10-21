@@ -17,5 +17,6 @@ It is written for software developers who may be new to embedded development.
 - [Build & Flash to X3](./pokemon-x3-build-and-flash.md)
 - [Game Ideas for Lua Apps](./game-ideas.md)
 - [Reader Speed Ideas](./reader-speed-ideas.md)
+- [Metalio E-INK4 Plus (port notes)](./metalio-e-ink4-plus.md)
 
 If you are new, start with [Getting Started](./getting-started.md).
