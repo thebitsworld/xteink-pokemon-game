@@ -1,3 +1,12 @@
+## [1.10.0-beta.1] - 2026-10-23
+
+> **Beta build** for testers. If battles misbehave, go back to v1.9.1 - your save is unchanged by this build. The animations need the SD card assets from this release (`pokemon/effects/`); with an older art pack, battles work as before, without animations.
+
+### Added
+
+- Pokémon: **battle animations**. In a battle, each move now plays the original Pokémon Red/Blue animation of a move of its type (Ember's flames for Fire, Hydro Pump's water for Water, Thunder's lightning, Rock Throw's rocks, Gust's tornado, Swords Dance for moves that raise your own stats...) over the Pokémon it hits, which then blinks as in the original games. The two moves of a turn play in the order they happened, and each Pokémon's HP drops when the hit lands. Ported from the xteink-pokemon-crosslingua fork (new in the SD card assets: `pokemon/effects/`).
+- Pokémon: Settings > **Battle animations** turns them off; a turn then shows its result straight away, as before.
+
 ## [1.9.1] - 2026-10-19
 
 ### Fixed
