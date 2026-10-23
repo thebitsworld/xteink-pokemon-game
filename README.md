@@ -68,14 +68,17 @@ These are current X3 simulator captures using the artwork from `xteink-pokemon-s
 
 Confirmed working on physical hardware on **Xteink X3**, **Xteink X4**, and **Xteink X4
 Pro** (X4 Pro has a touch-only UI, portrait orientation), including both locked and
-unlocked devices. **X3/X4 and X4 Pro firmware are not interchangeable** — they target
-different chips (ESP32-C3 vs. ESP32-S3), though the updater checks for this and refuses a
-mismatched file rather than bricking anything. Do not install on Sticky or another device.
+unlocked devices; an **Xteink X4 Classic** build is new in 1.10. **X3/X4 and X4 Pro/X4
+Classic firmware are not interchangeable** — they target different chips (ESP32-C3 vs.
+ESP32-S3), though the updater checks for this and refuses a mismatched file rather than
+bricking anything. The X4 Pro and X4 Classic share a chip, so pick between those two with
+care. Do not install on Sticky or another device.
 
 | Your device | Download |
 | --- | --- |
 | Xteink X3 or Xteink X4 | [Latest X3/X4 firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x3-x4-firmware-latest.bin) |
 | Xteink X4 Pro | [Latest X4 Pro firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-pro-firmware-latest.bin) |
+| Xteink X4 Classic | [Latest X4 Classic firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-classic-firmware-latest.bin) |
 
 Install it over Wi-Fi from **Settings → System → Updates → Check for Updates**, or copy
 the `.bin` to the SD card and use **Settings → System → SD Card Firmware Update**. Either

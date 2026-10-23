@@ -76,7 +76,7 @@ is in git history (before 2026-10-08).
 ## Standing conventions
 
 - Commit locally; push, tag or release only when the user says so in that session. A `v*.*.*` tag push
-  builds both firmwares in CI and publishes a release (a hyphenated tag is a prerelease). Push with
+  builds the three firmwares (X3/X4, X4 Pro, X4 Classic) in CI and publishes a release (a hyphenated tag is a prerelease). Push with
   `git -c credential.helper='!gh auth git-credential' push origin <ref>`; never run `gh auth setup-git`.
 - Code and docs in separate commits. Ask before design-level changes, with a proposal. Only format code
   you wrote (no clang-format installed: match the style). Run builds one at a time.

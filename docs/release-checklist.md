@@ -6,9 +6,11 @@ performed on another build is not evidence for the release candidate.
 ## Automated firmware release
 
 Pushing a tag matching `v*.*.*` (e.g. `git tag v0.4.0 && git push origin v0.4.0`)
-triggers `.github/workflows/release.yml`, which builds `pokemon-x3` and
-`pokemon-x4-pro`, packages `xteink-pokemon-x3-x4-firmware-v<version>.bin`,
-`xteink-pokemon-x4-pro-firmware-v<version>.bin`, a version-less
+triggers `.github/workflows/release.yml`, which builds `pokemon-x3`,
+`pokemon-x4-pro` and `pokemon-x4-classic`, packages
+`xteink-pokemon-x3-x4-firmware-v<version>.bin`,
+`xteink-pokemon-x4-pro-firmware-v<version>.bin`,
+`xteink-pokemon-x4-classic-firmware-v<version>.bin`, a version-less
 `-latest.bin` alias of each (so README.md/docs/installation.md can link
 directly to `.../releases/latest/download/xteink-pokemon-<device>-firmware-latest.bin`
 and always get the current build), and `SHA256SUMS.txt`. It extracts the
@@ -17,11 +19,11 @@ matching `## [<version>]` section from `CHANGELOG.md` via
 those assets and that changelog section as the release notes.
 
 If a firmware-only asset is ever published by hand instead of through this
-workflow, re-upload the same two `-latest.bin` aliases to that release too -
+workflow, re-upload the same three `-latest.bin` aliases to that release too -
 the stable per-device download links depend on every release consistently
 carrying them.
 
-This only automates the two firmware assets. It does **not** run the full
+This only automates the firmware assets. It does **not** run the full
 release checklist below, and it does **not** build the artwork archive - the
 Pokémon artwork pack is deliberately not committed to this repository (see
 "Artwork archive" below). Build and upload
@@ -124,7 +126,7 @@ Automated checks do not approve a hardware release.
 - [ ] Confirm converted artwork is present only in the
       `xteink-pokemon-sd-card-assets.zip` release asset and is not committed
       to Git history.
-- [ ] Confirm the release includes both firmware binaries (plus their
+- [ ] Confirm the release includes all three firmware binaries (plus their
       `-latest.bin` aliases), `xteink-pokemon-sd-card-assets.zip`, and
       `SHA256SUMS.txt` (firmware only) with the approved public filenames.
 - [ ] Confirm release notes link to `RIGHTS_AND_ATTRIBUTION.md` and the Rights

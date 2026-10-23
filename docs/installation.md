@@ -7,36 +7,40 @@ nav_order: 2
 
 ## Supported devices
 
-**Xteink X3**, **Xteink X4**, and **Xteink X4 Pro**. Do not install this firmware on a
-Sticky, a plain (non-Pokémon) CrossInk device, or any other device.
+**Xteink X3**, **Xteink X4**, **Xteink X4 Pro**, and **Xteink X4 Classic**. Do not install
+this firmware on a Sticky, a plain (non-Pokémon) CrossInk device, or any other device.
 
-Confirmed working on physical hardware for all three, including both locked and unlocked
-devices.
+Confirmed working on physical hardware on the X3, X4 and X4 Pro, including both locked and
+unlocked devices. The X4 Classic build is new (1.10).
 
 ## Step 1 — Download the right firmware for your device
 
-Firmware comes in exactly two variants, one per chip:
+Firmware comes in three variants:
 
 | Your device | Download |
 | --- | --- |
 | **Xteink X3 or Xteink X4** | [Latest X3/X4 firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x3-x4-firmware-latest.bin) |
 | **Xteink X4 Pro** | [Latest X4 Pro firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-pro-firmware-latest.bin) |
+| **Xteink X4 Classic** | [Latest X4 Classic firmware](https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-x4-classic-firmware-latest.bin) |
 
-X3 and X4 share one firmware build; X4 Pro is a different chip (ESP32-S3 vs. ESP32-C3) and
-always needs its own. **Always match the file to your device** — the "latest" links above
+X3 and X4 share one firmware build. X4 Pro and X4 Classic use a different chip (ESP32-S3
+vs. ESP32-C3), and each needs its own build: the X4 Classic has buttons only, no touchscreen
+or frontlight. **Always match the file to your device** — the "latest" links above
 always point at the newest release automatically, so you never need to hunt for a version
 number.
 
 Prefer to pick an exact version instead of always-latest? Every release on the
 [releases page](https://github.com/thebitsworld/xteink-pokemon-game/releases) lists
 `xteink-pokemon-x3-x4-firmware-v<version>.bin` and
-`xteink-pokemon-x4-pro-firmware-v<version>.bin` individually, plus a `SHA256SUMS.txt` you
+`xteink-pokemon-x4-pro-firmware-v<version>.bin` and
+`xteink-pokemon-x4-classic-firmware-v<version>.bin` individually, plus a `SHA256SUMS.txt` you
 can check the download against.
 
 **You cannot brick your device by picking the wrong file.** Before writing anything, the
 firmware updater checks that the file matches your device's chip and fits the update
 partition, and refuses to proceed with a clear error if it doesn't — it just won't install.
-Still, downloading the correct file the first time saves you a second trip.
+The X4 Pro and X4 Classic share a chip, though, so that check cannot tell their two files
+apart: take extra care to pick the right one of those two.
 
 ## Step 2 — Install it
 
@@ -116,7 +120,7 @@ for more.
 ## Troubleshooting
 
 - **"Firmware is for a different device"** — you downloaded the file for the other chip
-  (X3/X4 vs. X4 Pro). Go back to Step 1 and grab the correct one; nothing was written to
+  (X3/X4 vs. X4 Pro or X4 Classic). Go back to Step 1 and grab the correct one; nothing was written to
   the device.
 - **Pokémon sprites show a plain placeholder instead of artwork** — you haven't copied
   `xteink-pokemon-sd-card-assets.zip`'s `pokemon` folder to the SD card root yet, or copied
