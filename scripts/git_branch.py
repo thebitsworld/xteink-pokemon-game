@@ -242,10 +242,10 @@ def inject_version(env):
         scoped.append(('CROSSINK_VERSION', f'\\"{version_string}\\"'))
         print(f'CrossInk RC build version: {version_string}')
 
-    elif pioenv in {'pokemon-x3', 'pokemon-x4-pro'}:
+    elif pioenv in {'pokemon-x3', 'pokemon-x4-pro', 'pokemon-x4-classic'}:
         # This fork's own release versioning (see [pokemon] in
         # platformio.ini), independent of the upstream CrossInk engine
-        # version - these two environments are the only ones actually
+        # version - these environments are the only ones actually
         # shipped as Pokemon firmware, and the device's own Wi-Fi "Check for
         # Update" (src/network/OtaUpdater.cpp) compares this value against
         # the tag_name of this fork's own GitHub releases. Previously these
