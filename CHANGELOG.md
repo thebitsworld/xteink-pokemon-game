@@ -6,6 +6,7 @@
 
 - Pokémon: **battle animations**. In a battle, each move now plays the original Pokémon Red/Blue animation of a move of its type (Ember's flames for Fire, Hydro Pump's water for Water, Thunder's lightning, Rock Throw's rocks, Gust's tornado, Swords Dance for moves that raise your own stats...) over the Pokémon it hits, which then blinks as in the original games. The two moves of a turn play in the order they happened, and each Pokémon's HP drops when the hit lands. Ported from the xteink-pokemon-crosslingua fork (new in the SD card assets: `pokemon/effects/`).
 - Pokémon: Settings > **Battle animations** turns them off; a turn then shows its result straight away, as before.
+- Firmware for the **Xteink X4 Classic** (`xteink-pokemon-x4-classic-firmware-v<version>.bin`): the Pokémon game and apps on the X4 Classic's buttons. The Game Boy stays X4 Pro only. The X4 Pro and X4 Classic share a chip, so the updater cannot tell their files apart - pick the right one.
 
 ## [1.9.1] - 2026-10-19
 
