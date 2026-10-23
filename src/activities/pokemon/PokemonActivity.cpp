@@ -53,9 +53,23 @@ constexpr int STARTER_BUTTON_ROW_HEIGHT = 120;
 // almost touching it).
 constexpr int ROW_ICON_X = 24;
 
-// Screen::Settings rows after the Home Screen toggle (index 0).
+// Screen::Settings rows: the on/off toggles first, then the actions.
+constexpr int SETTINGS_TOGGLE_COUNT = 2;
+
+// A Screen::Settings toggle row's setting (index 0 Home Screen, 1 Battle animations).
+uint8_t& settingsToggleValue(const int index) {
+  return index == 0 ? SETTINGS.pokemonHomeScreen : SETTINGS.pokemonBattleAnimations;
+}
+
+const char* settingsToggleLabel(const int index) {
+  return index == 0 ? tr(STR_POKEMON_HOME_SCREEN) : tr(STR_POKEMON_BATTLE_ANIMATIONS);
+}
+
+// Screen::Settings rows after the toggles.
 const char* settingsActionLabel(const int index) {
-  return index == 1 ? tr(STR_POKEMON_SEND_SAVE) : index == 2 ? tr(STR_POKEMON_RECEIVE_SAVE) : tr(STR_POKEMON_RESET);
+  return index == SETTINGS_TOGGLE_COUNT       ? tr(STR_POKEMON_SEND_SAVE)
+         : index == SETTINGS_TOGGLE_COUNT + 1 ? tr(STR_POKEMON_RECEIVE_SAVE)
+                                              : tr(STR_POKEMON_RESET);
 }
 
 // A trainer class's name (trainers met while reading), translated.
@@ -1051,7 +1065,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::Menu:
       return 8;
     case Screen::Settings:
-      return 4;
+      return SETTINGS_TOGGLE_COUNT + 3;
     case Screen::Party:
       return pokemon::PARTY_SIZE;
     case Screen::Actions: {
@@ -1452,6 +1466,7 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
 
 bool PokemonActivity::startMoveAnimation(const pokemon::BattleTurnResult& result) {
   animationStepCount_ = 0;
+  if (SETTINGS.pokemonBattleAnimations == 0) return false;
   // An effect is only played when its frames are on the SD card - an older
   // art pack keeps battles as they were, without animations.
   const auto playable = [](const pokemon::MoveEffectStep& step) {
@@ -2345,17 +2360,18 @@ void PokemonActivity::activate() {
         setScreen(Screen::Settings);
       return;
     case Screen::Settings:
-      if (selected_ == 0) {
-        const uint8_t previous = SETTINGS.pokemonHomeScreen;
-        SETTINGS.pokemonHomeScreen = previous == 0 ? 1 : 0;
+      if (selected_ < SETTINGS_TOGGLE_COUNT) {
+        uint8_t& value = settingsToggleValue(selected_);
+        const uint8_t previous = value;
+        value = previous == 0 ? 1 : 0;
         if (!SETTINGS.saveToFile()) {
-          SETTINGS.pokemonHomeScreen = previous;
+          value = previous;
           showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Settings);
         } else {
           setScreen(Screen::Settings, selected_);
         }
-      } else if (selected_ == 1 || selected_ == 2) {
-        activityManager.goToPokemonSaveTransfer(selected_ == 1);
+      } else if (selected_ == SETTINGS_TOGGLE_COUNT || selected_ == SETTINGS_TOGGLE_COUNT + 1) {
+        activityManager.goToPokemonSaveTransfer(selected_ == SETTINGS_TOGGLE_COUNT);
       } else {
         setScreen(Screen::ResetFirst);
       }
@@ -3659,9 +3675,9 @@ void PokemonActivity::buildRows() {
                                 : tr(STR_POKEMON_SETTINGS));
         break;
       case Screen::Settings:
-        if (index == 0) {
-          row(local, tr(STR_POKEMON_HOME_SCREEN),
-              SETTINGS.pokemonHomeScreen != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
+        if (index < SETTINGS_TOGGLE_COUNT) {
+          row(local, settingsToggleLabel(index),
+              settingsToggleValue(index) != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
         } else {
           row(local, settingsActionLabel(index));
         }
@@ -5175,9 +5191,9 @@ void PokemonActivity::renderChoiceButtons() {
         label = index == 0 ? tr(STR_YES) : tr(STR_NO);
         break;
       case Screen::Settings:
-        if (index == 0) {
-          snprintf(combined, sizeof(combined), "%s: %s", tr(STR_POKEMON_HOME_SCREEN),
-                   SETTINGS.pokemonHomeScreen != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
+        if (index < SETTINGS_TOGGLE_COUNT) {
+          snprintf(combined, sizeof(combined), "%s: %s", settingsToggleLabel(index),
+                   settingsToggleValue(index) != 0 ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF));
           label = combined;
         } else {
           label = settingsActionLabel(index);

@@ -608,6 +608,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 #if defined(CROSSINK_ENABLE_POKEMON)
   // Show the lead Pokemon on supported home screens. Training continues when hidden.
   uint8_t pokemonHomeScreen = 1;
+  // Play each move's animation in battle before the turn's result.
+  uint8_t pokemonBattleAnimations = 1;
 #endif
   // Settings > System feature switches (see FeatureToggles.h).
   uint8_t slideshowEnabled = 1;

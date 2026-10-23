@@ -58,6 +58,8 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
     // Persisted here, but edited from the Pokemon menu rather than the main Settings screen.
     add(SettingInfo::Toggle(StrId::STR_POKEMON_HOME_SCREEN, &CrossPointSettings::pokemonHomeScreen,
                             "pokemonHomeScreen"));
+    add(SettingInfo::Toggle(StrId::STR_POKEMON_BATTLE_ANIMATIONS, &CrossPointSettings::pokemonBattleAnimations,
+                            "pokemonBattleAnimations"));
 #endif
     add(SettingInfo::Enum(StrId::STR_UI_SCALE, &CrossPointSettings::uiScale, {StrId::STR_SMALL, StrId::STR_LARGE},
                           "uiScale", StrId::STR_CAT_DISPLAY)
