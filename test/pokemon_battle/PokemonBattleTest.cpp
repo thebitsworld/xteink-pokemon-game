@@ -2589,8 +2589,43 @@ void estimateMoveDamageHandlesImmunityFixedDamageAndEmptySlots() {
   CHECK(pokemon::bestExpectedDamage(pikachu, squirtle) >= pokemon::estimateMoveDamage(pikachu, squirtle, 0));
 }
 
+void eachActionRecordsBothSidesHpAfterItAndTheTurnOrder() {
+  // Tackle both ways; the player's +6 Speed stage makes it hit first, and
+  // each action's snapshot is taken before end-of-turn damage.
+  BattleCombatant player = makeCombatant(1, 30, {33});
+  BattleCombatant opponent = makeCombatant(4, 30, {33});
+  player.speedStage = 6;
+  opponent.speedStage = -6;
+  const uint16_t playerHpBefore = player.currentHp;
+  const uint16_t opponentHpBefore = opponent.currentHp;
+  const pokemon::BattleTurnResult result = pokemon::stepBattle(player, opponent, 0, MAX_RANDOM);
+  CHECK(result.playerFirst);
+  CHECK(result.player.acted && result.opponent.acted);
+  CHECK(result.player.playerHpAfter == playerHpBefore);  // the opponent had not hit yet
+  CHECK(result.player.opponentHpAfter < opponentHpBefore);
+  CHECK(result.opponent.opponentHpAfter == result.player.opponentHpAfter);
+  CHECK(result.opponent.playerHpAfter == player.currentHp);
+
+  // Roles reversed: the opponent acts first.
+  BattleCombatant slow = makeCombatant(1, 30, {33});
+  BattleCombatant fast = makeCombatant(4, 30, {33});
+  slow.speedStage = -6;
+  fast.speedStage = 6;
+  const uint16_t slowHpBefore = slow.currentHp;
+  const pokemon::BattleTurnResult reversed = pokemon::stepBattle(slow, fast, 0, MAX_RANDOM);
+  CHECK(!reversed.playerFirst);
+  CHECK(reversed.opponent.playerHpAfter < slowHpBefore);
+  CHECK(reversed.opponent.opponentHpAfter == fast.maxHp);
+  CHECK(reversed.player.playerHpAfter == reversed.opponent.playerHpAfter);
+
+  BattleCombatant hurt = makeCombatant(1, 30, {33});
+  BattleCombatant attacker = makeCombatant(4, 30, {33});
+  CHECK(!pokemon::stepOpponentOnlyTurn(hurt, attacker, MAX_RANDOM).playerFirst);
+}
+
 int main() {
   statFormulasScaleWithLevel();
+  eachActionRecordsBothSidesHpAfterItAndTheTurnOrder();
   damagingMoveReducesDefenderHpAndReportsSuperEffective();
   fireMoveIsNotVeryEffectiveAgainstWaterAndCanBurn();
   statusMoveWithZeroAilmentChanceAlwaysAppliesItsAilment();

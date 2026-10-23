@@ -2131,6 +2131,16 @@ void defaultMovesetForLevel(const uint16_t speciesId, const uint8_t level,
   }
 }
 
+namespace {
+
+// Records both sides' HP right after `action` (see BattleActionResult::playerHpAfter).
+void noteHpAfter(BattleActionResult& action, const BattleCombatant& player, const BattleCombatant& opponent) {
+  action.playerHpAfter = player.currentHp;
+  action.opponentHpAfter = opponent.currentHp;
+}
+
+}  // namespace
+
 BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, const uint8_t playerMoveSlot,
                             const RandomSource& random, const bool wildEncounter) {
   BattleTurnResult result{};
@@ -2165,6 +2175,7 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
     uint32_t coin = 0;
     playerFirst = !rollBelow(random, 2U, coin) || coin == 0;
   }
+  result.playerFirst = playerFirst;
 
   // Counter only reflects a physical hit taken *this same turn* - clear last
   // turn's record before either side acts (see BattleCombatant::
@@ -2178,6 +2189,7 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
 
   if (playerFirst) {
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
+    noteHpAfter(result.player, player, opponent);
     // Explosion/Self-Destruct, or recoil, can now faint the attacker too -
     // check for a simultaneous KO before either side-specific branch below.
     // Unlike finishTurn()'s end-of-turn tie (genuinely nobody's move - a
@@ -2208,6 +2220,7 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
       return result;  // the encounter is over - see stepBattle()'s declaration
     }
     result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
+    noteHpAfter(result.opponent, player, opponent);
     // Same simultaneous-KO check as the first action above, but for the
     // opponent's own second action this turn (its own Explosion/Self-
     // Destruct/recoil can faint it at the same time its hit faints the
@@ -2228,6 +2241,7 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
     }
   } else {
     result.opponent = resolveAction(opponent, player, opponentMoveSlot, random);
+    noteHpAfter(result.opponent, player, opponent);
     if (player.currentHp == 0 && opponent.currentHp == 0) {
       faintCombatant(player, opponent, result.player.event);
       faintCombatant(opponent, player, result.opponent.event);
@@ -2245,6 +2259,7 @@ BattleTurnResult stepBattle(BattleCombatant& player, BattleCombatant& opponent, 
       return result;
     }
     result.player = resolveAction(player, opponent, playerMoveSlot, random);
+    noteHpAfter(result.player, player, opponent);
     // Mirrors the playerFirst branch's own second-action check just above:
     // the player's own second action this turn can also recoil/Explode
     // itself down to 0 at the same moment it faints the opponent.
@@ -2284,6 +2299,8 @@ BattleTurnResult stepOpponentOnlyTurn(BattleCombatant& player, BattleCombatant& 
   opponent.flinched = false;
 
   result.opponent = resolveAction(opponent, player, chooseOpponentMoveSlot(player, opponent, random), random);
+  noteHpAfter(result.opponent, player, opponent);
+  result.playerFirst = false;
   if (player.currentHp == 0) {
     faintCombatant(player, opponent, result.player.event);
     // The acting side's own Explosion/recoil can take it down in the same
@@ -2318,6 +2335,7 @@ BattleTurnResult stepPlayerOnlyTurn(BattleCombatant& player, BattleCombatant& op
   opponent.flinched = false;
 
   result.player = resolveAction(player, opponent, playerMoveSlot, random);
+  noteHpAfter(result.player, player, opponent);
   if (opponent.currentHp == 0) {
     faintCombatant(opponent, player, result.opponent.event);
     if (player.currentHp == 0) faintCombatant(player, opponent, result.player.event);  // see stepOpponentOnlyTurn()

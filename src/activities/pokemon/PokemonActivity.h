@@ -247,6 +247,11 @@ class PokemonActivity final : public Activity {
   uint8_t moveAnimationStepFrames(uint8_t step) const;
   void setMoveAnimationLog();
   void advanceMoveAnimation();
+  // Snapshots both sides' HP/status before a turn is resolved, for the animation.
+  void rememberHpBeforeTurn();
+  // A side as its HP panel shows it: while a move animation plays, the HP of
+  // the last hit that has landed and the status from before the turn.
+  pokemon::BattleCombatant shownBattleCombatant(bool player) const;
   // Trainer AI (gym/Elite Four only, not the Champion - see
   // gymTeamOrder_'s doc comment - and never a wild encounter): decides
   // whether the opponent should use a healing item or proactively switch
@@ -329,6 +334,12 @@ class PokemonActivity final : public Activity {
   unsigned long animationNextFrameMs_ = 0;
   pokemon::BattleTurnResult animationResult_{};
   char animationFinalLog_[160]{};
+  // Both sides' HP and status before the animated turn: the HP panels show
+  // these until each hit lands (see shownBattleCombatant()).
+  uint16_t animationPlayerHpBefore_ = 0;
+  uint16_t animationOpponentHpBefore_ = 0;
+  pokemon::Ailment animationPlayerStatusBefore_ = pokemon::Ailment::None;
+  pokemon::Ailment animationOpponentStatusBefore_ = pokemon::Ailment::None;
   uint8_t gymChallengeIndex_ = 0;         // 0 = not fighting a gym/Elite Four right now
   // gymChallengeIndex_ while fighting a trainer met while reading; every
   // "trainer battle" rule (no catching, no running, trainer IVs and XP)

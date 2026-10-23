@@ -1420,6 +1420,7 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
   char trainerActionLine[80] = "";
   pokemon::BattleTurnResult result{};
   if (trainerAiShouldActInsteadOfMoveThisTurn(trainerActionLine, sizeof(trainerActionLine))) {
+    rememberHpBeforeTurn();
     result = service_.resolvePlayerOnlyTurn(battlePlayer_, battleOpponent_, moveSlot);
     // Teleport (round 3-4 audit item 1.7): the engine can't tell a wild
     // battle from a trainer one, so a gym/Elite Four/Champion battle
@@ -1437,6 +1438,7 @@ void PokemonActivity::resolveBattlePlayerMoveTurn(const uint8_t moveSlot) {
       snprintf(battleLog_, sizeof(battleLog_), "%s", trainerActionLine);
     }
   } else {
+    rememberHpBeforeTurn();
     result = service_.resolveBattleTurn(battlePlayer_, battleOpponent_, moveSlot, /*wildEncounter=*/gymChallengeIndex_ == 0);
     if (gymChallengeIndex_ != 0 && result.player.event == pokemon::BattleLogEvent::Teleported) {
       result.player.event = pokemon::BattleLogEvent::MoveFailed;
@@ -1456,9 +1458,12 @@ bool PokemonActivity::startMoveAnimation(const pokemon::BattleTurnResult& result
     return step.effect != pokemon::MoveEffect::None && pokemon::pokemonMoveEffectArtInstalled(step.effect);
   };
   const pokemon::MoveEffectStep playerStep = pokemon::moveEffectFor(battlePlayer_, result.player);
-  if (playable(playerStep)) animationSteps_[animationStepCount_++] = {playerStep, true};
   const pokemon::MoveEffectStep opponentStep = pokemon::moveEffectFor(battleOpponent_, result.opponent);
-  if (playable(opponentStep)) animationSteps_[animationStepCount_++] = {opponentStep, false};
+  // In the order the two sides acted, so each hit lands on the HP it really took.
+  for (const bool byPlayer : {result.playerFirst, !result.playerFirst}) {
+    const pokemon::MoveEffectStep& step = byPlayer ? playerStep : opponentStep;
+    if (playable(step)) animationSteps_[animationStepCount_++] = {step, byPlayer};
+  }
   if (animationStepCount_ == 0) return false;
   animationResult_ = result;
   snprintf(animationFinalLog_, sizeof(animationFinalLog_), "%s", battleLog_);
@@ -1508,6 +1513,32 @@ void PokemonActivity::advanceMoveAnimation() {
   cleanRefreshNeeded_ = true;
   finishBattlePlayerMoveTurn(animationResult_);
   requestUpdate();
+}
+
+void PokemonActivity::rememberHpBeforeTurn() {
+  animationPlayerHpBefore_ = battlePlayer_.currentHp;
+  animationOpponentHpBefore_ = battleOpponent_.currentHp;
+  animationPlayerStatusBefore_ = battlePlayer_.status;
+  animationOpponentStatusBefore_ = battleOpponent_.status;
+}
+
+pokemon::BattleCombatant PokemonActivity::shownBattleCombatant(const bool player) const {
+  pokemon::BattleCombatant shown = player ? battlePlayer_ : battleOpponent_;
+  if (!animating_) return shown;
+  shown.currentHp = player ? animationPlayerHpBefore_ : animationOpponentHpBefore_;
+  shown.status = player ? animationPlayerStatusBefore_ : animationOpponentStatusBefore_;
+  // A step's HP lands once its effect frames are done (as the target starts
+  // to blink), and stays for the steps after it.
+  for (uint8_t step = 0; step < animationStepCount_ && step <= animationStep_; ++step) {
+    if (step == animationStep_ &&
+        animationFrame_ < pokemon::moveEffectFrameCount(animationSteps_[step].effect.effect)) {
+      break;
+    }
+    const pokemon::BattleActionResult& action =
+        animationSteps_[step].byPlayer ? animationResult_.player : animationResult_.opponent;
+    shown.currentHp = player ? action.playerHpAfter : action.opponentHpAfter;
+  }
+  return shown;
 }
 
 void PokemonActivity::finishBattlePlayerMoveTurn(const pokemon::BattleTurnResult& result) {
@@ -5315,8 +5346,10 @@ void PokemonActivity::renderBattleHud() {
     }
   };
 
+  const pokemon::BattleCombatant shownPlayer = shownBattleCombatant(true);
+  const pokemon::BattleCombatant shownOpponent = shownBattleCombatant(false);
   int opponentCount = 1;
-  uint32_t opponentAliveMask = battleOpponent_.currentHp > 0 ? 1U : 0U;
+  uint32_t opponentAliveMask = shownOpponent.currentHp > 0 ? 1U : 0U;
   if (gymChallengeIndex_ != 0) {
     const auto team = challengeTeam();
     opponentCount = static_cast<int>(team.size());
@@ -5326,7 +5359,7 @@ void PokemonActivity::renderBattleHud() {
       if (i < static_cast<int>(gymChallengeTeamProgress_)) {
         alive = false;  // already defeated
       } else if (i == static_cast<int>(gymChallengeTeamProgress_)) {
-        alive = battleOpponent_.currentHp > 0;  // currently on the field
+        alive = shownOpponent.currentHp > 0;  // currently on the field
       } else {
         alive = true;  // not sent out yet
       }
@@ -5337,7 +5370,7 @@ void PokemonActivity::renderBattleHud() {
   for (int i = 0; i < snapshot_.partyCount; ++i) {
     bool alive;
     if (i == battlePartySlot_) {
-      alive = battlePlayer_.currentHp > 0;  // the live combatant, not the (possibly stale) stored entry
+      alive = shownPlayer.currentHp > 0;  // the live combatant, not the (possibly stale) stored entry
     } else {
       alive = service_.peekBattleMoves(snapshot_.party[i]).currentHp > 0;
     }
@@ -5389,13 +5422,13 @@ void PokemonActivity::renderBattleHud() {
     const int oppPanelX = sideMargin + spriteW + compactSpriteGap;
     const int spriteY = rowTop + dotRowHeight + std::max(0, (panelHeight - spriteH) / 2);
     drawDots(opponentCount, opponentAliveMask, rowTop, oppPanelX + panelWidth);
-    drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), oppPanelX, rowTop + dotRowHeight);
+    drawPanel(shownOpponent, speciesName(battleOpponent_.speciesId), oppPanelX, rowTop + dotRowHeight);
     drawBattleSprite(false, Rect{oppSpriteX, spriteY, spriteW, spriteH});
 
     const int playerPanelX = halfWidth + compactCenterGap;
     const int playerSpriteX = width - sideMargin - spriteW;
     drawDots(snapshot_.partyCount, playerAliveMask, rowTop, playerPanelX + panelWidth);
-    drawPanel(battlePlayer_, playerName, playerPanelX, rowTop + dotRowHeight);
+    drawPanel(shownPlayer, playerName, playerPanelX, rowTop + dotRowHeight);
     drawBattleSprite(true, Rect{playerSpriteX, spriteY, spriteW, spriteH});
     messageY = hudBottom - messageHeight;
   } else {
@@ -5417,7 +5450,7 @@ void PokemonActivity::renderBattleHud() {
     const int opponentSpriteY = hudTop;
     const int opponentPanelX = sideMargin;
     drawDots(opponentCount, opponentAliveMask, hudTop, opponentPanelX + panelWidth);
-    drawPanel(battleOpponent_, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight);
+    drawPanel(shownOpponent, speciesName(battleOpponent_.speciesId), opponentPanelX, hudTop + dotRowHeight);
     drawBattleSprite(false, Rect{opponentSpriteX, opponentSpriteY, spriteW, spriteH});
 
     const int playerSpriteX = sideMargin;
@@ -5425,7 +5458,7 @@ void PokemonActivity::renderBattleHud() {
     const int playerSpriteY = playerZoneTop;
     const int playerPanelX = width - sideMargin - panelWidth;
     drawDots(snapshot_.partyCount, playerAliveMask, playerZoneTop, playerPanelX + panelWidth);
-    drawPanel(battlePlayer_, playerName, playerPanelX, playerZoneTop + dotRowHeight);
+    drawPanel(shownPlayer, playerName, playerPanelX, playerZoneTop + dotRowHeight);
     drawBattleSprite(true, Rect{playerSpriteX, playerSpriteY, spriteW, spriteH});
   }
 

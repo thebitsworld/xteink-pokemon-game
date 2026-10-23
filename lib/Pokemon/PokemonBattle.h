@@ -506,12 +506,19 @@ struct BattleActionResult {
   // this to show what Metronome/Mirror Move actually turned into, on top of
   // the usual "X used METRONOME!" framing.
   uint8_t redirectedMoveId = 0;
+  // Both sides' HP right after this action (before any end-of-turn status
+  // damage), so the UI can show each hit land in turn instead of the whole
+  // turn's result at once. Only meaningful when `acted` is true.
+  uint16_t playerHpAfter = 0;
+  uint16_t opponentHpAfter = 0;
 };
 
 struct BattleTurnResult {
   BattleActionResult player{};
   BattleActionResult opponent{};
   BattleOutcome outcome = BattleOutcome::InProgress;
+  // Which side acted first this turn (priority, then Speed, then a coin flip).
+  bool playerFirst = true;
 };
 
 // Generation I-derived stat formulas, now with IV/EV: `iv` is 0-15 (real Gen
