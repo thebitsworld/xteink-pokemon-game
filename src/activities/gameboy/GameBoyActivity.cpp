@@ -23,6 +23,7 @@
 
 #include "BluetoothInput.h"
 #include "CrossPointState.h"
+#include "GameLibraryStore.h"
 #include "components/TouchRegistry.h"
 #include "fontIds.h"
 
@@ -267,6 +268,7 @@ void GameBoyActivity::onEnter() {
   if (!loadRom() || !buildSavePaths() || !initEmulator() || !loadSave()) {
     return;
   }
+  GameLibraryStore::noteRecent(romPath);  // the library's Recently played
 
   // Woken in this game: pick up where the reader went to sleep. A resume file
   // is used once; one left from an earlier sleep is stale on a normal launch.

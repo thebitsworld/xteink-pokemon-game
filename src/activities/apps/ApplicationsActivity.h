@@ -21,6 +21,7 @@
 #include "FeatureToggles.h"
 #if CROSSINK_GAMEBOY
 #include "activities/gameboy/GameBoyActivity.h"
+#include "activities/gameboy/GameLibraryActivity.h"
 #include "activities/gameboy/PulseTestActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #endif
@@ -99,11 +100,11 @@ class ApplicationsActivity : public Activity {
         return;
       }
       if (app.gameBoy) {
-        // Built in: pick a ROM (starting where the last game was) and play it;
-        // leaving the game comes back here.
+        // Built in: pick a ROM from the game library (favourites, recent, all
+        // found on the SD card, or a folder) and play it; leaving the game
+        // comes back here.
         startActivityForResult(
-            std::make_unique<FileBrowserActivity>(renderer, mappedInput, GameBoyActivity::lastRomFolder(),
-                                                  FileBrowserActivity::Mode::PickGameBoyRom),
+            std::make_unique<GameLibraryActivity>(renderer, mappedInput),
             [this](const ActivityResult& result) {
               const auto* picked = std::get_if<FilePathResult>(&result.data);
               if (!result.isCancelled && picked && !picked->path.empty()) {
