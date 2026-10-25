@@ -81,6 +81,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #endif
 
 #include "AppVersion.h"
+#include "BluetoothInput.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalActions.h"
@@ -1085,6 +1086,7 @@ void enterDeepSleep(bool fromTimeout) {
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
+  bt::stopForSleep();
   activityManager.goToSleep(fromTimeout);
   // Reader exit may already have saved this state. Save after the sleep screen
   // appears, skipping an unchanged snapshot while still retrying failed saves.
@@ -1601,6 +1603,9 @@ void setup() {
     gpio.update();
   }
 
+  // Network boots (file transfer, OTA, sync) keep the radio for WiFi alone.
+  if (!isNetworkResume) bt::begin();
+
   allowSleepAt = millis() + 2000;
 }
 
@@ -1628,6 +1633,7 @@ void loop() {
   // hardware input frame. A shortcut may open an activity that never queries
   // the originating button, so its one-shot release guard must still expire.
   mappedInputManager.update();
+  bt::pump(mappedInputManager);
 #ifdef SIMULATOR
   simulatorHomeKeyInput.update();
 #endif
@@ -1676,7 +1682,11 @@ void loop() {
 #if CROSSINK_APP_CAP_TOUCH
                                  || gpio.wasTouchActivity()
 #endif
-                                 || halTiltSensor.hadActivity();
+                                 || halTiltSensor.hadActivity()
+#if CROSSINK_BLUETOOTH
+                                 || mappedInputManager.hadRemoteInput()
+#endif
+      ;
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
@@ -1910,8 +1920,9 @@ void loop() {
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
-      // If we've been inactive for a while, increase the delay to save power
-      powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
+      // If we've been inactive for a while, increase the delay to save power.
+      // The Bluetooth radio keeps the CPU at full speed while it is up.
+      if (!bt::running()) powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
       delay(50);
     } else {
       // Short delay to prevent tight loop while still being responsive

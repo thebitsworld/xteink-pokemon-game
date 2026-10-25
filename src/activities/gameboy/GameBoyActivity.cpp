@@ -21,6 +21,7 @@
 #include <ctime>
 #include <utility>
 
+#include "BluetoothInput.h"
 #include "CrossPointState.h"
 #include "components/TouchRegistry.h"
 #include "fontIds.h"
@@ -228,6 +229,7 @@ void GameBoyActivity::onEnter() {
   saveDirty = false;
   physicalJoypadMask = 0;
   touchJoypadMask = 0;
+  bluetoothJoypadMask = 0;
   activeTouch = TouchControl::None;
   multiTouchActive = false;
   nextFrameUs = 0;
@@ -530,7 +532,7 @@ void GameBoyActivity::render(RenderLock&&) {
   // The framebuffer keeps the title and buttons from the last picture (the
   // display is single-buffered): clear and redraw them only when they change,
   // and with every cleaning refresh in case anything else drew on the screen.
-  const uint32_t chrome = static_cast<uint32_t>(physicalJoypadMask | touchJoypadMask) |
+  const uint32_t chrome = static_cast<uint32_t>(physicalJoypadMask | touchJoypadMask | bluetoothJoypadMask) |
                           (static_cast<uint32_t>(activeTouch) << 8) | (static_cast<uint32_t>(orientation) << 22) |
                           (statusLineShown.load(std::memory_order_acquire) ? (0x20000u | (static_cast<uint32_t>(
                                                              perfTextIdx.load(std::memory_order_acquire))
@@ -927,6 +929,7 @@ void GameBoyActivity::openMenu() {
   multiTouchActive = false;
   touchJoypadMask = 0;
   physicalJoypadMask = 0;
+  bluetoothJoypadMask = 0;
   applyJoypad();
   menuSel = 0;
   loadArmed = false;
@@ -1546,6 +1549,7 @@ void GameBoyActivity::cleanup() {
   cartRamSize = 0;
   physicalJoypadMask = 0;
   touchJoypadMask = 0;
+  bluetoothJoypadMask = 0;
   activeTouch = TouchControl::None;
   multiTouchActive = false;
   saveDirty = false;
@@ -1605,10 +1609,20 @@ void GameBoyActivity::handleInput() {
                             Button::Power};
   uint8_t nextPhysical = 0;
   for (const Button button : buttons) {
+#if CROSSINK_BLUETOOTH
+    // A controller's buttons come in through bt::heldControls() below, by their
+    // own Game Boy names, not as the front buttons they stand for elsewhere.
+    if (mappedInput.isRemoteHeld(button)) continue;
+#endif
     if (mappedInput.isPressed(button)) nextPhysical |= joypadBitForButton(button);
   }
   if (nextPhysical != physicalJoypadMask) {
     physicalJoypadMask = nextPhysical;
+    applyJoypad();
+  }
+  const uint8_t nextBluetooth = joypadBitsForControls(bt::heldControls());
+  if (nextBluetooth != bluetoothJoypadMask) {
+    bluetoothJoypadMask = nextBluetooth;
     applyJoypad();
   }
 
@@ -1712,6 +1726,16 @@ uint8_t GameBoyActivity::joypadBitForTouch(const TouchControl control) {
   }
 }
 
+uint8_t GameBoyActivity::joypadBitsForControls(const uint8_t controls) {
+  static constexpr uint8_t bits[bt::ControlCount] = {JOYPAD_UP, JOYPAD_DOWN, JOYPAD_LEFT,  JOYPAD_RIGHT,
+                                                     JOYPAD_A,  JOYPAD_B,    JOYPAD_START, JOYPAD_SELECT};
+  uint8_t mask = 0;
+  for (uint8_t i = 0; i < bt::ControlCount; ++i) {
+    if (controls & bt::controlBit(static_cast<bt::Control>(i))) mask |= bits[i];
+  }
+  return mask;
+}
+
 uint8_t GameBoyActivity::joypadBitForButton(const MappedInputManager::Button button) {
   switch (button) {
     case MappedInputManager::Button::Up: return JOYPAD_UP;
@@ -1726,7 +1750,7 @@ uint8_t GameBoyActivity::joypadBitForButton(const MappedInputManager::Button but
 }
 
 void GameBoyActivity::applyJoypad() {
-  const uint8_t joypad = static_cast<uint8_t>(~(physicalJoypadMask | touchJoypadMask));
+  const uint8_t joypad = static_cast<uint8_t>(~(physicalJoypadMask | touchJoypadMask | bluetoothJoypadMask));
   if (gb) gb->direct.joypad = joypad;
   if (cgb) walnut_cgb_set_joypad(cgb, joypad);
 }
@@ -1930,7 +1954,7 @@ bool GameBoyActivity::drawGameFramePortrait(const uint8_t* source, uint8_t* fram
 }
 
 void GameBoyActivity::drawControls() {
-  const uint8_t currentMask = static_cast<uint8_t>(physicalJoypadMask | touchJoypadMask);
+  const uint8_t currentMask = static_cast<uint8_t>(physicalJoypadMask | touchJoypadMask | bluetoothJoypadMask);
 
   renderer.drawRect(gameX - 1, gameY - 1, gameW + 2, gameH + 2, true);
   renderer.drawText(UI_10_FONT_ID, titleX, titleY, title[0] ? title : "GAME BOY", true, EpdFontFamily::BOLD);

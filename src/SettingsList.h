@@ -589,7 +589,12 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 // Sized from the measured pokemon-x3 count (112): this fork adds 3 Slideshow entries, 1 entry gated behind
 // CROSSINK_ENABLE_POKEMON and 3 feature switches (Pokemon, Applications, Slideshow) on top of upstream's
 // entries; reserved for the max case.
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 112 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0);
+#if CROSSINK_BLUETOOTH
+inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 1;
+#else
+inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 0;
+#endif
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 112 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT;
 
 const std::vector<SettingInfo>& getBaseSettingsList();
 
@@ -1043,12 +1048,15 @@ inline std::vector<SettingInfo> buildDisplaySleepSettingsList(const std::vector<
 
 inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> systemSettings;
-  systemSettings.reserve(9);
+  systemSettings.reserve(10);
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_DEVICE, SettingAction::SystemDevice));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FILES_CACHE, SettingAction::SystemFilesCache));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FEATURES, SettingAction::SystemFeatures));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_READING_STATS, SettingAction::SystemReadingStats));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
+#if CROSSINK_BLUETOOTH
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_BLUETOOTH, SettingAction::Bluetooth));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));

@@ -134,6 +134,7 @@ class GameBoyActivity final : public Activity {
 
   uint8_t physicalJoypadMask = 0;
   uint8_t touchJoypadMask = 0;
+  uint8_t bluetoothJoypadMask = 0;  // a Bluetooth controller's buttons (bt::heldControls)
 
   int scale = 3;
   int gameX = 160;
@@ -292,6 +293,7 @@ class GameBoyActivity final : public Activity {
   void updateTouch(int x, int y);
   TouchControl hitTestTouch(int x, int y) const;
   static uint8_t joypadBitForTouch(TouchControl control);
+  static uint8_t joypadBitsForControls(uint8_t controls);
   static uint8_t joypadBitForButton(MappedInputManager::Button button);
   void applyJoypad();
 

@@ -16,6 +16,7 @@
 #include "AppCapabilities.h"
 #include "AppVersion.h"
 #include "BackupStatsActivity.h"
+#include "BluetoothActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ClockOffsetActivity.h"
@@ -1223,6 +1224,11 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::ClockSync:
         startActivityForResult(std::make_unique<ClockSyncActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::Bluetooth:
+#if CROSSINK_BLUETOOTH
+        startActivityForResult(std::make_unique<BluetoothActivity>(renderer, mappedInput), resultHandler);
+#endif
         break;
       case SettingAction::QuickActions:
         startActivityForResult(std::make_unique<QuickActionsActivity>(renderer, mappedInput), resultHandler);

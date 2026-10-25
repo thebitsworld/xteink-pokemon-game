@@ -61,6 +61,10 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
     add(SettingInfo::Toggle(StrId::STR_POKEMON_BATTLE_ANIMATIONS, &CrossPointSettings::pokemonBattleAnimations,
                             "pokemonBattleAnimations"));
 #endif
+#if CROSSINK_BLUETOOTH
+    // Persisted here, but switched from Settings > System > Bluetooth.
+    add(SettingInfo::Toggle(StrId::STR_BLUETOOTH, &CrossPointSettings::bluetoothEnabled, "bluetoothEnabled"));
+#endif
     add(SettingInfo::Enum(StrId::STR_UI_SCALE, &CrossPointSettings::uiScale, {StrId::STR_SMALL, StrId::STR_LARGE},
                           "uiScale", StrId::STR_CAT_DISPLAY)
             .withEnumRawValues({CrossPointSettings::UI_SCALE_SMALL, CrossPointSettings::UI_SCALE_LARGE}));

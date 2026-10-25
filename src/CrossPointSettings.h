@@ -611,6 +611,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Play each move's animation in battle before the turn's result.
   uint8_t pokemonBattleAnimations = 1;
 #endif
+#if CROSSINK_BLUETOOTH
+  // Bluetooth controllers / page turners (Settings > System > Bluetooth).
+  uint8_t bluetoothEnabled = 0;
+#endif
   // Settings > System feature switches (see FeatureToggles.h).
   uint8_t slideshowEnabled = 1;
 #if defined(CROSSINK_ENABLE_POKEMON)

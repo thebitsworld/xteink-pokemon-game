@@ -257,6 +257,17 @@ class MappedInputManager {
   int getReleasedFrontButton() const;
   bool isFrontButtonPressed(uint8_t buttonIndex) const;
 
+#if CROSSINK_BLUETOOTH
+  // Buttons held on a Bluetooth controller or page turner (BluetoothInput).
+  // Edges last one input frame: remoteBeginFrame() clears them before the
+  // next frame's events are injected.
+  void remoteBeginFrame() const;
+  void remoteInjectPress(Button button) const;
+  void remoteInjectRelease(Button button) const;
+  bool isRemoteHeld(Button button) const { return remoteHeld[static_cast<size_t>(button)]; }
+  bool hadRemoteInput() const { return remoteActivity; }
+#endif
+
 #ifdef SIMULATOR
   void simulatorInjectPress(Button button);
   void simulatorInjectRelease(Button button);
@@ -293,6 +304,14 @@ class MappedInputManager {
 #if CROSSINK_APP_CAP_TOUCH
   mutable bool suppressTouchTap = false;
   mutable bool deferredHomeGesture = false;
+#endif
+#if CROSSINK_BLUETOOTH
+  mutable std::array<bool, BUTTON_COUNT> remotePressed{};
+  mutable std::array<bool, BUTTON_COUNT> remoteReleased{};
+  mutable std::array<bool, BUTTON_COUNT> remoteHeld{};
+  mutable std::array<unsigned long, BUTTON_COUNT> remotePressStart{};
+  mutable std::array<unsigned long, BUTTON_COUNT> remoteReleasedHeldTime{};
+  mutable bool remoteActivity = false;
 #endif
 #ifdef SIMULATOR
   std::array<bool, BUTTON_COUNT> simulatorPressed{};

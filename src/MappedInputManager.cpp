@@ -107,7 +107,7 @@ ButtonIndex mapSideButtonForReaderOrientation(const ButtonIndex button, const bo
   return button;
 }
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || CROSSINK_BLUETOOTH
 size_t buttonIndex(MappedInputManager::Button button) { return static_cast<size_t>(button); }
 #endif
 
@@ -130,6 +130,9 @@ void MappedInputManager::suppressNextSideRelease(const Button button) {
 }
 
 bool MappedInputManager::wasPhysicallyReleased(const Button button) const {
+#if CROSSINK_BLUETOOTH
+  if (remoteReleased[buttonIndex(button)]) return true;
+#endif
 #ifdef SIMULATOR
   if (simulatorReleased[buttonIndex(button)]) {
     return true;
@@ -844,6 +847,9 @@ bool MappedInputManager::wasLightPanelGesture() const { return hasHomeKeyHardwar
 #endif
 
 bool MappedInputManager::wasPressed(const Button button) const {
+#if CROSSINK_BLUETOOTH
+  if (remotePressed[buttonIndex(button)]) return true;
+#endif
 #ifdef SIMULATOR
   if (simulatorPressed[buttonIndex(button)]) {
     return true;
@@ -887,9 +893,12 @@ bool MappedInputManager::wasReleased(const Button button) const {
     return true;
   }
 #ifdef SIMULATOR
-  const bool simulatedRelease = simulatorReleased[buttonIndex(button)];
+  bool simulatedRelease = simulatorReleased[buttonIndex(button)];
 #else
-  constexpr bool simulatedRelease = false;
+  bool simulatedRelease = false;
+#endif
+#if CROSSINK_BLUETOOTH
+  simulatedRelease = simulatedRelease || remoteReleased[buttonIndex(button)];
 #endif
 
   if (button == Button::Back) {
@@ -981,6 +990,9 @@ bool MappedInputManager::isPressed(const Button button) const {
     return false;
   }
 
+#if CROSSINK_BLUETOOTH
+  if (remoteHeld[buttonIndex(button)]) return true;
+#endif
 #ifdef SIMULATOR
   if (simulatorHeld[buttonIndex(button)]) {
     return true;
@@ -1006,6 +1018,9 @@ bool MappedInputManager::isPressed(const Button button) const {
 }
 
 bool MappedInputManager::isPhysicalPressed(const Button button) const {
+#if CROSSINK_BLUETOOTH
+  if (remoteHeld[buttonIndex(button)]) return true;
+#endif
 #ifdef SIMULATOR
   if (simulatorHeld[buttonIndex(button)]) {
     return true;
@@ -1015,6 +1030,9 @@ bool MappedInputManager::isPhysicalPressed(const Button button) const {
 }
 
 bool MappedInputManager::wasAnyPressed() const {
+#if CROSSINK_BLUETOOTH
+  if (std::any_of(remotePressed.begin(), remotePressed.end(), [](bool pressed) { return pressed; })) return true;
+#endif
 #ifdef SIMULATOR
   if (std::any_of(simulatorPressed.begin(), simulatorPressed.end(), [](bool pressed) { return pressed; })) {
     return true;
@@ -1030,6 +1048,9 @@ bool MappedInputManager::wasAnyPressed() const {
 }
 
 bool MappedInputManager::wasAnyReleased() const {
+#if CROSSINK_BLUETOOTH
+  if (std::any_of(remoteReleased.begin(), remoteReleased.end(), [](bool released) { return released; })) return true;
+#endif
 #ifdef SIMULATOR
   if (std::any_of(simulatorReleased.begin(), simulatorReleased.end(), [](bool released) { return released; })) {
     return true;
@@ -1052,6 +1073,15 @@ unsigned long MappedInputManager::getHeldTime() const {
     heldTime = touchHeldOverrideMs;
   } else {
     touchHeldOverrideValid = false;
+  }
+#endif
+#if CROSSINK_BLUETOOTH
+  for (size_t i = 0; i < BUTTON_COUNT; i++) {
+    if (remoteHeld[i] && remotePressStart[i] > 0) {
+      heldTime = std::max(heldTime, millis() - remotePressStart[i]);
+    } else if (remoteReleased[i]) {
+      heldTime = std::max(heldTime, remoteReleasedHeldTime[i]);
+    }
   }
 #endif
 #ifdef SIMULATOR
@@ -1220,6 +1250,32 @@ int MappedInputManager::getReleasedFrontButton() const {
 }
 
 bool MappedInputManager::isFrontButtonPressed(const uint8_t buttonIndex) const { return gpio.isPressed(buttonIndex); }
+
+#if CROSSINK_BLUETOOTH
+void MappedInputManager::remoteBeginFrame() const {
+  remotePressed.fill(false);
+  remoteReleased.fill(false);
+  remoteActivity = false;
+}
+
+void MappedInputManager::remoteInjectPress(const Button button) const {
+  const size_t idx = buttonIndex(button);
+  if (remoteHeld[idx]) return;
+  remotePressed[idx] = true;
+  remoteHeld[idx] = true;
+  remotePressStart[idx] = millis();
+  remoteActivity = true;
+}
+
+void MappedInputManager::remoteInjectRelease(const Button button) const {
+  const size_t idx = buttonIndex(button);
+  if (!remoteHeld[idx]) return;
+  remoteReleasedHeldTime[idx] = remotePressStart[idx] > 0 ? millis() - remotePressStart[idx] : 0;
+  remoteReleased[idx] = true;
+  remoteHeld[idx] = false;
+  remoteActivity = true;
+}
+#endif
 
 #ifdef SIMULATOR
 void MappedInputManager::simulatorInjectPress(Button button) {
