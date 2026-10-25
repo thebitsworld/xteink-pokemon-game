@@ -53,6 +53,17 @@ is in git history (before 2026-10-08).
   palette span - stretched onto levels 4..16), Smooth (17 levels, the tester found it busy), Brightness.
   Settings menu taps: orientation changes wait for the finger to lift, and the touch registry is cleared
   while it shows (game target ids collide with the front-button hints).
+- Bluetooth (X4 Pro only, `CROSSINK_BLUETOOTH`, after 1.10.0-beta.1, not released yet): the SDK's
+  `BleKeyboardHost` (`FREEINK_CAP_BLE_HID_HOST=1`) on `h2zero/NimBLE-Arduino @ 2.5.1` (2.3.8 does not
+  compile against the SDK's `onPassKeyDisplay`), NimBLE options as build flags - no custom_sdkconfig.
+  `src/BluetoothInput.*` maps raw button edges (`RawButtonEvent::code()`) to 8 controls (learned codes in
+  `/.crosspoint/bluetooth_buttons.bin`, else HID usage defaults) and injects Up/Down/Left/Right/A=Confirm
+  /B=Back into `MappedInputManager` (`remote*` arrays, beside the simulator ones; edges last one frame,
+  a release in its press's frame waits one). The Game Boy skips remote-held buttons in its physical
+  mask (there Confirm = Start) and reads `bt::heldControls()`. Setting `bluetoothEnabled` (no category,
+  switched from Settings > System > Bluetooth, `BluetoothActivity`). Radio: started at the end of
+  setup() unless it is a network boot, full CPU speed while up, `stopForSleep()` in enterDeepSleep().
+  Costs ~220 KB flash: pokemon-x4-pro is at 96% of its 6.4 MB slot. Not yet tried on hardware.
 - How to play guides (1.8.4): `guide.md` / `guide.vi.md` in an app
   folder, shown by `GuideViewerActivity` (Markdown subset, not the EPUB reader - that would add recents,
   reading time and Pokemon credit). "?" on Applications rows (tap; hold Select on X3/X4);

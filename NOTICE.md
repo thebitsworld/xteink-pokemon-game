@@ -6,6 +6,8 @@ This project is built from the MIT-licensed [CrossInk](https://github.com/uxjuli
 
 The X4 Pro Game Boy emulator uses [Peanut-GB](https://github.com/deltabeard/Peanut-GB) by Mahyar Koshkouei (MIT, with parts from SameBoy by Lior Halphon; see `lib/PeanutGB/src/peanut_gb.h`), and its game screen started from the MIT-licensed [Ink-boy](https://github.com/hellominecraft913-dev/Ink-boy) CrossInk fork.
 
+Bluetooth on the X4 Pro uses [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) by h2zero (Apache License 2.0, downloaded at build time) through the FreeInk SDK's BleKeyboardHost; reading a controller in the Game Boy follows Ink-boy.
+
 Artwork provenance:
 
 - Pokémon menu sprites: [PokeAPI Sprites](https://github.com/PokeAPI/sprites), revision `4bc9d60186fe2e499ee2f3d4d1b796806cb99a67`

@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Added
+
+- X4 Pro: **Bluetooth controllers and page turners**. Settings > System > Bluetooth turns Bluetooth on, searches for Bluetooth LE keyboards, gamepads and page turners, pairs them (up to four are remembered and reconnect by themselves) and forgets them. A controller works everywhere the front buttons do: its arrows move through menus, A selects, B goes back, so the Pokémon game and the apps play with it, and a page turner (Page Up/Down or arrows) turns pages in the reader. Bluetooth is off until you turn it on; while it is on the reader stays at full speed, which uses more battery. Bluetooth Classic-only controllers cannot connect (the chip only has Bluetooth LE).
+- Game Boy: plays with a Bluetooth controller - all eight buttons, Start and Select included. **Controller buttons** in the Bluetooth settings learns which of your controller's buttons is which (press each one when asked; Skip keeps a key's default). Without it, keyboards use the arrows or WASD, Enter/X for A, Esc/Z for B, Space for Start and Tab for Select. Idea from the Ink-boy fork.
+- Game Boy: two fingers can hold two on-screen buttons at once - B to run while walking, A and B together. Idea from the Ink-boy fork.
+
 ## [1.10.0-beta.1] - 2026-10-23
 
 > **Beta build** for testers. If battles misbehave, go back to v1.9.1 - your save is unchanged by this build. The animations need the SD card assets from this release (`pokemon/effects/`); with an older art pack, battles work as before, without animations.

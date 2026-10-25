@@ -107,6 +107,8 @@ Building from source? See [Getting Started](docs/development/getting-started.md)
 - [CrossPlay](https://github.com/ma-r-s/crossplay): the inspiration for most of the games and tools in Applications
 - [CrossSmudge](https://github.com/Mumfee/CrossSmudge): Lua apps taken into the App Store, and the app API they were written for
 - [InkBoy](https://github.com/kuslota/InkBoy): the pulse-drive idea behind the Game Boy's Pulse screen speeds
+- [Ink-boy](https://github.com/hellominecraft913-dev/Ink-boy): the Game Boy screen it started from, Bluetooth controllers in the Game Boy and two-finger touch buttons
+- [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino): the Bluetooth LE stack on the X4 Pro
 - [Peanut-GB](https://github.com/deltabeard/Peanut-GB) and [Walnut-CGB](https://github.com/Mr-PauI/Walnut-CGB): the Game Boy and Game Boy Color emulator cores
 - [FreeInk SDK](https://github.com/Free-Ink/freeink-sdk): the display drivers and UI toolkit, vendored and extended here
 
