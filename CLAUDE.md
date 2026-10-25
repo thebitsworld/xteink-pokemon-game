@@ -63,7 +63,15 @@ is in git history (before 2026-10-08).
   mask (there Confirm = Start) and reads `bt::heldControls()`. Setting `bluetoothEnabled` (no category,
   switched from Settings > System > Bluetooth, `BluetoothActivity`). Radio: started at the end of
   setup() unless it is a network boot, full CPU speed while up, `stopForSleep()` in enterDeepSleep().
-  Costs ~220 KB flash: pokemon-x4-pro is at 96% of its 6.4 MB slot. Not yet tried on hardware.
+  S3 options in `[bluetooth]` (X4 Pro, X4 Classic). X3/X4: `[firmware_tuned_bt_c3]` adds CrossPoint 2.0's BT
+  options to the rebuilt C3 core (CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY + `post:scripts/patch_arduino_ble_controller.py`
+  links libbtdm_app_flash.a); the rebuilt core lands in the shared framework-libs package, so switching
+  between `default` and `pokemon-x3` rebuilds it. C3 radio needs a 48 KB free block and pauses in Lua apps
+  (`bt::pauseForMemory` in LuaAppActivity). Flash: pokemon-x4-pro 96.5%, x4-classic 92.5%, pokemon-x3 99.0%
+  (~66 KB left - the next X3 feature needs room found first). Not yet tried on hardware.
+- Game Boy library (`GameLibraryActivity`, opened by the Applications row; `GameLibraryStore` keeps favourites
+  and recents in `/.crosspoint/gameboy_library.txt`; GameBoyActivity notes each started ROM). Scans 3 folders
+  deep from `/`, skipping hidden folders, `pokemon`, `sleep`, `fonts`, `dictionaries`; max 200 games.
 - How to play guides (1.8.4): `guide.md` / `guide.vi.md` in an app
   folder, shown by `GuideViewerActivity` (Markdown subset, not the EPUB reader - that would add recents,
   reading time and Pokemon credit). "?" on Applications rows (tap; hold Select on X3/X4);
