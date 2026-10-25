@@ -68,7 +68,9 @@ is in git history (before 2026-10-08).
   links libbtdm_app_flash.a); the rebuilt core lands in the shared framework-libs package, so switching
   between `default` and `pokemon-x3` rebuilds it. C3 radio needs a 48 KB free block and pauses in Lua apps
   (`bt::pauseForMemory` in LuaAppActivity). Flash: pokemon-x4-pro 96.5%, x4-classic 92.5%, pokemon-x3 99.0%
-  (~66 KB left - the next X3 feature needs room found first). Not yet tried on hardware.
+  (~66 KB left - the next X3 feature needs room found first; saved plan, not started:
+  docs/development/flash-size-plan.md - language pack + hyphenation in the unused `spiffs` partition). Released
+  as v1.10.0-beta.2 (2026-10-25, branch feat/bluetooth). Not yet tried on hardware.
 - Game Boy library (`GameLibraryActivity`, opened by the Applications row; `GameLibraryStore` keeps favourites
   and recents in `/.crosspoint/gameboy_library.txt`; GameBoyActivity notes each started ROM). Scans 3 folders
   deep from `/`, skipping hidden folders, `pokemon`, `sleep`, `fonts`, `dictionaries`; max 200 games.
