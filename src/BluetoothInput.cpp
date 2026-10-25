@@ -3,7 +3,9 @@
 #if CROSSINK_BLUETOOTH
 
 #include <BleKeyboardHost.h>
+#include <BoardConfig.h>
 #include <HalStorage.h>
+#include <esp_heap_caps.h>
 #include <Logging.h>
 
 #include <array>
@@ -35,6 +37,8 @@ bool learnedLoaded = false;
 bool learning = false;
 uint32_t learnedPress = 0;
 bool wasConnected = false;
+bool pausedForMemory = false;
+constexpr size_t C3_MIN_FREE_BLOCK = 48 * 1024;
 
 // The front button each control stands for outside the Game Boy screen.
 bool buttonFor(const uint8_t control, MappedInputManager::Button& out) {
@@ -125,6 +129,14 @@ void releaseAll(const MappedInputManager& input) {
 bool startRadio() {
   if (BleHid.isRunning()) return true;
   if (BleHid.isStopping() && !BleHid.end(1000)) return false;
+#if FREEINK_MCU_C3
+  // The NimBLE host and controller take ~40 KB of the C3's internal RAM; with
+  // less free in one piece the start would fail half way or starve the reader.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < C3_MIN_FREE_BLOCK) {
+    LOG_ERR(TAG, "Not enough memory to start Bluetooth");
+    return false;
+  }
+#endif
   if (!BleHid.begin(HOST_NAME)) {
     LOG_ERR(TAG, "Could not start Bluetooth");
     return false;
@@ -156,7 +168,10 @@ bool running() { return BleHid.isRunning(); }
 
 void pump(const MappedInputManager& input) {
   input.remoteBeginFrame();
-  if (!BleHid.isRunning()) return;
+  if (!BleHid.isRunning()) {
+    if (heldControls() != 0) releaseAll(input);  // stopped or paused while a button was down
+    return;
+  }
   BleHid.poll();
 
   const bool connected = BleHid.isConnected();
@@ -232,6 +247,19 @@ void stopForSleep() {
   held.fill({});
   pendingReleases.fill(0);
   (void)stopRadio();
+}
+
+void pauseForMemory() {
+#if FREEINK_MCU_C3
+  if (!BleHid.isRunning()) return;
+  pausedForMemory = stopRadio();
+#endif
+}
+
+void resumeAfterMemory() {
+  if (!pausedForMemory) return;
+  pausedForMemory = false;
+  if (SETTINGS.bluetoothEnabled) startRadio();
 }
 
 void setLearning(const bool on) {

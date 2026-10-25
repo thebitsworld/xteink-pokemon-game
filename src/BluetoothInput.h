@@ -37,6 +37,11 @@ void pump(const MappedInputManager& input);
 uint8_t heldControls();
 // Before deep sleep: the radio goes down so it cannot wake the panel later.
 void stopForSleep();
+// The ESP32-C3 readers (X3/X4) have no PSRAM: a Lua app needs the tens of KB
+// the radio holds, so it pauses while one runs and comes back after. No-ops
+// on the S3 readers.
+void pauseForMemory();
+void resumeAfterMemory();
 
 // Learning the controller's buttons: while on, presses are kept for
 // takeLearnedPress() and not injected.
@@ -54,6 +59,8 @@ inline bool running() { return false; }
 inline void pump(const MappedInputManager&) {}
 inline uint8_t heldControls() { return 0; }
 inline void stopForSleep() {}
+inline void pauseForMemory() {}
+inline void resumeAfterMemory() {}
 
 #endif
 

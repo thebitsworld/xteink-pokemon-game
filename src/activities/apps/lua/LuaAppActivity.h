@@ -4,6 +4,7 @@
 #include <mutex>
 #include <string>
 
+#include "BluetoothInput.h"
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
 #include "activities/Activity.h"
@@ -32,6 +33,7 @@ class LuaAppActivity : public Activity {
 
   void onEnter() override {
     Activity::onEnter();
+    bt::pauseForMemory();  // X3/X4: the app gets the radio's RAM
     openMemory_ = app_memory_log::takeOpenSnapshot();
     orientationOnEnter_ = renderer.getOrientation();
     runner_ = std::make_unique<ink::LuaRunner>(renderer, mappedInput, appDir_, appId_);
@@ -205,6 +207,7 @@ class LuaAppActivity : public Activity {
       }
     }
     renderer.setOrientation(orientationOnEnter_);  // smudge.set_orientation() may have turned it
+    bt::resumeAfterMemory();
     Activity::onExit();
   }
 
