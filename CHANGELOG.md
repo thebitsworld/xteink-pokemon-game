@@ -1,4 +1,16 @@
-## [Unreleased]
+## [1.10.0-beta.2] - 2026-10-25
+
+> ⚠️ **Test build - do not install unless you want to help test.** Stay on v1.9.1 (or 1.10.0-beta.1) for everyday reading. Nothing in this build has been tried on a real reader yet: Bluetooth, the Game Boy library and two-finger buttons were only built and checked in the PC simulator.
+>
+> **Known risks:**
+> - **X3/X4: Bluetooth is experimental.** The firmware is 99% full and Bluetooth takes about 40 KB of these readers' little memory while it is on, so big books, the Pokémon game or sleep/wake may misbehave or restart the reader. Keep Bluetooth **off** (the default) unless you are testing it; it pauses by itself while an app from Applications runs.
+> - **All readers: Bluetooth on uses more battery** - the reader stays at full speed while the radio is up. Only Bluetooth LE devices connect; a gamepad that sends two buttons in one byte may read a press of both as a different button.
+> - Bluetooth together with Wi-Fi (file transfer, updates) has not been tried; turn Bluetooth off before using them if anything goes wrong.
+> - **Delete saved game** in the Game Boy library removes the game's save files for good - back up `.sav` files you care about first.
+>
+> 🇻🇳 **Bản thử nghiệm - đừng cài nếu bạn không muốn thử.** Chưa chạy thử trên máy thật; Bluetooth trên X3/X4 có thể làm máy lỗi hoặc khởi động lại; xoá save game là mất hẳn. Dùng hằng ngày hãy giữ v1.9.1.
+>
+> If something goes wrong, flash v1.9.1 again: your Pokémon save and books are kept. This build needs no new SD card assets (use the ones from 1.10.0-beta.1).
 
 ### Added
 
