@@ -152,6 +152,7 @@ class GameBoyActivity final : public Activity {
   int titleY = 0;
 
   TouchControl activeTouch = TouchControl::None;
+  bool multiTouchActive = false;  // two fingers on the controls (handleInput)
 
   std::atomic<bool> initialized{false};
   std::atomic<bool> displayDue{true};

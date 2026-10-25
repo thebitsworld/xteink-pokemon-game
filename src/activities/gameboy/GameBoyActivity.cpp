@@ -229,6 +229,7 @@ void GameBoyActivity::onEnter() {
   physicalJoypadMask = 0;
   touchJoypadMask = 0;
   activeTouch = TouchControl::None;
+  multiTouchActive = false;
   nextFrameUs = 0;
   framesSinceDraw = DRAW_EVERY;
   nextDisplayUs = 0;
@@ -923,6 +924,7 @@ void GameBoyActivity::openMenu() {
   // see a button held while it is paused.
   mappedInput.suppressCurrentTouchContact();
   activeTouch = TouchControl::None;
+  multiTouchActive = false;
   touchJoypadMask = 0;
   physicalJoypadMask = 0;
   applyJoypad();
@@ -1545,6 +1547,7 @@ void GameBoyActivity::cleanup() {
   physicalJoypadMask = 0;
   touchJoypadMask = 0;
   activeTouch = TouchControl::None;
+  multiTouchActive = false;
   saveDirty = false;
 }
 
@@ -1610,6 +1613,45 @@ void GameBoyActivity::handleInput() {
   }
 
 #if CROSSINK_APP_CAP_TOUCH
+  // Two fingers hold two buttons at once (B to run while walking, A+B), an idea
+  // from Ink-boy's "Input fix". Both contacts are OR-ed into the touch mask.
+  int x1 = 0;
+  int y1 = 0;
+  int x2 = 0;
+  int y2 = 0;
+  if (mappedInput.getTwoFingerTouch(x1, y1, x2, y2)) {
+    multiTouchActive = true;
+    // Eat the one-finger down edge too, so it cannot replay when a finger lifts.
+    int ignoredX = 0;
+    int ignoredY = 0;
+    (void)mappedInput.wasScreenTouchDown(ignoredX, ignoredY);
+    const TouchControl first = hitTestTouch(x1, y1);
+    const TouchControl second = hitTestTouch(x2, y2);
+    if (first == TouchControl::Exit || second == TouchControl::Exit) {
+      exitRequested = true;
+      return;
+    }
+    if (first == TouchControl::Settings || second == TouchControl::Settings) {
+      openMenu();
+      return;
+    }
+    const uint8_t nextTouch = static_cast<uint8_t>(joypadBitForTouch(first) | joypadBitForTouch(second));
+    const TouchControl primary = first != TouchControl::None ? first : second;
+    if (nextTouch != touchJoypadMask || primary != activeTouch) {
+      activeTouch = primary;
+      touchJoypadMask = nextTouch;
+      applyJoypad();
+    }
+    return;
+  }
+  if (multiTouchActive) {
+    // Back to one finger: the held finger rebuilds the mask below.
+    multiTouchActive = false;
+    activeTouch = TouchControl::None;
+    touchJoypadMask = 0;
+    applyJoypad();
+  }
+
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTouchDown(x, y)) {
