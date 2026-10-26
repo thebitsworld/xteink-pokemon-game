@@ -115,7 +115,9 @@ is in git history (before 2026-10-08).
   under 1 MB (`MAX_PACK_BYTES` in the builder; ~0.92 MB now).
   Hyphenation for packed languages: `setPackedHyphenationPatterns` (host tests define
   HYPHENATION_ALL_BUILTIN). Download: language picker's last row -> `NetworkBootTarget::DOWNLOAD_LANGUAGES`
-  -> `LanguagePackDownloadActivity` -> restart. Not tried on a real reader yet (flash erase/write at boot).
+  -> `LanguagePackDownloadActivity` -> restart. Tried on the user's X3 (2026-10-26): SD install 3.3 s, languages
+  switch fine; its real table (`/.crosspoint/partitions.txt`, written once at boot): app0/app1 0x770000 each,
+  spiffs 0xEF0000 1 MB, coredump 0xFF0000. The Wi-Fi download waits for a release carrying the pack.
 - Open, undecided: a translation mechanism for Lua apps (all English today; the user wants to discuss it
   first). Firmware strings: the fork's own Pokémon strings are untranslated in most languages (fall back
   to English); Vietnamese is complete.
