@@ -473,8 +473,19 @@ void GameBoyActivity::emuTaskLoop() {
       if (saveDirty && !saveCartRam()) LOG_ERR(TAG, "Autosave failed: %s", savePath.c_str());
     }
 
-    // Let CPU 0's idle task (and its watchdog) run between frames.
-    delay(1);
+    // Let CPU 0's idle task (and its watchdog) run between frames. A heavy game
+    // (Pokemon Gold, ~17 ms a frame) lost ~6% of its speed to this 1 ms sleep,
+    // so while the emulator is behind real time it only yields, up to
+    // MAX_BEHIND_YIELDS loops in a row, then sleeps once: the idle task still
+    // runs many times a second, well inside its watchdog period (idea from
+    // Ink-boy 1.2.0).
+    if (nowMicros() >= nextFrameUs && behindStreak < MAX_BEHIND_YIELDS) {
+      ++behindStreak;
+      yield();
+    } else {
+      behindStreak = 0;
+      delay(1);
+    }
   }
 }
 

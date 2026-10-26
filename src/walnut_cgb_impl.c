@@ -94,11 +94,24 @@ static uint8_t romRead(struct gb_s* gb, const uint_fast32_t addr) {
   return addr < c->romSize ? c->rom[addr] : 0xFF;
 }
 
+// Operand fetches read 2 or 4 ROM bytes for nearly every instruction: check
+// the bound once and read them straight (idea from Ink-boy 1.2.0); only a read
+// that runs past the end of the image goes byte by byte (0xFF beyond it).
 static uint16_t romRead16(struct gb_s* gb, const uint_fast32_t addr) {
+  const struct WalnutCgb* c = owner(gb);
+  if (addr + 2u <= c->romSize) {
+    const uint8_t* p = c->rom + addr;
+    return (uint16_t)(p[0] | (p[1] << 8));
+  }
   return (uint16_t)(romRead(gb, addr) | (romRead(gb, addr + 1) << 8));
 }
 
 static uint32_t romRead32(struct gb_s* gb, const uint_fast32_t addr) {
+  const struct WalnutCgb* c = owner(gb);
+  if (addr + 4u <= c->romSize) {
+    const uint8_t* p = c->rom + addr;
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+  }
   return (uint32_t)romRead16(gb, addr) | ((uint32_t)romRead16(gb, addr + 2) << 16);
 }
 
