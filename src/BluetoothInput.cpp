@@ -6,6 +6,7 @@
 #include <BoardConfig.h>
 #include <HalStorage.h>
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -250,9 +251,24 @@ bool stopRadio() {
 
 }  // namespace
 
-void begin() {
+void begin(const bool allowStart) {
   loadLearned();
-  if (SETTINGS.bluetoothEnabled) startRadio();
+  if (!SETTINGS.bluetoothEnabled) return;
+  if (!allowStart) {
+    std::snprintf(startError, sizeof(startError), "%s", "Back held at start");
+    return;
+  }
+#if FREEINK_MCU_C3
+  // After a crash, do not start the radio again by itself: on these readers a
+  // crash with Bluetooth on is most likely the radio's RAM running out, and
+  // starting it at every boot would repeat it. It can be switched on again.
+  if (esp_reset_reason() == ESP_RST_PANIC) {
+    std::snprintf(startError, sizeof(startError), "%s", "not started after a crash");
+    LOG_ERR(TAG, "Bluetooth not started after a crash");
+    return;
+  }
+#endif
+  startRadio();
 }
 
 bool setEnabled(const bool on) {

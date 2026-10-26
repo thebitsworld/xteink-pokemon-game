@@ -51,6 +51,8 @@ BluetoothActivity::BluetoothActivity(GfxRenderer& renderer, MappedInputManager& 
 
 void BluetoothActivity::onEnter() {
   Activity::onEnter();
+  // X3/X4: Settings paused the radio for its RAM; this screen needs it.
+  bt::resumeAfterMemory();
   selectedIndex = 0;
   topIndex = 0;
   visibleRows = 1;
@@ -71,6 +73,7 @@ void BluetoothActivity::onEnter() {
 void BluetoothActivity::onExit() {
   if (learning) bt::setLearning(false);
   if (BleHid.isScanning()) BleHid.stopScan();
+  bt::pauseForMemory();  // back to Settings, which needs the RAM (X3/X4; no-op elsewhere)
   Activity::onExit();
 }
 

@@ -25,8 +25,10 @@ constexpr uint8_t controlBit(const Control control) { return static_cast<uint8_t
 
 #if CROSSINK_BLUETOOTH
 
-// Starts the radio when Settings has Bluetooth on (setup()).
-void begin();
+// Starts the radio when Settings has Bluetooth on (setup()). allowStart false
+// (Back held at power-on) leaves it off for this boot, an escape when it
+// keeps the reader from working.
+void begin(bool allowStart = true);
 // The Settings switch: starts or stops the radio and saves the setting.
 bool setEnabled(bool on);
 bool running();
@@ -59,7 +61,7 @@ bool sameButton(uint32_t a, uint32_t b);
 
 #else
 
-inline void begin() {}
+inline void begin(bool = true) {}
 inline bool running() { return false; }
 inline void pump(const MappedInputManager&) {}
 inline uint8_t heldControls() { return 0; }

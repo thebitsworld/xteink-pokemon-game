@@ -1604,7 +1604,9 @@ void setup() {
   }
 
   // Network boots (file transfer, OTA, sync) keep the radio for WiFi alone.
-  if (!isNetworkResume) bt::begin();
+  // Holding Back at power-on leaves Bluetooth off for this boot (an escape on
+  // X3/X4, where its RAM can run short).
+  if (!isNetworkResume) bt::begin(!mappedInputManager.isPressed(MappedInputManager::Button::Back));
 
   allowSleepAt = millis() + 2000;
 }

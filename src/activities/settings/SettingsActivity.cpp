@@ -17,6 +17,7 @@
 #include "AppVersion.h"
 #include "BackupStatsActivity.h"
 #include "BluetoothActivity.h"
+#include "BluetoothInput.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ClockOffsetActivity.h"
@@ -749,6 +750,10 @@ void SettingsActivity::openStringEditor(const SettingInfo& setting) {
 
 void SettingsActivity::onEnter() {
   Activity::onEnter();
+  // X3/X4: the settings lists need the RAM the Bluetooth radio holds (opening
+  // them with it running ran out of memory). Paused here, back when Settings
+  // closes; the Bluetooth screen runs it while it is open.
+  bt::pauseForMemory();
 
   // Reapply the orientation captured before the activity being replaced (for
   // example, a landscape reader) performs its normal portrait reset.
@@ -819,6 +824,7 @@ void SettingsActivity::onExit() {
   // Child Settings returns to the reader's panel; ordinary Settings still
   // returns Home in its usual portrait orientation.
   renderer.setOrientation(returnToParentOnClose ? entryOrientation : GfxRenderer::Orientation::Portrait);
+  bt::resumeAfterMemory();
   Activity::onExit();
 
   UITheme::getInstance().reload();  // Re-apply theme in case it was changed
