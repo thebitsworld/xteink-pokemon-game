@@ -87,7 +87,9 @@ constexpr size_t MINIMUM_FREE_BYTES = 65536;          // below: short in total, 
 constexpr uint32_t IDLE_OFF_MS = 30u * 1000u;         // a radio nobody connected to for this long stops
 constexpr uint32_t LAYOUT_QUIET_MS = 1500;            // no layout for this long before it starts again
 constexpr uint32_t START_RETRY_MS = 10u * 1000u;      // between refused starts in the reader
-constexpr uint8_t REFUSALS_BEFORE_RESTART = 3;        // heap in pieces this many times in a row: restart
+// One refusal is enough: a heap in pieces (after a chapter layout stopped the
+// radio) never joins again, and the reader lays out the next chapter in it.
+constexpr uint8_t REFUSALS_BEFORE_RESTART = 1;        // heap in pieces this many times in a row: restart
 constexpr uint32_t RESTART_SPENT_MAGIC = 0x42485231u;
 // Outlives ESP.restart(): a restart for a heap in pieces is spent until the
 // radio comes up again, so a heap still in pieces cannot restart in a loop.
