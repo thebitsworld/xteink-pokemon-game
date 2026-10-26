@@ -199,8 +199,8 @@ class ActivityManager {
   bool openReaderMenuAfterClosingOverlay();
   bool handleShortcutAction(uint8_t action);
   bool hasActivityNamed(const char* activityName) const;
-#ifdef SIMULATOR
   bool isCurrentActivityNamed(const char* activityName) const;
+#ifdef SIMULATOR
   const char* debugCurrentActivityName() const;
   Activity* simulatorCurrentActivity() const { return currentActivity.get(); }
 #endif

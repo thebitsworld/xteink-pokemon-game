@@ -82,6 +82,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 
 #include "AppVersion.h"
 #include "BluetoothInput.h"
+#include "activities/RenderLock.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalActions.h"
@@ -1635,6 +1636,16 @@ void loop() {
   // hardware input frame. A shortcut may open an activity that never queries
   // the originating button, so its one-shot release guard must still expire.
   mappedInputManager.update();
+  // X3/X4: the radio runs in the reader only, and not while a page renders
+  // (the stack's start takes RAM the render may be using).
+  // A menu over the book still counts as the reader (stopping and starting the
+  // stack splits the C3's heap); Settings over it does not (it needs the RAM).
+  const bool inReader = activityManager.isReaderActivity() && !activityManager.isCurrentActivityNamed("Settings");
+  bt::policyTick(activityManager.isCurrentActivityNamed("Bluetooth") ? bt::Place::Pairing
+                 : inReader && RenderLock::peek()                    ? bt::Place::Rendering
+                 : inReader                                          ? bt::Place::Reader
+                                                                     : bt::Place::Other);
+  if (gpio.wasAnyPressed()) bt::noteDeviceInput();
   bt::pump(mappedInputManager);
 #ifdef SIMULATOR
   simulatorHomeKeyInput.update();

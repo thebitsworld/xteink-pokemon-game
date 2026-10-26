@@ -17,7 +17,23 @@
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
 
+void (*SectionLayoutHooks::onStart)() = nullptr;
+void (*SectionLayoutHooks::onEnd)() = nullptr;
+
 namespace {
+
+// Brackets one layout call with SectionLayoutHooks.
+struct LayoutHookScope {
+  LayoutHookScope() {
+    if (SectionLayoutHooks::onStart) SectionLayoutHooks::onStart();
+  }
+  ~LayoutHookScope() {
+    if (SectionLayoutHooks::onEnd) SectionLayoutHooks::onEnd();
+  }
+  LayoutHookScope(const LayoutHookScope&) = delete;
+  LayoutHookScope& operator=(const LayoutHookScope&) = delete;
+};
+
 constexpr uint32_t SECTION_CACHE_MAGIC = 0x535843FF;  // bytes: 0xFF, "CXS"
 // v62: Text blocks persist source whitespace semantics for font-preview reflow.
 // This changes their serialized payload, so full and suspended section caches
@@ -408,6 +424,7 @@ bool Section::clearCache() const {
 bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::function<void()>& popupFn,
                                 bool* imagesWereSuppressed, bool* layoutAbortedForLowMemory,
                                 const SectionBuildOptions buildOptions) {
+  const LayoutHookScope layoutHook;
   const int fontId = spec.fontId;
   const float lineCompression = spec.lineCompression;
   const bool extraParagraphSpacing = spec.extraParagraphSpacing;
@@ -763,6 +780,7 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
 
 bool Section::startBuild(const ReaderRenderSpec& spec, const SectionBuildOptions buildOptions,
                          const std::function<void()>& popupFn) {
+  const LayoutHookScope layoutHook;
   const int fontId = spec.fontId;
   const float lineCompression = spec.lineCompression;
   const bool extraParagraphSpacing = spec.extraParagraphSpacing;
@@ -985,6 +1003,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const SectionBuildOptions
 }
 
 bool Section::buildSomeMore(const int maxPages) {
+  const LayoutHookScope layoutHook;
   if (!build_ || !build_->parser) {
     LOG_ERR("SCT", "buildSomeMore called with no active build");
     return false;

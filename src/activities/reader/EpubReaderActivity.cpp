@@ -31,6 +31,7 @@
 #include "BookStatsTracking.h"
 #include "ClipSelectionActivity.h"
 #include "ClippingStore.h"
+#include "BluetoothInput.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "FeatureToggles.h"
@@ -6856,6 +6857,9 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   // hardware permits only one reader for a file path at a time.
   nextSection.reset();
 
+  // X3/X4: a running Bluetooth radio holds the RAM this optional layout would
+  // take, and a layout stops it; leave the next chapter for when it is opened.
+  if (bt::holdsReaderHeap()) return;
   releaseGrayscaleStripScratch();
   const bool releasedSdFontCaches =
       releaseReaderSdFontCachesForLowMemory(renderer, "ERS", "preparing silent next-chapter indexing");

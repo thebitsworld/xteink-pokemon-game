@@ -1220,10 +1220,11 @@ bool ActivityManager::hasActivityNamed(const char* activityName) const {
   return std::any_of(stackActivities.begin(), stackActivities.end(), matches);
 }
 
-#ifdef SIMULATOR
 bool ActivityManager::isCurrentActivityNamed(const char* activityName) const {
   return currentActivity && currentActivity->name == activityName;
 }
+
+#ifdef SIMULATOR
 
 const char* ActivityManager::debugCurrentActivityName() const {
   return currentActivity ? currentActivity->name.c_str() : "<none>";

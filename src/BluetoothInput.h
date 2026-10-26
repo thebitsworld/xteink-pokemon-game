@@ -23,6 +23,10 @@ enum Control : uint8_t { Up, Down, Left, Right, A, B, Start, Select, ControlCoun
 
 constexpr uint8_t controlBit(const Control control) { return static_cast<uint8_t>(1u << control); }
 
+// Where the reader is, for the X3/X4 radio policy (policyTick()).
+// Rendering: in the reader while a page renders (the radio keeps its state).
+enum class Place : uint8_t { Other, Reader, Rendering, Pairing };
+
 #if CROSSINK_BLUETOOTH
 
 // Starts the radio when Settings has Bluetooth on (setup()). allowStart false
@@ -31,6 +35,14 @@ constexpr uint8_t controlBit(const Control control) { return static_cast<uint8_t
 void begin(bool allowStart = true);
 // The Settings switch: starts or stops the radio and saves the setting.
 bool setEnabled(bool on);
+// Once per loop: on X3/X4 starts or stops the radio for `place` (it runs only
+// in the reader, after the page is shown, and on the Bluetooth screen). No-op
+// on the S3, whose radio runs whenever it is switched on.
+void policyTick(Place place);
+// A key of the device was pressed: wakes a radio stopped for idleness.
+void noteDeviceInput();
+// X3/X4: the radio is up and holds RAM the reader's optional work would need.
+bool holdsReaderHeap();
 bool running();
 // Why the last start failed ("init 120K/80K": the step, free internal RAM and
 // its largest block; no step when it was short of RAM), or "".
@@ -71,6 +83,9 @@ inline uint8_t heldControls() { return 0; }
 inline void stopForSleep() {}
 inline void pauseForMemory() {}
 inline void resumeAfterMemory() {}
+inline void policyTick(Place) {}
+inline void noteDeviceInput() {}
+inline bool holdsReaderHeap() { return false; }
 
 #endif
 

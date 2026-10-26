@@ -2,20 +2,26 @@
 
 #if CROSSINK_BLUETOOTH
 
+#include <Arduino.h>
 #include <BleKeyboardHost.h>
 #include <BoardConfig.h>
+#include <Epub/Section.h>
 #include <HalStorage.h>
+#include <esp_attr.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <Logging.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
 
 namespace bt {
@@ -55,7 +61,40 @@ constexpr uint32_t LEARN_QUIET_MS = 250;
 constexpr uint32_t LEARN_STUCK_MS = 1500;
 bool wasConnected = false;
 bool pausedForMemory = false;
-constexpr size_t C3_MIN_FREE_BLOCK = 48 * 1024;
+// Serialises the radio's start/stop with its use: a chapter layout on the
+// render task stops it (layoutStarted()) while the main loop polls it.
+std::recursive_mutex radioMutex;
+
+#if FREEINK_MCU_C3
+// X3/X4 (ESP32-C3) radio policy, after CrossPoint Reader's BlePageTurner
+// (lib/BlePageTurner/src/RadioPolicy.h): the reader there has ~150 KB of
+// heap, the NimBLE stack takes ~49 KB of it, and laying out a chapter needs
+// what is left (a 32 KB inflate block and the page index). So the radio runs
+// only in the reader, with a remote paired, after the page is shown; it stops
+// for every chapter layout, for 30 s without a link, and outside the reader.
+constexpr size_t STACK_BYTES = 49152;
+constexpr size_t READER_BLOCK_BYTES = 32768;          // the reader's inflate ring, kept whole beside the stack
+constexpr size_t START_FREE_BYTES = STACK_BYTES + READER_BLOCK_BYTES;
+constexpr size_t MINIMUM_FREE_BYTES = 65536;          // below: short in total, not in pieces
+constexpr uint32_t IDLE_OFF_MS = 30u * 1000u;         // a radio nobody connected to for this long stops
+constexpr uint32_t LAYOUT_QUIET_MS = 1500;            // no layout for this long before it starts again
+constexpr uint32_t START_RETRY_MS = 10u * 1000u;      // between refused starts in the reader
+constexpr uint8_t REFUSALS_BEFORE_RESTART = 3;        // heap in pieces this many times in a row: restart
+constexpr uint32_t RESTART_SPENT_MAGIC = 0x42485231u;
+// Outlives ESP.restart(): a restart for a heap in pieces is spent until the
+// radio comes up again, so a heap still in pieces cannot restart in a loop.
+RTC_NOINIT_ATTR uint32_t restartMemo;
+
+std::atomic<int> layoutDepth{0};
+std::atomic<uint32_t> lastLayoutMs{0};
+Place lastPlace = Place::Other;
+uint32_t placeSinceMs = 0;
+uint32_t radioUpMs = 0;
+uint32_t lastLinkMs = 0;
+uint32_t lastStartTryMs = 0;
+bool idleStopped = false;
+uint8_t inPiecesInRow = 0;
+#endif
 
 // The front button each control stands for outside the Game Boy screen.
 bool buttonFor(const uint8_t control, MappedInputManager::Button& out) {
@@ -223,6 +262,7 @@ void noteStartError(const char* step) {
 }
 
 bool startRadio() {
+  std::lock_guard<std::recursive_mutex> lock(radioMutex);
   startError[0] = '\0';
   startErrorIsMemory = false;
   if (BleHid.isRunning()) return true;
@@ -231,11 +271,13 @@ bool startRadio() {
     return false;
   }
 #if FREEINK_MCU_C3
-  // The NimBLE host and controller take ~40 KB of the C3's internal RAM; with
-  // less free in one piece the start would fail half way or starve the reader.
-  if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < C3_MIN_FREE_BLOCK) {
-    noteStartError("");
+  // The stack and the reader's block must both fit; enough bytes but no
+  // block for them is a heap in pieces (only a restart joins it again).
+  const size_t freeBytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  if (freeBytes < START_FREE_BYTES || heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < READER_BLOCK_BYTES) {
+    noteStartError(freeBytes >= MINIMUM_FREE_BYTES ? "pieces" : "");
     startErrorIsMemory = true;
+    if (freeBytes >= MINIMUM_FREE_BYTES) ++inPiecesInRow;
     return false;
   }
 #endif
@@ -243,42 +285,148 @@ bool startRadio() {
     noteStartError("init");
     return false;
   }
+#if FREEINK_MCU_C3
+  // The stack may take the reader's last whole block: roll it back.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < READER_BLOCK_BYTES) {
+    BleHid.end(1500);
+    noteStartError("pieces");
+    startErrorIsMemory = true;
+    ++inPiecesInRow;
+    return false;
+  }
+  inPiecesInRow = 0;
+  restartMemo = 0;  // the radio came up: a later heap in pieces may restart once more
+  radioUpMs = lastLinkMs = millis();
+#endif
   return true;
 }
 
 bool stopRadio() {
+  std::lock_guard<std::recursive_mutex> lock(radioMutex);
   if (!BleHid.isRunning() && !BleHid.isStopping()) return true;
   if (BleHid.end(1500)) return true;
   LOG_ERR(TAG, "Bluetooth is still stopping");
   return false;
 }
 
+#if FREEINK_MCU_C3
+// SectionLayoutHooks (render task): the layout gets the radio's RAM.
+void layoutStarted() {
+  ++layoutDepth;
+  lastLayoutMs = millis();
+  if (BleHid.isRunning()) {
+    LOG_INF(TAG, "Bluetooth stops for a chapter layout");
+    stopRadio();
+  }
+}
+
+void layoutEnded() {
+  lastLayoutMs = millis();
+  --layoutDepth;
+}
+
+// Heap in pieces too often: restart into the same book, once per radio start.
+void restartForWholeHeap() {
+  if (inPiecesInRow < REFUSALS_BEFORE_RESTART || restartMemo == RESTART_SPENT_MAGIC) return;
+  LOG_INF(TAG, "Heap in pieces %u times: restarting into the book for Bluetooth", inPiecesInRow);
+  restartMemo = RESTART_SPENT_MAGIC;
+  APP_STATE.lastSleepFromReader = true;  // the boot reopens the open book
+  APP_STATE.saveToFile();
+  ESP.restart();
+}
+#endif
+
 }  // namespace
 
 void begin(const bool allowStart) {
   loadLearned();
+#if FREEINK_MCU_C3
+  // X3/X4: the radio starts in the reader only (policyTick()).
+  (void)allowStart;
+  if (esp_reset_reason() != ESP_RST_SW) restartMemo = 0;  // power-on garbage reads as "not spent"
+  SectionLayoutHooks::onStart = &layoutStarted;
+  SectionLayoutHooks::onEnd = &layoutEnded;
+#else
   if (!SETTINGS.bluetoothEnabled) return;
   if (!allowStart) {
     std::snprintf(startError, sizeof(startError), "%s", "Back held at start");
     return;
   }
-#if FREEINK_MCU_C3
-  // After a crash, do not start the radio again by itself: on these readers a
-  // crash with Bluetooth on is most likely the radio's RAM running out, and
-  // starting it at every boot would repeat it. It can be switched on again.
-  if (esp_reset_reason() == ESP_RST_PANIC) {
-    std::snprintf(startError, sizeof(startError), "%s", "not started after a crash");
-    LOG_ERR(TAG, "Bluetooth not started after a crash");
-    return;
-  }
-#endif
   startRadio();
+#endif
 }
 
 bool setEnabled(const bool on) {
   SETTINGS.bluetoothEnabled = on ? 1 : 0;
   SETTINGS.saveToFile();
   return on ? startRadio() : stopRadio();
+}
+
+void policyTick(const Place place) {
+#if FREEINK_MCU_C3
+  const uint32_t now = millis();
+  if (place == Place::Rendering) return;  // a page is rendering: leave the radio as it is
+  if (place != lastPlace) {
+    lastPlace = place;
+    placeSinceMs = now;
+    if (place == Place::Reader) {
+      idleStopped = false;  // every book visit starts over
+      lastStartTryMs = 0;
+    }
+  }
+  const bool on = BleHid.isRunning();
+  if (!SETTINGS.bluetoothEnabled) {
+    if (on) stopRadio();
+    return;
+  }
+  if (place == Place::Pairing) {
+    // Pairing is the user asking for the radio now.
+    if (!on && (lastStartTryMs == 0 || now - lastStartTryMs >= START_RETRY_MS)) {
+      lastStartTryMs = now;
+      startRadio();
+    }
+    return;
+  }
+  if (place != Place::Reader) {
+    if (on) stopRadio();
+    lastStartTryMs = 0;
+    return;
+  }
+  if (on) {
+    if (BleHid.isConnected() || BleHid.isConnecting()) {
+      lastLinkMs = now;
+    } else if (now - lastLinkMs >= IDLE_OFF_MS) {
+      LOG_INF(TAG, "Bluetooth stops: no remote linked for 30 s");
+      idleStopped = true;
+      stopRadio();
+    }
+    return;
+  }
+  // Off in the reader: start once the page is shown and no layout runs.
+  if (idleStopped || BleHid.pairedCount() == 0 || layoutDepth.load() > 0 ||
+      now - lastLayoutMs.load() < LAYOUT_QUIET_MS || now - placeSinceMs < LAYOUT_QUIET_MS) {
+    return;
+  }
+  if (lastStartTryMs != 0 && now - lastStartTryMs < START_RETRY_MS) return;
+  lastStartTryMs = now;
+  if (!startRadio()) restartForWholeHeap();
+#else
+  (void)place;
+#endif
+}
+
+void noteDeviceInput() {
+#if FREEINK_MCU_C3
+  idleStopped = false;  // a key of the device wakes a radio stopped for idleness
+#endif
+}
+
+bool holdsReaderHeap() {
+#if FREEINK_MCU_C3
+  return BleHid.isRunning();
+#else
+  return false;
+#endif
 }
 
 bool running() { return BleHid.isRunning(); }
@@ -288,6 +436,7 @@ const char* lastStartError() { return startError; }
 bool lastStartWasMemory() { return startErrorIsMemory; }
 
 void pump(const MappedInputManager& input) {
+  std::lock_guard<std::recursive_mutex> lock(radioMutex);
   input.remoteBeginFrame();
   if (!BleHid.isRunning()) {
     if (heldControls() != 0) releaseAll(input);  // stopped or paused while a button was down
@@ -380,7 +529,10 @@ void pauseForMemory() {
 void resumeAfterMemory() {
   if (!pausedForMemory) return;
   pausedForMemory = false;
+#if !FREEINK_MCU_C3
   if (SETTINGS.bluetoothEnabled) startRadio();
+#endif
+  // X3/X4: policyTick() starts it again where it may run (the reader).
 }
 
 void setLearning(const bool on) {

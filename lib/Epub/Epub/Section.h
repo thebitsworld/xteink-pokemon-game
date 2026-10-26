@@ -34,6 +34,13 @@ struct SectionBuildOptions {
   bool isCancellationRequested() const { return shouldCancel && shouldCancel(cancelContext); }
 };
 
+// Told when a chapter layout starts and ends, so the app can free RAM for it
+// (the X3's Bluetooth radio stops for it). Both may be null.
+struct SectionLayoutHooks {
+  static void (*onStart)();
+  static void (*onEnd)();
+};
+
 class Section {
   std::shared_ptr<Epub> epubOwner;
   Epub* epub;

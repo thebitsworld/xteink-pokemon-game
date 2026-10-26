@@ -3,6 +3,7 @@
 #if CROSSINK_BLUETOOTH
 
 #include <BleKeyboardHost.h>
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -57,7 +58,8 @@ void BluetoothActivity::onEnter() {
   uiReady = false;
   status[0] = '\0';
   // Switched on but not running: the start at boot (or the last one) failed.
-  if (SETTINGS.bluetoothEnabled && !bt::running() && bt::lastStartError()[0] != '\0') {
+  // (X3/X4 start it on this screen right after, see bt::policyTick().)
+  if (!FREEINK_MCU_C3 && SETTINGS.bluetoothEnabled && !bt::running() && bt::lastStartError()[0] != '\0') {
     std::snprintf(status, sizeof(status), "%s (%s)",
                   bt::lastStartWasMemory() ? tr(STR_BT_RESTART_TO_START) : tr(STR_BT_START_FAILED),
                   bt::lastStartError());
@@ -89,7 +91,13 @@ void BluetoothActivity::rebuildRows() {
 
   // Off with a status is a start that failed: say why right under the switch
   // (the Search row that shows other statuses only exists while it is on).
-  add(RowKind::Switch, 0, tr(STR_BLUETOOTH), on ? tr(STR_STATE_ON) : status[0] ? status : tr(STR_STATE_OFF));
+#if FREEINK_MCU_C3
+  // X3/X4: the radio runs here and in the reader only (bt::policyTick()).
+  const char* onLabel = tr(STR_BT_ON_READER_ONLY);
+#else
+  const char* onLabel = tr(STR_STATE_ON);
+#endif
+  add(RowKind::Switch, 0, tr(STR_BLUETOOTH), on ? onLabel : status[0] ? status : tr(STR_STATE_OFF));
   if (on) {
     std::string searchSubtitle = status[0] ? status : (BleHid.isScanning() ? tr(STR_BT_SEARCHING) : "");
     add(RowKind::Search, 0, tr(STR_BT_SEARCH), searchSubtitle);
