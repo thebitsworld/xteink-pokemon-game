@@ -107,9 +107,10 @@ reader" and does not open.
 
 ## Step 2.7 — Other languages (optional)
 
-The firmware has English and Vietnamese built in. The other 26 menu languages, and word
-hyphenation for French, German, Spanish, Italian, Portuguese, Polish, Swedish, Russian and
-Ukrainian books, come in a language pack (about 1.2 MB) that you install once:
+The firmware has English and Vietnamese built in (and word hyphenation for English and German
+books). The other 26 menu languages, and hyphenation for French, Spanish, Italian, Portuguese,
+Polish, Swedish, Russian and Ukrainian books, come in a language pack (about 0.9 MB) that you
+install once:
 
 - **Over Wi-Fi:** Settings > System > Device > Language > **Download more languages**. The
   reader joins Wi-Fi, downloads the pack and restarts to install it.
