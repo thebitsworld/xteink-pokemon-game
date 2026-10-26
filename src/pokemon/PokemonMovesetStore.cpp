@@ -79,7 +79,7 @@ bool inspectSlot(const char* path, MovesetStoreState& outputState, uint32_t& out
 }  // namespace
 
 void PokemonMovesetStore::load() const {
-  state_ = MovesetStoreState{};
+  state_.reset();
   ready_ = false;
   activeIsA_ = false;
   sequence_ = 0;
@@ -104,16 +104,30 @@ void PokemonMovesetStore::load() const {
     loaded_ = false;  // see above: retry on the next call rather than trust a partial read
     return;
   }
-  if (!readyA && !readyB) return;  // fresh install, or both slots lost - stay empty, not an error
+  if (!readyA && !readyB) {  // fresh install, or both slots lost - stay empty, not an error
+    stateA->entries.fill({});
+    state_ = std::move(stateA);
+    return;
+  }
   activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
-  state_ = activeIsA_ ? *stateA : *stateB;
+  state_ = std::move(activeIsA_ ? stateA : stateB);
   sequence_ = activeIsA_ ? sequenceA : sequenceB;
   ready_ = true;
 }
 
 const MovesetEntry* PokemonMovesetStore::findEntry(const uint32_t recordId) const {
+  if (!ensureLoaded()) return nullptr;
+  return pokemon::findMovesetEntry(*state_, recordId);
+}
+
+bool PokemonMovesetStore::ensureLoaded() const {
   if (!loaded_) load();
-  return pokemon::findMovesetEntry(state_, recordId);
+  return loaded_ && state_ != nullptr;
+}
+
+void PokemonMovesetStore::unload() const {
+  state_.reset();
+  loaded_ = false;
 }
 
 bool PokemonMovesetStore::writeState(const MovesetStoreState& state) const {
@@ -160,7 +174,7 @@ bool PokemonMovesetStore::writeState(const MovesetStoreState& state) const {
     return false;
   }
 
-  state_ = state;
+  *state_ = state;
   sequence_ = nextSequence;
   activeIsA_ = destinationIsA;
   ready_ = true;
@@ -168,9 +182,8 @@ bool PokemonMovesetStore::writeState(const MovesetStoreState& state) const {
 }
 
 bool PokemonMovesetStore::upsertEntry(const MovesetEntry& entry) {
-  if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
-  std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(state_));
+  if (!ensureLoaded()) return false;  // couldn't read the existing files: refuse to overwrite them
+  std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(*state_));
   if (!candidate) {
     LOG_ERR("PokemonMovesetStore", "Out of memory upserting moveset entry");
     return false;
@@ -180,9 +193,8 @@ bool PokemonMovesetStore::upsertEntry(const MovesetEntry& entry) {
 }
 
 bool PokemonMovesetStore::upsertEntries(const std::span<const MovesetEntry> entries) {
-  if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
-  std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(state_));
+  if (!ensureLoaded()) return false;  // couldn't read the existing files: refuse to overwrite them
+  std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(*state_));
   if (!candidate) {
     LOG_ERR("PokemonMovesetStore", "Out of memory upserting moveset entries");
     return false;
@@ -196,9 +208,8 @@ bool PokemonMovesetStore::upsertEntries(const std::span<const MovesetEntry> entr
 }
 
 bool PokemonMovesetStore::removeEntry(const uint32_t recordId) {
-  if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
-  std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(state_));
+  if (!ensureLoaded()) return false;  // couldn't read the existing files: refuse to overwrite them
+  std::unique_ptr<MovesetStoreState> candidate(new (std::nothrow) MovesetStoreState(*state_));
   if (!candidate) {
     LOG_ERR("PokemonMovesetStore", "Out of memory removing moveset entry");
     return false;
@@ -211,11 +222,10 @@ bool PokemonMovesetStore::reset() {
   if (!loaded_) load();
   if (!loaded_) {
     if (!discardSlotFiles()) return false;
-    state_ = MovesetStoreState{};
+    unload();  // no files left: the next load reads an empty store
     ready_ = false;
     activeIsA_ = false;
     sequence_ = 0;
-    loaded_ = true;
     return true;
   }
   std::unique_ptr<MovesetStoreState> empty(new (std::nothrow) MovesetStoreState());

@@ -96,7 +96,7 @@ bool inspectSlot(const char* path, IvEvStoreState& outputState, uint32_t& output
 }  // namespace
 
 void PokemonIvEvStore::load() const {
-  state_ = IvEvStoreState{};
+  state_.reset();
   ready_ = false;
   activeIsA_ = false;
   sequence_ = 0;
@@ -127,16 +127,30 @@ void PokemonIvEvStore::load() const {
     loaded_ = false;  // retry on the next call rather than trust a partial read
     return;
   }
-  if (!readyA && !readyB) return;  // fresh install, or both slots lost - stay empty, not an error
+  if (!readyA && !readyB) {  // fresh install, or both slots lost - stay empty, not an error
+    stateA->entries.fill({});
+    state_ = std::move(stateA);
+    return;
+  }
   activeIsA_ = readyA && (!readyB || !sequenceIsNewer(sequenceB, sequenceA));
-  state_ = activeIsA_ ? *stateA : *stateB;
+  state_ = std::move(activeIsA_ ? stateA : stateB);
   sequence_ = activeIsA_ ? sequenceA : sequenceB;
   ready_ = true;
 }
 
 const IvEvEntry* PokemonIvEvStore::findEntry(const uint32_t recordId) const {
+  if (!ensureLoaded()) return nullptr;
+  return pokemon::findIvEvEntry(*state_, recordId);
+}
+
+bool PokemonIvEvStore::ensureLoaded() const {
   if (!loaded_) load();
-  return pokemon::findIvEvEntry(state_, recordId);
+  return loaded_ && state_ != nullptr;
+}
+
+void PokemonIvEvStore::unload() const {
+  state_.reset();
+  loaded_ = false;
 }
 
 bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
@@ -203,7 +217,7 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
     return false;
   }
 
-  state_ = state;
+  *state_ = state;
   sequence_ = nextSequence;
   activeIsA_ = destinationIsA;
   ready_ = true;
@@ -211,8 +225,7 @@ bool PokemonIvEvStore::writeState(const IvEvStoreState& state) const {
 }
 
 bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
-  if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
+  if (!ensureLoaded()) return false;  // couldn't read the existing files: refuse to overwrite them
   // Heap-allocated, not a stack local copy of state_ - see load()'s
   // matching comment. This one was missed in the first pass at this fix
   // (found via a second real-device crash report, symbolized back to
@@ -225,7 +238,7 @@ bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
   // when the heap is under pressure elsewhere (e.g. mid-render) - failing
   // this one upsert gracefully is the correct behavior, matching how the
   // caller (PokemonService::ensureIvEv) already treats a `false` return.
-  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(state_));
+  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(*state_));
   if (!candidate) {
     LOG_ERR("PokemonIvEvStore", "Out of memory upserting IV/EV entry");
     return false;
@@ -235,11 +248,10 @@ bool PokemonIvEvStore::upsertEntry(const IvEvEntry& entry) {
 }
 
 bool PokemonIvEvStore::removeEntry(const uint32_t recordId) {
-  if (!loaded_) load();
-  if (!loaded_) return false;  // couldn't read the existing files: refuse to overwrite them
+  if (!ensureLoaded()) return false;  // couldn't read the existing files: refuse to overwrite them
   // Heap-allocated, not a stack local copy of state_ - see upsertEntry()'s
   // matching comment (and load()'s, for the original field-crash context).
-  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(state_));
+  std::unique_ptr<IvEvStoreState> candidate(new (std::nothrow) IvEvStoreState(*state_));
   if (!candidate) {
     LOG_ERR("PokemonIvEvStore", "Out of memory removing IV/EV entry");
     return false;
@@ -252,11 +264,10 @@ bool PokemonIvEvStore::reset() {
   if (!loaded_) load();
   if (!loaded_) {
     if (!discardSlotFiles()) return false;
-    state_ = IvEvStoreState{};
+    unload();  // no files left: the next load reads an empty store
     ready_ = false;
     activeIsA_ = false;
     sequence_ = 0;
-    loaded_ = true;
     return true;
   }
   std::unique_ptr<IvEvStoreState> empty(new (std::nothrow) IvEvStoreState());

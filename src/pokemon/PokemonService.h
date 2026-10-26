@@ -106,6 +106,9 @@ class PokemonService {
   void onSuccessfulPageTurn(uint32_t nowMs);
   void checkpointIfDue(uint32_t nowMs);
   void flushOnExit(uint32_t nowMs);
+  // Frees the IV/EV and moveset tables (~14 KB); any later call reads them
+  // back from the card. The reader keeps them out of RAM between credits.
+  void releaseSideTables();
   // Seconds of reading credited in the open session (0 with none open): the
   // simulator smoke test checks the reader really feeds the game.
   uint32_t sessionCreditedSeconds() const { return readingSessionActive_ ? tracker_.creditedSeconds() : 0; }

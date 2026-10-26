@@ -56,6 +56,21 @@ void upsertPersistsAndAFreshInstanceReadsItBack() {
   CHECK(reader.findEntry(999) == nullptr);
 }
 
+void unloadFreesTheTableAndTheNextCallReadsItBack() {
+  Storage.clear();
+  pokemon::PokemonMovesetStore store;
+  CHECK(store.upsertEntry(makeEntry(7, 84)));
+  store.unload();
+  const pokemon::MovesetEntry* seven = store.findEntry(7);
+  CHECK(seven != nullptr);
+  if (seven != nullptr) CHECK(seven->moves[0] == 84);
+  store.unload();
+  CHECK(store.upsertEntry(makeEntry(3, 33)));  // a write after unload keeps the earlier entries
+  pokemon::PokemonMovesetStore reader;
+  CHECK(reader.findEntry(7) != nullptr);
+  CHECK(reader.findEntry(3) != nullptr);
+}
+
 void writesAlternateBetweenTheTwoFilesAndTheNewestWins() {
   Storage.clear();
   pokemon::PokemonMovesetStore store;
@@ -181,6 +196,7 @@ void resetStillWipesAStoreThatCannotBeRead() {
 int main() {
   missingFilesLeaveAnEmptyStore();
   upsertPersistsAndAFreshInstanceReadsItBack();
+  unloadFreesTheTableAndTheNextCallReadsItBack();
   writesAlternateBetweenTheTwoFilesAndTheNewestWins();
   aCorruptNewestSlotFallsBackToTheOlderOne();
   removeAndResetPersist();

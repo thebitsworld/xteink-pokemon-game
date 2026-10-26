@@ -4,6 +4,8 @@
 
 #include <PokemonIvEvStoreCodec.h>
 
+#include <memory>
+
 namespace pokemon {
 
 // Reads/writes /.crosspoint/pokemon-ivev-{a,b}.bin: every record's permanent
@@ -21,6 +23,11 @@ class PokemonIvEvStore {
   // every other method on first use (idempotent, so an explicit call is
   // only needed to force a re-read).
   void load() const;
+  // Loads if needed; false when the files could not be read (or no RAM).
+  bool ensureLoaded() const;
+  // Frees the in-memory table (every write is already on the card); the
+  // next call reads it back. Pointers from findEntry() die with it.
+  void unload() const;
   const IvEvEntry* findEntry(uint32_t recordId) const;
   // Inserts/replaces an entry and rewrites the whole (inactive) file, then
   // flips the active pointer only after a read-back verifies it. Returns
@@ -44,7 +51,8 @@ class PokemonIvEvStore {
  private:
   bool writeState(const IvEvStoreState& state) const;
 
-  mutable IvEvStoreState state_{};
+  // Heap, and only while loaded: the reader runs without it (X3 RAM).
+  mutable std::unique_ptr<IvEvStoreState> state_;
   mutable bool loaded_ = false;
   mutable bool ready_ = false;      // at least one of the two files currently holds a valid, decoded state
   mutable bool activeIsA_ = false;  // which of the two files ready_ refers to

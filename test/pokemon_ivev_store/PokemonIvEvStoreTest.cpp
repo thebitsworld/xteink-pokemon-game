@@ -56,6 +56,21 @@ void upsertPersistsAndAFreshInstanceReadsItBack() {
   CHECK(reader.findEntry(999) == nullptr);
 }
 
+void unloadFreesTheTableAndTheNextCallReadsItBack() {
+  Storage.clear();
+  pokemon::PokemonIvEvStore store;
+  CHECK(store.upsertEntry(makeEntry(7, 20)));
+  store.unload();
+  const pokemon::IvEvEntry* seven = store.findEntry(7);
+  CHECK(seven != nullptr);
+  if (seven != nullptr) CHECK(seven->ev[0] == 20);
+  store.unload();
+  CHECK(store.upsertEntry(makeEntry(3, 15)));  // a write after unload keeps the earlier entries
+  pokemon::PokemonIvEvStore reader;
+  CHECK(reader.findEntry(7) != nullptr);
+  CHECK(reader.findEntry(3) != nullptr);
+}
+
 void upsertReplacesAnExistingEntryInPlace() {
   Storage.clear();
   pokemon::PokemonIvEvStore store;
@@ -234,6 +249,7 @@ int main() {
   missingFilesLeaveAnEmptyStore();
   upsertPersistsAndAFreshInstanceReadsItBack();
   upsertReplacesAnExistingEntryInPlace();
+  unloadFreesTheTableAndTheNextCallReadsItBack();
   successiveWritesAlternateBetweenTheTwoFiles();
   corruptingOneFileFallsBackToTheOtherWithoutDataLoss();
   bothFilesCorruptStillLeavesAnEmptyStoreNeverAnError();

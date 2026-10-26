@@ -4,6 +4,8 @@
 
 #include <PokemonMovesetStoreCodec.h>
 
+#include <memory>
+
 #include <span>
 
 namespace pokemon {
@@ -27,6 +29,11 @@ class PokemonMovesetStore {
   // Reads whichever of the two files is newest. Called automatically by every
   // other method on first use (idempotent).
   void load() const;
+  // Loads if needed; false when the files could not be read (or no RAM).
+  bool ensureLoaded() const;
+  // Frees the in-memory table (every write is already on the card); the
+  // next call reads it back. Pointers from findEntry() die with it.
+  void unload() const;
   const MovesetEntry* findEntry(uint32_t recordId) const;
   // Inserts/replaces an entry and rewrites the whole (inactive) file, then
   // flips the active pointer only after a read-back verifies it. False for a
@@ -48,7 +55,8 @@ class PokemonMovesetStore {
  private:
   bool writeState(const MovesetStoreState& state) const;
 
-  mutable MovesetStoreState state_{};
+  // Heap, and only while loaded: the reader runs without it (X3 RAM).
+  mutable std::unique_ptr<MovesetStoreState> state_;
   mutable bool loaded_ = false;
   mutable bool ready_ = false;      // at least one of the two files currently holds a valid, decoded state
   mutable bool activeIsA_ = false;  // which of the two files ready_ refers to

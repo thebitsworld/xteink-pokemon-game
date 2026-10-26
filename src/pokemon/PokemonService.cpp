@@ -1564,6 +1564,7 @@ ServiceStatus PokemonService::reset() {
 
 bool PokemonService::beginReadingSession() {
   readingSessionActive_ = false;
+  releaseSideTables();  // left loaded by the game screens
   if (!store_.isReady() && store_.begin() != StoreBeginResult::Ready) return false;
 
   PokemonState state{};
@@ -1601,12 +1602,26 @@ void PokemonService::flushOnExit(const uint32_t nowMs) {
 }
 
 bool PokemonService::creditFromTracker(void* context, const uint16_t minutes, const uint8_t bookProgressPercent) {
-  return static_cast<PokemonService*>(context)->creditMinutes(minutes, bookProgressPercent);
+  auto* service = static_cast<PokemonService*>(context);
+  const bool credited = service->creditMinutes(minutes, bookProgressPercent);
+  service->releaseSideTables();
+  return credited;
+}
+
+void PokemonService::releaseSideTables() {
+  ivEvStore_.unload();
+  movesetStore_.unload();
 }
 
 bool PokemonService::creditMinutes(const uint16_t minutes, const uint8_t bookProgressPercent) {
   PokemonState state{};
   if (minutes == 0 || !store_.loadState(state) || state.partyRecordIds[0] == 0) return false;
+  // Healing and level-ups need the IVs/EVs, move learning the movesets: with
+  // no RAM to read them, keep the minutes for the tracker's next retry.
+  if (!ivEvStore_.ensureLoaded() || !movesetStore_.ensureLoaded()) {
+    LOG_ERR("PokemonService", "No memory for the IV/EV or moveset table, crediting later");
+    return false;
+  }
 
   PokemonRecord leader{};
   if (!store_.readRecord(state.partyRecordIds[0], leader)) {

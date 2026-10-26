@@ -798,6 +798,11 @@ PokemonActivity::PokemonActivity(GfxRenderer& renderer, MappedInputManager& mapp
       uiTarget_(makeUiTarget(renderer)),
       app_(uiTarget_, uiTarget_.deviceContext()) {}
 
+void PokemonActivity::onExit() {
+  Activity::onExit();
+  service_.releaseSideTables();  // back on the card: the reader needs the RAM
+}
+
 void PokemonActivity::onEnter() {
   Activity::onEnter();
   // Pokemon is portrait-only by design - force it on entry the same way

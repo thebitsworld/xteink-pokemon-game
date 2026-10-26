@@ -24,6 +24,7 @@ class PokemonActivity final : public Activity {
   PokemonActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 
