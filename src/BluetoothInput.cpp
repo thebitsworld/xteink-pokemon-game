@@ -36,6 +36,19 @@ uint32_t learned[ControlCount] = {};
 bool learnedLoaded = false;
 bool learning = false;
 uint32_t learnedPress = 0;
+// Learning takes one code per physical press. A pad's D-pad or stick often
+// changes several report bytes at once (a hat byte and an axis byte, both
+// axes of a diagonal), each its own edge: without this the second edge was
+// learned as the next control, so Down also filled Left. While any learned-
+// gesture code is still down, further presses belong to the same press; the
+// next press counts only LEARN_QUIET_MS after everything was let go.
+std::array<uint32_t, 8> learningDown{};
+uint32_t learningQuietSinceMs = 0;
+uint32_t learningLastPressMs = 0;
+constexpr uint32_t LEARN_QUIET_MS = 250;
+// A release that never came (a dropped report) must not block learning: a
+// press this long after the last one starts a new gesture anyway.
+constexpr uint32_t LEARN_STUCK_MS = 1500;
 bool wasConnected = false;
 bool pausedForMemory = false;
 constexpr size_t C3_MIN_FREE_BLOCK = 48 * 1024;
@@ -101,6 +114,45 @@ bool saveLearned() {
   }
   Storage.remove(BUTTONS_PATH);
   return Storage.rename(BUTTONS_TMP_PATH, BUTTONS_PATH);
+}
+
+// Learning: the first press of a gesture is the learned code; every other
+// edge until the controller is idle again (all of the gesture's codes let go,
+// then LEARN_QUIET_MS without a press) is the same physical press.
+void learnFrom(const freeink::RawButtonEvent& event) {
+  const uint32_t code = event.code();
+  bool anyDown = false;
+  for (const uint32_t down : learningDown) anyDown = anyDown || down != 0;
+  if (!event.pressed) {
+    for (auto& down : learningDown) {
+      if (down == code) down = 0;
+    }
+    bool stillDown = false;
+    for (const uint32_t down : learningDown) stillDown = stillDown || down != 0;
+    if (anyDown && !stillDown) learningQuietSinceMs = event.atMs;
+    return;
+  }
+  if (event.wasRest) return;
+  if (anyDown && event.atMs - learningLastPressMs >= LEARN_STUCK_MS) {
+    learningDown.fill(0);
+    anyDown = false;
+    learningQuietSinceMs = learningLastPressMs;
+  }
+  learningLastPressMs = event.atMs;
+  // An axis zone comes as a single tap with no release of its own.
+  const bool tap = event.byteIndex == 0xFF && event.reportId == 0xFF;
+  const bool idle = !anyDown && event.atMs - learningQuietSinceMs >= LEARN_QUIET_MS;
+  if (idle && learnedPress == 0) learnedPress = code;
+  if (tap) {
+    learningQuietSinceMs = event.atMs;
+    return;
+  }
+  for (auto& down : learningDown) {
+    if (down == 0 || down == code) {
+      down = code;
+      break;
+    }
+  }
 }
 
 uint8_t controlFor(const freeink::RawButtonEvent& event) {
@@ -208,15 +260,15 @@ void pump(const MappedInputManager& input) {
   freeink::RawButtonEvent event;
   while (BleHid.popRawButton(event)) {
     const uint32_t code = event.code();
+    if (learning) {
+      learnFrom(event);
+      continue;
+    }
     if (!event.pressed) {
       release(code);
       continue;
     }
     if (event.wasRest) continue;
-    if (learning) {
-      learnedPress = code;
-      continue;
-    }
     const uint8_t control = controlFor(event);
     if (control == NO_CONTROL) continue;
     Held* slot = nullptr;
@@ -265,6 +317,9 @@ void resumeAfterMemory() {
 void setLearning(const bool on) {
   learning = on;
   learnedPress = 0;
+  learningDown.fill(0);
+  learningQuietSinceMs = 0;
+  learningLastPressMs = 0;
 }
 
 bool takeLearnedPress(uint32_t& code) {
