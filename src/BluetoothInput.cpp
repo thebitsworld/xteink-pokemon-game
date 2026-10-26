@@ -20,9 +20,12 @@
 #include <cstring>
 #include <mutex>
 
+#include <Preferences.h>
+
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "activities/RenderLock.h"
 
 namespace bt {
 namespace {
@@ -74,6 +77,10 @@ std::recursive_mutex radioMutex;
 // for every chapter layout, for 30 s without a link, and outside the reader.
 constexpr size_t STACK_BYTES = 49152;
 constexpr size_t READER_BLOCK_BYTES = 32768;          // the reader's inflate ring, kept whole beside the stack
+// The stack's start takes ~38 KB of the largest block (X3 log: 91K -> 53K), so
+// the reader's 32 KB block is still there afterwards only if this much was.
+// A start from a 51 KB block (in a book) hung the reader.
+constexpr size_t START_LARGEST_BYTES = 38 * 1024 + READER_BLOCK_BYTES;
 constexpr size_t START_FREE_BYTES = STACK_BYTES + READER_BLOCK_BYTES;
 constexpr size_t MINIMUM_FREE_BYTES = 65536;          // below: short in total, not in pieces
 constexpr uint32_t IDLE_OFF_MS = 30u * 1000u;         // a radio nobody connected to for this long stops
@@ -118,6 +125,9 @@ uint32_t lastLinkMs = 0;
 uint32_t lastStartTryMs = 0;
 bool idleStopped = false;
 uint8_t inPiecesInRow = 0;
+// The SDK reads the paired remotes when the radio first starts; until then
+// the bond count stored in NVS (same namespace and key) tells whether one is.
+bool bondStoredAtBoot = false;
 #endif
 
 // The front button each control stands for outside the Game Boy screen.
@@ -298,7 +308,7 @@ bool startRadio() {
   // The stack and the reader's block must both fit; enough bytes but no
   // block for them is a heap in pieces (only a restart joins it again).
   const size_t freeBytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  if (freeBytes < START_FREE_BYTES || heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < READER_BLOCK_BYTES) {
+  if (freeBytes < START_FREE_BYTES || heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < START_LARGEST_BYTES) {
     noteStartError(freeBytes >= MINIMUM_FREE_BYTES ? "pieces" : "");
     startErrorIsMemory = true;
     if (freeBytes >= MINIMUM_FREE_BYTES) ++inPiecesInRow;
@@ -334,13 +344,15 @@ bool stopRadio() {
 }
 
 #if FREEINK_MCU_C3
+std::atomic<bool> stoppedForLayout{false};
+
 // SectionLayoutHooks (render task): the layout gets the radio's RAM.
 void layoutStarted() {
   ++layoutDepth;
   lastLayoutMs = millis();
   if (BleHid.isRunning()) {
-    policyLog("stop: chapter layout");
     stopRadio();
+    stoppedForLayout = true;  // logged by policyTick: no SD writes from the layout
   }
 }
 
@@ -370,6 +382,11 @@ void begin(const bool allowStart) {
   if (esp_reset_reason() != ESP_RST_SW) restartMemo = 0;  // power-on garbage reads as "not spent"
   SectionLayoutHooks::onStart = &layoutStarted;
   SectionLayoutHooks::onEnd = &layoutEnded;
+  Preferences bonds;
+  if (bonds.begin("freeink-hid", true)) {
+    bondStoredAtBoot = bonds.getUChar("n", 0) > 0;
+    bonds.end();
+  }
 #else
   if (!SETTINGS.bluetoothEnabled) return;
   if (!allowStart) {
@@ -389,6 +406,7 @@ bool setEnabled(const bool on) {
 void policyTick(const Place place) {
 #if FREEINK_MCU_C3
   const uint32_t now = millis();
+  if (stoppedForLayout.exchange(false)) policyLog("stop: chapter layout");
   if (place == Place::Rendering) {  // a page is rendering: leave the radio as it is
     if (!BleHid.isRunning()) policyLog("wait: page rendering");
     return;
@@ -440,12 +458,17 @@ void policyTick(const Place place) {
   }
   // Off in the reader: start once the page is shown and no layout runs.
   if (idleStopped) return policyLog("wait: stopped idle, press a key");
-  if (BleHid.pairedCount() == 0) return policyLog("wait: no paired remote");
+  if (BleHid.pairedCount() == 0 && !bondStoredAtBoot) return policyLog("wait: no paired remote");
   if (layoutDepth.load() > 0 || now - lastLayoutMs.load() < LAYOUT_QUIET_MS) return policyLog("wait: layout");
   if (now - placeSinceMs < LAYOUT_QUIET_MS) return;
   if (lastStartTryMs != 0 && now - lastStartTryMs < START_RETRY_MS) return;
+  // No page renders while the stack comes up: it takes the RAM a render uses.
+  RenderLock renderLock(RenderLock::Mode::Try);
+  if (!renderLock.ownsLock()) return;
   lastStartTryMs = now;
+  policyLog("starting: reader");
   if (startRadio()) {
+    bondStoredAtBoot = BleHid.pairedCount() > 0;  // the SDK has read them now
     policyLog("start: reader");
   } else {
     policyLog("refused: reader", startError);
