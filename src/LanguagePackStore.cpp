@@ -6,6 +6,8 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -21,6 +23,25 @@ namespace {
 
 constexpr const char* TAG = "LANGPACK";
 constexpr size_t COPY_CHUNK_BYTES = 4096;
+// What the boot did with the pack, for readers without a serial port (X3).
+constexpr const char* LOG_PATH = "/.crosspoint/language-pack-log.txt";
+constexpr size_t LOG_MAX_BYTES = 16 * 1024;
+
+void packLog(const char* format, ...) {
+  char line[160];
+  va_list args;
+  va_start(args, format);
+  const int len = std::vsnprintf(line, sizeof(line) - 1, format, args);
+  va_end(args);
+  if (len <= 0) return;
+  const size_t length = std::min(static_cast<size_t>(len), sizeof(line) - 2);
+  LOG_INF(TAG, "%s", line);
+  line[length] = '\n';
+  HalFile file = Storage.open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return;
+  if (file.size() < LOG_MAX_BYTES) file.write(line, length + 1);
+  file.close();
+}
 
 bool readHeaderFromFile(const char* path, language_pack::Header& header) {
   HalFile file;
@@ -85,10 +106,26 @@ esp_partition_mmap_handle_t gMapHandle = 0;
 bool gMapped = false;
 
 const esp_partition_t* partition() {
+  if (gPartition != nullptr) return gPartition;
+  gPartition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+  // A reader first flashed with another firmware may name it differently.
   if (gPartition == nullptr) {
-    gPartition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+    gPartition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
   }
-  return gPartition;
+  if (gPartition != nullptr) {
+    packLog("partition %s at 0x%06x, %u KB", gPartition->label, static_cast<unsigned>(gPartition->address),
+            static_cast<unsigned>(gPartition->size / 1024));
+    return gPartition;
+  }
+  packLog("no spiffs partition; data partitions:");
+  esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+  for (; it != nullptr; it = esp_partition_next(it)) {
+    const esp_partition_t* part = esp_partition_get(it);
+    packLog("  %s subtype 0x%02x at 0x%06x, %u KB", part->label, static_cast<unsigned>(part->subtype),
+            static_cast<unsigned>(part->address), static_cast<unsigned>(part->size / 1024));
+  }
+  esp_partition_iterator_release(it);
+  return nullptr;
 }
 
 void unmap() {
@@ -109,13 +146,15 @@ bool mount() {
   language_pack::Header header{};
   if (!readInstalledHeader(header)) return false;
   const void* mapped = nullptr;
-  if (esp_partition_mmap(partition(), 0, header.totalSize, ESP_PARTITION_MMAP_DATA, &mapped, &gMapHandle) != ESP_OK) {
-    LOG_ERR(TAG, "Could not map the language pack (%u bytes)", static_cast<unsigned>(header.totalSize));
+  const esp_err_t mapError =
+      esp_partition_mmap(partition(), 0, header.totalSize, ESP_PARTITION_MMAP_DATA, &mapped, &gMapHandle);
+  if (mapError != ESP_OK) {
+    packLog("map failed (%u bytes, err 0x%x)", static_cast<unsigned>(header.totalSize), mapError);
     return false;
   }
   gMapped = true;
   if (!language_pack::attach(static_cast<const uint8_t*>(mapped), header.totalSize)) {
-    LOG_ERR(TAG, "Installed language pack is damaged");
+    packLog("installed pack is damaged");
     unmap();
     return false;
   }
@@ -128,7 +167,7 @@ bool mount() {
 bool copyToPartition(const language_pack::Header& header, const std::function<void(int)>& progress) {
   const esp_partition_t* part = partition();
   if (part == nullptr || header.totalSize > part->size) {
-    LOG_ERR(TAG, "No partition for a %u byte language pack", static_cast<unsigned>(header.totalSize));
+    packLog("no partition for a %u byte pack", static_cast<unsigned>(header.totalSize));
     return false;
   }
   std::unique_ptr<uint8_t[]> buffer(new (std::nothrow) uint8_t[COPY_CHUNK_BYTES]);
@@ -138,7 +177,11 @@ bool copyToPartition(const language_pack::Header& header, const std::function<vo
   bool ok = file.read(headerBytes, sizeof(headerBytes)) == static_cast<int>(sizeof(headerBytes));
 
   const size_t eraseSize = (header.totalSize + part->erase_size - 1) / part->erase_size * part->erase_size;
-  ok = ok && esp_partition_erase_range(part, 0, eraseSize) == ESP_OK;
+  if (ok) {
+    const esp_err_t eraseError = esp_partition_erase_range(part, 0, eraseSize);
+    if (eraseError != ESP_OK) packLog("erase failed (err 0x%x)", eraseError);
+    ok = eraseError == ESP_OK;
+  }
   uint32_t crc = 0;
   size_t offset = language_pack::HEADER_BYTES;
   while (ok && offset < header.totalSize) {
@@ -151,7 +194,7 @@ bool copyToPartition(const language_pack::Header& header, const std::function<vo
   }
   file.close();
   if (!ok || crc != header.crc32) {
-    LOG_ERR(TAG, "Language pack copy failed (crc %s)", crc == header.crc32 ? "ok" : "mismatch");
+    packLog("copy failed at %u (crc %s)", static_cast<unsigned>(offset), crc == header.crc32 ? "ok" : "mismatch");
     return false;
   }
   // Read the flash back before the header makes it valid.
@@ -163,7 +206,7 @@ bool copyToPartition(const language_pack::Header& header, const std::function<vo
     offset += chunk;
   }
   if (!ok || crc != header.crc32) {
-    LOG_ERR(TAG, "Language pack read-back failed");
+    packLog("read-back failed");
     return false;
   }
   ok = esp_partition_write(part, 0, headerBytes, sizeof(headerBytes)) == ESP_OK;
@@ -173,19 +216,25 @@ bool copyToPartition(const language_pack::Header& header, const std::function<vo
 
 bool installIfNewer(const std::function<void(int)>& progress) {
   language_pack::Header sdHeader{};
-  if (!readHeaderFromFile(PACK_PATH, sdHeader)) return true;  // nothing to install
+  if (!readHeaderFromFile(PACK_PATH, sdHeader)) {
+    if (Storage.exists(PACK_PATH)) packLog("%s is not a valid pack", PACK_PATH);
+    return true;  // nothing to install
+  }
   language_pack::Header installedHeader{};
   if (readInstalledHeader(installedHeader) && installedHeader.crc32 == sdHeader.crc32 &&
       installedHeader.totalSize == sdHeader.totalSize) {
     return true;  // already installed
   }
-  LOG_INF(TAG, "Installing the language pack from the SD card (%u bytes)", static_cast<unsigned>(sdHeader.totalSize));
+  packLog("installing %u bytes (crc %08x)", static_cast<unsigned>(sdHeader.totalSize),
+          static_cast<unsigned>(sdHeader.crc32));
   unmap();
+  const uint32_t startMs = millis();
   const bool ok = copyToPartition(sdHeader, progress);
-  if (!ok) {
+  if (!ok && partition() != nullptr) {
     // Never leave a header over what may be a partial copy.
     esp_partition_erase_range(partition(), 0, partition()->erase_size);
   }
+  packLog("install %s in %lu ms", ok ? "done" : "FAILED", static_cast<unsigned long>(millis() - startMs));
   return ok;
 }
 
@@ -198,14 +247,17 @@ void begin() {
     if (fileIsValidPack(USER_PACK_PATH)) {
       Storage.ensureDirectoryExists("/.crosspoint");
       Storage.remove(PACK_PATH);
-      if (!Storage.rename(USER_PACK_PATH, PACK_PATH)) LOG_ERR(TAG, "Could not move %s", USER_PACK_PATH);
+      packLog(Storage.rename(USER_PACK_PATH, PACK_PATH) ? "moved %s into /.crosspoint" : "could not move %s",
+              USER_PACK_PATH);
     } else {
-      LOG_ERR(TAG, "%s is not a valid language pack", USER_PACK_PATH);
+      packLog("%s is not a valid language pack", USER_PACK_PATH);
     }
   }
-  if (!installIfNewer(nullptr)) LOG_ERR(TAG, "Language pack not installed");
+  installIfNewer(nullptr);
   if (mount()) {
     LOG_INF(TAG, "Language pack: %u languages", static_cast<unsigned>(language_pack::header().languageCount));
+  } else if (Storage.exists(PACK_PATH)) {
+    packLog("no pack mounted although %s exists", PACK_PATH);
   }
 }
 
