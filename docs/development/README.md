@@ -18,5 +18,6 @@ It is written for software developers who may be new to embedded development.
 - [Game Ideas for Lua Apps](./game-ideas.md)
 - [Reader Speed Ideas](./reader-speed-ideas.md)
 - [Flash Size Plan](./flash-size-plan.md)
+- [Ideas from unidex](./ideas-from-unidex.md)
 
 If you are new, start with [Getting Started](./getting-started.md).
