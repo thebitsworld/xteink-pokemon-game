@@ -23,7 +23,9 @@ Only active reading counts — leaving a book open without turning pages does no
 ## More on the reader
 
 - **Applications:** 52 small games and tools (Chess, Go, Xiangqi, Tien Len, Caro, Hearts, Sudoku, Logic Puzzles, a calculator, a desk clock and more, many with a How to play guide), installed from the on-device App Store over Wi-Fi or from the `xteink-pokemon-apps.zip` attached to each release. See [Applications](docs/applications.md).
-- **Game Boy (X4 Pro only):** open a `.gb` ROM you own from the file browser and play it. See [Game Boy](docs/gameboy.md).
+- **Game Boy (X4 Pro only):** open a `.gb` ROM you own from the game library or the file browser and play it. See [Game Boy](docs/gameboy.md).
+- **Bluetooth controllers and page turners:** pair a Bluetooth LE gamepad, keyboard or page turner in Settings → System → Bluetooth. On the X4 Pro and X4 Classic it works everywhere (menus, the Pokémon game, apps, the Game Boy); on the X3/X4, which have little memory, it turns pages while you read.
+- **Languages:** English and Vietnamese are built in; the other 26 languages come in `language-pack.bin` (Settings → System → Device → Language → Download more languages, or copy it to the SD card). See [Installation](docs/installation.md#step-27--other-languages-optional).
 - **Nearby Sync:** send your Pokémon save, reading stats and the book you are reading to another reader nearby, without Wi-Fi.
 
 ## Screenshots
@@ -68,7 +70,8 @@ These are current X3 simulator captures using the artwork from `xteink-pokemon-s
 
 Confirmed working on physical hardware on **Xteink X3**, **Xteink X4**, and **Xteink X4
 Pro** (X4 Pro has a touch-only UI, portrait orientation), including both locked and
-unlocked devices; an **Xteink X4 Classic** build is new in 1.10. **X3/X4 and X4 Pro/X4
+unlocked devices. An **Xteink X4 Classic** build is new in 2.0 and **has not been tried on a
+real X4 Classic yet** — install it only if you are fine with testing. **X3/X4 and X4 Pro/X4
 Classic firmware are not interchangeable** — they target different chips (ESP32-C3 vs.
 ESP32-S3), though the updater checks for this and refuses a mismatched file rather than
 bricking anything. The X4 Pro and X4 Classic share a chip, so pick between those two with

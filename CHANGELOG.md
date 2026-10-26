@@ -1,20 +1,33 @@
-## [Unreleased]
+## [2.0.0] - 2026-10-26
+
+Everything since 1.9.1, including the two 1.10.0 betas.
+
+> **X4 Classic:** its firmware is built from the same code, but nobody has tried it on a real X4 Classic yet. Install it only if you are fine with testing, and keep the 1.9.1 firmware at hand to go back. Tried on real readers for this release: X3 (Bluetooth page turning, the language pack) and X4 Pro (Bluetooth with a BSP D6mini controller, the Game Boy).
+>
+> 🇻🇳 **X4 Classic:** firmware cho X4 Classic build từ cùng mã nguồn nhưng **chưa được thử trên máy X4 Classic thật**. Chỉ cài nếu bạn sẵn sàng thử, và giữ firmware 1.9.1 để quay lại. Đã thử trên máy thật: X3 (Bluetooth lật trang, gói ngôn ngữ) và X4 Pro (Bluetooth với tay cầm BSP D6mini, Game Boy).
+>
+> **Update notes:** the battle animations need the SD card assets from this release (`pokemon/effects/`). Languages other than English and Vietnamese need the language pack (`language-pack.bin`, see below). If you used a controller with a 1.10.0 beta, learn its buttons again. Your Pokémon save and books are kept; flashing 1.9.1 again also keeps them.
+
+### Added
+
+- **Bluetooth controllers and page turners** (X4 Pro, X4 Classic, X3/X4). Settings > System > Bluetooth turns Bluetooth on, searches for Bluetooth LE keyboards, gamepads and page turners, pairs them (up to four are remembered and reconnect by themselves) and forgets them. On the X4 Pro and X4 Classic a controller works everywhere the front buttons do: its arrows move through menus, A selects, B goes back, so the Pokémon game and the apps play with it, and a page turner (Page Up/Down or arrows) turns pages in the reader. Bluetooth is off until you turn it on; while it is on the reader stays at full speed, which uses more battery. Bluetooth Classic-only controllers cannot connect (the chip only has Bluetooth LE). **Controller buttons** learns which of your controller's buttons is which (press each one when asked). Gamepads in standard HID mode work best; touch-mapping modes (such as the BSP D6mini's V3 mode) work too.
+- X3/X4: Bluetooth works like CrossPoint's page turner, because these readers have little memory. The radio runs only while you read, with a paired controller or page turner, and on the Bluetooth settings screen. It pauses while a new chapter is laid out (the controller reconnects a few seconds later), stops after 30 seconds with nothing connected (press a key of the reader to bring it back), and if the memory is too broken up for it the reader restarts once into the book. On these readers the controller turns pages and works the reader's menus; it does not work at Home, in the Pokémon game or in apps. Tip: Settings > Reader > Indexing Method > Full Section lays out a chapter in one go, so the controller pauses only once per chapter.
+- **Language pack.** Only English and Vietnamese are built into the firmware now. The other 26 menu languages, and hyphenation for books in French, Spanish, Italian, Portuguese, Polish, Swedish, Russian and Ukrainian, come in `language-pack.bin`: Settings > System > Device > Language > **Download more languages** (Wi-Fi), or copy `language-pack.bin` from this release to the root of the SD card and restart. The pack goes into a part of the reader's flash that was unused and costs no memory; it frees about 0.8 MB of firmware space (X3/X4 from 99% to 87% full). A reader set to another language shows English until the pack is installed.
+- Pokémon: **battle animations**. In a battle, each move now plays the original Pokémon Red/Blue animation of a move of its type (Ember's flames for Fire, Hydro Pump's water for Water, Thunder's lightning, Rock Throw's rocks, Gust's tornado, Swords Dance for moves that raise your own stats...) over the Pokémon it hits, which then blinks as in the original games. The two moves of a turn play in the order they happened, and each Pokémon's HP drops when the hit lands. Ported from the xteink-pokemon-crosslingua fork (new in the SD card assets: `pokemon/effects/`). Settings > **Battle animations** turns them off.
+- Firmware for the **Xteink X4 Classic** (`xteink-pokemon-x4-classic-firmware-v<version>.bin`): the Pokémon game and apps on the X4 Classic's buttons. The Game Boy stays X4 Pro only. The X4 Pro and X4 Classic share a chip, so the updater cannot tell their files apart - pick the right one. Not tried on a real X4 Classic yet (see above).
+- Game Boy: a **game library**. Applications > Game Boy lists the Game Boy games on the SD card, with filters for all games, favorites and recently played. Select a game to play it, add or remove it from favorites, or delete its saved game (for good - back up `.sav` files you care about). Browse folders still opens the file picker. Idea from the Ink-boy fork.
+- Game Boy: plays with a Bluetooth controller - all eight buttons, Start and Select included. Without learned buttons, keyboards use the arrows or WASD, Enter/X for A, Esc/Z for B, Space for Start and Tab for Select. Idea from the Ink-boy fork.
+- Game Boy: two fingers can hold two on-screen buttons at once - B to run while walking, A and B together. Idea from the Ink-boy fork.
 
 ### Changed
 
-- X3/X4: Bluetooth works like CrossPoint's page turner. These readers have little memory, and the Bluetooth radio left too little to lay out a chapter ("This chapter needs more memory to lay out"). The radio now runs only while you read, with a paired controller or page turner, and on the Bluetooth settings screen. It pauses while a new chapter is laid out (the controller reconnects a few seconds later), stops after 30 seconds with nothing connected (press a key of the reader to bring it back), and if the memory is too broken up for it the reader restarts once into the book. On these readers the controller turns pages and works the reader's menus; it does not work at Home, in the Pokémon game or in apps. The X4 Pro and X4 Classic are unchanged.
 - Settings uses about 30 KB less memory: only the list on screen is built, and the full list of settings is no longer kept in memory all the time.
-- Only English and Vietnamese are built into the firmware now. The other 26 menu languages, and hyphenation for books in French, Spanish, Italian, Portuguese, Polish, Swedish, Russian and Ukrainian, come in a language pack: Settings > System > Device > Language > Download more languages, or copy `language-pack.bin` from the release to the root of the SD card. The pack goes into a part of the reader's flash that was unused and costs no memory; it frees about 0.8 MB of firmware space (X3/X4 from 99% to 87% full). A reader set to another language shows English until the pack is installed.
 
 ### Fixed
 
-- Bluetooth: gamepads in standard HID mode now work - each direction (D-pad or left stick) and each button is its own button. Before, the D-pad's directions all read as one button, so learning the controller's buttons stopped after the first direction and pages flipped back and forth.
-- Bluetooth: controllers in a touch-mapping mode (such as the BSP D6mini's V3 mode, which taps fixed spots of a phone screen) are read by where each button taps, so a button no longer acts as a different one now and then, and one press is one press. Their Start and Select may tap almost the same spot and be mixed up; the controller's HID mode works better.
-- X3/X4: switching Bluetooth on showed nothing when it could not start; the reason now shows under the switch.
 - X3/X4: opening Settings could restart the reader when Bluetooth was on (it ran out of memory).
-- Bluetooth: learning the controller's buttons takes one button per press - a D-pad press that the controller reports twice no longer fills two buttons at once.
-
-Tried on an X4 Pro with a BSP D6mini (HID mode): pages turn one at a time, and the Game Boy plays with all eight buttons. Learn the controller's buttons again after updating - buttons learned before do not match any more.
+- X3/X4: switching Bluetooth on showed nothing when it could not start; the reason now shows under the switch.
+- X3/X4: the reader could freeze when Bluetooth started in an idle book.
 
 ## [1.10.0-beta.2] - 2026-10-25
 
