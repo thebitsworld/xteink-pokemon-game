@@ -118,6 +118,13 @@ is in git history (before 2026-10-08).
   -> `LanguagePackDownloadActivity` -> restart. Tried on the user's X3 (2026-10-26): SD install 3.3 s, languages
   switch fine; its real table (`/.crosspoint/partitions.txt`, written once at boot): app0/app1 0x770000 each,
   spiffs 0xEF0000 1 MB, coredump 0xFF0000. The Wi-Fi download needs a stable release carrying the pack (2.0.0 on).
+  X4 Pro factory table (freeink-sdk/docs/xteink-x4pro-support.md): spiffs 80 KB at 0xFD0000 - the pack cannot go
+  there, so 2.0.0 left X4 Pro/Classic in English. Fix on fix/language-pack-psram (5978c64d, unreleased): when
+  `packGoesToRam()` (PSRAM present and partition missing/too small; `-DLANGUAGE_PACK_FORCE_RAM` forces it for
+  testing) the SD file is read into PSRAM - at boot only for a packed menu language, else via
+  `ensureLoaded()` (language picker) or `setPackedHyphenationLoader` (first book needing packed patterns).
+  A user's X4 Pro flashed with CrossPoint has partitions.csv's table (spiffs 3.4 MB) - the table depends on
+  how the reader was last fully flashed, not the model.
 - Metalio E-INK4 Plus (2026-10-21, research only, nothing built): ESP32-S31 + 4.7" ED047TC2 on a
   parallel bus via EPDiy (no controller), so a PaperBoy/InkBoy-style per-pixel pulse scan could reach
   ~30 scans/s (estimate). Notes: docs/development/metalio-e-ink4-plus.md. kuslota/InkBoy is not Ink-boy.

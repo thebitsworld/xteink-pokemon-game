@@ -9,7 +9,7 @@ release asset of its own; no boot-time StrId table - each string is a binary sea
 pack, so no RAM. The user's X3 kept its factory partition table (OTA/SD updates write only the app):
 its `spiffs` is 1 MB at 0xEF0000, not partitions.csv's 3.4 MB at 0xC90000, so the pack must stay under
 1 MB (`MAX_PACK_BYTES`): German hyphenation (206 KB) stays in the firmware and only used keys go in.
-Measured: pokemon-x3 99.0% -> 87.1%; pack 0.92 MB.
+Measured: pokemon-x3 99.0% -> 87.1%; pack 0.92 MB. X4 Pro/Classic with the factory table (80 KB spiffs) read the SD pack into PSRAM instead (fix after 2.0.0).
 
 ## Where the flash goes (pokemon-x3, v1.10.0-beta.2)
 

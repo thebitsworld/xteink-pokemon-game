@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Fixed
+
+- X4 Pro and X4 Classic: the **language pack** now works on readers that kept their factory flash layout (every reader that only ever updated over Wi-Fi or from the SD card). Their spare flash area is too small for the pack, so 2.0.0 left them in English; now the pack stays on the SD card and is read into memory when needed (a menu language from the pack, the language list, or a book in a language whose hyphenation is in the pack). Keep `language-pack.bin` on the card (in `.crosspoint/`, where the reader moves it). X3/X4 readers are unchanged.
+- The language list explains when a language pack on the SD card could not be used (no room, or a damaged file).
+- A pack that did not fit no longer erases the start of that flash area at every start-up.
+
 ## [2.0.0] - 2026-10-26
 
 Everything since 1.9.1, including the two 1.10.0 betas.
