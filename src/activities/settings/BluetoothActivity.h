@@ -47,7 +47,7 @@ class BluetoothActivity final : public Activity {
   // Labels the list points into; rebuilt with the rows.
   std::vector<std::string> labels;
   std::vector<std::string> subtitles;
-  char status[64] = {};
+  char status[112] = {};
   uint8_t lastDeviceCount = 0;
   bool lastConnected = false;
   bool lastScanning = false;

@@ -56,6 +56,10 @@ void BluetoothActivity::onEnter() {
   visibleRows = 1;
   uiReady = false;
   status[0] = '\0';
+  // Switched on but not running: the start at boot (or the last one) failed.
+  if (SETTINGS.bluetoothEnabled && !bt::running() && bt::lastStartError()[0] != '\0') {
+    std::snprintf(status, sizeof(status), "%s (%s)", tr(STR_BT_START_FAILED), bt::lastStartError());
+  }
   learning = false;
   rebuildRows();
   applySharedUiTheme(app, uiTarget);
@@ -81,7 +85,9 @@ void BluetoothActivity::rebuildRows() {
     subtitles.push_back(std::move(subtitle));
   };
 
-  add(RowKind::Switch, 0, tr(STR_BLUETOOTH), on ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+  // Off with a status is a start that failed: say why right under the switch
+  // (the Search row that shows other statuses only exists while it is on).
+  add(RowKind::Switch, 0, tr(STR_BLUETOOTH), on ? tr(STR_STATE_ON) : status[0] ? status : tr(STR_STATE_OFF));
   if (on) {
     std::string searchSubtitle = status[0] ? status : (BleHid.isScanning() ? tr(STR_BT_SEARCHING) : "");
     add(RowKind::Search, 0, tr(STR_BT_SEARCH), searchSubtitle);
@@ -121,7 +127,8 @@ void BluetoothActivity::activate(const Row& row) {
   switch (row.kind) {
     case RowKind::Switch:
       if (!bt::setEnabled(!bt::running())) {
-        std::snprintf(status, sizeof(status), "%s", tr(STR_BT_START_FAILED));
+        // With the reason and the RAM seen: a locked reader has no serial log.
+        std::snprintf(status, sizeof(status), "%s (%s)", tr(STR_BT_START_FAILED), bt::lastStartError());
       } else if (bt::running()) {
         BleHid.startScan(SCAN_MS);
       }

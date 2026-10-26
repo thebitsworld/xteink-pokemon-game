@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -206,19 +207,35 @@ void releaseAll(const MappedInputManager& input) {
   }
 }
 
+// Why the last start failed, for the Bluetooth screen (readers whose USB port
+// is locked have no log): the step and the internal RAM it saw, in KB.
+char startError[48] = {};
+
+void noteStartError(const char* step) {
+  const unsigned freeKb = static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+  const unsigned blockKb = static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+  std::snprintf(startError, sizeof(startError), "%s, RAM %u KB, block %u/%u KB", step, freeKb, blockKb,
+                static_cast<unsigned>(C3_MIN_FREE_BLOCK / 1024));
+  LOG_ERR(TAG, "Bluetooth did not start: %s", startError);
+}
+
 bool startRadio() {
+  startError[0] = '\0';
   if (BleHid.isRunning()) return true;
-  if (BleHid.isStopping() && !BleHid.end(1000)) return false;
+  if (BleHid.isStopping() && !BleHid.end(1000)) {
+    noteStartError("stopping");
+    return false;
+  }
 #if FREEINK_MCU_C3
   // The NimBLE host and controller take ~40 KB of the C3's internal RAM; with
   // less free in one piece the start would fail half way or starve the reader.
   if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < C3_MIN_FREE_BLOCK) {
-    LOG_ERR(TAG, "Not enough memory to start Bluetooth");
+    noteStartError("memory");
     return false;
   }
 #endif
   if (!BleHid.begin(HOST_NAME)) {
-    LOG_ERR(TAG, "Could not start Bluetooth");
+    noteStartError("init");
     return false;
   }
   return true;
@@ -245,6 +262,8 @@ bool setEnabled(const bool on) {
 }
 
 bool running() { return BleHid.isRunning(); }
+
+const char* lastStartError() { return startError; }
 
 void pump(const MappedInputManager& input) {
   input.remoteBeginFrame();

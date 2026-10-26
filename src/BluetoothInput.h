@@ -30,6 +30,8 @@ void begin();
 // The Settings switch: starts or stops the radio and saves the setting.
 bool setEnabled(bool on);
 bool running();
+// Why the last start failed ("memory, RAM 70 KB, block 31/48 KB"), or "".
+const char* lastStartError();
 // Once per loop, after MappedInputManager::update(): reads the controller and
 // injects this frame's button edges.
 void pump(const MappedInputManager& input);
