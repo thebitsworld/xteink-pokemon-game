@@ -586,15 +586,16 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 // can use it directly; mutable device UI lists use getSettingsList(), which
 // returns an owned copy and can add SD-card font and dictionary options.
 // Four edge gesture entries are compiled only for touch devices.
-// Sized from the measured pokemon-x3 count (112): this fork adds 3 Slideshow entries, 1 entry gated behind
+// Sized from the measured pokemon-x3 count (113): this fork adds 3 Slideshow entries, 1 entry gated behind
 // CROSSINK_ENABLE_POKEMON and 3 feature switches (Pokemon, Applications, Slideshow) on top of upstream's
-// entries; reserved for the max case.
+// entries; reserved for the max case. Keep it exact: one entry too many doubles the vector (to 224), and
+// on the X3 those extra SettingInfo slots stayed allocated - the simulator smoke test checks it.
 #if CROSSINK_BLUETOOTH
 inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 1;
 #else
 inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 0;
 #endif
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 112 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT;
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 113 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT;
 
 const std::vector<SettingInfo>& getBaseSettingsList();
 
