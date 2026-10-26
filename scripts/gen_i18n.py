@@ -43,6 +43,29 @@ FALLBACK_OFFSET = 0xFFFF
 MAX_BLOB_OFFSET = 0xFFFE
 
 
+def key_hash(key: str) -> int:
+    """FNV-1a (32-bit) of a STR_* key name.
+
+    The language pack (scripts/build_language_pack.py) stores its strings by
+    this hash, not by StrId index, so a pack keeps working with a firmware
+    whose StrId order changed; STRING_KEY_HASHES gives the firmware the hash
+    of each of its own keys.
+    """
+    value = 0x811C9DC5
+    for byte in key.encode("utf-8"):
+        value = ((value ^ byte) * 0x01000193) & 0xFFFFFFFF
+    return value
+
+
+def check_key_hashes(string_keys: List[str]) -> None:
+    seen: Dict[int, str] = {}
+    for key in string_keys:
+        h = key_hash(key)
+        if h in seen:
+            raise ValueError(f"String key hash collision: {seen[h]} and {key} (rename one)")
+        seen[h] = key
+
+
 # ---------------------------------------------------------------------------
 # YAML file reading (simple key: "value" format, no PyYAML dependency)
 # ---------------------------------------------------------------------------
@@ -495,6 +518,9 @@ def generate_keys_header(
     lines.append("// Character sets for each language (defined in I18nStrings.cpp)")
     lines.append("extern const char* const CHARACTER_SETS[];")
     lines.append("")
+    lines.append("// FNV-1a hash of each StrId's key name: how the language pack finds it")
+    lines.append("extern const uint32_t STRING_KEY_HASHES[];")
+    lines.append("")
 
     # StrId enum
     lines.append("// String IDs")
@@ -659,6 +685,16 @@ def generate_strings_cpp(
     lines.append("};")
     lines.append("")
 
+    # Key hashes, one per StrId (see key_hash()).
+    check_key_hashes(string_keys)
+    lines.append("// FNV-1a hash of each StrId's key name")
+    lines.append("const uint32_t STRING_KEY_HASHES[] = {")
+    for i in range(0, len(string_keys), 6):
+        chunk = string_keys[i : i + 6]
+        lines.append("    " + ", ".join(f"0x{key_hash(k):08X}u" for k in chunk) + ",")
+    lines.append("};")
+    lines.append("")
+
     # Per-language flat string blobs and offset tables.
     # Non-English languages skip strings identical to English; their offset
     # tables mark such a string with FALLBACK_OFFSET (0xFFFF), and the lookup
@@ -730,6 +766,9 @@ def generate_strings_cpp(
 
     # Compile-time size checks
     lines.append("// Compile-time validation of array sizes")
+    lines.append("static_assert(sizeof(STRING_KEY_HASHES) / sizeof(STRING_KEY_HASHES[0]) ==")
+    lines.append("                  static_cast<size_t>(StrId::_COUNT),")
+    lines.append('              "STRING_KEY_HASHES size mismatch");')
     for code in compiled:
         lines.append(
             f"static_assert(sizeof(i18n_strings::OFFSETS_{code}) "

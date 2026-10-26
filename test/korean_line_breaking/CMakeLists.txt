@@ -31,3 +31,5 @@ target_link_libraries(KoreanLineBreakingTest PRIVATE
 )
 
 gtest_discover_tests(KoreanLineBreakingTest)
+
+target_compile_definitions(KoreanLineBreakingTest PRIVATE HYPHENATION_ALL_BUILTIN)

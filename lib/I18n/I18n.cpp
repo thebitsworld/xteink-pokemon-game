@@ -4,18 +4,22 @@
 #include <cstring>
 
 #include "I18nStrings.h"
+#include "LanguagePack.h"
 
 using namespace i18n_strings;
 
-namespace {
-bool isBuiltinLanguage(const Language language) {
+bool I18n::isBuiltin(const Language language) {
   const auto raw = static_cast<uint8_t>(language);
   for (const uint8_t builtin : SORTED_LANGUAGE_INDICES) {
     if (builtin == raw) return true;
   }
   return false;
 }
-}  // namespace
+
+bool I18n::isAvailable(const Language language) {
+  if (language >= Language::_COUNT) return false;
+  return isBuiltin(language) || language_pack::hasLanguage(LANGUAGE_CODES[static_cast<size_t>(language)]);
+}
 
 I18n& I18n::getInstance() {
   static I18n instance;
@@ -26,6 +30,11 @@ const char* I18n::get(StrId id) const {
   const auto index = static_cast<size_t>(id);
   if (index >= static_cast<size_t>(StrId::_COUNT)) {
     return "???";
+  }
+
+  if (_packLanguage >= 0) {
+    const char* packed = language_pack::lookup(_packLanguage, STRING_KEY_HASHES[index]);
+    return packed != nullptr ? packed : STRINGS_EN_DATA + OFFSETS_EN[index];
   }
 
   // Use generated helper function - no hardcoded switch needed!
@@ -43,9 +52,11 @@ void I18n::setLanguage(Language lang) {
   if (lang >= Language::_COUNT) {
     return;
   }
+  _requested = lang;
   // Keep persisted settings untouched, but make every runtime language-dependent
   // behavior agree with the English string fallback in reduced-language builds.
-  _language = isBuiltinLanguage(lang) ? lang : Language::EN;
+  _packLanguage = isBuiltin(lang) ? -1 : language_pack::languageIndex(LANGUAGE_CODES[static_cast<size_t>(lang)]);
+  _language = (isBuiltin(lang) || _packLanguage >= 0) ? lang : Language::EN;
 }
 
 const char* I18n::getLanguageName(Language lang) const {

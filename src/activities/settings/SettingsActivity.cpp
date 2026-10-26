@@ -681,28 +681,38 @@ void SettingsActivity::openWordSpacingPicker() {
 }
 
 void SettingsActivity::openLanguagePicker() {
-  const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
+  // Built-in languages and those in the installed language pack: English
+  // first, then by native name; the last row downloads the pack.
+  std::vector<uint8_t> languages;
+  languages.push_back(static_cast<uint8_t>(Language::EN));
+  for (uint8_t i = 0; i < getLanguageCount(); i++) {
+    if (static_cast<Language>(i) != Language::EN && I18n::isAvailable(static_cast<Language>(i))) languages.push_back(i);
+  }
+  std::sort(languages.begin() + 1, languages.end(),
+            [](const uint8_t a, const uint8_t b) { return std::strcmp(LANGUAGE_NAMES[a], LANGUAGE_NAMES[b]) < 0; });
 
   std::vector<std::string> options;
-  options.reserve(languageCount);
-  for (int i = 0; i < languageCount; i++) {
-    options.push_back(I18N.getLanguageName(static_cast<Language>(SORTED_LANGUAGE_INDICES[i])));
+  options.reserve(languages.size() + 1);
+  for (const uint8_t language : languages) {
+    options.push_back(I18N.getLanguageName(static_cast<Language>(language)));
   }
+  options.push_back(tr(STR_DOWNLOAD_LANGUAGES));
 
   const auto currentLang = static_cast<uint8_t>(I18N.getLanguage());
-  const auto* begin = std::begin(SORTED_LANGUAGE_INDICES);
-  const auto* end = std::end(SORTED_LANGUAGE_INDICES);
-  const auto* it = std::find(begin, end, currentLang);
-  int currentIndex = (it != end) ? static_cast<int>(std::distance(begin, it)) : 0;
+  const auto it = std::find(languages.begin(), languages.end(), currentLang);
+  int currentIndex = (it != languages.end()) ? static_cast<int>(std::distance(languages.begin(), it)) : 0;
 
-  optionPopup.show(StrId::STR_LANGUAGE, options, currentIndex, [this](int selectedIndex) {
-    const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
-    if (selectedIndex < 0 || selectedIndex >= languageCount) {
+  optionPopup.show(StrId::STR_LANGUAGE, options, currentIndex, [this, languages](int selectedIndex) {
+    if (selectedIndex == static_cast<int>(languages.size())) {
+      silentRestartToDownloadLanguages();
+      return;
+    }
+    if (selectedIndex < 0 || selectedIndex >= static_cast<int>(languages.size())) {
       requestUpdate();
       return;
     }
 
-    const uint8_t langIndex = SORTED_LANGUAGE_INDICES[selectedIndex];
+    const uint8_t langIndex = languages[selectedIndex];
     {
       RenderLock lock(*this);
       I18N.setLanguage(static_cast<Language>(langIndex));

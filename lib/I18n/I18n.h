@@ -21,7 +21,15 @@ class I18n {
   const char* operator[](StrId id) const { return get(id); }
 
   Language getLanguage() const { return _language; }
+  // A language that is neither built in nor in the installed language pack
+  // shows English; the request is remembered, so installing the pack later
+  // (refreshLanguagePack) brings it back.
   void setLanguage(Language lang);
+  // Call after the language pack was attached or detached.
+  void refreshLanguagePack() { setLanguage(_requested); }
+  static bool isBuiltin(Language lang);
+  // Built in, or in the installed language pack.
+  static bool isAvailable(Language lang);
   const char* getLanguageName(Language lang) const;
   static Language languageFromCode(const char* code);
 
@@ -30,9 +38,11 @@ class I18n {
   static const char* getCharacterSet(Language lang);
 
  private:
-  I18n() : _language(Language::EN) {}
+  I18n() : _language(Language::EN), _requested(Language::EN) {}
 
   Language _language;
+  Language _requested;
+  int _packLanguage = -1;  // language_pack index of _language, or -1 (built in)
 };
 
 // Convenience macros

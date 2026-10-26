@@ -12,7 +12,7 @@ name: Release
 # xteink-pokemon-x4-classic-firmware-v<version>.bin), a version-less "-latest.bin" alias
 # of each (so README.md/docs/installation.md can link straight to
 # .../releases/latest/download/<alias-name> and always get the current build), and
-# SHA256SUMS.txt. The full-install ZIP needs the Pokemon artwork pack, which is
+# SHA256SUMS.txt, plus language-pack.bin (the languages left out of the firmware). The full-install ZIP needs the Pokemon artwork pack, which is
 # deliberately not committed to this repository (see docs/release-checklist.md) -
 # build and upload it to the same release by hand with
 # scripts/package_pokemon_v2_release.py when needed, same as before.
@@ -255,6 +255,16 @@ jobs:
           name: firmware-x4-classic
           path: build/pokemon-x4-classic
 
+      # The UI languages other than English/Vietnamese and their hyphenation,
+      # which the firmware no longer carries (lib/I18n/LanguagePack.h). The
+      # device downloads it from /releases/latest/download/language-pack.bin,
+      # so every release carries it; it also goes in the SD card assets ZIP.
+      - name: Build language pack
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python3 scripts/build_language_pack.py --out dist/language-pack.bin
+
       - name: Package firmware assets
         id: package
         run: |
@@ -333,6 +343,7 @@ jobs:
           version="${{ steps.package.outputs.version }}"
           assets=(
             "dist/xteink-pokemon-x4-pro-firmware-v${version}.bin"
+            dist/language-pack.bin
             dist/SHA256SUMS.txt
           )
           if [ -f "dist/xteink-pokemon-x3-x4-firmware-v${version}.bin" ]; then

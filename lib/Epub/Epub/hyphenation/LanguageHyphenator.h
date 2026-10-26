@@ -14,6 +14,8 @@ class LanguageHyphenator {
     return liangBreakIndexes(cps, patterns_, config_);
   }
 
+  // False for a language pack language that is not installed.
+  bool hasPatterns() const { return patterns_.data != nullptr && patterns_.size > 0; }
   size_t minPrefix() const { return config_.minPrefix; }
   size_t minSuffix() const { return config_.minSuffix; }
 

@@ -87,6 +87,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "CrossPointState.h"
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
+#include "LanguagePackStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
@@ -101,6 +102,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "activities/reader/ReadingStatsUtils.h"
 #include "activities/reader/StatsBackup.h"
 #include "activities/settings/FontDownloadActivity.h"
+#include "activities/settings/LanguagePackDownloadActivity.h"
 #include "activities/settings/KOReaderAuthActivity.h"
 #include "activities/settings/KOReaderSettingsActivity.h"
 #include "activities/settings/OtaUpdateActivity.h"
@@ -457,6 +459,7 @@ void silentRestartToNetwork(const NetworkBootTarget target, const uint32_t paylo
 }
 
 void silentRestartToManageFonts() { silentRestartToNetwork(NetworkBootTarget::MANAGE_FONTS); }
+void silentRestartToDownloadLanguages() { silentRestartToNetwork(NetworkBootTarget::DOWNLOAD_LANGUAGES); }
 
 static uint32_t encodeKOReaderSyncOrientation(const uint8_t orientation) {
   return orientation < CrossPointSettings::ORIENTATION_COUNT ? static_cast<uint32_t>(orientation) + 1 : 0;
@@ -1336,6 +1339,8 @@ void setup() {
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Wake, BoardConfig::ACTIVE.name,
                                wakeupRouteName(wakeupReason));
   const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
+  // Languages other than English and Vietnamese, and their hyphenation.
+  language_pack_store::begin();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   // Normal boot store deferral adapted from Sichroteph/YACP commit
   // 20af8aee8d3e1d560456753b08d1f52e5488621f (MIT). Accessors load these
@@ -1531,6 +1536,14 @@ void setup() {
         } else {
           LOG_ERR("MAIN", "OOM: Manage Fonts activity after minimal boot (free=%u maxAlloc=%u)", ESP.getFreeHeap(),
                   ESP.getMaxAllocHeap());
+        }
+        break;
+      }
+      case NetworkBootTarget::DOWNLOAD_LANGUAGES: {
+        auto languagesActivity = makeUniqueNoThrow<LanguagePackDownloadActivity>(renderer, mappedInputManager);
+        if (languagesActivity) {
+          activityManager.replaceActivity(std::move(languagesActivity));
+          launched = true;
         }
         break;
       }

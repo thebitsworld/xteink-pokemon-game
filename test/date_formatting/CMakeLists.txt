@@ -19,8 +19,11 @@ endif()
 configure_file(${REPO_ROOT}/lib/I18n/I18n.h ${GENERATED_I18N}/I18n.h COPYONLY)
 configure_file(${REPO_ROOT}/lib/I18n/I18n.cpp ${GENERATED_I18N}/I18n.cpp COPYONLY)
 configure_file(${REPO_ROOT}/lib/I18n/DateFormatting.cpp ${GENERATED_I18N}/DateFormatting.cpp COPYONLY)
+configure_file(${REPO_ROOT}/lib/I18n/LanguagePack.h ${GENERATED_I18N}/LanguagePack.h COPYONLY)
+configure_file(${REPO_ROOT}/lib/I18n/LanguagePack.cpp ${GENERATED_I18N}/LanguagePack.cpp COPYONLY)
 add_executable(date_formatting DateFormattingTest.cpp
-  ${GENERATED_I18N}/I18n.cpp ${GENERATED_I18N}/I18nStrings.cpp ${GENERATED_I18N}/DateFormatting.cpp)
+  ${GENERATED_I18N}/I18n.cpp ${GENERATED_I18N}/I18nStrings.cpp ${GENERATED_I18N}/DateFormatting.cpp
+  ${GENERATED_I18N}/LanguagePack.cpp)
 target_include_directories(date_formatting PRIVATE ${REPO_ROOT}/include ${GENERATED_I18N})
 target_compile_features(date_formatting PRIVATE cxx_std_17)
 target_compile_options(date_formatting PRIVATE -UNDEBUG)

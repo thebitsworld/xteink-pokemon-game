@@ -14,6 +14,7 @@ target_include_directories(HyphenationEvaluationTest PRIVATE
 
 target_compile_definitions(HyphenationEvaluationTest PRIVATE
   HYPHENATION_RESOURCES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources"
+  HYPHENATION_ALL_BUILTIN
 )
 
 target_link_libraries(HyphenationEvaluationTest PRIVATE
