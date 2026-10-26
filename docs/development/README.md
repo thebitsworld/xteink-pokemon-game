@@ -19,5 +19,6 @@ It is written for software developers who may be new to embedded development.
 - [Reader Speed Ideas](./reader-speed-ideas.md)
 - [Flash Size Plan](./flash-size-plan.md)
 - [Ideas from unidex](./ideas-from-unidex.md)
+- [Metalio E-INK4 Plus (port notes)](./metalio-e-ink4-plus.md)
 
 If you are new, start with [Getting Started](./getting-started.md).
