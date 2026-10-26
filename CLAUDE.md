@@ -124,7 +124,8 @@ is in git history (before 2026-10-08).
   testing) the SD file is read into PSRAM - at boot only for a packed menu language, else via
   `ensureLoaded()` (language picker) or `setPackedHyphenationLoader` (first book needing packed patterns).
   A user's X4 Pro flashed with CrossPoint has partitions.csv's table (spiffs 3.4 MB) - the table depends on
-  how the reader was last fully flashed, not the model.
+  how the reader was last fully flashed, not the model. Tried on the user's X4 Pro with a FORCE_RAM build
+  (2026-10-26): languages listed and kept across a restart; reading the 0.92 MB pack takes 680 ms per boot.
 - Metalio E-INK4 Plus (2026-10-21, research only, nothing built): ESP32-S31 + 4.7" ED047TC2 on a
   parallel bus via EPDiy (no controller), so a PaperBoy/InkBoy-style per-pixel pulse scan could reach
   ~30 scans/s (estimate). Notes: docs/development/metalio-e-ink4-plus.md. kuslota/InkBoy is not Ink-boy.
