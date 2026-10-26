@@ -214,7 +214,30 @@ bool copyToPartition(const language_pack::Header& header, const std::function<vo
   return ok;
 }
 
+// The partition table the reader really runs with: updates write only the
+// app, so it is the one it left the factory with, not partitions.csv.
+void writePartitionTable() {
+  constexpr const char* PATH = "/.crosspoint/partitions.txt";
+  if (Storage.exists(PATH)) return;  // fixed for the life of the reader
+  HalFile file = Storage.open(PATH, O_WRONLY | O_CREAT | O_TRUNC);
+  if (!file) return;
+  char line[96];
+  int len = std::snprintf(line, sizeof(line), "# label, type, subtype, offset, size\n");
+  file.write(line, static_cast<size_t>(len));
+  esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+  for (; it != nullptr; it = esp_partition_next(it)) {
+    const esp_partition_t* part = esp_partition_get(it);
+    len = std::snprintf(line, sizeof(line), "%s, 0x%02x, 0x%02x, 0x%06x, 0x%06x\n", part->label,
+                        static_cast<unsigned>(part->type), static_cast<unsigned>(part->subtype),
+                        static_cast<unsigned>(part->address), static_cast<unsigned>(part->size));
+    if (len > 0) file.write(line, static_cast<size_t>(len));
+  }
+  esp_partition_iterator_release(it);
+  file.close();
+}
+
 bool installIfNewer(const std::function<void(int)>& progress) {
+  writePartitionTable();
   language_pack::Header sdHeader{};
   if (!readHeaderFromFile(PACK_PATH, sdHeader)) {
     if (Storage.exists(PACK_PATH)) packLog("%s is not a valid pack", PACK_PATH);
