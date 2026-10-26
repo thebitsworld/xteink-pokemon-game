@@ -6,6 +6,7 @@
 #include <BleKeyboardHost.h>
 #include <BoardConfig.h>
 #include <Epub/Section.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <esp_attr.h>
 #include <esp_heap_caps.h>
@@ -315,6 +316,9 @@ bool startRadio() {
     return false;
   }
 #endif
+  // After 3 s without input the C3 runs at 10 MHz, and the controller hangs
+  // starting there (X3 log: "starting: reader" in an idle book, then nothing).
+  powerManager.setPowerSaving(false);
   if (!BleHid.begin(HOST_NAME)) {
     noteStartError("init");
     return false;
