@@ -210,10 +210,6 @@ class GameBoyActivity final : public Activity {
   std::atomic<bool> fullRefreshDue{false};
   bool saveDirty = false;   // cartridge RAM changed since the last save
   uint64_t nextFrameUs = 0;
-  // Loops in a row that skipped emuTaskLoop()'s 1 ms sleep because the
-  // emulator was behind real time (see MAX_BEHIND_YIELDS).
-  uint8_t behindStreak = 0;
-  static constexpr uint8_t MAX_BEHIND_YIELDS = 15;
   uint64_t nextDisplayUs = 0;
   uint64_t nextAutosaveUs = 0;
 
