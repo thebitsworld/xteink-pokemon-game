@@ -1,9 +1,5 @@
 ## [Unreleased]
 
-### Changed
-
-- Game Boy (X4 Pro): heavy games run a little faster - the emulator no longer pauses 1 ms between frames while it is behind, and reads the game's code more directly. Pokémon Gold ran at 96-97% of full speed; it should now reach about 100%. Ideas from Ink-boy 1.2.0.
-
 ### Fixed
 
 - Bluetooth: gamepads in standard HID mode now work - each direction (D-pad or left stick) and each button is its own button. Before, the D-pad's directions all read as one button, so learning the controller's buttons stopped after the first direction and pages flipped back and forth.

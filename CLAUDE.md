@@ -48,7 +48,7 @@ is in git history (before 2026-10-08).
   it with the `unchanged` column. Beyond ~5/s only a shorter waveform helps, which ghosts.
 - Game Boy emulation speed (1.8.3): one emulated frame in three is drawn (DRAW_EVERY, each core's
   frame_skip steered per frame); Walnut-CGB's ~50 KB context goes to internal RAM when 48 KB stay free,
-  its TU is -O2. Pokemon Gold 96-97%, Pokemon Red 100% (6 ms a frame). After Ink-boy 1.2.0 (2026-10-26, feat/bluetooth): the loop's 1 ms delay becomes yield() while behind (MAX_BEHIND_YIELDS 15) and ROM 16/32-bit reads are direct - Gold not yet measured on hardware. GBC colours: 17 grey levels as a
+  its TU is -O2. Pokemon Red 100% (6 ms a frame). Pokemon Gold walking the overworld at D40 measures ~83% on the user's X4 Pro (2026-10-26, serial `perf:` lines, ~80 samples: v1.9.1 82.6%, feat/bluetooth 84.3%; ~19 ms a frame, draw ~23 ms) - the older 96-97% was a lighter scene. Ink-boy 1.2.0's skip-the-1-ms-sleep-while-behind measured no gain (83.2%) and was reverted; its direct ROM 16/32-bit reads stay. BT on puts the Walnut state in PSRAM (largest internal block ~34 KB) at about the same speed. GBC colours: 17 grey levels as a
   4x4 Bayer dither (DMG uses 0/4/12/16); SETTINGS > Colours Contrast (default; night scenes - narrow
   palette span - stretched onto levels 4..16), Smooth (17 levels, the tester found it busy), Brightness.
   Settings menu taps: orientation changes wait for the finger to lift, and the touch registry is cleared
