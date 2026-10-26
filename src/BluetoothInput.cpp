@@ -85,6 +85,30 @@ constexpr uint32_t RESTART_SPENT_MAGIC = 0x42485231u;
 // radio comes up again, so a heap still in pieces cannot restart in a loop.
 RTC_NOINIT_ATTR uint32_t restartMemo;
 
+// The X3 is USB-locked: the policy's decisions go to a small log on the SD
+// card (each change once, with the internal RAM free/largest in KB).
+constexpr char POLICY_LOG_PATH[] = "/.crosspoint/bluetooth-log.txt";
+constexpr size_t POLICY_LOG_MAX_BYTES = 48 * 1024;
+std::mutex policyLogMutex;
+const char* lastPolicyNote = nullptr;
+
+void policyLog(const char* note, const char* detail = "") {
+  std::lock_guard<std::mutex> lock(policyLogMutex);
+  if (note == lastPolicyNote && detail[0] == '\0') return;
+  lastPolicyNote = note;
+  char line[112];
+  const int len = std::snprintf(line, sizeof(line), "%lus %s%s%s free=%uK max=%uK\n", millis() / 1000UL, note,
+                                detail[0] ? " " : "", detail,
+                                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                                static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024));
+  if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
+  LOG_INF(TAG, "policy: %s", line);
+  HalFile file = Storage.open(POLICY_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return;
+  if (file.size() < POLICY_LOG_MAX_BYTES) file.write(line, static_cast<size_t>(len));
+  file.close();
+}
+
 std::atomic<int> layoutDepth{0};
 std::atomic<uint32_t> lastLayoutMs{0};
 Place lastPlace = Place::Other;
@@ -315,7 +339,7 @@ void layoutStarted() {
   ++layoutDepth;
   lastLayoutMs = millis();
   if (BleHid.isRunning()) {
-    LOG_INF(TAG, "Bluetooth stops for a chapter layout");
+    policyLog("stop: chapter layout");
     stopRadio();
   }
 }
@@ -328,7 +352,7 @@ void layoutEnded() {
 // Heap in pieces too often: restart into the same book, once per radio start.
 void restartForWholeHeap() {
   if (inPiecesInRow < REFUSALS_BEFORE_RESTART || restartMemo == RESTART_SPENT_MAGIC) return;
-  LOG_INF(TAG, "Heap in pieces %u times: restarting into the book for Bluetooth", inPiecesInRow);
+  policyLog("restart: heap in pieces");
   restartMemo = RESTART_SPENT_MAGIC;
   APP_STATE.lastSleepFromReader = true;  // the boot reopens the open book
   APP_STATE.saveToFile();
@@ -365,10 +389,14 @@ bool setEnabled(const bool on) {
 void policyTick(const Place place) {
 #if FREEINK_MCU_C3
   const uint32_t now = millis();
-  if (place == Place::Rendering) return;  // a page is rendering: leave the radio as it is
+  if (place == Place::Rendering) {  // a page is rendering: leave the radio as it is
+    if (!BleHid.isRunning()) policyLog("wait: page rendering");
+    return;
+  }
   if (place != lastPlace) {
     lastPlace = place;
     placeSinceMs = now;
+    policyLog(place == Place::Reader ? "place: reader" : place == Place::Pairing ? "place: pairing" : "place: other");
     if (place == Place::Reader) {
       idleStopped = false;  // every book visit starts over
       lastStartTryMs = 0;
@@ -383,33 +411,46 @@ void policyTick(const Place place) {
     // Pairing is the user asking for the radio now.
     if (!on && (lastStartTryMs == 0 || now - lastStartTryMs >= START_RETRY_MS)) {
       lastStartTryMs = now;
-      startRadio();
+      if (startRadio()) {
+        policyLog("start: pairing screen");
+      } else {
+        policyLog("refused: pairing screen", startError);
+      }
     }
     return;
   }
   if (place != Place::Reader) {
-    if (on) stopRadio();
+    if (on) {
+      policyLog("stop: left the reader");
+      stopRadio();
+    }
     lastStartTryMs = 0;
     return;
   }
   if (on) {
     if (BleHid.isConnected() || BleHid.isConnecting()) {
       lastLinkMs = now;
+      policyLog(BleHid.isConnected() ? "linked" : "linking");
     } else if (now - lastLinkMs >= IDLE_OFF_MS) {
-      LOG_INF(TAG, "Bluetooth stops: no remote linked for 30 s");
+      policyLog("stop: no remote linked for 30 s");
       idleStopped = true;
       stopRadio();
     }
     return;
   }
   // Off in the reader: start once the page is shown and no layout runs.
-  if (idleStopped || BleHid.pairedCount() == 0 || layoutDepth.load() > 0 ||
-      now - lastLayoutMs.load() < LAYOUT_QUIET_MS || now - placeSinceMs < LAYOUT_QUIET_MS) {
-    return;
-  }
+  if (idleStopped) return policyLog("wait: stopped idle, press a key");
+  if (BleHid.pairedCount() == 0) return policyLog("wait: no paired remote");
+  if (layoutDepth.load() > 0 || now - lastLayoutMs.load() < LAYOUT_QUIET_MS) return policyLog("wait: layout");
+  if (now - placeSinceMs < LAYOUT_QUIET_MS) return;
   if (lastStartTryMs != 0 && now - lastStartTryMs < START_RETRY_MS) return;
   lastStartTryMs = now;
-  if (!startRadio()) restartForWholeHeap();
+  if (startRadio()) {
+    policyLog("start: reader");
+  } else {
+    policyLog("refused: reader", startError);
+    restartForWholeHeap();
+  }
 #else
   (void)place;
 #endif
