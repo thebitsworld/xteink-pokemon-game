@@ -70,7 +70,10 @@ is in git history (before 2026-10-08).
   (`bt::pauseForMemory` in LuaAppActivity). Flash: pokemon-x4-pro 96.5%, x4-classic 92.5%, pokemon-x3 99.0%
   (~66 KB left - the next X3 feature needs room found first; saved plan, not started:
   docs/development/flash-size-plan.md - language pack + hyphenation in the unused `spiffs` partition). Released
-  as v1.10.0-beta.2 (2026-10-25, branch feat/bluetooth). Not yet tried on hardware.
+  as v1.10.0-beta.2 (2026-10-25, branch feat/bluetooth). Tried on the user's X4 Pro with a BSP D6mini
+  (2026-10-26, unreleased fixes on the branch): HID mode works after the SDK gamepad decode; learning takes
+  one code per press (`learnFrom`); touch codes match the nearest learned spot (`controlForTouch`).
+  pokemon-x3 flash 99.0% after these.
 - Game Boy library (`GameLibraryActivity`, opened by the Applications row; `GameLibraryStore` keeps favourites
   and recents in `/.crosspoint/gameboy_library.txt`; GameBoyActivity notes each started ROM). Scans 3 folders
   deep from `/`, skipping hidden folders, `pokemon`, `sleep`, `fonts`, `dictionaries`; max 200 games.
@@ -143,6 +146,14 @@ is in git history (before 2026-10-08).
     Pulse polish+ (P8x3PP-60: idle, and still OR 1.5 s since the last polish). Betas tried and
     dropped: fewer frames (blur), 0x1F "fast" (more ghost), polishing while pixels still changed
     (patchy, flicker). Pulse test shows only with -DCROSSINK_PULSE_TEST=1. Default stays D40.
+  - BleKeyboardHost (`libs/network/BleKeyboardHost`): `parseGamepadLayout`/`gamepadMaskOf` read a HID
+    gamepad's hat, left stick and buttons from the report map and emit one raw edge per direction/button
+    (`RawButtonEvent::GAMEPAD_REPORT_ID` 0xFD; byteIndex 0 = direction 1-4, 1 = button n; default keycodes
+    = the axis-pad usages); a Digitizer-page report map (0x0D) makes each touch one tap named by its spot
+    (`TOUCH_REPORT_ID` 0xFE, value = X/16, byteIndex = Y/16, lost lift released after 2 s). Found with a
+    BSP D6mini: HID mode's hat rests at 0xFF and broke the rest-frame guess; V3 mode is a touchscreen.
+    `-DFREEINK_BLE_HID_REPORT_DEBUG=1` (e.g. via `PLATFORMIO_BUILD_FLAGS`) dumps every report, the report
+    map and the parsed gamepad layout on serial.
   - `RefreshTimings` reports the last COMPLETED refresh with running `refreshes`/`skipped` counts (an
     overlapped refresh completes on the next call). Not an SDK file but related:
     `HalDisplay::displayBufferOverlapped`/`finishOverlapped` (SPI-locked shadow-free async refresh).

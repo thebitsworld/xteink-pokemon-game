@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Fixed
+
+- Bluetooth: gamepads in standard HID mode now work - each direction (D-pad or left stick) and each button is its own button. Before, the D-pad's directions all read as one button, so learning the controller's buttons stopped after the first direction and pages flipped back and forth.
+- Bluetooth: controllers in a touch-mapping mode (such as the BSP D6mini's V3 mode, which taps fixed spots of a phone screen) are read by where each button taps, so a button no longer acts as a different one now and then, and one press is one press. Their Start and Select may tap almost the same spot and be mixed up; the controller's HID mode works better.
+- Bluetooth: learning the controller's buttons takes one button per press - a D-pad press that the controller reports twice no longer fills two buttons at once.
+
+Tried on an X4 Pro with a BSP D6mini (HID mode): pages turn one at a time, and the Game Boy plays with all eight buttons. Learn the controller's buttons again after updating - buttons learned before do not match any more.
+
 ## [1.10.0-beta.2] - 2026-10-25
 
 > ⚠️ **Test build - do not install unless you want to help test.** Stay on v1.9.1 (or 1.10.0-beta.1) for everyday reading. Nothing in this build has been tried on a real reader yet: Bluetooth, the Game Boy library and two-finger buttons were only built and checked in the PC simulator.
