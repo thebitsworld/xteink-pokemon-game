@@ -6,9 +6,9 @@
 #include <cstring>
 
 #include "HyphenationCommon.h"
+#include "generated/hyph-de.trie.h"
 #include "generated/hyph-en.trie.h"
 #if defined(HYPHENATION_ALL_BUILTIN)
-#include "generated/hyph-de.trie.h"
 #include "generated/hyph-es.trie.h"
 #include "generated/hyph-fr.trie.h"
 #include "generated/hyph-it.trie.h"
@@ -21,7 +21,8 @@
 
 namespace {
 
-// Only English is compiled into the firmware; the other languages' patterns
+// Only English and German (too big for the pack) are compiled into the
+// firmware; the other languages' patterns
 // come from the language pack (setPackedHyphenationPatterns) and are empty -
 // no hyphenation - until it is installed. Host tests and tools compile them
 // all in (HYPHENATION_ALL_BUILTIN).
@@ -31,7 +32,6 @@ namespace {
 #define PACKED_PATTERNS(tag) SerializedHyphenationPatterns tag##Patterns {}
 #endif
 PACKED_PATTERNS(fr);
-PACKED_PATTERNS(de);
 PACKED_PATTERNS(ru);
 PACKED_PATTERNS(es);
 PACKED_PATTERNS(it);
@@ -45,14 +45,14 @@ struct PackedPatterns {
   const char* tag;
   SerializedHyphenationPatterns* patterns;
 };
-constexpr PackedPatterns kPacked[] = {{"fr", &frPatterns}, {"de", &dePatterns}, {"ru", &ruPatterns},
-                                      {"es", &esPatterns}, {"it", &itPatterns}, {"sv", &svPatterns},
-                                      {"uk", &ukPatterns}, {"pl", &plPatterns}, {"pt", &ptPatterns}};
+constexpr PackedPatterns kPacked[] = {{"fr", &frPatterns}, {"ru", &ruPatterns}, {"es", &esPatterns},
+                                      {"it", &itPatterns}, {"sv", &svPatterns}, {"uk", &ukPatterns},
+                                      {"pl", &plPatterns}, {"pt", &ptPatterns}};
 
 // English hyphenation patterns (3/3 minimum prefix/suffix length)
 LanguageHyphenator englishHyphenator(en_patterns, isLatinLetter, toLowerLatin, 3, 3);
 LanguageHyphenator frenchHyphenator(frPatterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator germanHyphenator(dePatterns, isLatinLetter, toLowerLatin);
+LanguageHyphenator germanHyphenator(de_patterns, isLatinLetter, toLowerLatin);
 LanguageHyphenator russianHyphenator(ruPatterns, isCyrillicLetter, toLowerCyrillic);
 LanguageHyphenator spanishHyphenator(esPatterns, isLatinLetter, toLowerLatin);
 LanguageHyphenator italianHyphenator(itPatterns, isLatinLetter, toLowerLatin);
@@ -102,7 +102,7 @@ void clearPackedHyphenationPatterns() {
 }
 
 const char* const* packedHyphenationTags(size_t& count) {
-  static const char* const kTags[] = {"fr", "de", "ru", "es", "it", "sv", "uk", "pl", "pt"};
+  static const char* const kTags[] = {"fr", "ru", "es", "it", "sv", "uk", "pl", "pt"};
   count = sizeof(kTags) / sizeof(kTags[0]);
   return kTags;
 }

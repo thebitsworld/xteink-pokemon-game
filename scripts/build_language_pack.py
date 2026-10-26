@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build language-pack.bin: the UI languages and hyphenation patterns left out of the firmware.
 
-The firmware keeps English and Vietnamese (and English hyphenation) built in; every other language
+The firmware keeps English and Vietnamese (and English and German hyphenation) built in; every other language
 lives in this pack, which the reader installs into its unused `spiffs` flash partition and reads in
 place (lib/I18n/LanguagePack.h). Strings are stored by the FNV-1a hash of their key name, so a pack
 keeps working with a newer or older firmware: a key the pack lacks shows in English.
@@ -32,15 +32,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gen_i18n import key_hash, check_key_hashes, load_translations, parse_builtin_langs  # noqa: E402
+from gen_i18n import (  # noqa: E402
+    check_key_hashes,
+    find_used_string_keys,
+    key_hash,
+    load_translations,
+    parse_builtin_langs,
+)
 
 MAGIC = b"XLPK"
 FORMAT_VERSION = 1
 HEADER_BYTES = 32
 DIRECTORY_ENTRY_BYTES = 16
 TRIE_DIR = ROOT / "lib/Epub/Epub/hyphenation/generated"
-# Hyphenation kept in the firmware (lib/Epub/Epub/hyphenation/LanguageRegistry.cpp).
-BUILTIN_HYPHENATION = {"en"}
+# Hyphenation kept in the firmware (lib/Epub/Epub/hyphenation/LanguageRegistry.cpp). German's trie
+# (206 KB) would not fit beside the strings in MAX_PACK_BYTES.
+BUILTIN_HYPHENATION = {"en", "de"}
+# The smallest `spiffs` partition met so far: X3 readers keep the partition table they shipped with
+# (an OTA or SD update writes only the app), and theirs has 1 MB at 0xEF0000, not the 3.4 MB of
+# partitions.csv.
+MAX_PACK_BYTES = 1024 * 1024
 
 
 def align4(data: bytearray) -> None:
@@ -74,6 +85,9 @@ def load_tries() -> list[tuple[str, bytes, int]]:
 def build(builtin_codes: str) -> bytes:
     languages, _names, string_keys, translations, _inherited = load_translations(str(ROOT / "lib/I18n/translations"))
     check_key_hashes(string_keys)
+    # Only keys the firmware uses (as its own build strips the rest).
+    used = find_used_string_keys([str(ROOT / "src"), str(ROOT / "lib")])
+    string_keys = [k for k in string_keys if k in used]
     builtin = parse_builtin_langs(builtin_codes, languages) or set(languages)
     packed = [(i, code) for i, code in enumerate(languages) if code not in builtin]
     tries = load_tries()
@@ -121,6 +135,8 @@ def build(builtin_codes: str) -> bytes:
         "<HHHHIIIII", FORMAT_VERSION, len(language_entries), len(trie_entries), 0, total, crc, content_id, 0, 0
     )
     assert len(header) == HEADER_BYTES
+    if total > MAX_PACK_BYTES:
+        raise ValueError(f"Language pack is {total} bytes, over the {MAX_PACK_BYTES} byte partition")
     return header + rest
 
 

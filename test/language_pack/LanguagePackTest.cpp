@@ -45,9 +45,10 @@ void packLanguagesComeBackOnceAttached(std::vector<uint8_t>& pack) {
   assert(I18n::isAvailable(Language::FR));
 
   language_pack::Hyphenation hyphenation{};
-  assert(language_pack::findHyphenation("de", hyphenation) && hyphenation.size > 0 &&
+  assert(language_pack::findHyphenation("fr", hyphenation) && hyphenation.size > 0 &&
          hyphenation.rootOffset < hyphenation.size);
-  assert(!language_pack::findHyphenation("en", hyphenation));  // stays in the firmware
+  assert(!language_pack::findHyphenation("en", hyphenation));  // these stay in the firmware
+  assert(!language_pack::findHyphenation("de", hyphenation));
 
   assert(language_pack::attach(nullptr, 0));
   I18N.refreshLanguagePack();
