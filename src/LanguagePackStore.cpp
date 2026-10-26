@@ -2,6 +2,7 @@
 
 #include <Epub/hyphenation/LanguageRegistry.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <LanguagePack.h>
 #include <Logging.h>
 
@@ -14,7 +15,10 @@
 #include <memory>
 #include <new>
 
+#include "CrossPointSettings.h"
+
 #ifndef SIMULATOR
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #endif
 
@@ -72,32 +76,71 @@ void detach() {
   clearPackedHyphenationPatterns();
 }
 
+Problem gProblem = Problem::None;
+
+// The pack read whole from the SD card into memory: the simulator always,
+// and on the S3 readers (PSRAM) whose spiffs partition is too small for it.
+uint8_t* gPackRam = nullptr;
+
+uint8_t* allocPack(const size_t size) {
 #ifdef SIMULATOR
+  return new (std::nothrow) uint8_t[size];
+#else
+  return static_cast<uint8_t*>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#endif
+}
 
-std::unique_ptr<uint8_t[]> gPackBytes;
+void freePack(uint8_t* bytes) {
+#ifdef SIMULATOR
+  delete[] bytes;
+#else
+  heap_caps_free(bytes);
+#endif
+}
 
-// The simulator has no partition: the SD copy is the installed pack.
-bool mount() {
-  detach();
-  gPackBytes.reset();
+bool loadFromSd() {
+  if (language_pack::attached()) return true;
   language_pack::Header header{};
   if (!readHeaderFromFile(PACK_PATH, header)) return false;
-  std::unique_ptr<uint8_t[]> bytes(new (std::nothrow) uint8_t[header.totalSize]);
+  const uint32_t startMs = millis();
+  uint8_t* bytes = allocPack(header.totalSize);
   HalFile file;
-  if (!bytes || !Storage.openFileForRead(TAG, PACK_PATH, file) || !file) return false;
-  const bool read = file.read(bytes.get(), header.totalSize) == static_cast<int>(header.totalSize);
-  file.close();
-  if (!read || !language_pack::crcMatches(bytes.get(), header) ||
-      !language_pack::attach(bytes.get(), header.totalSize)) {
-    LOG_ERR(TAG, "Invalid language pack on the SD card");
+  if (bytes == nullptr || !Storage.openFileForRead(TAG, PACK_PATH, file) || !file) {
+    if (bytes != nullptr) freePack(bytes);
+    packLog("no memory for a %u byte pack", static_cast<unsigned>(header.totalSize));
     return false;
   }
-  gPackBytes = std::move(bytes);
+  const bool read = file.read(bytes, header.totalSize) == static_cast<int>(header.totalSize);
+  file.close();
+  if (!read || !language_pack::crcMatches(bytes, header) || !language_pack::attach(bytes, header.totalSize)) {
+    freePack(bytes);
+    gProblem = Problem::Damaged;
+    packLog("%s is damaged", PACK_PATH);
+    return false;
+  }
+  gPackRam = bytes;
   applyHyphenation();
+#if defined(LANGUAGE_PACK_FORCE_RAM)
+  // Test builds note it on the SD card too (normal ones would fill the log: every wake is a boot).
+  packLog("read %u bytes from the SD card in %lu ms", static_cast<unsigned>(header.totalSize),
+          static_cast<unsigned long>(millis() - startMs));
+#else
+  LOG_INF(TAG, "Language pack read from the SD card in %lu ms", static_cast<unsigned long>(millis() - startMs));
+#endif
   return true;
 }
 
+#ifdef SIMULATOR
+
+// The simulator has no partition: the SD copy is the installed pack.
+bool mount() { return loadFromSd(); }
+
 bool installIfNewer(const std::function<void(int)>&) { return true; }
+
+void writePartitionTable() {}
+
+// Where the pack goes: false = the partition. The simulator reads the SD file.
+bool packGoesToRam(const language_pack::Header&) { return false; }
 
 #else
 
@@ -166,10 +209,7 @@ bool mount() {
 // cut leaves no valid header over a half-written pack.
 bool copyToPartition(const language_pack::Header& header, const std::function<void(int)>& progress) {
   const esp_partition_t* part = partition();
-  if (part == nullptr || header.totalSize > part->size) {
-    packLog("no partition for a %u byte pack", static_cast<unsigned>(header.totalSize));
-    return false;
-  }
+  if (part == nullptr || header.totalSize > part->size) return false;  // installIfNewer checked
   std::unique_ptr<uint8_t[]> buffer(new (std::nothrow) uint8_t[COPY_CHUNK_BYTES]);
   HalFile file;
   if (!buffer || !Storage.openFileForRead(TAG, PACK_PATH, file) || !file) return false;
@@ -237,7 +277,6 @@ void writePartitionTable() {
 }
 
 bool installIfNewer(const std::function<void(int)>& progress) {
-  writePartitionTable();
   language_pack::Header sdHeader{};
   if (!readHeaderFromFile(PACK_PATH, sdHeader)) {
     if (Storage.exists(PACK_PATH)) packLog("%s is not a valid pack", PACK_PATH);
@@ -247,6 +286,13 @@ bool installIfNewer(const std::function<void(int)>& progress) {
   if (readInstalledHeader(installedHeader) && installedHeader.crc32 == sdHeader.crc32 &&
       installedHeader.totalSize == sdHeader.totalSize) {
     return true;  // already installed
+  }
+  if (partition() == nullptr || sdHeader.totalSize > partition()->size) {
+    // Never touch a partition the pack does not fit: it may hold another
+    // firmware's data (the X4 Pro's factory spiffs is 80 KB).
+    gProblem = Problem::NoRoom;
+    packLog("no partition for a %u byte pack", static_cast<unsigned>(sdHeader.totalSize));
+    return false;
   }
   packLog("installing %u bytes (crc %08x)", static_cast<unsigned>(sdHeader.totalSize),
           static_cast<unsigned>(sdHeader.crc32));
@@ -261,7 +307,27 @@ bool installIfNewer(const std::function<void(int)>& progress) {
   return ok;
 }
 
+// A pack the spiffs partition cannot hold is read from the SD card into PSRAM
+// instead, on readers that have it (X4 Pro, X4 Classic): their factory
+// partition table keeps an 80 KB spiffs, and updates never rewrite the table.
+// -DLANGUAGE_PACK_FORCE_RAM tries this path on a reader with a large partition.
+bool packGoesToRam(const language_pack::Header& header) {
+  if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) return false;
+#if defined(LANGUAGE_PACK_FORCE_RAM)
+  (void)header;
+  return true;
+#else
+  const esp_partition_t* part = partition();
+  return part == nullptr || header.totalSize > part->size;
 #endif
+}
+
+#endif
+
+// Loads a pack kept on the SD card the first time a book needs its patterns.
+void loadForHyphenation() {
+  if (loadFromSd()) LOG_INF(TAG, "Language pack loaded for hyphenation");
+}
 
 }  // namespace
 
@@ -275,6 +341,15 @@ void begin() {
     } else {
       packLog("%s is not a valid language pack", USER_PACK_PATH);
     }
+  }
+  writePartitionTable();
+  language_pack::Header sdHeader{};
+  if (readHeaderFromFile(PACK_PATH, sdHeader) && packGoesToRam(sdHeader)) {
+    // Read only when needed: now for a menu language from the pack, else when
+    // the language picker opens or a book needs a packed hyphenation.
+    setPackedHyphenationLoader(&loadForHyphenation);
+    if (!I18n::isBuiltin(static_cast<Language>(SETTINGS.language))) loadFromSd();
+    return;
   }
   installIfNewer(nullptr);
   if (mount()) {
@@ -301,6 +376,14 @@ bool fileIsValidPack(const char* path) {
   file.close();
   return ok && crc == header.crc32;
 }
+
+bool ensureLoaded() {
+  if (language_pack::attached()) return true;
+  language_pack::Header header{};
+  return readHeaderFromFile(PACK_PATH, header) && packGoesToRam(header) && loadFromSd();
+}
+
+Problem problem() { return language_pack::attached() ? Problem::None : gProblem; }
 
 bool installed() { return language_pack::attached(); }
 

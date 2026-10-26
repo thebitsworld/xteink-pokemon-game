@@ -61,6 +61,15 @@ LanguageHyphenator ukrainianHyphenator(ukPatterns, isCyrillicLetter, toLowerCyri
 LanguageHyphenator polishHyphenator(plPatterns, isLatinLetter, toLowerLatin);
 LanguageHyphenator portugueseHyphenator(ptPatterns, isLatinLetter, toLowerLatin);
 
+void (*packedLoader)() = nullptr;
+
+bool isPackedTag(const char* tag) {
+  for (const auto& packed : kPacked) {
+    if (std::strcmp(packed.tag, tag) == 0) return true;
+  }
+  return false;
+}
+
 using EntryArray = std::array<LanguageEntry, 10>;
 
 const EntryArray& entries() {
@@ -83,9 +92,17 @@ const LanguageHyphenator* getLanguageHyphenatorForPrimaryTag(const std::string& 
   const auto& allEntries = entries();
   const auto it = std::find_if(allEntries.begin(), allEntries.end(),
                                [&primaryTag](const LanguageEntry& entry) { return primaryTag == entry.primaryTag; });
-  if (it == allEntries.end() || !it->hyphenator->hasPatterns()) return nullptr;
+  if (it == allEntries.end()) return nullptr;
+  if (!it->hyphenator->hasPatterns() && packedLoader != nullptr && isPackedTag(it->primaryTag)) {
+    void (*loader)() = packedLoader;
+    packedLoader = nullptr;  // once: a pack that is missing stays missing until the next boot
+    loader();
+  }
+  if (!it->hyphenator->hasPatterns()) return nullptr;
   return it->hyphenator;
 }
+
+void setPackedHyphenationLoader(void (*loader)()) { packedLoader = loader; }
 
 bool setPackedHyphenationPatterns(const char* primaryTag, const uint8_t* data, const size_t size,
                                   const size_t rootOffset) {

@@ -36,6 +36,7 @@
 #include "QuickActionsActivity.h"
 #include "SdCardFontSystem.h"
 #include "SdFirmwareUpdateActivity.h"
+#include "LanguagePackStore.h"
 #include "SettingsList.h"
 #include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
@@ -683,6 +684,8 @@ void SettingsActivity::openWordSpacingPicker() {
 void SettingsActivity::openLanguagePicker() {
   // Built-in languages and those in the installed language pack: English
   // first, then by native name; the last row downloads the pack.
+  // A pack kept on the SD card (S3 readers with a small spiffs) is read now.
+  language_pack_store::ensureLoaded();
   std::vector<uint8_t> languages;
   languages.push_back(static_cast<uint8_t>(Language::EN));
   for (uint8_t i = 0; i < getLanguageCount(); i++) {
@@ -702,6 +705,12 @@ void SettingsActivity::openLanguagePicker() {
   const auto it = std::find(languages.begin(), languages.end(), currentLang);
   int currentIndex = (it != languages.end()) ? static_cast<int>(std::distance(languages.begin(), it)) : 0;
 
+  // A pack on the SD card that could not be used says why, under the list.
+  const auto packProblem = language_pack_store::problem();
+  const OptionPopup::Note note =
+      packProblem == language_pack_store::Problem::NoRoom    ? OptionPopup::Note(tr(STR_LANGUAGE_PACK), tr(STR_LANGUAGE_PACK_NO_ROOM))
+      : packProblem == language_pack_store::Problem::Damaged ? OptionPopup::Note(tr(STR_LANGUAGE_PACK), tr(STR_LANGUAGE_PACK_DAMAGED))
+                                                              : OptionPopup::Note();
   optionPopup.show(StrId::STR_LANGUAGE, options, currentIndex, [this, languages](int selectedIndex) {
     if (selectedIndex == static_cast<int>(languages.size())) {
       silentRestartToDownloadLanguages();
@@ -721,7 +730,7 @@ void SettingsActivity::openLanguagePicker() {
     SETTINGS.language = langIndex;
     SETTINGS.saveToFile();
     requestUpdate();
-  });
+  }, note);
   requestUpdate();
 }
 
