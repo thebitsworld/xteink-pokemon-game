@@ -1,9 +1,16 @@
 ## [Unreleased]
 
+### Changed
+
+- X3/X4: Bluetooth works like CrossPoint's page turner. These readers have little memory, and the Bluetooth radio left too little to lay out a chapter ("This chapter needs more memory to lay out"). The radio now runs only while you read, with a paired controller or page turner, and on the Bluetooth settings screen. It pauses while a new chapter is laid out (the controller reconnects a few seconds later), stops after 30 seconds with nothing connected (press a key of the reader to bring it back), and if the memory is too broken up for it the reader restarts once into the book. On these readers the controller turns pages and works the reader's menus; it does not work at Home, in the Pokémon game or in apps. The X4 Pro and X4 Classic are unchanged.
+- Settings uses about 30 KB less memory: only the list on screen is built, and the full list of settings is no longer kept in memory all the time.
+
 ### Fixed
 
 - Bluetooth: gamepads in standard HID mode now work - each direction (D-pad or left stick) and each button is its own button. Before, the D-pad's directions all read as one button, so learning the controller's buttons stopped after the first direction and pages flipped back and forth.
 - Bluetooth: controllers in a touch-mapping mode (such as the BSP D6mini's V3 mode, which taps fixed spots of a phone screen) are read by where each button taps, so a button no longer acts as a different one now and then, and one press is one press. Their Start and Select may tap almost the same spot and be mixed up; the controller's HID mode works better.
+- X3/X4: switching Bluetooth on showed nothing when it could not start; the reason now shows under the switch.
+- X3/X4: opening Settings could restart the reader when Bluetooth was on (it ran out of memory).
 - Bluetooth: learning the controller's buttons takes one button per press - a D-pad press that the controller reports twice no longer fills two buttons at once.
 
 Tried on an X4 Pro with a BSP D6mini (HID mode): pages turn one at a time, and the Game Boy plays with all eight buttons. Learn the controller's buttons again after updating - buttons learned before do not match any more.

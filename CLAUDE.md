@@ -74,6 +74,17 @@ is in git history (before 2026-10-08).
   (2026-10-26, unreleased fixes on the branch): HID mode works after the SDK gamepad decode; learning takes
   one code per press (`learnFrom`); touch codes match the nearest learned spot (`controlForTouch`).
   pokemon-x3 flash 99.0% after these.
+  X3/X4 (C3) radio policy since 85fac408 (2026-10-26), ported from CrossPoint's BlePageTurner RadioPolicy.h
+  (fetch with `gh api repos/crosspoint-reader/crosspoint-reader/contents/lib/BlePageTurner/src/RadioPolicy.h`):
+  `bt::policyTick(Place)` from main.cpp - radio only in the reader (menus over it count, Settings does not)
+  with a bond, after 1.5 s without layout (`SectionLayoutHooks` in lib/Epub Section.cpp stop it from the render
+  task under `radioMutex`), and on the Bluetooth screen; 80 KB free + 32 KB block to start, rollback if the
+  block goes, 30 s idle off, 3 heap-in-pieces refusals -> ESP.restart into the book (RTC memo). Stopping and
+  restarting NimBLE splits the C3 heap (67 KB free, no 48 KB block after one cycle), hence no pausing for
+  Settings. Settings RAM: only the list on screen is built (`buildSettingsList`), the base list is freed when
+  no `BaseSettingsListHold` holds it (it used to be a boot-to-off static), BASE_SETTINGS_CAPACITY = 113. X3 is
+  USB-locked: the Bluetooth screen shows start failures as "free/largest" KB; crash_report.txt on the SD card
+  decodes with the matching ELF (its app desc elf_sha256 at offset 0x90 of the esp_app_desc).
 - Game Boy library (`GameLibraryActivity`, opened by the Applications row; `GameLibraryStore` keeps favourites
   and recents in `/.crosspoint/gameboy_library.txt`; GameBoyActivity notes each started ROM). Scans 3 folders
   deep from `/`, skipping hidden folders, `pokemon`, `sleep`, `fonts`, `dictionaries`; max 200 games.
