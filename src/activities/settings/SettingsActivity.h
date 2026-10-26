@@ -261,6 +261,9 @@ class SettingsActivity final : public Activity {
   std::vector<SettingInfo> systemReadingStatsSettings;
   std::vector<SettingInfo> systemGlobalStatsSettings;
   const std::vector<SettingInfo>* currentSettings = nullptr;
+  // Only the list on screen is built (buildSettingsList()); the others stay empty.
+  const std::vector<SettingInfo>* builtSettings = nullptr;
+  bool settingsListStale = true;
 
   bool preserveQuickResumeTimeoutOn = false;
   bool quickResumeTimeoutAutoEnabled = false;
@@ -320,6 +323,7 @@ class SettingsActivity final : public Activity {
   void openFrontlightScheduleTimePicker(uint16_t CrossPointSettings::* valuePtr, StrId titleId);
   void openStringEditor(const SettingInfo& setting);
   void rebuildSettingsLists();
+  void buildSettingsList(std::vector<SettingInfo>* target);
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
   void closeRootSettings();
   void finishToParent();

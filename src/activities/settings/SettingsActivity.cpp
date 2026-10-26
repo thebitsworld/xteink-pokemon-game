@@ -279,32 +279,28 @@ SettingsActivity::SettingsActivity(GfxRenderer& renderer, MappedInputManager& ma
       app(uiTarget, uiTarget.deviceContext()) {}
 
 void SettingsActivity::rebuildSettingsLists() {
-  displaySettings.clear();
-  displaySleepSettings.clear();
-  displayFrontlightSettings.clear();
-  readerSettings.clear();
-  readerFontSettings.clear();
-  readerPageLayoutSettings.clear();
-  controlsSettings.clear();
-  controlsPowerSettings.clear();
-  controlsHomeButtonSettings.clear();
-  controlsFrontButtonSettings.clear();
-  controlsSideButtonSettings.clear();
-  controlsTapsGesturesSettings.clear();
-  controlsTwoFingerSwipeSettings.clear();
-  controlsEdgeGestureSettings.clear();
-  systemSettings.clear();
-  systemDeviceSettings.clear();
-  systemFilesCacheSettings.clear();
-  systemFeatureSettings.clear();
-  fileBrowserSettings.clear();
-  systemReadingStatsSettings.clear();
-  systemGlobalStatsSettings.clear();
+  settingsListStale = true;
+  setCurrentSettingsForCategory();
+}
 
-  if (isFileBrowserView()) {
-    fileBrowserSettings = buildFileBrowserSettingsList(getBaseSettingsList());
-    currentSettings = &fileBrowserSettings;
-    settingsCount = static_cast<int>(currentSettings->size());
+// Builds only `target`, the list on screen, and frees every other one: each
+// SettingInfo is 144 bytes on the C3, and all 21 lists built at once, beside
+// the full list they are copied from, ran the X3 out of RAM with Bluetooth on.
+void SettingsActivity::buildSettingsList(std::vector<SettingInfo>* const target) {
+  for (std::vector<SettingInfo>* list :
+       {&displaySettings, &displaySleepSettings, &displayFrontlightSettings, &readerSettings, &readerFontSettings,
+        &readerPageLayoutSettings, &readerScreenMarginSettings, &controlsSettings, &controlsPowerSettings,
+        &controlsHomeButtonSettings, &controlsFrontButtonSettings, &controlsSideButtonSettings,
+        &controlsTapsGesturesSettings, &controlsTwoFingerSwipeSettings, &controlsEdgeGestureSettings, &systemSettings,
+        &systemDeviceSettings, &systemFilesCacheSettings, &systemFeatureSettings, &fileBrowserSettings,
+        &systemReadingStatsSettings, &systemGlobalStatsSettings}) {
+    std::vector<SettingInfo>().swap(*list);
+  }
+  builtSettings = target;
+  settingsListStale = false;
+
+  if (target == &fileBrowserSettings) {
+    fileBrowserSettings = buildFileBrowserSettingsList(BaseSettingsListHold().list());
     return;
   }
 
@@ -315,7 +311,7 @@ void SettingsActivity::rebuildSettingsLists() {
 
   dictionaryRegistry.refreshIfDirty();
   const auto allSettings = getSettingsList(needsFonts ? &sdFontSystem.registry() : nullptr, &dictionaryRegistry);
-  displaySettings = buildGroupedDisplaySettingsList(allSettings);
+  if (target == &displaySettings) displaySettings = buildGroupedDisplaySettingsList(allSettings);
 #ifndef SIMULATOR
   if (BoardConfig::isX4Pro() || CROSSINK_APP_DEVICE_X4CLASSIC) {
     displaySettings.erase(
@@ -324,10 +320,10 @@ void SettingsActivity::rebuildSettingsLists() {
         displaySettings.end());
   }
 #endif
-  displaySleepSettings = buildDisplaySleepSettingsList(allSettings);
-  displayFrontlightSettings = buildDisplayFrontlightSettingsList(allSettings);
-  readerSettings = buildReaderSettingsParentList(allSettings);
-  readerFontSettings = buildReaderFontSettingsList(allSettings);
+  if (target == &displaySleepSettings) displaySleepSettings = buildDisplaySleepSettingsList(allSettings);
+  if (target == &displayFrontlightSettings) displayFrontlightSettings = buildDisplayFrontlightSettingsList(allSettings);
+  if (target == &readerSettings) readerSettings = buildReaderSettingsParentList(allSettings);
+  if (target == &readerFontSettings) readerFontSettings = buildReaderFontSettingsList(allSettings);
 #if CROSSINK_SCALABLE_FONTS
   if (needsFonts && sdFontSystem.isScalableFamily(SETTINGS.sdFontFamilyName)) {
     const auto fontSize =
@@ -337,27 +333,43 @@ void SettingsActivity::rebuildSettingsLists() {
     readerFontSettings.insert(insertAt, SettingInfo::Action(StrId::STR_TTF_RENDERING, SettingAction::TtfRendering));
   }
 #endif
-  readerPageLayoutSettings = buildReaderPageLayoutSettingsList(allSettings);
-  readerScreenMarginSettings = buildReaderScreenMarginSettingsList(allSettings);
-  systemSettings = buildSystemSettingsParentList(allSettings);
-  systemDeviceSettings = buildSystemDeviceSettingsList(allSettings);
-  systemFilesCacheSettings = buildSystemFilesCacheSettingsList(allSettings);
-  systemFeatureSettings = buildSystemFeaturesSettingsList(allSettings);
-  systemReadingStatsSettings = buildSystemReadingStatsSettingsList(allSettings);
-  systemGlobalStatsSettings = buildSystemGlobalStatsSettingsList(allSettings);
-  controlsSettings = buildControlsSettingsParentList(allSettings);
-  controlsPowerSettings = buildControlsPowerSettingsList(allSettings);
-  controlsHomeButtonSettings = buildControlsHomeButtonSettingsList(allSettings);
-  controlsTapsGesturesSettings = buildControlsTapsGesturesSettingsList(allSettings);
-  controlsTwoFingerSwipeSettings = buildControlsTwoFingerSwipeSettingsList(allSettings);
-  controlsEdgeGestureSettings = buildControlsEdgeGestureSettingsList(allSettings);
+  if (target == &readerPageLayoutSettings) readerPageLayoutSettings = buildReaderPageLayoutSettingsList(allSettings);
+  if (target == &readerScreenMarginSettings) {
+    readerScreenMarginSettings = buildReaderScreenMarginSettingsList(allSettings);
+  }
+  if (target == &systemSettings) systemSettings = buildSystemSettingsParentList(allSettings);
+  if (target == &systemDeviceSettings) systemDeviceSettings = buildSystemDeviceSettingsList(allSettings);
+  if (target == &systemFilesCacheSettings) systemFilesCacheSettings = buildSystemFilesCacheSettingsList(allSettings);
+  if (target == &systemFeatureSettings) systemFeatureSettings = buildSystemFeaturesSettingsList(allSettings);
+  if (target == &systemReadingStatsSettings) {
+    systemReadingStatsSettings = buildSystemReadingStatsSettingsList(allSettings);
+  }
+  if (target == &systemGlobalStatsSettings) systemGlobalStatsSettings = buildSystemGlobalStatsSettingsList(allSettings);
+  if (target == &controlsSettings) controlsSettings = buildControlsSettingsParentList(allSettings);
+  if (target == &controlsPowerSettings) controlsPowerSettings = buildControlsPowerSettingsList(allSettings);
+  if (target == &controlsHomeButtonSettings) {
+    controlsHomeButtonSettings = buildControlsHomeButtonSettingsList(allSettings);
+  }
+  if (target == &controlsTapsGesturesSettings) {
+    controlsTapsGesturesSettings = buildControlsTapsGesturesSettingsList(allSettings);
+  }
+  if (target == &controlsTwoFingerSwipeSettings) {
+    controlsTwoFingerSwipeSettings = buildControlsTwoFingerSwipeSettingsList(allSettings);
+  }
+  if (target == &controlsEdgeGestureSettings) {
+    controlsEdgeGestureSettings = buildControlsEdgeGestureSettingsList(allSettings);
+  }
   const size_t expectedSideButtonCount =
       controlsSideButtonBaseCount + (hasSideButtonChordSetting(allSettings) ? 1u : 0u);
 #if CROSSINK_APP_CAP_TOUCH
   if (!gpio.hasTouch()) {
-    controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
+    if (target == &controlsFrontButtonSettings) {
+      controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
+    }
   }
-  controlsSideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
+  if (target == &controlsSideButtonSettings) {
+    controlsSideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
+  }
 
   const bool hasTouch = gpio.hasTouch();
   const bool hasHomeKey = gpio.hasHomeKey();
@@ -367,8 +379,12 @@ void SettingsActivity::rebuildSettingsLists() {
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   const size_t expectedFrontButtonCount = hasTouch ? 0u : controlsFrontButtonCount;
 #else
-  controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
-  controlsSideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
+  if (target == &controlsFrontButtonSettings) {
+    controlsFrontButtonSettings = buildControlsFrontButtonSettingsList(allSettings);
+  }
+  if (target == &controlsSideButtonSettings) {
+    controlsSideButtonSettings = buildControlsSideButtonSettingsList(allSettings);
+  }
 
   const size_t expectedControlsCount = controlsParentBaseCount + (gpio.hasHomeKey() ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN) ? 1u : 0u) +
@@ -376,106 +392,106 @@ void SettingsActivity::rebuildSettingsLists() {
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   constexpr size_t expectedFrontButtonCount = controlsFrontButtonCount;
 #endif
-  if (controlsSettings.size() != expectedControlsCount ||
-      (gpio.hasHomeKey() && controlsHomeButtonSettings.size() != controlsHomeButtonCount) ||
-      controlsPowerSettings.size() < controlsPowerMinCount || controlsPowerSettings.size() > controlsPowerMaxCount ||
-      controlsFrontButtonSettings.size() != expectedFrontButtonCount ||
-      controlsSideButtonSettings.size() != expectedSideButtonCount) {
-    LOG_ERR("SET", "Unexpected controls menu counts: controls=%u/%u home=%u power=%u front=%u side=%u",
-            static_cast<uint32_t>(controlsSettings.size()), static_cast<uint32_t>(expectedControlsCount),
-            static_cast<uint32_t>(controlsHomeButtonSettings.size()),
-            static_cast<uint32_t>(controlsPowerSettings.size()),
-            static_cast<uint32_t>(controlsFrontButtonSettings.size()),
-            static_cast<uint32_t>(controlsSideButtonSettings.size()));
+  // Only the list being shown is built: check the one that was.
+  const bool countsOff = (target == &controlsSettings && controlsSettings.size() != expectedControlsCount) ||
+                         (target == &controlsHomeButtonSettings && gpio.hasHomeKey() &&
+                          controlsHomeButtonSettings.size() != controlsHomeButtonCount) ||
+                         (target == &controlsPowerSettings && (controlsPowerSettings.size() < controlsPowerMinCount ||
+                                                               controlsPowerSettings.size() > controlsPowerMaxCount)) ||
+                         (target == &controlsFrontButtonSettings &&
+                          controlsFrontButtonSettings.size() != expectedFrontButtonCount) ||
+                         (target == &controlsSideButtonSettings &&
+                          controlsSideButtonSettings.size() != expectedSideButtonCount);
+  if (countsOff) {
+    LOG_ERR("SET", "Unexpected controls menu count: %u entries", static_cast<uint32_t>(target->size()));
   }
-
-  setCurrentSettingsForCategory();
 }
 
 void SettingsActivity::setCurrentSettingsForCategory() {
+  std::vector<SettingInfo>* target = &systemSettings;
   if (isFileBrowserView()) {
-    currentSettings = &fileBrowserSettings;
-    settingsCount = static_cast<int>(currentSettings->size());
-    return;
+    target = &fileBrowserSettings;
+  } else {
+    switch (selectedCategoryIndex) {
+      case 0:
+        if (activeSubmenu == SettingAction::DisplaySleepScreen) {
+          target = &displaySleepSettings;
+        } else if (activeSubmenu == SettingAction::DisplayFrontlight) {
+          target = &displayFrontlightSettings;
+        } else {
+          target = &displaySettings;
+        }
+        break;
+      case 1:
+        switch (activeSubmenu) {
+          case SettingAction::ReaderFontOptions:
+            target = &readerFontSettings;
+            break;
+          case SettingAction::ReaderPageLayout:
+            target = &readerPageLayoutSettings;
+            break;
+          case SettingAction::ScreenMargin:
+            target = &readerScreenMarginSettings;
+            break;
+          default:
+            target = &readerSettings;
+            break;
+        }
+        break;
+      case 2:
+        switch (activeSubmenu) {
+          case SettingAction::ControlsPowerButton:
+            target = &controlsPowerSettings;
+            break;
+          case SettingAction::ControlsHomeButton:
+            target = &controlsHomeButtonSettings;
+            break;
+          case SettingAction::ControlsFrontButtons:
+            target = &controlsFrontButtonSettings;
+            break;
+          case SettingAction::ControlsSideButtons:
+            target = &controlsSideButtonSettings;
+            break;
+          case SettingAction::ControlsTapsGestures:
+            target = &controlsTapsGesturesSettings;
+            break;
+          case SettingAction::ControlsTwoFingerSwipe:
+            target = &controlsTwoFingerSwipeSettings;
+            break;
+          case SettingAction::ControlsEdgeGestures:
+            target = &controlsEdgeGestureSettings;
+            break;
+          default:
+            target = &controlsSettings;
+            break;
+        }
+        break;
+      case 3:
+        switch (activeSubmenu) {
+          case SettingAction::SystemDevice:
+            target = &systemDeviceSettings;
+            break;
+          case SettingAction::SystemFilesCache:
+            target = &systemFilesCacheSettings;
+            break;
+          case SettingAction::SystemFeatures:
+            target = &systemFeatureSettings;
+            break;
+          case SettingAction::SystemReadingStats:
+            target = &systemReadingStatsSettings;
+            break;
+          case SettingAction::SystemGlobalStats:
+            target = &systemGlobalStatsSettings;
+            break;
+          default:
+            target = &systemSettings;
+            break;
+        }
+        break;
+    }
   }
-
-  switch (selectedCategoryIndex) {
-    case 0:
-      if (activeSubmenu == SettingAction::DisplaySleepScreen) {
-        currentSettings = &displaySleepSettings;
-      } else if (activeSubmenu == SettingAction::DisplayFrontlight) {
-        currentSettings = &displayFrontlightSettings;
-      } else {
-        currentSettings = &displaySettings;
-      }
-      break;
-    case 1:
-      switch (activeSubmenu) {
-        case SettingAction::ReaderFontOptions:
-          currentSettings = &readerFontSettings;
-          break;
-        case SettingAction::ReaderPageLayout:
-          currentSettings = &readerPageLayoutSettings;
-          break;
-        case SettingAction::ScreenMargin:
-          currentSettings = &readerScreenMarginSettings;
-          break;
-        default:
-          currentSettings = &readerSettings;
-          break;
-      }
-      break;
-    case 2:
-      switch (activeSubmenu) {
-        case SettingAction::ControlsPowerButton:
-          currentSettings = &controlsPowerSettings;
-          break;
-        case SettingAction::ControlsHomeButton:
-          currentSettings = &controlsHomeButtonSettings;
-          break;
-        case SettingAction::ControlsFrontButtons:
-          currentSettings = &controlsFrontButtonSettings;
-          break;
-        case SettingAction::ControlsSideButtons:
-          currentSettings = &controlsSideButtonSettings;
-          break;
-        case SettingAction::ControlsTapsGestures:
-          currentSettings = &controlsTapsGesturesSettings;
-          break;
-        case SettingAction::ControlsTwoFingerSwipe:
-          currentSettings = &controlsTwoFingerSwipeSettings;
-          break;
-        case SettingAction::ControlsEdgeGestures:
-          currentSettings = &controlsEdgeGestureSettings;
-          break;
-        default:
-          currentSettings = &controlsSettings;
-          break;
-      }
-      break;
-    case 3:
-      switch (activeSubmenu) {
-        case SettingAction::SystemDevice:
-          currentSettings = &systemDeviceSettings;
-          break;
-        case SettingAction::SystemFilesCache:
-          currentSettings = &systemFilesCacheSettings;
-          break;
-        case SettingAction::SystemFeatures:
-          currentSettings = &systemFeatureSettings;
-          break;
-        case SettingAction::SystemReadingStats:
-          currentSettings = &systemReadingStatsSettings;
-          break;
-        case SettingAction::SystemGlobalStats:
-          currentSettings = &systemGlobalStatsSettings;
-          break;
-        default:
-          currentSettings = &systemSettings;
-          break;
-      }
-      break;
-  }
+  if (settingsListStale || builtSettings != target) buildSettingsList(target);
+  currentSettings = target;
   settingsCount = static_cast<int>(currentSettings->size());
 }
 
