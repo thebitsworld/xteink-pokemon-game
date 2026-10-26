@@ -597,11 +597,24 @@ inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 0;
 #endif
 inline constexpr size_t BASE_SETTINGS_CAPACITY = 113 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT;
 
-const std::vector<SettingInfo>& getBaseSettingsList();
+// Keeps the shared base settings list alive while it exists; the list is
+// built by the first hold and freed when the last one ends. Hold it for as
+// long as references into list() are used.
+class BaseSettingsListHold {
+ public:
+  BaseSettingsListHold();
+  ~BaseSettingsListHold();
+  BaseSettingsListHold(const BaseSettingsListHold&) = delete;
+  BaseSettingsListHold& operator=(const BaseSettingsListHold&) = delete;
+  const std::vector<SettingInfo>& list() const { return *list_; }
+
+ private:
+  const std::vector<SettingInfo>* list_;
+};
 
 inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
                                                 const DictionaryRegistry* dictRegistry = nullptr) {
-  std::vector<SettingInfo> v = getBaseSettingsList();
+  std::vector<SettingInfo> v = BaseSettingsListHold().list();
   if (!SETTINGS.shouldTrackReadingStats()) {
     for (auto& setting : v) {
       if (setting.valuePtr == &CrossPointSettings::sleepScreen) {

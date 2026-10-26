@@ -432,7 +432,8 @@ class SimulatorSmokeTest {
   }
 
   static void verifyReaderControlsSettings() {
-    const auto& base = getBaseSettingsList();
+    const BaseSettingsListHold baseSettings;
+    const auto& base = baseSettings.list();
     if (base.size() > BASE_SETTINGS_CAPACITY || base.capacity() < BASE_SETTINGS_CAPACITY) {
       fail("Base settings allocation mismatch: size=%zu capacity=%zu", base.size(), base.capacity());
     }

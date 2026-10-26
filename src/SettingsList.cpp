@@ -1,10 +1,23 @@
 #include "SettingsList.h"
 
-const std::vector<SettingInfo>& getBaseSettingsList() {
-  static const std::vector<SettingInfo> baseList = [] {
+#include <mutex>
+
+namespace {
+
+// The base list is ~16 KB (113 entries of 144 bytes on the C3, plus their enum
+// vectors). It used to be a function-local static, built by the first
+// settings load at boot and kept for good - RAM an X3 reading a book with
+// Bluetooth on could not spare. Now it is built on demand and freed when the
+// last BaseSettingsListHold ends.
+std::mutex baseListMutex;
+std::vector<SettingInfo>* baseList = nullptr;
+int baseListHolds = 0;
+
+std::vector<SettingInfo> buildBaseSettingsList() {
+  return [] {
     std::vector<SettingInfo> v;
-    // Reserve the maximum final size. Growing this process-lifetime vector
-    // would otherwise leave it holding roughly twice the memory it needs.
+    // Reserve the maximum final size. Growing it would otherwise leave it
+    // holding roughly twice the memory it needs.
     v.reserve(BASE_SETTINGS_CAPACITY);
     auto add = [&v](SettingInfo setting) { v.push_back(std::move(setting)); };
 
@@ -449,6 +462,21 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
     }
     return v;
   }();
+}
 
-  return baseList;
+}  // namespace
+
+BaseSettingsListHold::BaseSettingsListHold() {
+  std::lock_guard<std::mutex> lock(baseListMutex);
+  if (baseList == nullptr) baseList = new std::vector<SettingInfo>(buildBaseSettingsList());
+  ++baseListHolds;
+  list_ = baseList;
+}
+
+BaseSettingsListHold::~BaseSettingsListHold() {
+  std::lock_guard<std::mutex> lock(baseListMutex);
+  if (--baseListHolds == 0) {
+    delete baseList;
+    baseList = nullptr;
+  }
 }
