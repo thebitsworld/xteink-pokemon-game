@@ -1,4 +1,8 @@
-## [Unreleased]
+## [2.0.1] - 2026-10-26
+
+> **Update notes:** X4 Pro and X4 Classic readers that showed English after picking another language in 2.0.0 get it back: keep `language-pack.bin` on the SD card (the reader moves it into `.crosspoint/`). On those readers, a menu language from the pack adds about 0.7 s to each start-up. Your Pokémon save and books are kept.
+>
+> 🇻🇳 Máy X4 Pro / X4 Classic bị hiện tiếng Anh sau khi chọn ngôn ngữ khác ở bản 2.0.0 sẽ có lại ngôn ngữ: giữ file `language-pack.bin` trên thẻ SD (máy tự chuyển vào `.crosspoint/`). Trên các máy đó, ngôn ngữ trong gói làm mỗi lần khởi động chậm thêm khoảng 0,7 giây. Save Pokémon và sách được giữ nguyên.
 
 ### Fixed
 
