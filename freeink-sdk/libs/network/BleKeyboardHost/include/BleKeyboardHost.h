@@ -64,6 +64,14 @@ struct KeyEvent {
 // the same frame (0 when none), so an app that routes raw edges can fall back to
 // key bindings for a button it has not learned.
 struct RawButtonEvent {
+  // xteink-pokemon: a tap from a touch-mapping pad (a digitizer, e.g. BSP D6mini mode
+  // V3) carries this report id; value = X / 16 and byteIndex = Y / 16 of where it
+  // landed (0-4095 each). Match it by distance: the pad jitters every tap.
+  static constexpr uint8_t TOUCH_REPORT_ID = 0xFE;
+  // xteink-pokemon: an edge from a HID gamepad's report (read through its report
+  // map): byteIndex 0 = direction (value 1 up, 2 down, 3 left, 4 right), byteIndex
+  // 1 = button (value = button number).
+  static constexpr uint8_t GAMEPAD_REPORT_ID = 0xFD;
   uint8_t reportId = 0;
   uint8_t byteIndex = 0;
   uint8_t value = 0;

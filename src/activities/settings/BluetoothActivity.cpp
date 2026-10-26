@@ -263,7 +263,7 @@ void BluetoothActivity::loopLearning() {
   if (!skipped) {
     // One button cannot stand for two controls.
     for (uint8_t i = 0; i < learnStep; ++i) {
-      if (learnCodes[i] == code) return;
+      if (bt::sameButton(learnCodes[i], code)) return;
     }
     learnCodes[learnStep] = code;
   }

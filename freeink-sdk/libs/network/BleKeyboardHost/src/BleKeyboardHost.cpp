@@ -100,6 +100,38 @@ void clearSelectedPlanLocked() {
 // edge-detects the generic path so one physical press = one key event.
 bool g_hasKeyboardPage = false;
 bool g_hasConsumerPage = false;
+// xteink-pokemon: a pad in a touch-mapping mode (BSP D6mini mode V3) is a multi-touch
+// digitizer: every button is a tap at a fixed spot, jittered by a few units each
+// press. Its contact bytes read as a new "button" on every press, so such
+// reports skip the byte-edge decode and come out as one tap per touch, named by
+// where it landed (see touchCodeOf()).
+bool g_hasDigitizerPage = false;
+uint32_t g_touchCode = 0;  // the touch still down, 0 = none
+
+// xteink-pokemon: a standard HID gamepad (BSP D6mini HID mode: four 8-bit stick
+// axes centred at 0x80, a hat byte that rests at 0xFF, then button bits). Its hat
+// rests on a value with MORE bits set than a pressed direction, so the byte-edge
+// decode read every release as a press and all four directions as one button.
+// The report map says where each field sits; such reports come out as one edge
+// per direction and per button instead (see ingestGamepad()).
+struct GamepadLayout {
+  bool valid = false;
+  uint8_t reportId = 0;
+  int16_t hatBit = -1;
+  uint8_t hatSize = 0;
+  int32_t hatMin = 0;
+  int32_t hatMax = 0;
+  int16_t buttonsBit = -1;
+  uint8_t buttonCount = 0;
+  int16_t xBit = -1;
+  int16_t yBit = -1;
+  uint8_t axisSize = 0;
+  int32_t axisMin = 0;
+  int32_t axisMax = 0;
+  uint16_t bits = 0;  // the report's payload size in bits
+};
+GamepadLayout g_gamepad;
+uint32_t g_gamepadMask = 0;  // directions (bits 0-3: up, down, left, right) and buttons (bit 4 = button 1) held
 uint8_t g_preferredByteIndex = 0xFF;  // byte the report map suggests holds the code
 uint8_t g_lastGenericCode = 0;        // last non-zero code seen on the generic path
 volatile uint32_t g_lastReportMs = 0;  // millis() of the last HID notification (stale-release)
@@ -137,6 +169,168 @@ RawFrame rawFrameOf(const uint8_t* data, size_t len) {
   return f;
 }
 
+// xteink-pokemon: a digitizer contact is [flags][X 12 bits][Y 12 bits] (flags bit0 =
+// tip down). A touch is named by its first contact's spot, 16 units a step:
+// value = X / 16, byteIndex = Y / 16, report id TOUCH_REPORT_ID. Hosts match it to
+// a learned spot by distance, not equality (the pad jitters each tap).
+// xteink-pokemon: reads the report map's Input items for the first report that
+// carries a hat switch or buttons (Generic Desktop hat 0x39 / X 0x30 / Y 0x31,
+// Button page 0x09). Only short items; enough for HID gamepads.
+void parseGamepadLayout(const uint8_t* map, const size_t len) {
+  g_gamepad = GamepadLayout{};
+  g_gamepadMask = 0;
+  if (!map) return;
+  uint32_t usagePage = 0;
+  int32_t logicalMin = 0;
+  int32_t logicalMax = 0;
+  uint32_t reportSize = 0;
+  uint32_t reportCount = 0;
+  uint8_t reportId = 0;
+  struct Offset {
+    uint8_t id;
+    uint16_t bits;
+  };
+  Offset offsets[8] = {};
+  uint8_t offsetCount = 1;  // offsets[0]: report id 0
+  uint16_t* bitPos = &offsets[0].bits;
+  uint32_t usages[16] = {};
+  uint8_t usageCount = 0;
+  uint32_t usageMin = 0;
+  bool haveRange = false;
+  GamepadLayout layout;
+  bool layoutId = false;
+  for (size_t i = 0; i < len;) {
+    const uint8_t prefix = map[i];
+    if (prefix == 0xFE) {  // long item: skip it
+      if (i + 2 >= len) break;
+      i += 3 + map[i + 1];
+      continue;
+    }
+    const uint8_t size = (prefix & 0x03) == 3 ? 4 : (prefix & 0x03);
+    if (i + size >= len) break;  // a truncated item
+    uint32_t value = 0;
+    for (uint8_t b = 0; b < size && i + 1 + b < len; ++b) value |= static_cast<uint32_t>(map[i + 1 + b]) << (8 * b);
+    int32_t signedValue = static_cast<int32_t>(value);
+    if (size == 1 && (value & 0x80)) signedValue = static_cast<int32_t>(value | 0xFFFFFF00u);
+    if (size == 2 && (value & 0x8000)) signedValue = static_cast<int32_t>(value | 0xFFFF0000u);
+    const uint8_t type = (prefix >> 2) & 0x03;
+    const uint8_t tag = prefix >> 4;
+    i += 1 + size;
+    if (type == 1) {  // global
+      if (tag == 0x0) usagePage = value;
+      else if (tag == 0x1) logicalMin = signedValue;
+      else if (tag == 0x2) logicalMax = signedValue;
+      else if (tag == 0x7) reportSize = value;
+      else if (tag == 0x9) reportCount = value;
+      else if (tag == 0x8) {
+        reportId = static_cast<uint8_t>(value);
+        uint8_t slot = 0;
+        while (slot < offsetCount && offsets[slot].id != reportId) ++slot;
+        if (slot == offsetCount && offsetCount < 8) offsets[offsetCount++] = {reportId, 0};
+        bitPos = &offsets[slot < 8 ? slot : 7].bits;
+      }
+    } else if (type == 2) {  // local
+      const uint32_t full = size == 4 ? value : (usagePage << 16 | value);
+      if (tag == 0x0 && usageCount < 16) usages[usageCount++] = full;
+      else if (tag == 0x1) usageMin = full, haveRange = true;
+      else if (tag == 0x2) haveRange = true;  // Usage Maximum: the count bounds the range
+    } else if (type == 0) {  // main
+      if (tag == 0x8) {  // Input
+        const bool constant = (value & 0x01) != 0;
+        const bool variable = (value & 0x02) != 0;
+        if (!constant && (!layout.valid || layoutId == false || layout.reportId == reportId)) {
+          for (uint32_t n = 0; n < reportCount; ++n) {
+            uint32_t usage = 0;
+            if (usageCount > 0) usage = usages[n < usageCount ? n : usageCount - 1];
+            else if (haveRange) usage = usageMin + n;
+            const uint16_t at = static_cast<uint16_t>(*bitPos + n * reportSize);
+            const uint16_t page = static_cast<uint16_t>(usage >> 16);
+            const uint16_t id = static_cast<uint16_t>(usage & 0xFFFF);
+            bool used = false;
+            if (page == 0x01 && id == 0x39 && layout.hatBit < 0 && reportSize <= 8) {
+              layout.hatBit = static_cast<int16_t>(at);
+              layout.hatSize = static_cast<uint8_t>(reportSize);
+              layout.hatMin = logicalMin;
+              layout.hatMax = logicalMax;
+              used = true;
+            } else if (page == 0x01 && (id == 0x30 || id == 0x31) && reportSize <= 16) {
+              (id == 0x30 ? layout.xBit : layout.yBit) = static_cast<int16_t>(at);
+              layout.axisSize = static_cast<uint8_t>(reportSize);
+              layout.axisMin = logicalMin;
+              layout.axisMax = logicalMax;
+              used = true;
+            } else if (page == 0x09 && variable && reportSize == 1 && id >= 1 && id <= 28) {
+              if (layout.buttonsBit < 0) layout.buttonsBit = static_cast<int16_t>(at - (id - 1));
+              if (id > layout.buttonCount) layout.buttonCount = static_cast<uint8_t>(id);
+              used = true;
+            }
+            if (used && !layoutId) {
+              layout.reportId = reportId;
+              layoutId = true;
+            }
+          }
+          if (layoutId && layout.reportId == reportId) layout.valid = layout.hatBit >= 0 || layout.buttonsBit >= 0;
+        }
+        *bitPos = static_cast<uint16_t>(*bitPos + reportSize * reportCount);
+        if (layout.valid && layout.reportId == reportId) layout.bits = *bitPos;
+      }
+      usageCount = 0;
+      haveRange = false;
+    }
+  }
+  g_gamepad = layout;
+}
+
+uint32_t gamepadBits(const uint8_t* data, const size_t len, const int16_t at, const uint8_t size) {
+  uint32_t v = 0;
+  for (uint8_t b = 0; b < size; ++b) {
+    const uint32_t bit = static_cast<uint32_t>(at) + b;
+    if (bit / 8 >= len) break;
+    if (data[bit / 8] & (1u << (bit % 8))) v |= 1u << b;
+  }
+  return v;
+}
+
+int32_t gamepadSigned(const uint32_t v, const uint8_t size, const bool isSigned) {
+  if (!isSigned || size == 0 || size >= 32 || !(v & (1u << (size - 1)))) return static_cast<int32_t>(v);
+  return static_cast<int32_t>(v | (~0u << size));
+}
+
+// Directions (bits 0-3: up, down, left, right) and buttons (bit 4 + n - 1) a
+// report holds. The hat and the left stick both give directions.
+uint32_t gamepadMaskOf(const uint8_t* data, const size_t len) {
+  const GamepadLayout& g = g_gamepad;
+  uint32_t mask = 0;
+  if (g.hatBit >= 0) {
+    const int32_t v = gamepadSigned(gamepadBits(data, len, g.hatBit, g.hatSize), g.hatSize, g.hatMin < 0);
+    const int32_t positions = g.hatMax - g.hatMin + 1;
+    if (v >= g.hatMin && v <= g.hatMax && (positions == 8 || positions == 4)) {
+      static constexpr uint8_t kHat8[8] = {0x1, 0x9, 0x8, 0xA, 0x2, 0x6, 0x4, 0x5};  // up, up-right, ...
+      mask |= kHat8[(v - g.hatMin) * (positions == 4 ? 2 : 1)];
+    }
+  }
+  if (g.xBit >= 0 && g.yBit >= 0 && g.axisMax > g.axisMin) {
+    const bool isSigned = g.axisMin < 0;
+    const int32_t x = gamepadSigned(gamepadBits(data, len, g.xBit, g.axisSize), g.axisSize, isSigned);
+    const int32_t y = gamepadSigned(gamepadBits(data, len, g.yBit, g.axisSize), g.axisSize, isSigned);
+    const int32_t quarter = (g.axisMax - g.axisMin) / 4;
+    if (y < g.axisMin + quarter) mask |= 0x1;
+    if (y > g.axisMax - quarter) mask |= 0x2;
+    if (x < g.axisMin + quarter) mask |= 0x4;
+    if (x > g.axisMax - quarter) mask |= 0x8;
+  }
+  for (uint8_t n = 0; g.buttonsBit >= 0 && n < g.buttonCount; ++n) {
+    if (gamepadBits(data, len, static_cast<int16_t>(g.buttonsBit + n), 1)) mask |= 1u << (4 + n);
+  }
+  return mask;
+}
+
+uint32_t touchCodeOf(const uint8_t* data) {
+  const uint32_t x = data[1] | static_cast<uint32_t>(data[2] & 0x0F) << 8;
+  const uint32_t y = static_cast<uint32_t>(data[2] >> 4) | static_cast<uint32_t>(data[3]) << 4;
+  return (x >> 4) | (y >> 4) << 8 | static_cast<uint32_t>(RawButtonEvent::TOUCH_REPORT_ID) << 16;
+}
+
 // The button a frame holds: the first byte that differs from `rest`, as
 // value | index << 8 | id << 16. 0 = the frame is the rest frame (a release).
 uint32_t rawButtonCode(const RawFrame& f, const uint8_t* rest) {
@@ -162,12 +356,15 @@ bool clientReleased() {
 void parseReportMapHints(const uint8_t* map, size_t len) {
   g_hasKeyboardPage = false;
   g_hasConsumerPage = false;
+  g_hasDigitizerPage = false;  // xteink-pokemon
+  g_touchCode = 0;
   g_preferredByteIndex = 0xFF;
   if (!map || len < 2) return;
   for (size_t i = 0; i + 1 < len; ++i) {
     if (map[i] == 0x05) {  // Usage Page (1-byte value follows)
       if (map[i + 1] == 0x07) g_hasKeyboardPage = true;
       else if (map[i + 1] == 0x0C) g_hasConsumerPage = true;
+      else if (map[i + 1] == 0x0D) g_hasDigitizerPage = true;  // xteink-pokemon: touch-mapping pads
     }
   }
   if (g_hasKeyboardPage) g_preferredByteIndex = 2;
@@ -253,9 +450,20 @@ bool setupHid(NimBLEClient* client) {
     if (rmap->canRead()) {
       NimBLEAttValue v = rmap->readValue();
       parseReportMapHints(v.data(), v.size());
+      parseGamepadLayout(v.data(), v.size());  // xteink-pokemon
 #if FREEINK_BLE_HID_REPORT_DEBUG
       Serial.printf("[BleHid] report map: kbd=%d consumer=%d preferredByte=%d len=%u\n", g_hasKeyboardPage,
                     g_hasConsumerPage, (int)g_preferredByteIndex, (unsigned)v.size());
+      Serial.printf("[BleHid] gamepad: valid=%d id=%u hat=%d/%u [%ld..%ld] buttons=%d x%u x=%d y=%d/%u [%ld..%ld] bits=%u\n",
+                    g_gamepad.valid, g_gamepad.reportId, g_gamepad.hatBit, g_gamepad.hatSize, (long)g_gamepad.hatMin,
+                    (long)g_gamepad.hatMax, g_gamepad.buttonsBit, g_gamepad.buttonCount, g_gamepad.xBit, g_gamepad.yBit,
+                    g_gamepad.axisSize, (long)g_gamepad.axisMin, (long)g_gamepad.axisMax, g_gamepad.bits);
+      for (size_t at = 0; at < v.size(); at += 32) {
+        char line[100];
+        size_t off = 0;
+        for (size_t k = at; k < v.size() && k < at + 32; ++k) off += snprintf(line + off, sizeof(line) - off, "%02X", v[k]);
+        Serial.printf("[BleHid] map %s\n", line);
+      }
 #endif
     }
   }
@@ -647,6 +855,12 @@ void BleKeyboardHost::poll() {
     rawCode_ = 0;
     rawReports_ = 0;
   }
+  // xteink-pokemon: a touch whose lift report was lost must not hold forever.
+  constexpr uint32_t kTouchLostLiftMs = 2000;
+  if (g_touchCode != 0 && (millis() - g_lastReportMs) > kTouchLostLiftMs) {
+    pushRawLocked(g_touchCode, false, g_lastReportMs, 0, 0, 0);
+    g_touchCode = 0;
+  }
   portEXIT_CRITICAL(&g_mux);
 
   // Auto-reconnect to a bonded HID peripheral: the selected one while a plan is
@@ -915,6 +1129,55 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
     Serial.printf("[BleHid] report len=%u %s\n", (unsigned)len, buf);
   }
 #endif
+
+  // xteink-pokemon: touch-mapping pads - one tap per touch, nothing else from
+  // these reports (their contact bytes are not buttons).
+  if (g_hasDigitizerPage && len >= 4 && (data[0] & 0xF0) == 0) {
+    const bool tip = (data[0] & 0x01) != 0;
+    portENTER_CRITICAL(&g_mux);
+    if (tip && g_touchCode == 0) {
+      g_touchCode = touchCodeOf(data);
+      if (!pushRawLocked(g_touchCode, true, now, 0, 0, 1)) g_touchCode = 0;
+    } else if (!tip && g_touchCode != 0) {
+      pushRawLocked(g_touchCode, false, now, 0, 0, 0);
+      g_touchCode = 0;
+    }
+    portEXIT_CRITICAL(&g_mux);
+    return;
+  }
+
+  // xteink-pokemon: HID gamepads - one edge per direction and per button.
+  if (g_gamepad.valid && (g_gamepad.reportId == 0 || g_notifyReportId == g_gamepad.reportId) &&
+      len * 8 >= g_gamepad.bits) {
+    const uint32_t mask = gamepadMaskOf(data, len);
+    const uint32_t changed = mask ^ g_gamepadMask;
+    if (changed != 0) {
+      // Default keys for a pad nobody taught: the SDK's axis-pad usages.
+      static constexpr uint8_t kDirKey[4] = {0x43, 0x45, 0x41, 0x46};  // up, down, left, right
+      portENTER_CRITICAL(&g_mux);
+      for (int pass = 0; pass < 2; ++pass) {  // releases first, then presses
+        for (uint8_t bit = 0; bit < 32; ++bit) {
+          if (!(changed & (1u << bit))) continue;
+          const bool down = (mask & (1u << bit)) != 0;
+          if (down != (pass == 1)) continue;
+          const bool isDir = bit < 4;
+          const uint8_t number = isDir ? static_cast<uint8_t>(bit + 1) : static_cast<uint8_t>(bit - 3);
+          const uint32_t code = number | (isDir ? 0u : 1u) << 8 |
+                                static_cast<uint32_t>(RawButtonEvent::GAMEPAD_REPORT_ID) << 16;
+          const uint8_t key = isDir ? kDirKey[bit] : number == 1 ? 0x47 : number == 2 ? 0x48 : 0;
+          if (down) {
+            if (!pushRawLocked(code, true, now, key, 0, 1)) g_gamepadMask &= ~(1u << bit);
+            else g_gamepadMask |= 1u << bit;
+          } else {
+            pushRawLocked(code, false, now, 0, 0, 0);
+            g_gamepadMask &= ~(1u << bit);
+          }
+        }
+      }
+      portEXIT_CRITICAL(&g_mux);
+    }
+    return;
+  }
 
   // Normalize: strip a leading report id (len 9). Boot/report-protocol keyboard
   // reports are [mod][reserved][k0..k5] (8 bytes) or a compact [mod][k0..k5] (7).

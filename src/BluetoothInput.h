@@ -51,6 +51,9 @@ uint32_t learnedCode(Control control);
 void setLearnedCodes(const uint32_t (&codes)[ControlCount]);
 void clearLearnedCodes();
 bool hasLearnedCodes();
+// True when two learned codes name the same controller button (a touch-mapping
+// pad's taps land a little apart each time).
+bool sameButton(uint32_t a, uint32_t b);
 
 #else
 

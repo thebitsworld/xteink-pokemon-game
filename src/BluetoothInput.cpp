@@ -8,7 +8,9 @@
 #include <esp_heap_caps.h>
 #include <Logging.h>
 
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -155,8 +157,34 @@ void learnFrom(const freeink::RawButtonEvent& event) {
   }
 }
 
+// A tap from a touch-mapping pad (BSP D6mini mode V3) names the spot it landed on,
+// jittered a little each press: it is the control learned nearest to it, within
+// TOUCH_MATCH_STEPS steps of 16 units (of 4096) on each axis.
+constexpr int TOUCH_MATCH_STEPS = 8;
+
+bool isTouchCode(const uint32_t code) {
+  return static_cast<uint8_t>(code >> 16) == freeink::RawButtonEvent::TOUCH_REPORT_ID;
+}
+
+uint8_t controlForTouch(const uint32_t code) {
+  uint8_t best = NO_CONTROL;
+  int bestDistance = TOUCH_MATCH_STEPS + 1;
+  for (uint8_t i = 0; i < ControlCount; ++i) {
+    if (learned[i] == 0 || !isTouchCode(learned[i])) continue;
+    const int dx = std::abs(static_cast<int>(code & 0xFF) - static_cast<int>(learned[i] & 0xFF));
+    const int dy = std::abs(static_cast<int>((code >> 8) & 0xFF) - static_cast<int>((learned[i] >> 8) & 0xFF));
+    const int distance = std::max(dx, dy);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = i;
+    }
+  }
+  return best;
+}
+
 uint8_t controlFor(const freeink::RawButtonEvent& event) {
   const uint32_t code = event.code();
+  if (isTouchCode(code)) return controlForTouch(code);
   for (uint8_t i = 0; i < ControlCount; ++i) {
     if (learned[i] != 0 && learned[i] == code) return i;
   }
@@ -344,6 +372,16 @@ void clearLearnedCodes() {
   std::memset(learned, 0, sizeof(learned));
   learnedLoaded = true;
   Storage.remove(BUTTONS_PATH);
+}
+
+bool sameButton(const uint32_t a, const uint32_t b) {
+  if (a == b) return true;
+  if (!isTouchCode(a) || !isTouchCode(b)) return false;
+  // Two touch spots this close are one button tapped twice (its jitter); real
+  // buttons of a touch-mapping pad sit further apart.
+  const int dx = std::abs(static_cast<int>(a & 0xFF) - static_cast<int>(b & 0xFF));
+  const int dy = std::abs(static_cast<int>((a >> 8) & 0xFF) - static_cast<int>((b >> 8) & 0xFF));
+  return std::max(dx, dy) <= 1;
 }
 
 bool hasLearnedCodes() {
