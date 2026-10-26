@@ -105,6 +105,22 @@ Wi-Fi. To add them all at once without Wi-Fi instead:
 The same ZIP works on every reader. An app made for another reader shows as "Not for this
 reader" and does not open.
 
+## Step 2.7 — Other languages (optional)
+
+The firmware has English and Vietnamese built in. The other 26 menu languages, and word
+hyphenation for French, German, Spanish, Italian, Portuguese, Polish, Swedish, Russian and
+Ukrainian books, come in a language pack (about 1.2 MB) that you install once:
+
+- **Over Wi-Fi:** Settings > System > Device > Language > **Download more languages**. The
+  reader joins Wi-Fi, downloads the pack and restarts to install it.
+- **From an SD card:** download `language-pack.bin` from the same release, copy it to the
+  **root** of the SD card and restart the reader. It installs the pack at start (a few
+  seconds) and moves the file into `.crosspoint`.
+
+Then pick your language in Settings > System > Device > Language. A firmware update keeps
+the pack; text added in newer firmware shows in English until you download the pack again.
+Without the pack, a reader set to another language shows English.
+
 ## Your saves are safe
 
 An update never touches your books, reading statistics, or Pokémon save — those live in

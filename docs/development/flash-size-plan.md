@@ -1,6 +1,12 @@
 # Flash size plan
 
-Status: **saved, not started** (2026-10-25). The owner asked to keep this plan for later.
+Status: **language pack done** (2026-10-26, branch feat/language-pack): English + Vietnamese built in,
+the rest in `language-pack.bin` (`scripts/build_language_pack.py`, `lib/I18n/LanguagePack.*`,
+`src/LanguagePackStore.*`). Differences from the plan below: the install sources are the SD card root
+(`/language-pack.bin`, moved to `/.crosspoint/`) and a Wi-Fi download from the latest release
+(network boot, then restart - the boot installs it); the pack is not in the SD card assets ZIP but a
+release asset of its own; no boot-time StrId table - each string is a binary search over the mapped
+pack, so no RAM. Measured: pokemon-x3 99.0% -> 84.0%, pokemon-x4-pro 96.5% -> 81.5%; pack 1.17 MB.
 
 ## Where the flash goes (pokemon-x3, v1.10.0-beta.2)
 
