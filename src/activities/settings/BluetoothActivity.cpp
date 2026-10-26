@@ -51,8 +51,6 @@ BluetoothActivity::BluetoothActivity(GfxRenderer& renderer, MappedInputManager& 
 
 void BluetoothActivity::onEnter() {
   Activity::onEnter();
-  // X3/X4: Settings paused the radio for its RAM; this screen needs it.
-  bt::resumeAfterMemory();
   selectedIndex = 0;
   topIndex = 0;
   visibleRows = 1;
@@ -60,7 +58,9 @@ void BluetoothActivity::onEnter() {
   status[0] = '\0';
   // Switched on but not running: the start at boot (or the last one) failed.
   if (SETTINGS.bluetoothEnabled && !bt::running() && bt::lastStartError()[0] != '\0') {
-    std::snprintf(status, sizeof(status), "%s (%s)", tr(STR_BT_START_FAILED), bt::lastStartError());
+    std::snprintf(status, sizeof(status), "%s (%s)",
+                  bt::lastStartWasMemory() ? tr(STR_BT_RESTART_TO_START) : tr(STR_BT_START_FAILED),
+                  bt::lastStartError());
   }
   learning = false;
   rebuildRows();
@@ -73,7 +73,6 @@ void BluetoothActivity::onEnter() {
 void BluetoothActivity::onExit() {
   if (learning) bt::setLearning(false);
   if (BleHid.isScanning()) BleHid.stopScan();
-  bt::pauseForMemory();  // back to Settings, which needs the RAM (X3/X4; no-op elsewhere)
   Activity::onExit();
 }
 
@@ -131,7 +130,11 @@ void BluetoothActivity::activate(const Row& row) {
     case RowKind::Switch:
       if (!bt::setEnabled(!bt::running())) {
         // With the reason and the RAM seen: a locked reader has no serial log.
-        std::snprintf(status, sizeof(status), "%s (%s)", tr(STR_BT_START_FAILED), bt::lastStartError());
+        // Short of RAM (X3/X4): it starts at power-on, while the RAM is still
+        // in one piece - starting and stopping it later splits it up.
+        std::snprintf(status, sizeof(status), "%s (%s)",
+                      bt::lastStartWasMemory() ? tr(STR_BT_RESTART_TO_START) : tr(STR_BT_START_FAILED),
+                      bt::lastStartError());
       } else if (bt::running()) {
         BleHid.startScan(SCAN_MS);
       }
