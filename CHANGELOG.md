@@ -1,3 +1,15 @@
+## [2.0.2-beta.1-x4pro] - 2026-10-31
+
+> **Test build for the X4 Pro - install it only if you want to help test.** Stay on v2.0.1 for everyday use. It only changes the Game Boy emulator for Game Boy Color games (and Game Boy games on the same emulator); everything else is the same as 2.0.1. It was built and checked on a PC (the new drawing gives the same picture as before, line for line, on the dmg-acid2 and cgb-acid2 test ROMs) but not yet tried on a real X4 Pro. There is no X3/X4 or X4 Classic file in this release.
+>
+> To help: play a Game Boy Color game that felt slow on 2.0.1 (Pokemon Gold, Silver or Crystal walking around a town) for a few minutes, then send `/.crosspoint/gameboy-perf.txt`. If the picture looks wrong (broken backgrounds, wrong tiles), go back to v2.0.1: your Pokémon save, books and Game Boy saves are kept.
+>
+> 🇻🇳 **Bản thử nghiệm cho X4 Pro - chỉ cài nếu bạn muốn thử.** Dùng hằng ngày hãy giữ v2.0.1. Bản này chỉ thay bộ giả lập cho game Game Boy Color; mới kiểm tra trên PC, chưa chạy trên máy thật. Chơi thử một game GBC từng bị chậm (Pokemon Gold/Silver/Crystal) vài phút rồi gửi file `/.crosspoint/gameboy-perf.txt`. Nếu hình bị lỗi, cài lại v2.0.1 - save vẫn giữ nguyên.
+
+### Changed
+
+- Game Boy (X4 Pro): Game Boy Color games run faster. The emulator draws the background a whole row of 8 pixels at a time instead of pixel by pixel (taken from esp32-emu-game, where that part became about 5 times faster on the same chip), and is built for speed at a higher level. Heavy games such as Pokemon Gold, which ran at about 84% of full speed on 2.0.1, should come closer to full speed.
+
 ## [2.0.1] - 2026-10-26
 
 > **Update notes:** X4 Pro and X4 Classic readers that showed English after picking another language in 2.0.0 get it back: keep `language-pack.bin` on the SD card (the reader moves it into `.crosspoint/`). On those readers, a menu language from the pack adds about 0.7 s to each start-up. Your Pokémon save and books are kept.
