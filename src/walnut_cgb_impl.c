@@ -5,8 +5,9 @@
 #if defined(CROSSINK_GAMEBOY) && CROSSINK_GAMEBOY
 
 // The core is the Game Boy Color's CPU: compiled for speed rather than the
-// firmware's default size (-Os). At -Os it ran Pokemon Gold at ~61% speed.
-#pragma GCC optimize("O2")
+// firmware's default size (-Os). At -Os it ran Pokemon Gold at ~61% speed;
+// -O3 (as in esp32-emu-game, the same core on an ESP32-S3) beats -O2 there.
+#pragma GCC optimize("O3")
 
 #include <stdlib.h>
 #include <string.h>

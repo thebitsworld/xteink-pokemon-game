@@ -2646,6 +2646,11 @@ struct sprite_data {
 	uint8_t x;
 };
 
+/* xteink-pokemon: profiling hook (empty unless the front-end defines it). */
+#ifndef WGB_PROF_MARK
+# define WGB_PROF_MARK(i)
+#endif
+
 #if WALNUT_GB_HIGH_LCD_ACCURACY
 static int compare_sprites(const struct sprite_data *const sd1, const struct sprite_data *const sd2)
 {
@@ -2660,42 +2665,13 @@ static int compare_sprites(const struct sprite_data *const sd1, const struct spr
 #endif
 
 
-void __gb_draw_line(struct gb_s *gb)
+#ifdef WGB_VERIFY
+/* xteink-pokemon: the original per-pixel background / window renderer, kept
+ * to check the fast one against (front-end defines WGB_VERIFY). */
+static void __gb_draw_bg_win_ref(struct gb_s *gb, uint8_t *pixels, uint8_t *pixelsPrio)
 {
-	uint8_t pixels[160] = {0};
 	const uint8_t hram_io_ly = gb->hram_io[IO_LY];
-#if WALNUT_FULL_GBC_SUPPORT
 	const uint8_t cgbMode = gb->cgb.cgbMode;
-#endif
-	/* If LCD not initialised by front-end, don't render anything. */
-	if(gb->display.lcd_draw_line == NULL)
-		return;
-
-	if(gb->direct.frame_skip && !gb->display.frame_skip_count)
-		return;
-
-#if WALNUT_FULL_GBC_SUPPORT
-	uint8_t pixelsPrio[160] = {0};  //do these pixels have priority over OAM?
-#endif
-	/* If interlaced mode is activated, check if we need to draw the current
-	 * line. */
-	if(gb->direct.interlace)
-	{
-		if((!gb->display.interlace_count
-				&& (hram_io_ly & 1) == 0)
-				|| (gb->display.interlace_count
-				    && (hram_io_ly & 1) == 1))
-		{
-			/* Compensate for missing window draw if required. */
-			if(gb->hram_io[IO_LCDC] & LCDC_WINDOW_ENABLE
-					&& hram_io_ly >= gb->display.WY
-					&& gb->hram_io[IO_WX] <= 166)
-				gb->display.window_clear++;
-
-			return;
-		}
-	}
-
 	/* If background is enabled, draw it. */
 #if WALNUT_FULL_GBC_SUPPORT
 	if(cgbMode || gb->hram_io[IO_LCDC] & LCDC_BG_ENABLE)
@@ -2989,6 +2965,176 @@ void __gb_draw_line(struct gb_s *gb)
 		gb->display.window_clear++; // advance window line
 	}
 
+}
+#endif
+
+/* xteink-pokemon: fast background / window renderer (from esp32-emu-game): a whole tile row (8 pixels) is decoded
+ * at once through a table instead of bit by bit. Same output as the original
+ * per-pixel code, except that in DMG mode the CGB tile attributes in VRAM
+ * bank 1 are ignored (a DMG has none; old values could be left there by a
+ * previous GBC game, as VRAM isn't cleared on reset). */
+static uint16_t wgb_spread[256];      /* tile row byte -> 2-bit slots, leftmost pixel (bit 7) in slot 0 */
+static uint16_t wgb_spread_rev[256];  /* the same for a horizontally flipped tile */
+
+static void wgb_init_tables(void)
+{
+	for(int b = 0; b < 256; b++)
+	{
+		uint16_t s = 0, r = 0;
+		for(int col = 0; col < 8; col++)
+		{
+			if((b >> (7 - col)) & 1) s |= 1u << (2 * col);
+			if((b >> col) & 1) r |= 1u << (2 * col);
+		}
+		wgb_spread[b] = s;
+		wgb_spread_rev[b] = r;
+	}
+}
+
+/* 4 pixels' 2-bit colours (one byte of wgb_spread output) -> 4 bytes */
+static uint32_t wgb_quad[256];           /* colour numbers 0..3, for CGB (+ palette base) */
+static uint32_t wgb_dmg_quad[256];       /* DMG: through the BG palette, | LCD_PALETTE_BG */
+static uint8_t wgb_dmg_pal[4] = { 0xFF, 0xFF, 0xFF, 0xFF };   /* palette wgb_dmg_quad is for */
+
+static void wgb_init_quads(void)
+{
+	for(int q = 0; q < 256; q++)
+		wgb_quad[q] = (q & 3) | ((q >> 2 & 3) << 8) | ((q >> 4 & 3) << 16) | ((uint32_t)(q >> 6 & 3) << 24);
+}
+
+static void wgb_dmg_quads(const uint8_t *pal)
+{
+	if(memcmp(pal, wgb_dmg_pal, 4) == 0)
+		return;
+	memcpy(wgb_dmg_pal, pal, 4);
+	uint8_t v[4];
+	for(int c = 0; c < 4; c++)
+		v[c] = pal[c] | LCD_PALETTE_BG;
+	for(int q = 0; q < 256; q++)
+		wgb_dmg_quad[q] = v[q & 3] | (v[q >> 2 & 3] << 8) | (v[q >> 4 & 3] << 16) | ((uint32_t)v[q >> 6 & 3] << 24);
+}
+
+/* Draws display columns x .. 159 from a row of the tile map. map: address
+ * of the map row, py: pixel row inside the tiles, mx: map x (in pixels) of
+ * column x; it wraps at 256 like the hardware. Whole tiles are written into
+ * word-aligned buffers (4 pixels per store), then copied into place. */
+static void __gb_draw_tile_row(struct gb_s *gb, uint8_t *pixels, uint8_t *pixelsPrio,
+			       uint16_t map, uint8_t py, uint8_t x, uint8_t mx)
+{
+	uint32_t row[(LCD_WIDTH + 16) / 4], prio[(LCD_WIDTH + 16) / 4];
+	const uint8_t lcdc = gb->hram_io[IO_LCDC];
+	const uint8_t cgb = gb->cgb.cgbMode;
+	const uint8_t skip = mx & 7;                 /* pixels of the first tile left of x */
+	const int tiles = (skip + LCD_WIDTH - x + 7) / 8;
+	if(!cgb)
+		wgb_dmg_quads(gb->display.bg_palette);
+
+	for(int t = 0; t < tiles; t++, mx += 8)
+	{
+		const uint16_t m = map + (mx >> 3);
+		const uint8_t idx = gb->vram[m];
+		const uint8_t att = cgb ? gb->vram[m + 0x2000] : 0;
+		uint16_t tile = (lcdc & LCDC_TILE_SELECT) ?
+			VRAM_TILES_1 + idx * 0x10 :
+			VRAM_TILES_2 + ((idx + 0x80) & 0xFF) * 0x10;
+		if(att & 0x08) tile += 0x2000;               /* VRAM bank 1 */
+		tile += 2 * ((att & 0x40) ? 7 - py : py);    /* vertical flip */
+
+		const uint16_t *tab = (att & 0x20) ? wgb_spread_rev : wgb_spread;
+		const uint16_t cv = tab[gb->vram[tile]] | (tab[gb->vram[tile + 1]] << 1);
+		if(cgb)
+		{
+			const uint32_t base = ((att & 0x07) << 2) * 0x01010101u;
+			row[2 * t] = wgb_quad[cv & 0xFF] + base;
+			row[2 * t + 1] = wgb_quad[cv >> 8] + base;
+			prio[2 * t] = prio[2 * t + 1] = (att >> 7) * 0x01010101u;
+		}
+		else
+		{
+			row[2 * t] = wgb_dmg_quad[cv & 0xFF];
+			row[2 * t + 1] = wgb_dmg_quad[cv >> 8];
+		}
+	}
+	memcpy(pixels + x, (const uint8_t *)row + skip, LCD_WIDTH - x);
+	if(cgb)
+		memcpy(pixelsPrio + x, (const uint8_t *)prio + skip, LCD_WIDTH - x);
+}
+
+static void __gb_draw_bg_win_fast(struct gb_s *gb, uint8_t *pixels, uint8_t *pixelsPrio)
+{
+	const uint8_t ly = gb->hram_io[IO_LY];
+	const uint8_t lcdc = gb->hram_io[IO_LCDC];
+
+	if(gb->cgb.cgbMode || (lcdc & LCDC_BG_ENABLE))
+	{
+		const uint8_t bg_y = ly + gb->hram_io[IO_SCY];
+		const uint16_t map = ((lcdc & LCDC_BG_MAP) ? VRAM_BMAP_2 : VRAM_BMAP_1) + (bg_y >> 3) * 0x20;
+		__gb_draw_tile_row(gb, pixels, pixelsPrio, map, bg_y & 7, 0, gb->hram_io[IO_SCX]);
+	}
+
+	const uint8_t wx = gb->hram_io[IO_WX];
+	if((lcdc & LCDC_WINDOW_ENABLE) && ly >= gb->display.WY && wx <= 166)
+	{
+		const uint8_t wl = gb->display.window_clear;
+		const uint16_t map = ((lcdc & LCDC_WINDOW_MAP) ? VRAM_BMAP_2 : VRAM_BMAP_1) + (wl >> 3) * 0x20;
+		const uint8_t x0 = wx < 7 ? 0 : wx - 7;
+		__gb_draw_tile_row(gb, pixels, pixelsPrio, map, wl & 7, x0, x0 - wx + 7);
+		gb->display.window_clear++;
+	}
+}
+
+void __gb_draw_line(struct gb_s *gb)
+{
+	uint8_t pixels[160] = {0};
+	const uint8_t hram_io_ly = gb->hram_io[IO_LY];
+#if WALNUT_FULL_GBC_SUPPORT
+	const uint8_t cgbMode = gb->cgb.cgbMode;
+#endif
+	/* If LCD not initialised by front-end, don't render anything. */
+	if(gb->display.lcd_draw_line == NULL)
+		return;
+
+	if(gb->direct.frame_skip && !gb->display.frame_skip_count)
+		return;
+	WGB_PROF_MARK(0);
+
+#if WALNUT_FULL_GBC_SUPPORT
+	uint8_t pixelsPrio[160] = {0};  //do these pixels have priority over OAM?
+#endif
+	/* If interlaced mode is activated, check if we need to draw the current
+	 * line. */
+	if(gb->direct.interlace)
+	{
+		if((!gb->display.interlace_count
+				&& (hram_io_ly & 1) == 0)
+				|| (gb->display.interlace_count
+				    && (hram_io_ly & 1) == 1))
+		{
+			/* Compensate for missing window draw if required. */
+			if(gb->hram_io[IO_LCDC] & LCDC_WINDOW_ENABLE
+					&& hram_io_ly >= gb->display.WY
+					&& gb->hram_io[IO_WX] <= 166)
+				gb->display.window_clear++;
+
+			return;
+		}
+	}
+
+#ifdef WGB_VERIFY
+	{
+		uint8_t ref[160] = {0}, ref_prio[160] = {0};
+		const uint8_t wc = gb->display.window_clear;
+		__gb_draw_bg_win_ref(gb, ref, ref_prio);
+		gb->display.window_clear = wc;
+		__gb_draw_bg_win_fast(gb, pixels, pixelsPrio);
+		if(memcmp(ref, pixels, 160) || (cgbMode && memcmp(ref_prio, pixelsPrio, 160)))
+			WGB_VERIFY_FAIL(gb, ref, pixels);
+	}
+#else
+	__gb_draw_bg_win_fast(gb, pixels, pixelsPrio);
+#endif
+	WGB_PROF_MARK(1);
+	WGB_PROF_MARK(2);
 	// draw sprites
 	if(gb->hram_io[IO_LCDC] & LCDC_OBJ_ENABLE)
 	{
@@ -3176,7 +3322,9 @@ void __gb_draw_line(struct gb_s *gb)
 		}
 	}
 	
+	WGB_PROF_MARK(3);
 	gb->display.lcd_draw_line(gb, pixels, gb->hram_io[IO_LY]);
+	WGB_PROF_MARK(4);
 }
 #endif
 
@@ -7748,6 +7896,9 @@ void gb_init_lcd(struct gb_s *gb,
 			const uint8_t *pixels,
 			const uint_fast8_t line))
 {
+	/* xteink-pokemon: tables for the fast background renderer */
+	wgb_init_tables();
+	wgb_init_quads();
 	gb->display.lcd_draw_line = lcd_draw_line;
 
 	gb->direct.interlace = false;
