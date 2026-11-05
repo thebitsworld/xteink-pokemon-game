@@ -5,6 +5,8 @@ nav_order: 11
 
 # Languages
 
+> In this firmware, downloading languages over Wi-Fi is not available: copy the files to the SD card as described below.
+
 CrossInk includes English. You can download other menu languages on the reader
 or install them from your SD card. You can also edit a translation or create your
 own.

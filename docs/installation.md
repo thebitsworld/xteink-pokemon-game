@@ -107,20 +107,17 @@ reader" and does not open.
 
 ## Step 2.7 — Other languages (optional)
 
-The firmware has English and Vietnamese built in (and word hyphenation for English and German
-books). The other 26 menu languages, and hyphenation for French, Spanish, Italian, Portuguese,
-Polish, Swedish, Russian and Ukrainian books, come in a language pack (about 0.9 MB) that you
-install once:
+English and Vietnamese are built in. Every other menu language is a file on the SD card:
 
-- **Over Wi-Fi:** Settings > System > Device > Language > **Download more languages**. The
-  reader joins Wi-Fi, downloads the pack and restarts to install it.
-- **From an SD card:** download `language-pack.bin` from the same release, copy it to the
-  **root** of the SD card and restart the reader. It installs the pack at start (a few
-  seconds) and moves the file into `.crosspoint`.
+1. Download `xteink-pokemon-languages-v<version>.zip` from the same release.
+2. Copy your language's `.yaml` from its `.crossink/languages` folder to `.crossink/languages` on the SD card.
+3. Pick it in Settings > Language. The reader installs it and restarts.
 
-Then pick your language in Settings > System > Device > Language. A firmware update keeps
-the pack; text added in newer firmware shows in English until you download the pack again.
-Without the pack, a reader set to another language shows English.
+Hyphenation for German, Spanish, French, Italian, Polish, Portuguese, Russian, Swedish and Ukrainian books works the
+same way: copy the `.cphyph` file from `xteink-pokemon-hyphenation-v<version>.zip` to `.crossink/hyphenation` on the SD
+card. Downloading languages over Wi-Fi is not available in this firmware. Text added in newer firmware shows in English
+until you copy that release's file, and in Arabic, Belarusian, Kazakh, Russian and Ukrainian some Pokemon text stays in
+English to fit the reader's language storage.
 
 ## Your saves are safe
 
