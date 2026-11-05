@@ -407,7 +407,9 @@ void GameBoyActivity::startEmuTask() {
   emuRun.store(true, std::memory_order_release);
   emuStopped.store(false, std::memory_order_release);
   if (xTaskCreatePinnedToCore(&GameBoyActivity::emuTaskEntry, "GameBoyEmu", 12288, this, 1, &emuTask, 0) != pdPASS) {
-    LOG_ERR(TAG, "Could not start the emulator task");
+    LOG_ERR(TAG, "Could not start the emulator task: internal free=%u largest=%u",
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
     emuTask = nullptr;
     emuRun.store(false, std::memory_order_release);
     emuStopped.store(true, std::memory_order_release);

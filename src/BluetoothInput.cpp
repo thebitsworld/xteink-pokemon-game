@@ -28,6 +28,27 @@
 #include "MappedInputManager.h"
 #include "activities/RenderLock.h"
 
+// The NimBLE host's buffers and pools in PSRAM (linked with --wrap, see
+// [env:pokemon-x4-pro]): the framework's sdkconfig.h pins NimBLE to internal
+// RAM, whatever CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL says, and with the
+// radio up the Game Boy core in IRAM left no block for its emulator task.
+#if CROSSINK_NIMBLE_HOST_PSRAM
+extern "C" {
+void* __real_nimble_platform_mem_malloc(size_t size);
+void* __real_nimble_platform_mem_calloc(size_t n, size_t size);
+
+void* __wrap_nimble_platform_mem_malloc(const size_t size) {
+  void* p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p : __real_nimble_platform_mem_malloc(size);
+}
+
+void* __wrap_nimble_platform_mem_calloc(const size_t n, const size_t size) {
+  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p : __real_nimble_platform_mem_calloc(n, size);
+}
+}
+#endif
+
 namespace bt {
 namespace {
 
