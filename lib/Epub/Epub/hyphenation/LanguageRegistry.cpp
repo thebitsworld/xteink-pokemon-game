@@ -124,6 +124,11 @@ const char* const* packedHyphenationTags(size_t& count) {
   return kTags;
 }
 
+uint32_t getLanguagePatternIdentity(const char* primaryTag) {
+  // Built-in pattern changes need a section format bump; 0 vs 1 covers a pack's patterns appearing later.
+  return primaryTag != nullptr && getLanguageHyphenatorForPrimaryTag(primaryTag) != nullptr ? 1 : 0;
+}
+
 LanguageEntryView getLanguageEntries() {
   const auto& allEntries = entries();
   return LanguageEntryView{allEntries.data(), allEntries.size()};

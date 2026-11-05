@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "I18nKeys.h"
@@ -27,6 +28,11 @@ class I18n {
   void setLanguage(Language lang);
   // Call after the language pack was attached or detached.
   void refreshLanguagePack() { setLanguage(_requested); }
+  // English always has its own text; a string a language leaves out shows English.
+  bool hasTranslation(StrId id) const;
+  const char* getCode() const { return LANGUAGE_CODES[static_cast<size_t>(_language)]; }
+  const char* getName() const { return LANGUAGE_NAMES[static_cast<size_t>(_language)]; }
+  bool isRightToLeft() const;
   static bool isBuiltin(Language lang);
   // Built in, or in the installed language pack.
   static bool isAvailable(Language lang);

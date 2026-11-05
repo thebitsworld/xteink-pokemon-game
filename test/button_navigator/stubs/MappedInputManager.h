@@ -16,6 +16,7 @@ class MappedInputManager {
   bool wasReleased(const Button button) const { return released_[index(button)]; }
   bool isPressed(const Button button) const { return held_[index(button)]; }
   uint32_t getHeldTime() const { return heldTimeMs_; }
+  uint32_t buttonSampleTime() const { return millis(); }
 
   void setPressed(const Button button, const bool value) { pressed_[index(button)] = value; }
   void setReleased(const Button button, const bool value) { released_[index(button)] = value; }

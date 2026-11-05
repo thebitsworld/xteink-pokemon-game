@@ -2,10 +2,14 @@
 #include <HalStorage.h>
 #include <Stream.h>
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+#include "HttpRequestDiagnostics.h"
 
 /**
  * HTTP client utility for fetching content and downloading files.
@@ -14,6 +18,7 @@
  */
 class HttpDownloader {
  public:
+  using Header = std::pair<std::string, std::string>;
   using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
   using CancelCallback = std::function<bool()>;
   // Called with each body chunk as it arrives; return false to abort. Lets a
@@ -26,6 +31,8 @@ class HttpDownloader {
     FILE_ERROR,
     ABORTED,
     INSUFFICIENT_SPACE,
+    UNAUTHORIZED,
+    FILE_EXISTS,  // Resolved destination needs explicit replacement approval.
   };
 
   enum class Transport {
@@ -43,6 +50,8 @@ class HttpDownloader {
           bufferSize(bufferSize),
           transport(transport) {}
 
+    // Borrowed for the synchronous call; never forwarded to a different origin.
+    const std::vector<Header>* headers = nullptr;
     bool preservePartial;
     bool resumePartial;
     CancelCallback shouldCancel;
@@ -56,14 +65,43 @@ class HttpDownloader {
     // (or deletes) an existing file and never leaves a truncated one behind
     // under the real name.
     bool stageAsPart = false;
+    // Opt-in asset contract: success also requires deleting the transaction backup.
+    bool requireBackupCleanup = false;
     // Checks the finished file before it is accepted (and, with stageAsPart,
     // before it replaces destPath). Returning false fails the download and
     // removes the file. Catches bodies cut short without a Content-Length.
     bool (*validate)(const std::string& path) = nullptr;
+    // Optional context-aware check, also run before publication. Both checks
+    // must pass when both are supplied. Context is borrowed for this call.
+    bool (*validateWithContext)(const std::string& path, void* context) = nullptr;
+    void* validationContext = nullptr;
+    // Hard limits include any resumed bytes. Zero leaves the corresponding
+    // limit unspecified. Enforced on declared totals and before every body
+    // write/callback, including chunked or close-delimited responses.
+    size_t maxBytes = 0;
+    size_t expectedBytes = 0;
+    // Number of redirects after the initial request; zero prohibits redirects.
+    uint8_t maxRedirects = 4;
+    // Optional fixed endpoint policy. Checked before contacting the initial
+    // URL and every redirect target, with an absolute URL. This is a routing
+    // restriction, not TLS authentication (WOLFSSL currently uses insecure TLS).
+    bool (*allowUrl)(std::string_view url, void* context) = nullptr;
+    void* urlContext = nullptr;
     // Once the response length is known, fail with INSUFFICIENT_SPACE before
     // writing anything if the SD card cannot hold the file. The first check
     // can scan the whole FAT, so leave it off for small files.
     bool checkFreeSpace = false;
+    // Opt in only for bulk WOLFSSL transfers. Reserve after request text is
+    // freed; other transports and SDK builds without retention ignore this.
+    bool reserveFullRecord = false;
+    // OPDS EPUBs only: choose the final response's safe Content-Disposition
+    // basename, falling back to destPath. Requires stageAsPart. A collision
+    // returns FILE_EXISTS before touching the partial or complete book.
+    bool useServerFilename = false;
+    // Borrowed for this synchronous call; approval applies to exactly one path.
+    std::string_view overwriteApprovedPath;
+    // Receives the chosen path, including when FILE_EXISTS requests approval.
+    std::string* resolvedPath = nullptr;
   };
 
   /**
@@ -83,10 +121,12 @@ class HttpDownloader {
 
   /**
    * Stream a URL with cancellation/progress support and a detailed result.
+   * Optional diagnostics are reset on entry and borrowed only during this call.
    */
   static DownloadError streamUrl(const std::string& url, const DataCallback& onData,
                                  ProgressCallback progress = nullptr, const std::string& username = "",
-                                 const std::string& password = "", DownloadOptions options = DownloadOptions());
+                                 const std::string& password = "", DownloadOptions options = DownloadOptions(),
+                                 HttpRequestDiagnostics* diagnostics = nullptr);
 
   /**
    * Download a file to the SD card with optional credentials.

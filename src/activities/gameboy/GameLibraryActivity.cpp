@@ -247,8 +247,9 @@ void GameLibraryActivity::loop() {
   }
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
+  // On release: finishing on the press leaves the release to the screen below, which then closes too.
   if (TouchHeaderBackButton::wasTapped(mappedInput, renderer) ||
-      mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
   }

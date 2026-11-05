@@ -26,6 +26,19 @@ I18n& I18n::getInstance() {
   return instance;
 }
 
+bool I18n::hasTranslation(const StrId id) const {
+  const auto index = static_cast<size_t>(id);
+  if (index >= static_cast<size_t>(StrId::_COUNT)) return false;
+  if (_language == Language::EN) return true;
+  if (_packLanguage >= 0) return language_pack::lookup(_packLanguage, STRING_KEY_HASHES[index]) != nullptr;
+  return getLanguageStrings(_language).offsets[index] != 0xFFFF;
+}
+
+bool I18n::isRightToLeft() const {
+  const char* code = getCode();
+  return std::strcmp(code, "AR") == 0 || std::strcmp(code, "HE") == 0;
+}
+
 const char* I18n::get(StrId id) const {
   const auto index = static_cast<size_t>(id);
   if (index >= static_cast<size_t>(StrId::_COUNT)) {

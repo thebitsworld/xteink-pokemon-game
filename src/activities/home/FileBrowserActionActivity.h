@@ -33,6 +33,8 @@ enum class FileBrowserAction : int {
   ToggleBookStatsTracking = 20,
   SetSlideshowFolder = 21,
   ClearSlideshowFolder = 22,
+  UploadFolderProgress = 23,
+  SyncProgress = 24,
 };
 
 class FileBrowserActionActivity final : public Activity {

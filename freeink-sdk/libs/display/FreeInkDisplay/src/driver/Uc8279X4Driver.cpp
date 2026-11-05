@@ -704,13 +704,12 @@ void Uc8279X4Driver::sendPulsePlanes(EpdBus& bus, const uint16_t row0, const uin
   const uint8_t cmds[2] = {CMD_DTM2, CMD_DTM1};
   for (int p = 0; p < 2; ++p) {
     bus.cmd(cmds[p]);
-    bus.beginTxn();
+    auto txn = bus.beginTxn();
     for (uint32_t done = 0; done < size;) {
       const uint32_t n = size - done < 32768 ? size - done : 32768;
-      bus.rawWriteBytes(planes[p] + done, static_cast<uint16_t>(n));
+      txn.writeBytes(planes[p] + done, static_cast<uint16_t>(n));
       done += n;
     }
-    bus.endTxn();
   }
   bus.cmd(CMD_PARTIAL_OUT);
 }
@@ -814,17 +813,16 @@ void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb
   uint16_t used = 0;
   const uint16_t bytes = _winByte1 - _winByte0 + 1;
   bus.cmd(ramCmd);
-  bus.beginTxn();
+  auto txn = bus.beginTxn();
   for (uint16_t r = _winRow0; r <= _winRow1; ++r) {
     if (used + bytes > sizeof(buf)) {
-      bus.rawWriteBytes(buf, used);
+      txn.writeBytes(buf, used);
       used = 0;
     }
     memcpy(buf + used, fb + static_cast<uint32_t>(r) * _wb + _winByte0, bytes);
     used = static_cast<uint16_t>(used + bytes);
   }
-  if (used) bus.rawWriteBytes(buf, used);
-  bus.endTxn();
+  if (used) txn.writeBytes(buf, used);
 }
 
 // Refresh a single rectangle instead of the whole panel.

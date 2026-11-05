@@ -27,4 +27,5 @@ add_executable(date_formatting DateFormattingTest.cpp
 target_include_directories(date_formatting PRIVATE ${REPO_ROOT}/include ${GENERATED_I18N})
 target_compile_features(date_formatting PRIVATE cxx_std_17)
 target_compile_options(date_formatting PRIVATE -UNDEBUG)
-add_test(NAME date_formatting COMMAND date_formatting)
+add_test(NAME date_formatting COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/integration_test.py $<TARGET_FILE:date_formatting> ${REPO_ROOT})

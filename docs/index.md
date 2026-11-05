@@ -32,5 +32,14 @@ The remaining documents are inherited CrossInk reader documentation. Installatio
 - [EPUB Indexing Methods](./epub-indexing.md)
 - [EPUB Render Modes](./epub-render-modes.md)
 - [Data Cache](./data-cache.md)
+- [Languages](./languages.md)
+- [Plugins](./sd-plugins.md)
+- [BOOX Picco](./picco.md)
 - [Web Server Guide](./webserver.md)
 - [Troubleshooting](./troubleshooting.md)
+
+## Developer Docs
+
+- [Development guides](./development/README.md)
+- [Plugin Development Guide](./development/plugin-development.md)
+- [Translation reference](./translators.md)

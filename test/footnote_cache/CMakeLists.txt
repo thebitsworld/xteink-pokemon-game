@@ -5,6 +5,7 @@ add_executable(FootnoteCacheTest
 target_include_directories(FootnoteCacheTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/lib/Epub
+  ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/EpdFont
 )
 
@@ -13,3 +14,6 @@ target_link_libraries(FootnoteCacheTest PRIVATE
 )
 
 add_test(NAME FootnoteCacheTest COMMAND FootnoteCacheTest)
+
+# Page.h and friends name Print in their serialize() signatures only.
+target_compile_options(FootnoteCacheTest PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/stubs/PrintForward.h)

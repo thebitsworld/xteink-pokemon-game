@@ -51,7 +51,9 @@ BUILTIN_HYPHENATION = {"en", "de"}
 # The smallest `spiffs` partition met so far: X3 readers keep the partition table they shipped with
 # (an OTA or SD update writes only the app), and theirs has 1 MB at 0xEF0000, not the 3.4 MB of
 # partitions.csv.
-MAX_PACK_BYTES = 1024 * 1024
+# Above the X3's 1 MB `spiffs` (CrossInk 2.0.0's strings took the pack to ~1.3 MB): the X3 shows "no room" and
+# keeps English and Vietnamese. S3 readers have the room, or read the pack from the SD card into PSRAM.
+MAX_PACK_BYTES = 1536 * 1024
 
 
 def align4(data: bytearray) -> None:
