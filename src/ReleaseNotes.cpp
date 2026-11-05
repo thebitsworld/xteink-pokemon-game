@@ -32,5 +32,8 @@ bool releaseNotesNeedLanguageUpdate() {
   return false;
 }
 
-// Languages live in the language pack here, not in per-language downloads: nothing to offer.
-bool releaseNotesOfferLanguageUpdate(const char*, const char*, const uint16_t) { return false; }
+bool releaseNotesOfferLanguageUpdate(const char* preferredCode, const char* activeCode, const uint16_t updateTried) {
+  if (!preferredCode || !activeCode || updateTried >= RELEASE_NOTES_REVISION) return false;
+  if (!std::strcmp(preferredCode, "EN") || !I18n::supportedDownload(preferredCode)) return false;
+  return std::strcmp(preferredCode, activeCode) != 0 || releaseNotesNeedLanguageUpdate();
+}

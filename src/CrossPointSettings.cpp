@@ -537,7 +537,8 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   }
   doc["quickActionsTrigger"] = quickActionsTrigger;
   doc["filenameFallbackFont"] = filenameFallbackFont;
-  doc["language"] = (language < getLanguageCount()) ? LANGUAGE_CODES[language] : "EN";
+  doc["language"] = languageCode;
+  doc["languageCacheGeneration"] = languageCacheGeneration;
   if (keyboardLayouts != 0) doc["keyboardLayouts"] = keyboardLayouts;
   doc["tiltPageTurnDirectionSchema"] = TILT_DIRECTION_SCHEMA_CURRENT;
   doc["clockDateHasBeenSynced"] = clockDateHasBeenSynced;
@@ -1003,11 +1004,17 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
     needsResave = true;
   }
   if (doc["language"].is<const char*>()) {
-    language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
+    const char* code = doc["language"].as<const char*>();
+    if (language_cache::validCode(code)) {
+      std::strcpy(languageCode, code);
+      for (char* p = languageCode; *p; ++p)
+        if (*p >= 'a' && *p <= 'z') *p -= 'a' - 'A';
+    }
   } else if (doc["language"].is<uint8_t>()) {
     const auto legacy = doc["language"].as<uint8_t>();
-    if (legacy < getLanguageCount()) language = legacy;
+    if (legacy < getLanguageCount()) std::strcpy(languageCode, LANGUAGE_CODES[legacy]);
   }
+  languageCacheGeneration = doc["languageCacheGeneration"] | uint64_t{0};
   const char* filenameFont = doc["filenameFallbackFont"] | "";
   if (std::strlen(filenameFont) < sizeof(filenameFallbackFont) && !std::strchr(filenameFont, '/') &&
       !std::strchr(filenameFont, '\\') && std::strcmp(filenameFont, ".") != 0 && std::strcmp(filenameFont, "..") != 0) {
@@ -1128,7 +1135,8 @@ bool CrossPointSettings::migrateLanguageBinaryFile() {
       uint8_t oldIndex;
       serialization::readPod(f, oldIndex);
       if (oldIndex < V1_LANGUAGE_COUNT) {
-        language = static_cast<uint8_t>(V1_LANGUAGES[oldIndex]);
+        std::strcpy(languageCode, LANGUAGE_CODES[static_cast<uint8_t>(V1_LANGUAGES[oldIndex])]);
+        languageCacheGeneration = 0;
       }
     }
   }

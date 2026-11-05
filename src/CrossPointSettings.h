@@ -746,7 +746,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint16_t frontlightScheduleEnd = 0xFFFF;
   // Language setting (Language enum index, default 0 = EN)
   char filenameFallbackFont[64] = "";  // Folder name under /.crossink/languages/fonts; empty disables fallback.
-  uint8_t language = 0;
+  char languageCode[32] = "EN";        // Preferred identity survives temporary English fallback.
+  uint64_t languageCacheGeneration = 0;
   // Enabled keyboard layouts. Zero derives a default from the UI language;
   // non-zero bits follow KeyboardLayoutSet::ALL table order.
   uint16_t keyboardLayouts = 0;

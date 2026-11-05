@@ -15,7 +15,9 @@ with tempfile.TemporaryDirectory(prefix="crossink-dates-") as tmp:
                CROSSINK_LANGUAGE_FLASH=str(base / "flash.bin"))
     subprocess.run([program, "EN"], env=env, check=True)
     for source in sorted((root / "lib/I18n/translations").glob("*.yaml")):
-        if source.name == "english.yaml":
+        # These sources exceed the device's language slot; only their packaged form installs.
+        if source.name in ("english.yaml", "arabic.yaml", "belarusian.yaml", "kazakh.yaml", "russian.yaml",
+                           "ukrainian.yaml"):
             continue
         shutil.copy2(source, sources / source.name)
         code = next(line.split('"')[1] for line in source.read_text().splitlines()

@@ -80,6 +80,149 @@ def prepare_fs(temp_root: Path, book: Path) -> str:
     return f"/books/{book.name}"
 
 
+def prepare_asset_mock(temp_root: Path, snapshot: str | None, hyphenation_only: bool = False) -> Path:
+    """Copy immutable producer bytes into a disposable mock, or make local fixtures.
+
+    Preserve full snapshot paths for companions and provide scoped translation
+    discovery for the running firmware. Never mutate
+    the supplied snapshot and never qualify TLS/publication with this transport.
+    """
+    mock = temp_root / "asset-http-mock"
+    mock.mkdir()
+    if snapshot:
+        source = Path(snapshot).resolve()
+        if source.is_file():
+            source = source.parent
+        if not (source / "snapshot.json").is_file():
+            raise ValueError("--asset-snapshot must name one snapshot directory or snapshot.json")
+        kinds = (("hyphenation", "cphyph"),) if hyphenation_only else (("hyphenation", "cphyph"), ("translation", "yaml"))
+        for kind, extension in kinds:
+            catalog_file = source / "catalogs" / "stable" / f"{kind}.json"
+            catalog = json.loads(catalog_file.read_bytes())
+            for entry in catalog["entries"]:
+                if not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]) or not 0 < entry["bytes"] <= 262144:
+                    raise ValueError("Snapshot contains an invalid digest or payload size")
+                payload = source / kind / f"{entry['sha256']}.{extension}"
+                data = payload.read_bytes()
+                if len(data) != entry["bytes"] or hashlib.sha256(data).hexdigest() != entry["sha256"]:
+                    raise ValueError(f"Snapshot payload mismatch: {payload}")
+                destination = mock / "snapshots" / catalog["revision"] / kind / payload.name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(payload, destination)
+            shutil.copy2(catalog_file, mock / catalog_file.name)
+        # Derive each recipient closure from both exact indexes, including
+        # opaque source archives. This fixture validator never approves a release.
+        indexes = {}
+        for name in ("notices.json", "sources.json"):
+            raw = (source / name).read_bytes()
+            if not 0 < len(raw) <= 2097152:
+                raise ValueError("Companion index exceeds bound")
+            indexes[name] = json.loads(raw)
+        for kind, _ in kinds:
+            catalog = json.loads((mock / f"{kind}.json").read_bytes())
+            prefix = f"snapshots/{catalog['revision']}/"
+            for name in indexes:
+                target = mock / prefix / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source / name, target)
+            for entry in catalog["entries"]:
+                references = {}
+                total = 0
+                for index in indexes.values():
+                    files = index[kind][entry["code"]]["files"]
+                    if not 0 < len(files) <= 16:
+                        raise ValueError("Selected companion list exceeds bound")
+                    for ref in files:
+                        path = ref["path"]
+                        if (len(path) > 240 or not path.startswith(prefix + "source/") or
+                            not re.fullmatch(r"[A-Za-z0-9._/-]+", path) or
+                            any(part in ("", ".", "..") for part in path.split("/")) or
+                            not re.fullmatch(r"[0-9a-f]{64}", ref["sha256"]) or
+                            not 0 < ref["bytes"] <= 2097152):
+                            raise ValueError("Invalid companion reference")
+                        total += ref["bytes"]
+                        if path in references and references[path] != ref:
+                            raise ValueError("Conflicting companion references")
+                        references[path] = ref
+                if len(references) > 32 or total > 8388608:
+                    raise ValueError("Companion closure exceeds bound")
+                expected = temp_root / "asset-expected" / f"{kind}-{entry['code']}.txt"
+                expected.parent.mkdir(exist_ok=True)
+                lines = []
+                for path, ref in references.items():
+                    original = source / path.removeprefix(prefix)
+                    data = original.read_bytes()
+                    if len(data) != ref["bytes"] or hashlib.sha256(data).hexdigest() != ref["sha256"]:
+                        raise ValueError(f"Companion mismatch: {original}")
+                    target = mock / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(original, target)
+                    lines.append(path.removeprefix(prefix))
+                expected.write_text("\n".join([*lines, "notices.json", "sources.json"]) + "\n")
+        print(f"Asset smoke uses copied, unpublished snapshot and complete indexed companions: {source}", flush=True)
+    else:
+        from generate_language_template import generate
+        from package_hyphenation import CODES, pack_bytes
+        generated = generate("simulator-local-fixture")
+        contract = json.loads(generated["language-template.json"])
+        common = {"schema": 1, "channel": "stable", "revision": contract["sourceCommit"],
+                  "format": 1, "requires": 0, "notices": "notices.json", "sources": "sources.json"}
+        hyphenation = dict(common, kind="hyphenation", entries=[])
+        for code in CODES:
+            data = pack_bytes(code)
+            digest = hashlib.sha256(data).hexdigest()
+            (mock / f"{digest}.cphyph").write_bytes(data)
+            hyphenation["entries"].append({"code": code, "bytes": len(data), "sha256": digest})
+        translation = dict(common, kind="translation", source=contract["englishSourceSha256"],
+                           keyset=contract["keysetSha256"], entries=[])
+        for language in contract["languages"]:
+            if "translation" not in language:
+                continue
+            reference = language["translation"]
+            data = generated[reference["filename"]]
+            (mock / f"{reference['sha256']}.yaml").write_bytes(data)
+            translation["entries"].append({"code": language["code"], "name": language["name"],
+                                            "bytes": len(data), "sha256": reference["sha256"]})
+        for kind, catalog in (("hyphenation", hyphenation), ("translation", translation)):
+            (mock / f"{kind}.json").write_text(json.dumps(catalog, ensure_ascii=False, separators=(",", ":")))
+        revision = common["revision"]
+        prefix = f"snapshots/{revision}/"
+        notice = b"TEST-ONLY functional fixture; not a distributable source/license arrangement.\n"
+        path = prefix + "source/TEST-ONLY.txt"
+        target = mock / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(notice)
+        ref = {"path": path, "bytes": len(notice), "sha256": hashlib.sha256(notice).hexdigest()}
+        index = {kind: {entry["code"]: {"files": [ref]} for entry in catalog["entries"]}
+                 for kind, catalog in (("hyphenation", hyphenation), ("translation", translation))}
+        for name in ("notices.json", "sources.json"):
+            (mock / prefix / name).write_text(json.dumps(index, separators=(",", ":")))
+        for kind, catalog in (("hyphenation", hyphenation), ("translation", translation)):
+            extension = "cphyph" if kind == "hyphenation" else "yaml"
+            for entry in catalog["entries"]:
+                payload = mock / f"{entry['sha256']}.{extension}"
+                destination = mock / prefix / kind / payload.name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(payload, destination)
+                expected = temp_root / "asset-expected" / f"{kind}-{entry['code']}.txt"
+                expected.parent.mkdir(exist_ok=True)
+                expected.write_text("source/TEST-ONLY.txt\nnotices.json\nsources.json\n")
+        print("Asset smoke uses disposable working-source fixtures, not a release snapshot", flush=True)
+    translation_file = mock / "translation.json"
+    if translation_file.is_file():
+        from generate_language_template import generate
+        from publish_language_assets import catalog_key
+        contract = json.loads(generate("simulator-local-fixture")["language-template.json"])
+        # Obsolete-snapshot tests intentionally serve mismatched bytes at the
+        # running firmware's lookup path, so parser rejection is still exercised.
+        lookup = dict(json.loads(translation_file.read_bytes()),
+                      source=contract["englishSourceSha256"], keyset=contract["keysetSha256"])
+        destination = mock / catalog_key(lookup)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(translation_file, destination)
+    return mock
+
+
 def prepare_pokemon_assets(temp_root: Path) -> None:
     source = next((path for path in POKEMON_ASSET_CANDIDATES if path.is_dir()), None)
     if source is None:
@@ -200,7 +343,184 @@ def run_smoke(args: argparse.Namespace) -> int:
         if args.font_dir:
             shutil.copytree(Path(args.font_dir), temp_root / "fs_" / "fonts", dirs_exist_ok=True)
         env = build_smoke_environment(os.environ, args, temp_root / "fs_", simulator_book_path)
-        factory_flash = None  # upstream's language flash scenario; not in this fork
+        if args.unicode_spaces:
+            env["CROSSINK_SIMULATOR_SMOKE_UNICODE_SPACES"] = "1"
+        factory_flash = None
+        if args.factory_flash:
+            factory_flash = temp_root / "language-flash.bin"
+            factory_flash.write_bytes(b"\xa5" * 0x14000)
+            env["CROSSINK_LANGUAGE_FLASH"] = str(factory_flash)
+        if args.asset_downloads:
+            env["CROSSINK_SIMULATOR_SMOKE_ASSET_DOWNLOADS"] = "1"
+            env["CROSSINK_ASSET_SMOKE_STAGE"] = "0"
+            env.pop("CROSSINK_ASSET_SMOKE_HYPHENATION_ONLY", None)
+            env.pop("CROSSINK_ASSET_SMOKE_EXPECT_TRANSLATION_REJECTION", None)
+            env.pop("CROSSINK_ASSET_SMOKE_EMPTY_CATALOG", None)
+            env.pop("CROSSINK_ASSET_SMOKE_SAVE_FAILURE", None)
+            if args.asset_save_failure:
+                env["CROSSINK_ASSET_SMOKE_SAVE_FAILURE"] = "1"
+            if args.asset_expect_translation_rejection:
+                env["CROSSINK_ASSET_SMOKE_EXPECT_TRANSLATION_REJECTION"] = "1"
+            env["CROSSINK_SIM_HTTP_MOCK_ROOT"] = str(prepare_asset_mock(temp_root, args.asset_snapshot, args.asset_hyphenation_only))
+            if args.asset_empty_catalog:
+                catalog_path = Path(env["CROSSINK_SIM_HTTP_MOCK_ROOT"]) / "hyphenation.json"
+                catalog = json.loads(catalog_path.read_bytes())
+                catalog["entries"] = []
+                catalog_path.write_text(json.dumps(catalog, ensure_ascii=False, separators=(",", ":")))
+                env["CROSSINK_ASSET_SMOKE_EMPTY_CATALOG"] = "1"
+            env["CROSSPOINT_SIM_WIFI_NETWORKS"] = "asset-smoke:-40:open"
+            env["CROSSINK_LANGUAGE_FLASH"] = str(temp_root / "language-flash.bin")
+            if args.asset_hyphenation_only:
+                env["CROSSINK_ASSET_SMOKE_HYPHENATION_ONLY"] = "1"
+            if args.asset_captures:
+                env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.asset_captures).resolve())
+        if args.language_file:
+            language_path = temp_root / "fs_" / ".crossink" / "languages" / "smoke.yaml"
+            language_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(args.language_file), language_path)
+            env["CROSSINK_LANGUAGE_FLASH"] = str(temp_root / "language-flash.bin")
+            installer_env = dict(env, CROSSINK_TEST_SD=str(temp_root / "fs_"))
+            installed = subprocess.run(
+                [str(Path(args.language_installer).resolve()), "install", "EN", "0",
+                 "/.crossink/languages/smoke.yaml"],
+                cwd=temp_root, env=installer_env, text=True, capture_output=True, check=True, timeout=30,
+            )
+            code, generation = installed.stdout.strip().split("|")
+            settings = temp_root / "fs_" / ".crosspoint" / "crossink-settings.json"
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            settings.write_text(
+                json.dumps({"language": code, "languageCacheGeneration": int(generation)})
+            )
+        if args.hyphenation:
+            from package_hyphenation import pack_bytes
+            # Only the disposable fixture changes: exercise the reader's book
+            # language independently of the selected interface language.
+            target = temp_root / "fs_" / simulator_book_path.lstrip("/")
+            updated = target.with_suffix(".hyphenation.epub")
+            languages = 0
+            with zipfile.ZipFile(target) as source, zipfile.ZipFile(updated, "w") as destination:
+                for entry in source.infolist():
+                    data = source.read(entry)
+                    if entry.filename.endswith(".opf"):
+                        data, found = re.subn(rb"(<dc:language[^>]*>).*?(</dc:language>)",
+                                             rb"\g<1>de-DE\g<2>", data, flags=re.S)
+                        languages += found
+                    destination.writestr(entry, data)
+            if not languages:
+                raise ValueError("Hyphenation smoke fixture needs dc:language metadata")
+            updated.replace(target)
+            packs = temp_root / "fs_" / ".crossink" / "hyphenation"
+            packs.mkdir(parents=True, exist_ok=True)
+            data = pack_bytes("de")
+            (packs / "hyph-de.cphyph").write_bytes(data)
+            (packs / "hyph-fr.cphyph").write_bytes(data)  # mismatched header identity
+            env["CROSSINK_SIMULATOR_SMOKE_HYPHENATION"] = "1"
+            env["CROSSINK_HYPHENATION_SMOKE_UI"] = code if args.language_file else "EN"
+        if args.hyphenation_captures:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.hyphenation_captures).resolve())
+        if args.filename_font_dir:
+            shutil.copytree(Path(args.filename_font_dir), temp_root / "fs_" / ".crossink" / "languages" / "fonts", dirs_exist_ok=True)
+        if args.filename_font_family:
+            env["CROSSINK_SIMULATOR_SMOKE_FILENAME_FONT"] = args.filename_font_family
+        if args.filename_font_error_family:
+            env["CROSSINK_SIMULATOR_SMOKE_FILENAME_FONT_ERROR"] = args.filename_font_error_family
+        if args.filename_font_captures:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.filename_font_captures).resolve())
+        if args.screen_calibration:
+            env["CROSSINK_SIMULATOR_SMOKE_CALIBRATION"] = "1"
+            env["CROSSINK_CALIBRATION_PATH"] = str(temp_root / "device-calibration.nvs")
+        if args.status_bar_lifecycle:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_LIFECYCLE"] = "1"
+        if args.chapter_percentage:
+            env["CROSSINK_SIMULATOR_SMOKE_CHAPTER_PERCENTAGE"] = "1"
+        if args.centered_status_bar:
+            env["CROSSINK_SIMULATOR_SMOKE_CENTERED_STATUS_BAR"] = "1"
+        if args.status_bar_feature:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_FEATURE"] = "1"
+        if args.status_bar_captures:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.status_bar_captures).resolve())
+        if args.clipping_selection:
+            env["CROSSINK_SIMULATOR_SMOKE_CLIPPING_SELECTION"] = "1"
+        if args.dictionary or args.clipping_selection:
+            dictionary = temp_root / "fs_" / "dictionary-smoke"
+            dictionary.mkdir()
+            words = sorted(["accord", "aime", "après", "d'accord", "est", "histoire", "inspecteur", "école"])
+            index = bytearray()
+            definitions = bytearray()
+            for word in words:
+                definition = f"Definition of {word}".encode()
+                index.extend(word.encode() + b"\0" + struct.pack(">II", len(definitions), len(definition)))
+                definitions.extend(definition)
+            (dictionary / "dict.idx").write_bytes(index)
+            (dictionary / "dict.dict").write_bytes(definitions)
+            (dictionary / "dict.ifo").write_text(
+                "StarDict's dict ifo file\nversion=2.4.2\nbookname=French smoke\n"
+                f"wordcount={len(words)}\nidxfilesize={len(index)}\nsametypesequence=m\n"
+            )
+            if args.dictionary and not args.clipping_selection:
+                env["CROSSINK_SIMULATOR_SMOKE_DICTIONARY"] = "1"
+        if args.font_dir and args.font_family:
+            env["CROSSINK_SIMULATOR_SMOKE_ISOLATED_FONTS"] = "1"
+        if args.font_family:
+            env["CROSSINK_SIMULATOR_SMOKE_FONT_FAMILY"] = args.font_family
+        if args.reader_font_layout:
+            env["CROSSINK_SIMULATOR_SMOKE_READER_FONT_LAYOUT"] = "1"
+        if args.c3_font_sizes:
+            env["CROSSINK_SIMULATOR_SMOKE_C3_FONT_SIZES"] = "1"
+        if args.font_size_book:
+            env["CROSSINK_SIMULATOR_SMOKE_FONT_SIZE_BOOK"] = "1"
+        if args.gesture_shortcuts:
+            env["CROSSINK_SIMULATOR_SMOKE_GESTURE_SHORTCUTS"] = "1"
+        if args.font_recovery:
+            env["CROSSINK_SIMULATOR_SMOKE_FONT_RECOVERY"] = "1"
+        if args.wifi_transmit_power:
+            env["CROSSINK_SIMULATOR_SMOKE_WIFI_POWER"] = "1"
+        if args.image_display:
+            env["CROSSINK_SIMULATOR_SMOKE_IMAGE_DISPLAY"] = "1"
+        if args.tilt_settings:
+            env["CROSSINK_SIMULATOR_SMOKE_TILT_SETTINGS"] = "1"
+        if args.receive_folder:
+            env["CROSSINK_SIMULATOR_SMOKE_RECEIVE_FOLDER"] = "1"
+        if args.receive_folder_captures:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.receive_folder_captures).resolve())
+        env["CROSSINK_SIMULATOR_SMOKE_BOOK"] = simulator_book_path
+        env["CROSSINK_SIMULATOR_SMOKE_PAGE_TURNS"] = str(args.page_turns)
+        if args.context_menu_sync_return:
+            env["CROSSINK_SIMULATOR_SMOKE_CONTEXT_MENU_SYNC_RETURN"] = args.context_menu_sync_return
+            env["CROSSINK_SIMULATOR_SMOKE_FILE_BROWSER_SYNC_RETURN"] = "1"
+        if args.file_browser_sync_return:
+            env["CROSSINK_SIMULATOR_SMOKE_FILE_BROWSER_SYNC_RETURN"] = "1"
+        if args.frontlight_sync:
+            env["CROSSINK_SIMULATOR_SMOKE_FRONTLIGHT_SYNC"] = "1"
+        if args.frontlight_layout:
+            env["CROSSINK_SIMULATOR_SMOKE_FRONTLIGHT_LAYOUT"] = "1"
+        if args.frontlight_captures:
+            capture_dir = Path(args.frontlight_captures).resolve()
+            capture_dir.mkdir(parents=True, exist_ok=True)
+            env["CROSSINK_SIMULATOR_SMOKE_FRONTLIGHT_CAPTURES"] = str(capture_dir)
+        if args.opds_catalog:
+            env["CROSSINK_SIMULATOR_SMOKE_OPDS_CATALOG"] = "1"
+        if args.support_export:
+            env["CROSSINK_SIMULATOR_SMOKE_SUPPORT_EXPORT"] = "1"
+        if args.bookmarks:
+            env["CROSSINK_SIMULATOR_SMOKE_BOOKMARKS"] = "1"
+        if args.about:
+            env["CROSSINK_SIMULATOR_SMOKE_ABOUT"] = "1"
+        if args.release_notes:
+            env["CROSSINK_SIMULATOR_SMOKE_RELEASE_NOTES"] = "1"
+        if args.about_captures:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.about_captures).resolve())
+        if args.sync_server_captures:
+            env["CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES"] = str(Path(args.sync_server_captures).resolve())
+            env["CROSSINK_SIMULATOR_SMOKE_SYNC_SERVER_CAPTURES"] = "1"
+        if args.menu_orientation:
+            env["CROSSINK_SIMULATOR_SMOKE_MENU_ORIENTATION"] = "1"
+        if args.home_swipe:
+            env["CROSSINK_SIMULATOR_SMOKE_HOME_SWIPE"] = "1"
+        if args.home_themes:
+            env["CROSSINK_SIMULATOR_SMOKE_HOME_THEMES"] = "1"
+        if args.theme:
+            env["CROSSINK_SIMULATOR_SMOKE_THEME"] = str(THEMES[args.theme])
 
         print(f"Running simulator smoke test with isolated fs_: {temp_root / 'fs_'}", flush=True)
         proc = subprocess.run(

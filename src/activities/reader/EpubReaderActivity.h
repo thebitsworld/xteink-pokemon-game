@@ -184,6 +184,8 @@ class EpubReaderActivity final : public Activity {
   unsigned long pageTurnDuration = 0UL;
   ManualPageTurnQueue pendingManualPageTurns;
   QueuedTurnRenderingState queuedTurnRendering;
+  bool hyphenationPackChecked = false;
+  bool checkHyphenationPack();
   // A position another reader left for this book (sync_parked.bin), offered
   // once the first page is on screen. Allocated only when one is found.
   std::unique_ptr<KeptPosition::Offer> keptOffer;

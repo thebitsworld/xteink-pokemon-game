@@ -29,6 +29,34 @@ def valid_text(value):
         raise ValueError("language text contains unsupported control characters")
 
 
+def fit_device_cache(data, entries, code):
+    """Drop the translations that do not fit the device's language slot; they show in English.
+
+    This fork's Pokemon, Lua and Game Boy strings take the largest scripts past the 64 KB slot. Pokemon
+    strings go first, longest first, so that menus and the reader stay translated.
+    """
+    # Every string counts, not only those the catalog marks active: a build whose schema has more keys
+    # (the simulator's, say) still stores them.
+    active = [e for e in entries if data.get(e["key"], "") not in ("", e["english"])]
+    record = LIMITS["cacheRecordBytes"]
+    used = LIMITS["cacheHeaderBytes"] + sum(record + len(data[e["key"]].encode("utf-8")) + 1 for e in active)
+    # Below the 64 KB slot: this estimate runs about 3 KB under what the device stores.
+    limit = 62000
+    if used <= limit:
+        return data
+    data = dict(data)
+    order = sorted(active, key=lambda e: (not e["key"].startswith("STR_POKEMON"), -len(data[e["key"]].encode("utf-8"))))
+    dropped = 0
+    for entry in order:
+        if used <= limit:
+            break
+        used -= record + len(data[entry["key"]].encode("utf-8")) + 1
+        del data[entry["key"]]
+        dropped += 1
+    print(f"{code}: {dropped} of {len(active)} translations left in English to fit the device cache")
+    return data
+
+
 def starter_artifact(source, identity, entries, version, source_commit, source_hash, keyset_hash):
     """Normalize a community source for this editor keyset without changing text."""
     code, name = identity
@@ -50,6 +78,7 @@ def starter_artifact(source, identity, entries, version, source_commit, source_h
         "_template_source_sha256": source_hash, "_template_keyset_sha256": keyset_hash,
         "_language_code": code, "_language_name": name, "_direction": direction, "_keyboard": keyboard,
     }
+    data = fit_device_cache(data, entries, code)
     values = dict(metadata)
     cache_bytes = LIMITS["cacheHeaderBytes"]
     for entry in entries:

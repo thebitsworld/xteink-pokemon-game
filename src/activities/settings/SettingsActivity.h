@@ -238,9 +238,11 @@ inline bool settingShowsNavigationCaret(const SettingInfo& setting) {
 
 class SettingsActivity final : public Activity {
 #ifdef SIMULATOR
+  friend struct AssetDownloadSmokeTest;
   friend struct ScreenCalibrationSmokeTest;
   friend struct ReaderDrawerLayoutSmokeTest;
 #endif
+  StrId languageError = StrId::_COUNT;
 #ifdef SIMULATOR
 #endif
  public:
@@ -301,6 +303,16 @@ class SettingsActivity final : public Activity {
   SettingAction parentSubmenu = SettingAction::None;
 
   OptionPopup optionPopup;
+  HeapObject<I18n::Catalog> languageCatalog;
+  I18n::Option pendingLanguage;
+  bool languageDownloadsOpen = false;
+  bool languageRestartRequired = false;
+  bool pendingLanguageDownloads = false;
+  bool openLanguageDownloadsPending = false;
+  bool pendingLanguageDownloadConnect = false;
+  bool pendingLanguageDownloadAction = false;
+  uint8_t languageDownloadRow = 0;  // Index into LANGUAGE_CODES of the tapped download row.
+  mutable char languageDownloadLabel[256] = {};
   char languageRuntimeNote[96] = {};
 #if CROSSINK_SCALABLE_FONTS
   std::vector<FilenameFontSystem::Family> filenameFontNames;
@@ -341,7 +353,12 @@ class SettingsActivity final : public Activity {
   void openWordSpacingPicker();
   void openCharacterSpacingPicker();
   void openLanguagePicker();
+  void openLanguageDownloads();
+  void selectLanguageDownload();
+  void startLanguageDownload();
+  int languageSourceIndex(const char* code) const;
   void openFilenameFontPicker();
+  void applyLanguage(const I18n::Option& selected);
   void openIdleTimeThresholdPicker();
   void toggleCurrentSetting();
   void openSleepTimeoutPicker();
@@ -362,6 +379,7 @@ class SettingsActivity final : public Activity {
   bool allowGlobalHomeSwipeGesture() const override { return !dismissOnUpSwipe && !optionPopup.isActive(); }
   bool handleHomeGesture() override;
   // Opens System > Device with the Download Languages popup once the activity enters.
+  void openLanguageDownloadsOnEnter() { openLanguageDownloadsPending = true; }
   void enableTouchscreenRecovery() { touchscreenRecovery = true; }
 #ifdef SIMULATOR
   void simulatorOpenFrontButtons();
@@ -373,6 +391,7 @@ class SettingsActivity final : public Activity {
 #endif
   freeink::ui::Rect simulatorSafeRect() const { return app.device().safeRect(); }
   SettingAction simulatorActiveSubmenu() const { return activeSubmenu; }
+  bool simulatorLanguageDownloadsOpen() const { return languageDownloadsOpen && optionPopup.isActive(); }
 #endif
   void onEnter() override;
   void onExit() override;

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "AssetDownloadActivity.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -75,7 +76,7 @@ void ReleaseNotesActivity::onEnter() {
 
   // Use the saved preference, not the active code: after upgrading from firmware with built-in
   // translations, a saved non-English language with no installed pack runs as English.
-  const char* code = I18N.getCode();
+  const char* code = SETTINGS.languageCode;
   updateOffered = releaseNotesOfferLanguageUpdate(code, I18N.getCode(), APP_STATE.releaseNotesUpdateTried);
   languageIndex = static_cast<int>(I18n::languageFromCode(code));
   page = 0;
@@ -251,7 +252,9 @@ void ReleaseNotesActivity::startUpdate() {
   if (APP_STATE.saveToFile() && SETTINGS.saveToFile()) {
     RenderLock restartLock(*this);
     leavingForUpdate = true;  // releaseNotesSeen stays unset so the translated notes show after the download.
-    silentRestartToDownloadLanguages();
+    silentRestartToNetwork(
+        NetworkBootTarget::DOWNLOAD_ASSETS,
+        AssetDownloadActivity::bootPayload(AssetCatalog::Kind::Translation, static_cast<uint8_t>(languageIndex)));
   } else {
     LOG_ERR("NOTES", "Cannot save state before network restart");
     APP_STATE.releaseNotesUpdateTried = previousTried;

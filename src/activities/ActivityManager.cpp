@@ -1084,6 +1084,7 @@ void ActivityManager::goToSettings(const bool dismissOnUpSwipe, const bool openL
     returningHomeThroughSettings = true;
   }
   auto settings = std::make_unique<SettingsActivity>(renderer, mappedInput, dismissOnUpSwipe);
+  if (openLanguageDownloads) settings->openLanguageDownloadsOnEnter();
   if (touchscreenRecovery) settings->enableTouchscreenRecovery();
   replaceActivity(std::move(settings));
 }

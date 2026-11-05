@@ -41,7 +41,7 @@ void capturePreferences(SupportInfo::Snapshot& d) {
   std::lock_guard<std::mutex> lock(SETTINGS.getMutex());
 // Preserve the allowlisted numeric schema; custom identities stay private and map to English.
 #define SUPPORT_LANGUAGE_CODE() \
-  d.preferences[SupportInfo::language] = SETTINGS.language;
+  d.preferences[SupportInfo::language] = static_cast<uint8_t>(I18n::languageFromCode(SETTINGS.languageCode));
 #define SUPPORT_PREF(name) d.preferences[SupportInfo::name] = SETTINGS.name;
 #include <SupportPreferences.inc>
 #undef SUPPORT_PREF

@@ -2,131 +2,67 @@
 
 #include <algorithm>
 #include <array>
-
 #include <cstring>
 
 #include "HyphenationCommon.h"
-#include "generated/hyph-de.trie.h"
 #include "generated/hyph-en.trie.h"
-#if defined(HYPHENATION_ALL_BUILTIN)
-#include "generated/hyph-es.trie.h"
-#include "generated/hyph-fr.trie.h"
-#include "generated/hyph-it.trie.h"
-#include "generated/hyph-pl.trie.h"
-#include "generated/hyph-pt.trie.h"
-#include "generated/hyph-ru.trie.h"
-#include "generated/hyph-sv.trie.h"
-#include "generated/hyph-uk.trie.h"
-#endif
 
 namespace {
 
-// Only English and German (too big for the pack) are compiled into the
-// firmware; the other languages' patterns
-// come from the language pack (setPackedHyphenationPatterns) and are empty -
-// no hyphenation - until it is installed. Host tests and tools compile them
-// all in (HYPHENATION_ALL_BUILTIN).
-#if defined(HYPHENATION_ALL_BUILTIN)
-#define PACKED_PATTERNS(tag) SerializedHyphenationPatterns tag##Patterns = tag##_patterns
-#else
-#define PACKED_PATTERNS(tag) SerializedHyphenationPatterns tag##Patterns {}
-#endif
-PACKED_PATTERNS(fr);
-PACKED_PATTERNS(ru);
-PACKED_PATTERNS(es);
-PACKED_PATTERNS(it);
-PACKED_PATTERNS(sv);
-PACKED_PATTERNS(uk);
-PACKED_PATTERNS(pl);
-PACKED_PATTERNS(pt);
-#undef PACKED_PATTERNS
-
-struct PackedPatterns {
-  const char* tag;
-  SerializedHyphenationPatterns* patterns;
-};
-constexpr PackedPatterns kPacked[] = {{"fr", &frPatterns}, {"ru", &ruPatterns}, {"es", &esPatterns},
-                                      {"it", &itPatterns}, {"sv", &svPatterns}, {"uk", &ukPatterns},
-                                      {"pl", &plPatterns}, {"pt", &ptPatterns}};
-
 // English hyphenation patterns (3/3 minimum prefix/suffix length)
 LanguageHyphenator englishHyphenator(en_patterns, isLatinLetter, toLowerLatin, 3, 3);
-LanguageHyphenator frenchHyphenator(frPatterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator germanHyphenator(de_patterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator russianHyphenator(ruPatterns, isCyrillicLetter, toLowerCyrillic);
-LanguageHyphenator spanishHyphenator(esPatterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator italianHyphenator(itPatterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator swedishHyphenator(svPatterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator ukrainianHyphenator(ukPatterns, isCyrillicLetter, toLowerCyrillic);
-LanguageHyphenator polishHyphenator(plPatterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator portugueseHyphenator(ptPatterns, isLatinLetter, toLowerLatin);
-
-void (*packedLoader)() = nullptr;
-
-bool isPackedTag(const char* tag) {
-  for (const auto& packed : kPacked) {
-    if (std::strcmp(packed.tag, tag) == 0) return true;
-  }
-  return false;
-}
 
 using EntryArray = std::array<LanguageEntry, 10>;
 
 const EntryArray& entries() {
   static const EntryArray kEntries = {{{"english", "en", &englishHyphenator},
-                                       {"french", "fr", &frenchHyphenator},
-                                       {"german", "de", &germanHyphenator},
-                                       {"russian", "ru", &russianHyphenator},
-                                       {"spanish", "es", &spanishHyphenator},
-                                       {"italian", "it", &italianHyphenator},
-                                       {"polish", "pl", &polishHyphenator},
-                                       {"portuguese", "pt", &portugueseHyphenator},
-                                       {"swedish", "sv", &swedishHyphenator},
-                                       {"ukrainian", "uk", &ukrainianHyphenator}}};
+                                       {"french", "fr", nullptr},
+                                       {"german", "de", nullptr},
+                                       {"russian", "ru", nullptr},
+                                       {"spanish", "es", nullptr},
+                                       {"italian", "it", nullptr},
+                                       {"polish", "pl", nullptr},
+                                       {"portuguese", "pt", nullptr},
+                                       {"swedish", "sv", nullptr},
+                                       {"ukrainian", "uk", nullptr}}};
   return kEntries;
 }
 
+ExternalHyphenationLookup externalLookup = nullptr;
+SerializedHyphenationPatterns externalPatterns{0, nullptr, 0};
+LanguageHyphenator externalHyphenator(externalPatterns, isLatinLetter, toLowerLatin);
+
 }  // namespace
 
+// Adapted from CrossPoint Reader PR #3706 (MIT): external pattern provider.
+void setExternalHyphenationLookup(ExternalHyphenationLookup lookup) { externalLookup = lookup; }
+
+const LanguageEntry* findLanguageEntry(const char* primaryTag) {
+  if (!primaryTag) return nullptr;
+  for (const auto& entry : entries())
+    if (!std::strcmp(primaryTag, entry.primaryTag)) return &entry;
+  return nullptr;
+}
+
 const LanguageHyphenator* getLanguageHyphenatorForPrimaryTag(const std::string& primaryTag) {
-  const auto& allEntries = entries();
-  const auto it = std::find_if(allEntries.begin(), allEntries.end(),
-                               [&primaryTag](const LanguageEntry& entry) { return primaryTag == entry.primaryTag; });
-  if (it == allEntries.end()) return nullptr;
-  if (!it->hyphenator->hasPatterns() && packedLoader != nullptr && isPackedTag(it->primaryTag)) {
-    void (*loader)() = packedLoader;
-    packedLoader = nullptr;  // once: a pack that is missing stays missing until the next boot
-    loader();
-  }
-  if (!it->hyphenator->hasPatterns()) return nullptr;
-  return it->hyphenator;
-}
-
-void setPackedHyphenationLoader(void (*loader)()) { packedLoader = loader; }
-
-bool setPackedHyphenationPatterns(const char* primaryTag, const uint8_t* data, const size_t size,
-                                  const size_t rootOffset) {
-  for (const auto& packed : kPacked) {
-    if (std::strcmp(packed.tag, primaryTag) != 0) continue;
-    *packed.patterns = SerializedHyphenationPatterns{rootOffset, data, data != nullptr ? size : 0};
-    return true;
-  }
-  return false;
-}
-
-void clearPackedHyphenationPatterns() {
-  for (const auto& packed : kPacked) *packed.patterns = SerializedHyphenationPatterns{};
-}
-
-const char* const* packedHyphenationTags(size_t& count) {
-  static const char* const kTags[] = {"fr", "ru", "es", "it", "sv", "uk", "pl", "pt"};
-  count = sizeof(kTags) / sizeof(kTags[0]);
-  return kTags;
+  const auto* entry = findLanguageEntry(primaryTag.c_str());
+  if (!entry) return nullptr;
+  if (entry->hyphenator) return entry->hyphenator;
+  ExternalHyphenationPatterns found{};
+  if (!externalLookup || !externalLookup(entry->primaryTag, found)) return nullptr;
+  externalPatterns = found.patterns;
+  const bool cyrillic = primaryTag == "ru" || primaryTag == "uk";
+  externalHyphenator.configure(cyrillic ? isCyrillicLetter : isLatinLetter, cyrillic ? toLowerCyrillic : toLowerLatin);
+  return &externalHyphenator;
 }
 
 uint32_t getLanguagePatternIdentity(const char* primaryTag) {
-  // Built-in pattern changes need a section format bump; 0 vs 1 covers a pack's patterns appearing later.
-  return primaryTag != nullptr && getLanguageHyphenatorForPrimaryTag(primaryTag) != nullptr ? 1 : 0;
+  const auto* entry = findLanguageEntry(primaryTag);
+  if (!entry) return 0;
+  // Built-in pattern changes already require the section format version bump.
+  if (entry->hyphenator) return 1;
+  ExternalHyphenationPatterns found{};
+  return externalLookup && externalLookup(entry->primaryTag, found) ? found.identity : 0;
 }
 
 LanguageEntryView getLanguageEntries() {
