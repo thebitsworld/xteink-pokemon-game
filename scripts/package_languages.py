@@ -13,8 +13,27 @@ from package_hyphenation import artifacts as hyphenation_artifacts
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def write_bundle(output: Path, entries: dict) -> None:
+    """The one ZIP the reader unpacks by itself (src/LanguageBundle.cpp), with its checksum beside it."""
+    names = sorted(name for name in entries
+                   if (name.startswith(".crossink/languages/") and name.endswith(".yaml"))
+                   or (name.startswith(".crossink/hyphenation/") and name.endswith(".cphyph")))
+    files = {name: entries[name] for name in names}
+    files[".crossink/bundle-manifest.txt"] = ("\n".join(names) + "\n").encode("utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in sorted(files.items()):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, data)
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    Path(f"{output}.sha256").write_text(f"{digest}  {output.name}\n")
+    print(f"Packaged bundle of {len(names)} files, {output.stat().st_size} bytes: {output}")
+
+
 def package(output: Path, version: str, benchmark: bool = False, template_output_dir=None,
-            source_commit=None, status="local-fixture"):
+            source_commit=None, status="local-fixture", bundle_output=None):
     artifacts = generate(version, source_commit, status)
     entries = dict(artifacts)
     entries.update(hyphenation_artifacts())
@@ -40,6 +59,8 @@ def package(output: Path, version: str, benchmark: bool = False, template_output
         english = english.replace('_language_code: "EN"', '_language_code: "BENCH"\n_keyboard: "EN"')
         english = english.replace('_language_name: "English"', '_language_name: "English benchmark"')
         entries[".crossink/languages/benchmark.yaml"] = (prefix + english).encode("utf-8")
+    if bundle_output is not None:
+        write_bundle(bundle_output, entries)
     entries["README.md"] = (ROOT / "docs/languages.md").read_bytes()
     entries["manifest.json"] = (json.dumps({
         "firmware": version,
@@ -64,5 +85,6 @@ if __name__ == "__main__":
     parser.add_argument("--template-output-dir", type=Path, help="Also write the atomic editor JSON and YAML pair")
     parser.add_argument("--source-commit", help="Full source snapshot Git SHA")
     parser.add_argument("--status", choices=["local-fixture", "release-build"], default="local-fixture")
+    parser.add_argument("--bundle-output", type=Path, help="Also write the ZIP the reader unpacks by itself")
     args = parser.parse_args()
-    package(args.output, args.version, args.benchmark, args.template_output_dir, args.source_commit, args.status)
+    package(args.output, args.version, args.benchmark, args.template_output_dir, args.source_commit, args.status, args.bundle_output)

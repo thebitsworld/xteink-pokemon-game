@@ -101,8 +101,9 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "HyphenationPackStore.h"
+#include "LanguageBundle.h"
 #include "SilentRestart.h"
-#include "activities/settings/AssetDownloadActivity.h"
+#include "activities/settings/LanguageBundleDownloadActivity.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/boot_sleep/ImageFolderIndex.h"
@@ -1428,7 +1429,9 @@ void setup() {
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Wake, BoardConfig::ACTIVE.name,
                                wakeupRouteName(wakeupReason));
   const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
+  const bool languageBundleInstalled = language_bundle::installPending();
   I18N.begin(SETTINGS.languageCode, SETTINGS.languageCacheGeneration);
+  if (languageBundleInstalled) language_bundle::applyPreferredLanguage();
   HyphenationPackStore::begin();
   // Normal boot store deferral adapted from Sichroteph/YACP commit
   // 20af8aee8d3e1d560456753b08d1f52e5488621f (MIT). Accessors load these
@@ -1626,8 +1629,8 @@ void setup() {
         launched = activityManager.resumeFileTransferFromNetworkBoot(snapshotPayload);
         break;
       case NetworkBootTarget::DOWNLOAD_ASSETS: {
-        if (!AssetDownloadActivity::validBootPayload(snapshotPayload)) break;
-        auto assets = makeUniqueNoThrow<AssetDownloadActivity>(renderer, mappedInputManager, snapshotPayload);
+        // This fork has no download server (ASSET_DOWNLOAD_BASE_URL): every download is the release's one bundle.
+        auto assets = makeUniqueNoThrow<LanguageBundleDownloadActivity>(renderer, mappedInputManager);
         if (assets) {
           activityManager.replaceActivity(std::move(assets));
           launched = true;

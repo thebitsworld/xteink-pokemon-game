@@ -234,6 +234,8 @@ add_subdirectory(input_wake)
 add_subdirectory(button_navigation)
 add_subdirectory(button_capture)
 
+add_test(NAME LanguageBundleTest
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_language_bundle.py)
 add_test(NAME ReaderRestartStatsRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_reader_restart_stats.py)
 

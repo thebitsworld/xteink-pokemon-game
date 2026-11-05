@@ -345,6 +345,13 @@ def run_smoke(args: argparse.Namespace) -> int:
         env = build_smoke_environment(os.environ, args, temp_root / "fs_", simulator_book_path)
         if args.unicode_spaces:
             env["CROSSINK_SIMULATOR_SMOKE_UNICODE_SPACES"] = "1"
+        if args.language_bundle:
+            shutil.copy2(Path(args.language_bundle), temp_root / "fs_" / "xteink-pokemon-languages.zip")
+            env["CROSSINK_LANGUAGE_FLASH"] = str(temp_root / "language-flash.bin")
+            if args.language_bundle_preferred:
+                settings = temp_root / "fs_" / ".crosspoint" / "crossink-settings.json"
+                settings.parent.mkdir(parents=True, exist_ok=True)
+                settings.write_text(json.dumps({"language": args.language_bundle_preferred}))
         factory_flash = None
         if args.factory_flash:
             factory_flash = temp_root / "language-flash.bin"
@@ -538,6 +545,10 @@ def run_smoke(args: argparse.Namespace) -> int:
 
     print(proc.stdout, end="")
 
+    if args.language_bundle and "[LANGBUNDLE] Installed " not in proc.stdout.replace("[INF] ", ""):
+        print("The language bundle was not installed", file=sys.stderr)
+        return 2
+
     if proc.returncode != 0:
         print(f"Simulator smoke test failed with exit code {proc.returncode}", file=sys.stderr)
         return proc.returncode
@@ -666,6 +677,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, help="Seconds before the simulator run is treated as hung (default: 120; 180 for about, support export or filename fonts; 300 for frontlight layout or asset downloads)")
     parser.add_argument("--page-turns", type=int, default=2, help="Number of EPUB page-forward taps to run")
     parser.add_argument("--theme", choices=sorted(THEMES), help="UI theme to use during the smoke test")
+    parser.add_argument("--language-bundle", help="Put this language bundle on the SD card; the boot must unpack it")
+    parser.add_argument("--language-bundle-preferred", help="Saved language code the bundle must install by itself")
     parser.add_argument("--pokemon", action="store_true", help="Run the Pokemon onboarding and collection smoke route")
     parser.add_argument("--home-navigation", action="store_true",
                         help="Exercise Home navigation through the Pokemon row to Settings")
