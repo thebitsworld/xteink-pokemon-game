@@ -67,6 +67,30 @@ static void* walnutAlloc(const size_t size) {
 #define ENABLE_LCD 1
 #define WALNUT_GB_12_COLOUR 1
 #define WALNUT_FULL_GBC_SUPPORT 1
+
+// The path run for every Game Boy instruction and drawn line (~40 KB) does not
+// fit the S3's 16 KB instruction cache, and flash is DIO: run it from internal
+// RAM. The core's definitions pick the section up from these declarations.
+#ifdef SIMULATOR
+#define WALNUT_HOT
+#else
+#include <esp_attr.h>
+#define WALNUT_HOT IRAM_ATTR
+#endif
+struct gb_s;
+WALNUT_HOT uint8_t __gb_read(struct gb_s* gb, uint16_t addr);
+WALNUT_HOT uint16_t __gb_read16(struct gb_s* gb, uint16_t addr);
+WALNUT_HOT uint32_t __gb_read32(struct gb_s* gb, uint16_t addr);
+WALNUT_HOT void __gb_write(struct gb_s* gb, uint_fast16_t addr, uint8_t val);
+WALNUT_HOT void __gb_write16(struct gb_s* gb, uint_fast16_t addr, uint16_t val);
+WALNUT_HOT void __gb_write32(struct gb_s* gb, uint16_t addr, uint32_t val);
+WALNUT_HOT uint8_t __gb_execute_cb(struct gb_s* gb);
+WALNUT_HOT void __gb_draw_line(struct gb_s* gb);
+WALNUT_HOT static inline void __gb_step_cpu(struct gb_s* gb);
+WALNUT_HOT static void __gb_draw_tile_row(struct gb_s* gb, uint8_t* pixels, uint8_t* pixelsPrio, uint16_t map,
+                                          uint8_t py, uint8_t x, uint8_t mx);
+WALNUT_HOT static void __gb_draw_bg_win_fast(struct gb_s* gb, uint8_t* pixels, uint8_t* pixelsPrio);
+WALNUT_HOT void gb_run_frame_dualfetch(struct gb_s* gb);
 #include <walnut_cgb.h>
 
 struct WalnutCgb {
@@ -90,7 +114,7 @@ struct WalnutCgb {
 
 static struct WalnutCgb* owner(struct gb_s* gb) { return (struct WalnutCgb*)gb->direct.priv; }
 
-static uint8_t romRead(struct gb_s* gb, const uint_fast32_t addr) {
+WALNUT_HOT static uint8_t romRead(struct gb_s* gb, const uint_fast32_t addr) {
   const struct WalnutCgb* c = owner(gb);
   return addr < c->romSize ? c->rom[addr] : 0xFF;
 }
@@ -98,7 +122,7 @@ static uint8_t romRead(struct gb_s* gb, const uint_fast32_t addr) {
 // Operand fetches read 2 or 4 ROM bytes for nearly every instruction: check
 // the bound once and read them straight (idea from Ink-boy 1.2.0); only a read
 // that runs past the end of the image goes byte by byte (0xFF beyond it).
-static uint16_t romRead16(struct gb_s* gb, const uint_fast32_t addr) {
+WALNUT_HOT static uint16_t romRead16(struct gb_s* gb, const uint_fast32_t addr) {
   const struct WalnutCgb* c = owner(gb);
   if (addr + 2u <= c->romSize) {
     const uint8_t* p = c->rom + addr;
@@ -107,7 +131,7 @@ static uint16_t romRead16(struct gb_s* gb, const uint_fast32_t addr) {
   return (uint16_t)(romRead(gb, addr) | (romRead(gb, addr + 1) << 8));
 }
 
-static uint32_t romRead32(struct gb_s* gb, const uint_fast32_t addr) {
+WALNUT_HOT static uint32_t romRead32(struct gb_s* gb, const uint_fast32_t addr) {
   const struct WalnutCgb* c = owner(gb);
   if (addr + 4u <= c->romSize) {
     const uint8_t* p = c->rom + addr;
@@ -116,12 +140,12 @@ static uint32_t romRead32(struct gb_s* gb, const uint_fast32_t addr) {
   return (uint32_t)romRead16(gb, addr) | ((uint32_t)romRead16(gb, addr + 2) << 16);
 }
 
-static uint8_t cartRamRead(struct gb_s* gb, const uint_fast32_t addr) {
+WALNUT_HOT static uint8_t cartRamRead(struct gb_s* gb, const uint_fast32_t addr) {
   const struct WalnutCgb* c = owner(gb);
   return c->ram && addr < c->ramSize ? c->ram[addr] : 0xFF;
 }
 
-static void cartRamWrite(struct gb_s* gb, const uint_fast32_t addr, const uint8_t value) {
+WALNUT_HOT static void cartRamWrite(struct gb_s* gb, const uint_fast32_t addr, const uint8_t value) {
   struct WalnutCgb* c = owner(gb);
   if (!c->ram || addr >= c->ramSize) return;
   if (c->ram[addr] == value) return;
@@ -226,7 +250,7 @@ static void buildShades(struct WalnutCgb* c, const uint16_t* palette) {
 // each colour becomes one of the reader's grey levels (buildShades()). Game
 // Boy (DMG) games on this core take the Game Boy's four greys, as Peanut-GB's
 // do.
-static void drawLine(struct gb_s* gb, const uint8_t* pixels, const uint_fast8_t line) {
+WALNUT_HOT static void drawLine(struct gb_s* gb, const uint8_t* pixels, const uint_fast8_t line) {
   struct WalnutCgb* c = owner(gb);
   if (gb->cgb.cgbMode) {
     if (!c->shadesValid || memcmp(c->paletteSeen, gb->cgb.fixPalette, sizeof(c->paletteSeen)) != 0) {
