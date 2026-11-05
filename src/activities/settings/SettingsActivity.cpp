@@ -175,6 +175,11 @@ std::string formatCompactDuration(const uint32_t seconds) {
   return buf;
 }
 
+// Room for two lines: a long development version wraps.
+int systemVersionFooterHeight(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
+  return 2 * renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing + systemVersionFooterBottomInset;
+}
+
 void drawSystemVersionFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
   const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   const std::string label = AppVersion::versionLabel();
@@ -2084,6 +2089,10 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
     props.headerText.bold = true;
   }
   configureUiListSectionHeaders(props, screen.theme());
+  // The System tab's version footer (drawSystemVersionFooter) gets its own space below the rows.
+  if (!isFileBrowserView() && selectedCategoryIndex == 3) {
+    screen.takeBottom(static_cast<int16_t>(systemVersionFooterHeight(renderer, UITheme::getInstance().getMetrics())));
+  }
   const auto rows = configureUiList(props, screen.theme(), screen.body());
   visibleRows = rows > 0 ? rows : 1;
   topIndex = scrollListBy(topIndex, 0, visibleRows, settingsCount);  // clamp to range
