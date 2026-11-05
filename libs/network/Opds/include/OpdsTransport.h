@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 /**
  * Network + URL abstraction the OpdsClient drives. The firmware implements it
@@ -13,13 +15,18 @@
  */
 namespace freeink::opds {
 
+using HttpHeader = std::pair<std::string, std::string>;
+
 // Credentials for a single request. Empty fields are omitted from the request:
 // Basic auth is sent only when username is non-empty, Bearer only when bearer
-// is non-empty (bearer takes precedence, matching the HTTP layer).
+// is non-empty (bearer takes precedence, matching the HTTP layer). `headers`
+// are the server's custom headers (e.g. an auth proxy's), sent like
+// credentials: to the request's own origin only, never to a redirect target.
 struct HttpAuth {
   std::string username;
   std::string password;
   std::string bearer;
+  std::vector<HttpHeader> headers;
 };
 
 // Outcome of a streaming GET: ok is true for a 2xx response, status carries the

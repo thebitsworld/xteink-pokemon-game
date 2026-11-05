@@ -579,6 +579,14 @@ void testCssUnit() {
   CssDecl withInline = cascadeFor(sheet, "p", "big", &inlineDecl);
   CHECK_EQ(withInline.sizePct, 200);  // inline beats class
   CHECK_EQ(withInline.weightBold, 1);
+
+  // Lengths with more fractional digits than are kept (as Calibre emits)
+  // still parse; the extra digits are not taken for the unit.
+  const CssDecl longFrac =
+      parseInlineStyle("font-size: 1.16667em; margin-top: 0.83333em; text-indent: 1.5em");
+  CHECK_EQ(longFrac.sizePct, 116);
+  CHECK_EQ(longFrac.marginTopPct, 83);
+  CHECK_EQ(longFrac.textIndentPct, 150);
 }
 
 // Builds the fixture book's stylesheet the way an app would: every manifest

@@ -31,8 +31,8 @@ port. `FREEINK_CAP_LED` remains off.
 
 The NT26 4G modem has no power enable and runs whenever the board is on. Its
 host link is the vendor's framed UART-ethernet protocol at 2 Mbaud; it does not
-answer plain AT commands. Board startup holds MRDY (GPIO21) high, the vendor
-driver's idle level. Its only other control is 4G_RST on expander P0.3.
+answer plain AT commands. The SDK does not drive its pins; its only other
+control is 4G_RST on expander P0.3.
 The Bluetooth audio module (UART2, TX48/RX47) also has no power enable or known
 sleep command. Only its amplifier (P0.4) is switchable; it stays off unless
 AudioManager plays.
@@ -103,10 +103,14 @@ For hardware power-off, call `HapticManager::getInstance().end()` if using hapti
 finish all display work, call `display.deepSleep()`,
 close/unmount storage, then call `freeink::metalio::powerOff()` from your hardware
 task. Call `AudioManager::powerDown()` and `Microphone::end()` before sleeping
-or pulsing hardware power-off. This disables the amp, waits 280 ms, and issues one high/low/high shutdown
-pulse with 100 ms intervals. The caller may repeat the pulse if USB keeps the
-device powered. Do not cut P0.5 first: it is shared by the screen and card, and
-the sample explicitly keeps it powered during panel shutdown. `powerOff()` does
+or pulsing hardware power-off. Following the vendor firmware, it disables the amp,
+holds the main and screen/card rails on, and toggles the power key (P1.3) every
+100 ms until the power-switch chip cuts power. A single pulse, or a few spaced
+ones, does not switch it off: measured on hardware, the board then stays powered
+in deep sleep. On battery the call does not return; it returns after `maxMs`
+(default 5 s) when USB keeps the device powered. Do not cut P0.5 first: it is
+shared by the screen and card, and the sample explicitly keeps it powered during
+panel shutdown. `powerOff()` does
 not replace application-level display/storage shutdown. Board helpers use the
 shared Wire bus; serialize board-control calls with your input/hardware task.
 

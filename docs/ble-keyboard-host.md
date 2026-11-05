@@ -81,6 +81,8 @@ Page-turner remotes:
 
 ```cpp
 BleHid.armSelectedPeerReconnect(addr);  // retry only the remote the user chose, bounded
+// or: connect whichever bonded remote advertises (Priority waits 3 s for addr)
+BleHid.armBondedReconnect(freeink::PickPolicy::First, nullptr);
 BleHid.connectedAddr();                 // peer on the live link ("" when none)
 
 freeink::RawButtonEvent raw;            // each button edge as the report bytes carry it
@@ -111,14 +113,20 @@ peripheral requires passkey pairing, the host exposes the six-digit code through
   upserted into a fixed array (`kMaxDiscovered`) and the HID service UUID is
   recorded when present. HID is validated at connect time so devices that put
   their name or services in scan response / extended advertising fragments can
-  still appear in the pairing UI.
-- **Connect** — runs on a dedicated FreeRTOS task: connect → discover HID →
+  still appear in the pairing UI. The scan of `armBondedReconnect()` is passive
+  and only compares each advertiser with the bonds; nothing enters the array.
+- **Connect** — runs on a dedicated FreeRTOS task: connect → discover HID (if a
+  search for the HID UUID finds nothing, all services are listed) →
   `secureConnection()` (bond) → write **Report Protocol** mode → subscribe to
   Input reports, falling back to Boot Keyboard Input (`0x2A22`) for devices that
   only expose the boot characteristic.
 - **Reports** — normalized to `[mod][k0..k5]`, diffed against the previous
   report, then translated (US QWERTY HID usages) into `KeyEvent`s. Page turners
   commonly send arrow or page-up/page-down usages, which arrive as `SpecialKey`.
+  - **Bare key arrays** — if a keyboard's Report Map has one Input item, a
+    Keyboard-page array of 8- or 16-bit slots (the Flic Duo's layout), its
+    reports of that id and length are read slot by slot from byte 0, with no
+    modifier byte.
 - **Auto-repeat** — HID sends one report per state change, so `poll()`
   synthesizes repeats for the held key after an initial delay.
 
@@ -127,5 +135,23 @@ peripheral requires passkey pairing, the host exposes the six-digit code through
 All storage is fixed-capacity: discovered devices (`kMaxDiscovered` = 24), bonds
 (`kMaxBonds` = 4), the key ring (`kKeyQueueLen` = 16) and the raw button ring
 (`kRawQueueLen` = 17, eight taps). One active connection.
-No `std::vector`/heap in the hot path. Configure NimBLE for a single connection,
+No `std::vector`/heap in the hot path. Each scan report still costs NimBLE an
+advertiser object with its payload buffer, and the callback an address string,
+during pairing scans and the bonded-reconnect scan alike. The bonded scan turns on
+the controller's duplicate filter, which cuts repeats from a device within one 5 s
+scan; its cache is bounded, so in a crowded room repeats come back. Configure NimBLE for a single connection,
 central-only, to keep its static footprint small on the C3.
+
+### Known remote button profiles
+
+`BleRemoteProfiles.h` provides allocation-free report profiles for Free3 and
+BOOX Keypage remotes. `remoteButtonProfileIndex(name)` returns an index into
+`kRemoteButtonProfiles`, or `-1` for an unknown remote. Each entry associates a
+`RawButtonEvent::code()` with a logical key; `anyReport` ignores the report ID
+when matching that entry. Free3's separate third-button tap/hold reports map to
+PageDown/PageUp; BOOX's two code sets map to Right/Left. Applications decide
+whether those keys navigate pages, chapters, or another UI.
+
+These profiles are opt-in metadata. They do not rewrite `popKey()` or
+`popRawButton()` events, and raw identities remain stable for saved bindings.
+Applications should let user bindings override profile defaults.

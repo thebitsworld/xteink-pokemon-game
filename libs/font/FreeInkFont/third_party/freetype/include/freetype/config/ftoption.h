@@ -336,10 +336,8 @@ FT_BEGIN_HEADER
    *   You would normally undefine this configuration macro when building a
    *   version of FreeType that doesn't contain a Type~1 or CFF driver.
    */
-/* FreeInkFont: opt-in (FREEINK_FONT_ENABLE_PSNAMES) together with the
- * psnames module registration in ftmodule.h — this build ships no Type 1 or
- * CFF driver, so the glyph-name machinery only serves FT_Get_Glyph_Name. */
-#if FREEINK_FONT_ENABLE_PSNAMES
+/* FreeInkFont: CFF also needs the psnames module for PostScript names. */
+#if FREEINK_FONT_ENABLE_PSNAMES || FREEINK_FONT_ENABLE_CFF
 #define FT_CONFIG_OPTION_POSTSCRIPT_NAMES
 #endif
 
@@ -359,7 +357,7 @@ FT_BEGIN_HEADER
    *   synthesize a Unicode charmap out of the glyphs found in the fonts.
    */
 /* FreeInkFont: the AGL is the bulk of psnames' ~64KB; it goes with it. */
-#if FREEINK_FONT_ENABLE_PSNAMES
+#if FREEINK_FONT_ENABLE_PSNAMES || FREEINK_FONT_ENABLE_CFF
 #define FT_CONFIG_OPTION_ADOBE_GLYPH_LIST
 #endif
 

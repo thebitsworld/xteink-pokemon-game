@@ -1,0 +1,146 @@
+#include <Arduino.h>
+#include <BoardConfig.h>
+#include <Logging.h>
+#include <Wire.h>
+#include <driver/gpio.h>
+
+#include <cassert>
+#include <cstdio>
+
+#define private public
+#include <InputManager.h>
+#undef private
+#include "../../src/gsl/EegoA4GslFirmware.h"
+
+int main() {
+  InputManager input;
+  assert(input.gslUploadFirmware());
+  assert(Wire.writes.size() == 417);
+  size_t entryIndex = 0;
+  for (const auto& tx : Wire.writes) {
+    assert(tx.size() >= 2 && tx.size() <= 65);
+    assert(entryIndex < freeink::EEGO_A4_GSL_FIRMWARE_LEN);
+    if (tx[0] == 0xF0) {
+      const auto& entry = freeink::EEGO_A4_GSL_FIRMWARE[entryIndex++];
+      assert(tx.size() == 2 && entry.reg == 0xF0 && tx[1] == entry.value);
+      continue;
+    }
+    assert((tx.size() - 1) % 4 == 0);
+    for (size_t offset = 1; offset < tx.size(); offset += 4) {
+      assert(entryIndex < freeink::EEGO_A4_GSL_FIRMWARE_LEN);
+      const auto& entry = freeink::EEGO_A4_GSL_FIRMWARE[entryIndex++];
+      const uint32_t value = uint32_t(tx[offset]) | (uint32_t(tx[offset + 1]) << 8) | (uint32_t(tx[offset + 2]) << 16) |
+                             (uint32_t(tx[offset + 3]) << 24);
+      assert(entry.reg != 0xF0 && entry.reg == tx[0] + offset - 1 && value == entry.value);
+    }
+  }
+  assert(entryIndex == freeink::EEGO_A4_GSL_FIRMWARE_LEN);
+
+  for (const int failAt : {0, 1, 16, 416}) {
+    Wire = {};
+    Wire.failAt = failAt;
+    assert(!input.gslUploadFirmware());
+    assert(Wire.writes.size() == static_cast<size_t>(failAt + 1));
+  }
+
+  Wire = {};
+  input.beginGslx680();
+  assert(input.hasTouch());
+  // A successful ACK cannot hide a later failed upload or invalid firmware magic.
+  Wire = {};
+  Wire.failAt = 25;
+  loggedErrors = 0;
+  input.beginGslx680();
+  assert(!input.hasTouch() && loggedErrors == 1 && Wire.writes.size() == 26);
+  Wire = {};
+  Wire.magicValid = false;
+  loggedErrors = 0;
+  input.beginGslx680();
+  assert(!input.hasTouch() && loggedErrors == 1);
+
+  for (const bool nack : {false, true}) {
+    Wire = {};
+    Wire.failAt = nack ? 0 : -1;
+    input.touchDataEnabled = true;
+    gpioLevels[3] = HIGH;
+    gpioHeld[3] = true;
+    assert(input.prepareForDeepSleep() == !nack);
+    assert(Wire.writes.size() == 1 && Wire.writes[0] == std::vector<uint8_t>({0xE0, 0x88}));
+    assert(Wire.ended && gpioLevels[3] == LOW && gpioHeld[3] && !input.hasTouch());
+    Wire = {};
+    input.beginGslx680();
+    assert(!gpioHeld[3] && gpioLevels[3] == HIGH && input.hasTouch());
+  }
+  // Home key / touch classification mirrors the stock firmware.
+  struct Frame {
+    uint8_t count;
+    uint16_t xWord, yWord;
+  };
+  const auto feed = [&](const Frame& f, unsigned long now) {
+    Wire = {};
+    input.touchReadAt = 0;
+    Wire.touchFrame = {f.count, 0, 0, 0, static_cast<uint8_t>(f.yWord), static_cast<uint8_t>(f.yWord >> 8),
+                       static_cast<uint8_t>(f.xWord), static_cast<uint8_t>(f.xWord >> 8)};
+    input.pollGslx680(now);
+  };
+  const auto reset = [&]() {
+    input.touchPressed = false;
+    input.touchHomeKeyDown = false;
+    input.touchHomeKeyEvent = false;
+    input.touchHomeKeyTapEvent = false;
+  };
+  // The exact key sample is the key, whatever its track id or contact count.
+  for (const auto& f : {Frame{1, 0x03a0, 0x1020}, Frame{1, 0x13a0, 0x2020}, Frame{1, 0x03a0, 0xf020},
+                        Frame{2, 0x03a0, 0x1020}}) {
+    reset();
+    feed(f, 1000);
+    assert(input.touchHomeKeyEvent && !input.touchPressed && "key sample not read as the home key");
+  }
+  // Other samples past the glass (X >= 920) are dropped: neither key nor touch.
+  for (const auto& f : {Frame{1, 0x03a7, 0x1020}, Frame{1, 0x03a0, 0x1031}, Frame{1, 0x0398, 0x1020}}) {
+    reset();
+    feed(f, 1000);
+    assert(!input.touchHomeKeyEvent && !input.touchPressed && "off-glass sample was not dropped");
+  }
+  // X 919 is on the glass.
+  reset();
+  feed(Frame{1, 0x0397, 0x1020}, 1000);
+  assert(!input.touchHomeKeyEvent && input.touchPressed);
+  // A key sample during a screen touch is ignored.
+  reset();
+  feed(Frame{1, 0x0200, 0x1100}, 1000);
+  feed(Frame{1, 0x03a0, 0x1020}, 1020);
+  assert(input.touchPressed && !input.touchHomeKeyDown && "key fired during a screen touch");
+  // A touch that follows a key press cancels it: no tap on release.
+  reset();
+  feed(Frame{1, 0x03a0, 0x1020}, 1000);
+  assert(input.touchHomeKeyDown);
+  feed(Frame{1, 0x0200, 0x1100}, 1020);
+  feed(Frame{0, 0, 0}, 1040);
+  assert(!input.touchHomeKeyTapEvent && "key press followed by a touch still tapped");
+  // A clean press and release is a tap.
+  reset();
+  feed(Frame{1, 0x03a0, 0x1020}, 1000);
+  feed(Frame{0, 0, 0}, 1060);
+  assert(input.touchHomeKeyTapEvent);
+  // Stock factory calibration: every table point maps to its own screen pixel,
+  // and samples between them interpolate inside their triangle.
+  struct Cal {
+    uint16_t rx, ry;
+    int16_t sx, sy;
+  };
+  for (const auto& c : {Cal{549, 337, 276, 306}, Cal{720, 94, 80, 168}, Cal{694, 560, 472, 168},
+                        Cal{392, 558, 472, 444}, Cal{374, 97, 80, 444}, Cal{455, 40, 34, 379}}) {
+    int16_t x = -1, y = -1;
+    InputManager::gslCalibrate(c.rx, c.ry, x, y);
+    assert(x == c.sx && y == c.sy && "stock calibration point mismatch");
+  }
+  int16_t edgeX = -1, edgeY = -1;
+  InputManager::gslCalibrate(0, 680, edgeX, edgeY);  // extrapolates to (595, 775)
+  assert(edgeX == 551 && edgeY == 767 && "calibration must clamp to the screen");
+  // A frame lands in the panel-native frame: x = portrait y, y = 551 - portrait x.
+  reset();
+  feed(Frame{1, 549, 0x1000 | 337}, 1000);
+  assert(input.touchPressed && input.touchPoint.x == 306 && input.touchPoint.y == 551 - 276);
+  std::puts("A4 firmware bytes, batching, failure handling, touch sleep and wake, home key classification, stock calibration passed");
+}

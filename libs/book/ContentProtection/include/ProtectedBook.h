@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ByteSource.h"
@@ -40,8 +41,10 @@ class ProtectedBook {
   bool isProtected() const { return protected_; }
   const std::string& lastError() const { return lastError_; }
 
-  // The 16-byte AES content key. Required before decryptEntryToSink().
-  void setContentKey(const uint8_t key[16]);
+  // The AES content key: 16 bytes (aes128-cbc schemes) or 32 bytes
+  // (aes256-cbc, e.g. Readium LCP). Required before decryptEntryToSink().
+  void setContentKey(const uint8_t* key, size_t len);
+  void setContentKey(const uint8_t key[16]) { setContentKey(key, 16); }
 
   bool isEncrypted(const std::string& name) const;
   size_t decryptedSize(const std::string& name) const;
@@ -51,15 +54,6 @@ class ProtectedBook {
   // hide in here.
   bool decryptEntryToSink(ByteSource& source, Crypto& crypto, const std::string& name,
                           ContentChunkSink sink, void* context);
-
-  // Read a non-encrypted entry fully, inflating when deflated. Capped and
-  // OOM-safe: fails (rather than aborting) when the entry is oversized or
-  // memory is unavailable.
-  bool readEntryInflated(ByteSource& source, const std::string& name, std::string* out);
-
-  // Inflates raw-deflate data (windowBits -15) into a caller-owned buffer of
-  // exactly the expected size.
-  bool inflateTo(const uint8_t* in, size_t inLen, uint8_t* out, size_t outLen);
 
  private:
   // Reserves lastError_'s buffer up front. Every error string assigned by this
@@ -75,9 +69,21 @@ class ProtectedBook {
   bool scanEncryptionXml(ByteSource& source, const ZipEntryInfo& entry);
 
   ZipScan zip_;
-  // Sorted FNV-1a hashes of the aes128-cbc encrypted entry paths.
+  // Sorted FNV-1a hashes of the encrypted entry paths (aes128-cbc or
+  // aes256-cbc; a container uses one cipher, recorded in aes256_).
   std::vector<uint64_t> encryptedUriHashes_;
-  uint8_t bookKey_[16] = {0};
+  // Sorted hashes of encrypted entries whose encryption.xml Compression
+  // property says Method="0": decrypt only, no inflate (LCP stores already
+  // uncompressed resources this way). Entries absent from here inflate, the
+  // historical default.
+  std::vector<uint64_t> storedUriHashes_;
+  // Sorted (path hash, plaintext size) from encryption.xml's Compression
+  // OriginalLength. decryptedSize() prefers it: the zip entry size is the
+  // encrypted blob's, which callers sizing a plaintext buffer cannot use.
+  std::vector<std::pair<uint64_t, uint32_t>> originalSizes_;
+  uint8_t bookKey_[32] = {0};
+  size_t keyLen_ = 0;
+  bool aes256_ = false;
   bool protected_ = false;
   bool hasKey_ = false;
   std::string lastError_;

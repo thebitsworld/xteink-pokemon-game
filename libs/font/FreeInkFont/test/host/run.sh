@@ -9,7 +9,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT HUP INT TERM
 
 FONT_FIXTURE="$SDK_ROOT/libs/book/FreeInkBook/test/fixtures/fonts/DejaVuSans.ttf"
 INCLUDES="-I$FONT_ROOT/include -I$FONT_ROOT/third_party/freetype/include -I$FONT_ROOT/third_party/stb"
-DEFINES='-DFREEINK_FONT_ENABLE_AUTOHINT=1 -DFREEINK_FONT_ENABLE_NATIVE_HINTING=1 -DFREEINK_FONT_ENABLE_MONOCHROME=1'
+DEFINES='-DFREEINK_FONT_ENABLE_AUTOHINT=1 -DFREEINK_FONT_ENABLE_NATIVE_HINTING=1 -DFREEINK_FONT_ENABLE_MONOCHROME=1 -DFREEINK_FONT_ENABLE_CFF=1'
 SANITIZERS='-fsanitize=address,undefined -fno-omit-frame-pointer'
 
 # The GSUB feature branch adds an optional companion translation unit to
@@ -30,8 +30,8 @@ else
 fi
 
 # Host toolchain, not the ESP32 cross-compiler, so this doesn't reproduce
-# target-specific codegen. Scoped to the two modules this change vendors
-# (autofit, raster) — NOT ft_smooth.c, which independently trips this same
+# target-specific codegen. Scoped to autofit, raster, and the CFF interpreter.
+# NOT ft_smooth.c, which independently trips this same
 # 2048 limit (a ~16.7 KB frame in gray_convert_glyph, present already in
 # main with none of these flags set) and is a pre-existing, unrelated finding
 # tracked outside this change, not something introduced here.
@@ -41,6 +41,11 @@ cc -std=c99 -O2 $INCLUDES $DEFINES $FRAME_CHECK -c "$FONT_ROOT/src/freetype/ft_a
 # shellcheck disable=SC2086
 cc -std=c99 -O2 $INCLUDES $DEFINES $FRAME_CHECK -c "$FONT_ROOT/src/freetype/ft_raster.c" \
   -o "$BUILD_DIR/raster-stack-check.o"
+# CFF composites recursively enter the interpreter; a large frame can exhaust
+# the device render task even when a simple Latin glyph renders successfully.
+# shellcheck disable=SC2086
+cc -std=c99 -O2 $INCLUDES $DEFINES $FRAME_CHECK -c "$FONT_ROOT/src/freetype/ft_psaux.c" \
+  -o "$BUILD_DIR/psaux-stack-check.o"
 
 for source in "$FONT_ROOT"/src/freetype/*.c; do
   object="$BUILD_DIR/$(basename "$source" .c).o"
@@ -54,6 +59,20 @@ c++ -std=c++17 $INCLUDES $DEFINES $SANITIZERS \
   "$SCRIPT_DIR/FtFontRenderOptionsTest.cpp" "$BUILD_DIR"/ft_*.o \
   -o "$BUILD_DIR/ftfont-render-options-test"
 "$BUILD_DIR/ftfont-render-options-test" "$FONT_FIXTURE"
+
+# An optional real CFF fixture verifies inspection and rendering without
+# committing a font whose redistribution terms are unknown.
+if [ -n "${FREEINK_FONT_CFF_FIXTURE_DIR:-}" ]; then
+  # shellcheck disable=SC2086
+  c++ -std=c++17 $INCLUDES $DEFINES $SANITIZERS \
+    "$FONT_ROOT/src/FtFont.cpp" "$FONT_ROOT/src/FontAlloc.c" $GSUB_SOURCE \
+    "$SCRIPT_DIR/FtFontCffTest.cpp" "$BUILD_DIR"/ft_*.o \
+    -o "$BUILD_DIR/ftfont-cff-test"
+  for font in "$FREEINK_FONT_CFF_FIXTURE_DIR"/*.ttf "$FREEINK_FONT_CFF_FIXTURE_DIR"/*.otf; do
+    [ -f "$font" ] || continue
+    "$BUILD_DIR/ftfont-cff-test" "$font"
+  done
+fi
 
 # A consumer that defines none of the three flags must still build AND RUN
 # clean: Default rendering still works, and setRenderOptions() reports

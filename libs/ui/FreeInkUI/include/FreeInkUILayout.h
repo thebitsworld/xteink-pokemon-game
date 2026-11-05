@@ -132,9 +132,14 @@ inline void layoutLinear(Rect rect, Axis axis, int16_t gap, uint8_t count,
       resolveToken, user);
 }
 
+enum class LayoutKind : uint8_t { Linear, Grid };
+
 struct LayoutNode {
   const char* id = nullptr;
   Axis axis = Axis::Column;
+  LayoutKind kind = LayoutKind::Linear;
+  uint8_t columns = 1, rows = 1;
+  uint8_t column = 0, row = 0, columnSpan = 1, rowSpan = 1;
   int16_t gap = 0;
   LayoutLength length = LayoutLength::flexible();
   const LayoutNode *children = nullptr;
@@ -148,6 +153,35 @@ inline void layoutTree(const LayoutNode& node, LayoutRect rect, Emit&& emit,
   if (!node.children || node.childCount == 0) {
     if (node.id && node.id[0] != '\0')
       emit(node.id, rect);
+    return;
+  }
+
+  if (node.kind == LayoutKind::Grid) {
+    if (!node.columns || !node.rows || rect.empty())
+      return;
+    const int32_t gap = node.gap > 0 ? node.gap : 0;
+    const int32_t width = rect.width - gap * (node.columns - 1);
+    const int32_t height = rect.height - gap * (node.rows - 1);
+    if (width <= 0 || height <= 0)
+      return;
+    for (uint8_t i = 0; i < node.childCount; ++i) {
+      const auto &child = node.children[i];
+      if (!child.columnSpan || !child.rowSpan ||
+          child.column + child.columnSpan > node.columns ||
+          child.row + child.rowSpan > node.rows)
+        continue;
+      const int32_t x =
+          width * child.column / node.columns + gap * child.column;
+      const int32_t y = height * child.row / node.rows + gap * child.row;
+      const int32_t right =
+          width * (child.column + child.columnSpan) / node.columns +
+          gap * (child.column + child.columnSpan - 1);
+      const int32_t bottom = height * (child.row + child.rowSpan) / node.rows +
+                             gap * (child.row + child.rowSpan - 1);
+      layoutTree(child,
+                 LayoutRect{rect.x + x, rect.y + y, right - x, bottom - y},
+                 emit, resolveToken, user);
+    }
     return;
   }
 

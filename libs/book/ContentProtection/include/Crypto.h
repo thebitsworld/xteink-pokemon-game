@@ -38,6 +38,54 @@ class Crypto {
   virtual bool aes128CbcDecrypt(const uint8_t key[16], const uint8_t iv[16], const uint8_t* in,
                                 size_t len, uint8_t* out) = 0;
 
+  // AES-256-CBC decrypt, same contract. Defaulted (unsupported) so existing
+  // backends keep compiling; LCP content requires a backend that overrides it.
+  virtual bool aes256CbcDecrypt(const uint8_t key[32], const uint8_t iv[16], const uint8_t* in,
+                                size_t len, uint8_t* out) {
+    (void)key;
+    (void)iv;
+    (void)in;
+    (void)len;
+    (void)out;
+    return false;
+  }
+
+  // --- device key agreement (LCP wrapped key delivery) ----------------------
+  // X25519 per RFC 7748 (little-endian raw keys). Defaulted (unsupported) so
+  // existing backends keep compiling.
+  virtual bool x25519MakeKey(uint8_t priv[32], uint8_t pub[32]) {
+    (void)priv;
+    (void)pub;
+    return false;
+  }
+  virtual bool x25519SharedSecret(const uint8_t priv[32], const uint8_t peerPub[32], uint8_t out[32]) {
+    (void)priv;
+    (void)peerPub;
+    (void)out;
+    return false;
+  }
+  // HKDF-SHA256 with an empty salt.
+  virtual bool hkdfSha256(const uint8_t* ikm, size_t ikmLen, const uint8_t* info, size_t infoLen, uint8_t* out,
+                          size_t outLen) {
+    (void)ikm;
+    (void)ikmLen;
+    (void)info;
+    (void)infoLen;
+    (void)out;
+    (void)outLen;
+    return false;
+  }
+  virtual bool aes256GcmDecrypt(const uint8_t key[32], const uint8_t iv[12], const uint8_t* in, size_t len,
+                                const uint8_t tag[16], uint8_t* out) {
+    (void)key;
+    (void)iv;
+    (void)in;
+    (void)len;
+    (void)tag;
+    (void)out;
+    return false;
+  }
+
   virtual void sha1(const uint8_t* data, size_t len, uint8_t out[20]) = 0;
   virtual void sha256(const uint8_t* data, size_t len, uint8_t out[32]) = 0;
 

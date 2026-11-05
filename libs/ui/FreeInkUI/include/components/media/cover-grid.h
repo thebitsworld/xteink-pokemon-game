@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "../../FreeInkUICore.h"
 
 namespace freeink {
@@ -70,6 +72,34 @@ struct CoverGridProps {
   CoverGridCoverPainter coverPainter = nullptr;
   void* coverPainterUserData = nullptr;
 };
+
+inline bool fitCoverGrid(Rect rect, int count, int lineHeight,
+                         int maxCoverHeight, CoverGridProps &grid) {
+  if (rect.empty() || count <= 0 || grid.columns == 0 || lineHeight <= 0)
+    return false;
+  grid.gap = std::max<int16_t>(0, grid.gap);
+  grid.rowGap = grid.rowGap < 0 ? grid.gap : grid.rowGap;
+  grid.labelHeight = static_cast<int16_t>(
+      lineHeight * (grid.titleText.maxLines ? grid.titleText.maxLines : 1));
+  const int labelSpace = grid.labelHeight + grid.labelGap + 8;
+  const int desiredRows = (count + grid.columns - 1) / grid.columns;
+  // Keep full rows visible; short landscape slots scroll rather than cropping
+  // labels.
+  const int fittingRows =
+      (rect.height + grid.rowGap) / (24 + labelSpace + grid.rowGap);
+  const int rows = std::max(1, std::min(desiredRows, fittingRows));
+  const int rowHeight = (rect.height - (rows - 1) * grid.rowGap) / rows;
+  const int cellWidth =
+      (rect.width - (grid.columns - 1) * grid.gap) / grid.columns;
+  const int height = std::min(
+      {maxCoverHeight, rowHeight - labelSpace, (cellWidth - 12) * 3 / 2});
+  if (height < 1)
+    return false;
+  grid.coverSize = {static_cast<int16_t>(height * 2 / 3),
+                    static_cast<int16_t>(height)};
+  grid.rowHeight = static_cast<int16_t>(height + labelSpace);
+  return true;
+}
 
 inline uint16_t coverGridVisibleCells(Rect rect, const uint8_t columns, const int16_t rowHeight, const int16_t rowGap) {
   if (columns == 0 || rowHeight <= 0) return 0;

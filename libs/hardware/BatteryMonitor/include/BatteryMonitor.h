@@ -12,7 +12,8 @@
 //     BQ27220 gauge (+ optional BQ25896 charger) over I2C; the ADC pin/divider are
 //     ignored. Used by X3 and LilyGo T5 S3. Config comes from
 //     BoardConfig::ACTIVE.batteryGauge, and gauge-vs-ADC is chosen at *runtime*
-//     (gaugeAddr != 0), so X3 (gauge) and X4 (ADC) work from one C3 binary.
+//     (gaugeAddr != 0), so X3 (gauge) and X4 (ADC) work from one C3 binary. A
+//     CW2015 is probed once; when it does not answer, the ADC pin is used.
 class BatteryMonitor {
 public:
     static constexpr int8_t PIN_NONE = -1;
@@ -27,6 +28,9 @@ public:
         uint16_t millivolts = 0;
         bool charging = false;
         bool externalPower = false;
+        bool chargeCompleteKnown = false;
+        bool chargeComplete = false;
+        int16_t chargerStatus = -1;  // Raw charger register, or -1 when not sampled/unknown.
         // Raw M5PM1 telemetry for diagnostics; -1 when not read (non-PM1 boards
         // or failed I/O). VIN is the DC input rail, 5VINOUT the bidirectional
         // USB-C rail, powerSource the PM1's PWR_SRC bitmap (reg 0x04 [2:0]:
@@ -48,8 +52,8 @@ public:
 
     // Like readPercentage(), but reports whether the read succeeded. An I2C gauge
     // can fail transiently; on failure this returns false and leaves `out`
-    // unchanged, so a caller can keep its last good value. The ADC path always
-    // succeeds.
+    // unchanged, so a caller can keep its last good value. Picco also rejects
+    // missing/implausible ADC voltage rather than interpreting it as empty.
     bool readPercentageChecked(uint16_t& out) const;
 
     // Read every battery field the active board can report. `supported` is false
@@ -64,8 +68,9 @@ public:
     double readVolts() const;
 
     // True when the battery is actively charging. Sources by backend:
-    //   * ADC boards: the MCP73832-style charge-status pin (LOW = charging);
-    //     always false when no charge-status pin is configured.
+    //   * ADC boards: the MCP73832-style charge-status pin (LOW = charging),
+    //     else an I2C charger IC's CHRG_STAT when one is configured (Picco's
+    //     SGM41562); false when neither exists.
     //   * Gauge boards: a charger IC's status (BQ25896 CHRG_STAT) when present,
     //     else the gauge's own Current() sign (BQ27220, positive = charging), so
     //     a board with a gauge but no charger IC (e.g. X3) still reports it.
@@ -75,9 +80,9 @@ public:
     //
     // This is NOT isCharging(): a full battery stops charging while still
     // plugged in, so isCharging() goes false with the cable still attached.
-    // Only a source that reports the input rail itself can answer this, so it
-    // is currently the BQ25896's REG0B — VBUS_STAT[7:5] plus PG_STAT — and
-    // nothing else. Boards without that charger IC cannot observe it.
+    // Only a source that reports the input rail itself can answer this: the
+    // BQ25896's REG0B (VBUS_STAT[7:5] plus PG_STAT), the SGM41562's REG08
+    // input-present bit, or the M5 PMIC. Boards without one of those cannot observe it.
     //
     // `known` (optional, out) is set false when the board has no way to tell,
     // or the read failed. Callers MUST branch on it: a bare false means "no
@@ -103,6 +108,19 @@ public:
     // FullChargeCapacity() reads more than a quarter above it. One short step per call,
     // about 8 s in all: call from the task that owns the gauge until it returns false.
     static bool loadDesignCapacity();
+
+    // Cuts the battery off from the system through the charger IC's BATFET
+    // (ship mode) — a full power-off the MCU cannot undo; what turns the device
+    // back on is up to the charger. SGM41562 only (REG06 bit 5). Returns false
+    // when the board has no such charger or the I2C write failed.
+    static bool enterShipMode();
+
+    // One-time charger setup at boot. SGM41562 (Onyx Picco): replays the stock
+    // firmware's init (FUN_4200a2d0) — including the 4.35 V charge voltage for the
+    // Picco's high-voltage cell — and only when REG0B reads 0, as stock does.
+    // Returns false (and changes nothing) on other boards, or if the charger
+    // can't be reached.
+    static bool configureCharger();
 
 private:
     bool hasAdcBackend() const;
