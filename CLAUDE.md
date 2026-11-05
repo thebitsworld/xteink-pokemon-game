@@ -13,8 +13,12 @@ is in git history (before 2026-10-08).
   64 KB slot in `spiffs`; hyphenation packs from `.crossink/hyphenation`. `scripts/package_languages.py` runs
   `fit_device_cache` (`generate_language_template.py`): translations that overflow the slot, Pokemon strings first, stay
   out of the packaged file and show in English (the raw files in `lib/I18n/translations` for AR, BE, KK, RU, UK do not
-  install as they are). No download server for this fork: `CROSSINK_ASSET_BASE_URL` is unset, so Wi-Fi downloads report
-  unavailable and languages go on the SD card (release assets `xteink-pokemon-languages-*.zip`, `-hyphenation-*.zip`).
+  install as they are). No download server for this fork (`CROSSINK_ASSET_BASE_URL` unset): `xteink-pokemon-languages.zip`
+  (`package_languages.py --bundle-output`, with `.sha256`) on each release holds every file; `src/LanguageBundle.*`
+  unpacks it at boot from the SD root or `/.crosspoint/language-bundle.zip` by `.crossink/bundle-manifest.txt` and
+  re-installs the saved language; `LanguageBundleDownloadActivity` is what every `NetworkBootTarget::DOWNLOAD_ASSETS`
+  opens. It downloads from `releases/latest`, which skips prereleases, so the Wi-Fi path has never run against GitHub
+  until a stable release carries the ZIP. Test the SD path with `run_simulator_smoke_test.py --language-bundle <zip>`.
   `pokemon-*` envs do not set `CROSSINK_SCALABLE_FONTS`: upstream's EPUB embedded fonts and UI fallback font are compiled
   out. Unit tests not passing: PokemonEffectArtTest (needs PIL), ui_font_errors and OpdsServerStoreTest (do not link:
   `CrossPointSettings::defaultIndexingMethod`).

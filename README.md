@@ -25,7 +25,7 @@ Only active reading counts — leaving a book open without turning pages does no
 - **Applications:** 52 small games and tools (Chess, Go, Xiangqi, Tien Len, Caro, Hearts, Sudoku, Logic Puzzles, a calculator, a desk clock and more, many with a How to play guide), installed from the on-device App Store over Wi-Fi or from the `xteink-pokemon-apps.zip` attached to each release. See [Applications](docs/applications.md).
 - **Game Boy (X4 Pro only):** open a `.gb` ROM you own from the game library or the file browser and play it. See [Game Boy](docs/gameboy.md).
 - **Bluetooth controllers and page turners:** pair a Bluetooth LE gamepad, keyboard or page turner in Settings → System → Bluetooth. On the X4 Pro and X4 Classic it works everywhere (menus, the Pokémon game, apps, the Game Boy); on the X3/X4, which have little memory, it turns pages while you read.
-- **Languages:** English and Vietnamese are built in; the other 26 languages are files you copy to the SD card (`xteink-pokemon-languages-*.zip` in each release). See [Installation](docs/installation.md#step-27--other-languages-optional).
+- **Languages:** English and Vietnamese are built in; the other 26 languages come in `xteink-pokemon-languages.zip` (Settings → System → Device → Download more languages, or copy it to the root of the SD card). See [Installation](docs/installation.md#step-27--other-languages-optional).
 - **Nearby Sync:** send your Pokémon save, reading stats and the book you are reading to another reader nearby, without Wi-Fi.
 
 ## Screenshots

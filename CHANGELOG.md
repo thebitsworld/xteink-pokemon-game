@@ -8,7 +8,7 @@
 
 - OPDS Browser moved to File Transfer. Its place on the Home screen goes to Plugins when they are switched on.
 - Long-press behaviour for the front buttons is now set per button in Controls; your earlier choice carries over.
-- Languages: `language-pack.bin` is gone. English and Vietnamese stay built in; for any other language, copy its `.yaml` from the languages ZIP in this release to `.crossink/languages` on the SD card and pick it in Settings > Language. Hyphenation packs go in `.crossink/hyphenation`. Readers using another language show English until it is installed. In Arabic, Belarusian, Kazakh, Russian and Ukrainian, some Pokemon text stays in English to fit the reader's language storage.
+- Languages: `language-pack.bin` is gone. English and Vietnamese stay built in; every other language and hyphenation pack comes in `xteink-pokemon-languages.zip`. Download it from Settings > System > Device > Download more languages, or copy it to the root of the SD card: the reader installs it by itself and returns to the language you had chosen. In Arabic, Belarusian, Hebrew, Kazakh, Russian and Ukrainian, some Pokemon text stays in English to fit the reader's language storage.
 - Game Boy (X4 Pro): Game Boy Color games run close to full speed. The emulator's busiest code now runs from the reader's fast internal memory instead of flash: Pokemon Gold takes about 8 ms a frame instead of about 19 ms, and went from 80-86% to 98-99% of full speed on a real X4 Pro with Bluetooth off. This uses about 40 KB of internal memory.
 
 ### Fixed

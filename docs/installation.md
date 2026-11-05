@@ -107,17 +107,18 @@ reader" and does not open.
 
 ## Step 2.7 — Other languages (optional)
 
-English and Vietnamese are built in. Every other menu language is a file on the SD card:
+English and Vietnamese are built in. The other menu languages, and hyphenation for German, Spanish, French, Italian,
+Polish, Portuguese, Russian, Swedish and Ukrainian books, come in one file of about 0.8 MB that you install once:
 
-1. Download `xteink-pokemon-languages-v<version>.zip` from the same release.
-2. Copy your language's `.yaml` from its `.crossink/languages` folder to `.crossink/languages` on the SD card.
-3. Pick it in Settings > Language. The reader installs it and restarts.
+- **Over Wi-Fi:** Settings > System > Device > **Download more languages**. The reader joins Wi-Fi, downloads the file,
+  checks it and restarts to install it.
+- **From an SD card:** download `xteink-pokemon-languages.zip` from the same release, copy it to the **root** of the SD
+  card without unpacking it and restart the reader. It installs the files by itself and removes the ZIP.
 
-Hyphenation for German, Spanish, French, Italian, Polish, Portuguese, Russian, Swedish and Ukrainian books works the
-same way: copy the `.cphyph` file from `xteink-pokemon-hyphenation-v<version>.zip` to `.crossink/hyphenation` on the SD
-card. Downloading languages over Wi-Fi is not available in this firmware. Text added in newer firmware shows in English
-until you copy that release's file, and in Arabic, Belarusian, Kazakh, Russian and Ukrainian some Pokemon text stays in
-English to fit the reader's language storage.
+Then pick your language in Settings > Language. If you already had another language chosen, the reader goes back to it
+by itself. The files take about 2.2 MB on the card, in `.crossink/languages` and `.crossink/hyphenation`. Text added in
+newer firmware shows in English until you install that release's file, and in Arabic, Belarusian, Hebrew, Kazakh,
+Russian and Ukrainian some Pokemon text stays in English to fit the reader's language storage.
 
 ## Your saves are safe
 

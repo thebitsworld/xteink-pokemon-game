@@ -5,7 +5,7 @@ nav_order: 11
 
 # Languages
 
-> In this firmware, downloading languages over Wi-Fi is not available: copy the files to the SD card as described below.
+> In this firmware, every language and hyphenation pack comes in one file, `xteink-pokemon-languages.zip`: download it from Settings or copy it to the root of the SD card, as [Installation](installation.md#step-27--other-languages-optional) describes. Single files you add to `.crossink/languages` by hand work as described below.
 
 CrossInk includes English. You can download other menu languages on the reader
 or install them from your SD card. You can also edit a translation or create your
