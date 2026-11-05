@@ -48,7 +48,7 @@ is in git history (before 2026-10-08).
   it with the `unchanged` column. Beyond ~5/s only a shorter waveform helps, which ghosts.
 - Game Boy emulation speed (1.8.3): one emulated frame in three is drawn (DRAW_EVERY, each core's
   frame_skip steered per frame); Walnut-CGB's ~50 KB context goes to internal RAM when 48 KB stay free,
-  its TU is -O2. Pokemon Red 100% (6 ms a frame). Pokemon Gold walking the overworld at D40 measures ~83% on the user's X4 Pro (2026-10-26, serial `perf:` lines, ~80 samples: v1.9.1 82.6%, feat/bluetooth 84.3%; ~19 ms a frame, draw ~23 ms) - the older 96-97% was a lighter scene. Ink-boy 1.2.0's skip-the-1-ms-sleep-while-behind measured no gain (83.2%) and was reverted; its direct ROM 16/32-bit reads stay. BT on puts the Walnut state in PSRAM (largest internal block ~34 KB) at about the same speed. GBC colours: 17 grey levels as a
+  its TU is -O3. Its hot path (~40 KB: `WALNUT_HOT` in `src/walnut_cgb_impl.c`) runs from IRAM, since the prebuilt S3 core has a 16 KB instruction cache and DIO flash: Pokemon Gold on the user's X4 Pro 2026-11-05 (gameboy-perf.txt, 88 s each, walnut-internal, BT off) 98% at Pulse polish, 99% at D40, 7.7-8.2 ms a frame, draw ~15 ms; the user reports BT on also runs well, no figure. Cost: 40.6 KB of internal RAM in pokemon-x4-pro. With the radio up that left no block for the emulator task's 12 KB stack ("Could not start the emulator"), so the NimBLE host's memory is in PSRAM there (`--wrap=nimble_platform_mem_*`, `CROSSINK_NIMBLE_HOST_PSRAM`; the framework's sdkconfig.h defines MEM_ALLOC_MODE_INTERNAL, so the EXTERNAL flag alone does nothing): radio up, at Home, 64.6 KB free, largest block 31.7 KB (35.7/25.6 before). Before IRAM: Pokemon Red 100% (6 ms a frame). Pokemon Gold walking the overworld at D40 measured ~83% on the user's X4 Pro (2026-10-26, serial `perf:` lines, ~80 samples: v1.9.1 82.6%, feat/bluetooth 84.3%; ~19 ms a frame, draw ~23 ms) - the older 96-97% was a lighter scene. Ink-boy 1.2.0's skip-the-1-ms-sleep-while-behind measured no gain (83.2%) and was reverted; its direct ROM 16/32-bit reads stay. BT on puts the Walnut state in PSRAM (largest internal block ~34 KB) at about the same speed. GBC colours: 17 grey levels as a
   4x4 Bayer dither (DMG uses 0/4/12/16); SETTINGS > Colours Contrast (default; night scenes - narrow
   palette span - stretched onto levels 4..16), Smooth (17 levels, the tester found it busy), Brightness.
   Settings menu taps: orientation changes wait for the finger to lift, and the touch registry is cleared
@@ -243,6 +243,10 @@ python3 scripts/run_simulator_smoke_test.py --no-build --env pokemon-x4-pro-simu
   `{"type": "tool", "optional": true, "owner": "platformio", "version": "~4.41101.0"}` and delete that
   folder's `__pycache__` (the pinned scons 4.8.1 mirror lacks `SCons/Tool/FortranCommon.py`, so linking
   `firmware.elf` fails).
+- If `pio run` fails with `KeyError: 'cwd'`: the env's `.pio/libdeps/<env>/*.pio-link` files lack it; add
+  `"cwd": "<repo path>"` to each and run again (seen 2026-11-05 on a fresh clone, cause not found).
+- `pio run -e x4-pro` fails on `BITTER_*_FONT_ID` in `lib/ScalableFont/ScalableBuiltins.cpp` (2026-11-05, in code
+  the Game Boy work did not touch); CI releases build `pokemon-x4-pro` and `pokemon-x4-classic`, which do link.
 - If `pokemon-x3` fails linking with "gap between .eh_frame and .flash.tdata": add
   `.rodata.__func__.0`, `.rodata.control_construct.str1.4` and `.rodata.tlsf_realloc.str1.4` to the
   `*libheap.a:tlsf.*(...)` rule in

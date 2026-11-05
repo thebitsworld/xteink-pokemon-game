@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Changed
+
+- Game Boy (X4 Pro): Game Boy Color games run close to full speed. The emulator's busiest code now runs from the reader's fast internal memory instead of flash: Pokemon Gold takes about 8 ms a frame instead of about 19 ms, and went from 80-86% to 98-99% of full speed on a real X4 Pro with Bluetooth off. This uses about 40 KB of internal memory.
+
+### Fixed
+
+- X4 Pro: Bluetooth keeps most of its memory in the larger external memory, about 29 KB less in the internal memory, so that a Game Boy game still opens with Bluetooth on and a controller connected.
+
 ## [2.0.2-beta.1-x4pro] - 2026-10-31
 
 > **Test build for the X4 Pro - install it only if you want to help test.** Stay on v2.0.1 for everyday use. It only changes the Game Boy emulator for Game Boy Color games (and Game Boy games on the same emulator); everything else is the same as 2.0.1. It was built and checked on a PC (the new drawing gives the same picture as before, line for line, on the dmg-acid2 and cgb-acid2 test ROMs) but not yet tried on a real X4 Pro. There is no X3/X4 or X4 Classic file in this release.
