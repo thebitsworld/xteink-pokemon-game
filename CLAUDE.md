@@ -7,6 +7,17 @@ is in git history (before 2026-10-08).
 
 ## Where things stand (2026-10-19, v1.9.1)
 
+- CrossInk v2.0.0-rc merged on branch `merge/crossink-2.0.0-rc` (2026-11-05, 4374264d6), freeink-sdk at 684ea60. The
+  language pack was kept by the user's choice over upstream's SD languages, flash cache and hyphenation packs (removed:
+  `lib/LanguageCache`, `HyphenationPack`, `AssetCacheStorage`, `AssetCatalog`, asset downloads), so `I18n`, `gen_i18n.py`
+  and `LanguageRegistry.cpp` stay ours and those files will conflict again on the next upstream merge. The pack is now
+  1.3 MB, over the X3's 1 MB `spiffs` (undecided: the user has not chosen what an X3 gets). `pokemon-x4-pro` and the
+  others do not set `CROSSINK_SCALABLE_FONTS`, so upstream's EPUB embedded fonts and UI fallback font are compiled out.
+  Upstream's smoke scenarios for hyphenation packs and release notes are stubbed in `SimulatorSmokeTest.cpp`, and
+  `run_simulator_smoke_test.py` passes only this fork's environment, so upstream's other `--` scenarios do not run.
+  Unit tests not passing: PokemonEffectArtTest (needs PIL), ui_font_errors and OpdsServerStoreTest (do not link:
+  `CrossPointSettings::defaultIndexingMethod`).
+
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
   X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.1; latest release `v1.9.1` (stable). Its
@@ -245,8 +256,12 @@ python3 scripts/run_simulator_smoke_test.py --no-build --env pokemon-x4-pro-simu
   `firmware.elf` fails).
 - If `pio run` fails with `KeyError: 'cwd'`: the env's `.pio/libdeps/<env>/*.pio-link` files lack it; add
   `"cwd": "<repo path>"` to each and run again (seen 2026-11-05 on a fresh clone, cause not found).
-- `pio run -e x4-pro` fails on `BITTER_*_FONT_ID` in `lib/ScalableFont/ScalableBuiltins.cpp` (2026-11-05, in code
-  the Game Boy work did not touch); CI releases build `pokemon-x4-pro` and `pokemon-x4-classic`, which do link.
+- **Do not build `-e x4-pro`.** It fails on `BITTER_*_FONT_ID` in `lib/ScalableFont/ScalableBuiltins.cpp` anyway, and
+  worse: with `lib_ignore = BLE` and no Bluetooth library, pioarduino edits the shared
+  `framework-arduinoespressif32-libs/esp32s3/pioarduino-build.py` and removes the `bt` includes, so every later S3
+  build fails on `esp_bt.h`. Repair: copy `pioarduino-build.py.esp32s3` over it. CI builds only the `pokemon-*` envs.
+- The simulator also needs `pkg-config` and `libwolfssl-dev` (since CrossInk 2.0.0). `crossink-simulator` is unpinned:
+  upstream's pinned commit is not fetchable.
 - If `pokemon-x3` fails linking with "gap between .eh_frame and .flash.tdata": add
   `.rodata.__func__.0`, `.rodata.control_construct.str1.4` and `.rodata.tlsf_realloc.str1.4` to the
   `*libheap.a:tlsf.*(...)` rule in
