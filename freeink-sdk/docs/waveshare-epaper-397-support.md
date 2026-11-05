@@ -114,7 +114,7 @@ Bring-up on a unit, reading an EPUB end to end:
   be coarse until it has seen a full charge cycle.
 * **SPI clock** — 20 MHz is the vendor value and it is NOT worth raising: a page
   turn measures `wait=407ms` (BW waveform) + `gray_display=226ms` against
-  `display=24ms` of actual SPI traffic, so the 40 MHz default would save ~10 ms of
+  `display=24ms` of actual SPI traffic, so a 40 MHz clock would save ~10 ms of
   910. The panel's waveforms are the floor here, not the bus.
 * SHTC3 has no `EnvironmentSensor` backend yet (`tempHumidityAddr` is left 0), and
   the ES8311 codec / NS4150B amp are wired but unused (`NO_AUDIO`).

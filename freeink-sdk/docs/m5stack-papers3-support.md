@@ -69,7 +69,11 @@ touch paging). Firmware without touch page-turn support is unusable here.
   power-off path). Idle level is LOW.
 - **Wake-from-off via RTC**: the BM8563's INT line feeds the PMS150G, not an
   ESP32 GPIO — set an RTC alarm before powering off.
-- **USB detect** — GPIO5, HIGH = USB present (`BoardProfile.usbDetect`).
+- **USB detect** — GPIO5, **active-LOW**: the pin is driven low while a cable is
+  attached (measured on hardware: floating, pull-up and pull-down all read 0 with
+  USB connected and the battery full). `BoardProfile.usbDetectActiveHigh = false`
+  carries that, and `BatteryMonitor::isExternalPowerPresent()` answers from it —
+  which also covers "cable in, battery full", where `isCharging()` is false.
 
 ## Peripherals
 
@@ -98,7 +102,7 @@ board_build.arduino.memory_type = qio_opi
 build_flags = -DBOARD_HAS_PSRAM -DFREEINK_DEVICE_PAPERS3=1
 lib_deps =
   BoardPaperS3=symlink://freeink-sdk/libs/hardware/BoardPaperS3
-  m5stack/M5GFX @ 0.2.20
+  m5stack/M5GFX @ 0.2.33
 ```
 
 No `-DFREEINK_LGFX_EPD_CONFIG` is needed: `FREEINK_DEVICE_PAPERS3` selects

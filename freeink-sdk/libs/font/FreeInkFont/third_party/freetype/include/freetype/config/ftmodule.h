@@ -7,12 +7,17 @@
  * (FT_Get_Glyph_Name / AGL Unicode synthesis), which a codepoint-driven cmap
  * renderer never performs — at ~64KB of text (mostly the Adobe Glyph List)
  * it would be the largest module in this build, with no TrueType
- * functionality attached. No CFF/Type1/BDF/etc. */
-#if FREEINK_FONT_ENABLE_PSNAMES
+ * functionality attached. CFF needs psnames, psaux, and pshinter. */
+#if FREEINK_FONT_ENABLE_PSNAMES || FREEINK_FONT_ENABLE_CFF
 FT_USE_MODULE( FT_Module_Class, psnames_module_class )
 #endif
 FT_USE_MODULE( FT_Module_Class, sfnt_module_class )
 FT_USE_MODULE( FT_Driver_ClassRec, tt_driver_class )
+#if FREEINK_FONT_ENABLE_CFF
+FT_USE_MODULE( FT_Module_Class, psaux_module_class )
+FT_USE_MODULE( FT_Module_Class, pshinter_module_class )
+FT_USE_MODULE( FT_Driver_ClassRec, cff_driver_class )
+#endif
 FT_USE_MODULE( FT_Renderer_Class, ft_smooth_renderer_class )
 #if FREEINK_FONT_ENABLE_MONOCHROME
 FT_USE_MODULE( FT_Renderer_Class, ft_raster1_renderer_class )

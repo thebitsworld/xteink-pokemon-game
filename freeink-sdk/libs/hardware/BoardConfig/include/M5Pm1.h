@@ -45,16 +45,20 @@ constexpr int SCL = FREEINK_M5PM1_SCL;
 constexpr uint32_t I2C_HZ = 100000;
 
 // --- registers (official M5PM1 datasheet) ---
-constexpr uint8_t REG_PWR_CFG = 0x06;     // [3]BOOST_EN [2]LDO_EN [1]DCDC_EN [0]CHG_EN
-                                          // auto-clears to 0 on reset/download/shutdown
-constexpr uint8_t REG_WAKE_SRC = 0x05;    // latched wake source; write 0 to clear
-constexpr uint8_t REG_I2C_CFG = 0x09;     // [4]SPD(0=100k) [3:0]SLP_TO (0=no idle sleep)
-constexpr uint8_t REG_WDT_CNT = 0x0A;     // seconds; 0 disables the PMIC watchdog
-constexpr uint8_t REG_SYS_CMD = 0x0C;     // KEY=0xA in high nibble; 1=off, 2=reset, 3=download
-constexpr uint8_t REG_GPIO_MODE = 0x10;   // 1 = output
-constexpr uint8_t REG_GPIO_OUT = 0x11;    // output level
-constexpr uint8_t REG_GPIO_DRV = 0x13;    // 0 = push-pull
+constexpr uint8_t REG_PWR_CFG = 0x06;   // [3]BOOST_EN [2]LDO_EN [1]DCDC_EN [0]CHG_EN
+                                        // auto-clears to 0 on reset/download/shutdown
+constexpr uint8_t REG_WAKE_SRC = 0x05;  // latched wake source; write 0 to clear
+constexpr uint8_t REG_HOLD_CFG = 0x07;
+constexpr uint8_t REG_I2C_CFG = 0x09;    // [4]SPD(0=100k) [3:0]SLP_TO (0=no idle sleep)
+constexpr uint8_t REG_WDT_CNT = 0x0A;    // seconds; 0 disables the PMIC watchdog
+constexpr uint8_t REG_SYS_CMD = 0x0C;    // KEY=0xA in high nibble; 1=off, 2=reset, 3=download
+constexpr uint8_t REG_GPIO_MODE = 0x10;  // 1 = output
+constexpr uint8_t REG_GPIO_OUT = 0x11;   // output level
+constexpr uint8_t REG_GPIO_DRV = 0x13;   // 0 = push-pull
+constexpr uint8_t REG_GPIO_PULL0 = 0x14;
 constexpr uint8_t REG_GPIO_FUNC0 = 0x16;  // 0 = plain GPIO (vs alt function)
+constexpr uint8_t REG_GPIO_WAKE_EN = 0x18;
+constexpr uint8_t REG_GPIO_WAKE_CFG = 0x19;
 constexpr uint8_t REG_PWM0_DUTY_L = 0x30;
 constexpr uint8_t REG_PWM_FREQ_L = 0x34;
 constexpr uint8_t REG_BTN_STATUS = 0x48;  // [7] event (read-clear), [0] physical level
@@ -71,6 +75,8 @@ constexpr uint8_t BOOST_EN = 1 << 3;  // 5VINOUT / Grove boost
 constexpr uint8_t LED_R_EN = 1 << 4;  // Paper Mono: red leg of the discrete RGB LED
 
 constexpr uint8_t WAKE_PWR_BUTTON = 1 << 2;
+constexpr uint8_t WAKE_EXTERNAL = 1 << 5;
+constexpr uint8_t LDO_HOLD = 1 << 5;
 constexpr uint8_t BTN_EVENT = 1 << 7;
 constexpr uint8_t BTN_PRESSED = 1 << 0;
 constexpr uint8_t BTN_DOWNLOAD_LOCK = 1 << 7;
@@ -79,6 +85,7 @@ constexpr uint8_t SYS_CMD_SHUTDOWN = 0xA1;
 
 // EPD_EN is wired to PMIC GPIO0.
 constexpr uint8_t GPIO0 = 1 << 0;
+constexpr uint8_t GPIO_WAKE_MASK = 0x1F;
 
 // Init the internal I2C bus and pin the PM1 to 100 kHz with idle-sleep disabled
 // (SLP_TO=0) so it doesn't drop off the bus between transactions. Idempotent —
@@ -153,6 +160,12 @@ inline bool updateReg(uint8_t reg, uint8_t clearMask, uint8_t setMask) {
   return writeReg(reg, static_cast<uint8_t>((value & ~clearMask) | setMask));
 }
 
+inline bool updateRegChecked(uint8_t reg, uint8_t clearMask, uint8_t setMask) {
+  if (!updateReg(reg, clearMask, setMask)) return false;
+  uint8_t value = 0;
+  return readReg(reg, &value) && (value & (clearMask | setMask)) == setMask;
+}
+
 inline bool configureAppPowerButton(uint8_t* configuredValue = nullptr) {
   uint8_t value = 0;
   if (!readReg(REG_BTN_CFG_1, &value)) return false;
@@ -172,10 +185,11 @@ inline bool readWakeSource(uint8_t* value) { return readReg(REG_WAKE_SRC, value)
 
 inline bool clearWakeSource() { return writeReg(REG_WAKE_SRC, 0x00); }
 
-inline bool requestShutdown() {
+inline bool requestShutdown(bool (*shouldAbort)(void*) = nullptr, void* context = nullptr) {
   // The PMIC library's reference implementation waits before issuing a system
   // command so any preceding rail writes have reached the PY32 firmware.
   delay(120);
+  if (shouldAbort && shouldAbort(context)) return false;
   return writeReg(REG_SYS_CMD, SYS_CMD_SHUTDOWN);
 }
 

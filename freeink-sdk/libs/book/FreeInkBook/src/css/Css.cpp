@@ -69,6 +69,7 @@ int32_t lengthToPct(const char* v, uint32_t len, bool* rootRelativeOut = nullptr
       ++i;
       any = true;
     }
+    while (i < len && v[i] >= '0' && v[i] <= '9') ++i;  // digits past 1/1000 are dropped
   }
   if (!any) return -1;
   const char* unit = v + i;

@@ -31,6 +31,10 @@ the first FreeType-backed operation.
   caller-provided allocation. The SDK deliberately does not convert points or
   assume a display DPI/PPI; that policy belongs to the application or board.
 
+Define `FREEINK_FONT_ENABLE_CFF=1` to include the OpenType CFF driver and its
+PostScript helpers. It is opt-in so TrueType-only builds keep their existing
+code and memory budget.
+
 Cache sizes are tunable via `-DFREEINK_FONT_ADVANCE_SLOTS` /
 `-DFREEINK_FONT_GLYPH_SLOTS` (defaults 512 / 128).
 

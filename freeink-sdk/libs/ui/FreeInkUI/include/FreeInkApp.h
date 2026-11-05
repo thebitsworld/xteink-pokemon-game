@@ -9,6 +9,16 @@
 // design-time tools can generate ordinary C++ against it.
 
 #include <FreeInkUI.h>
+#include <FreeInkUIComponentStyle.h>
+
+// Component style overrides (Screen::setComponentStyle). Its checks read a runtime pointer, so a
+// firmware that never sets a style still carries every override and content-alignment path, the
+// row-measuring loop of listContentHeight() inlined at each list call site: ~3.3 KB of flash in a
+// firmware with four list screens. Building with FREEINK_UI_COMPONENT_STYLE=0 compiles them out,
+// and setComponentStyle() with them.
+#ifndef FREEINK_UI_COMPONENT_STYLE
+#define FREEINK_UI_COMPONENT_STYLE 1
+#endif
 
 #include <atomic>
 #include <memory>
@@ -61,6 +71,9 @@ public:
   const DeviceContext &device() const { return frame_.device(); }
   const ThemeTokens &theme() const { return theme_; }
   Rect contentRect() const { return content_; }
+#if FREEINK_UI_COMPONENT_STYLE
+  void setComponentStyle(const ComponentStyle* style) { componentStyle_ = style; }
+#endif
 
   void setContentMargin(Insets margin) {
     content_ = insetClamped(frame_.safeRect(), margin);
@@ -169,6 +182,10 @@ public:
       themed.styles.normal.border = Paint::solid(Color::Black);
       themed.styles.normal.borderWidth = theme_.headerUnderline;
     }
+    if (componentStyle()) {
+      componentStyle()->text.apply(themed.titleText);
+      componentStyle()->apply(themed.styles);
+    }
     themed.minTouchSize = theme_.minTouchSize;
     ui::header(frame_, take(anchor, theme_.headerHeight), themed);
   }
@@ -267,6 +284,13 @@ public:
       themed.valueText = theme_.smallText;
     if (textStyleUnset(themed.headerText))
       themed.headerText = theme_.smallText;
+    if (componentStyle()) {
+      componentStyle()->text.apply(themed.labelText);
+      componentStyle()->text.apply(themed.subtitleText);
+      componentStyle()->text.apply(themed.valueText);
+      componentStyle()->text.apply(themed.headerText);
+      themed.underlineFitsText = componentStyle()->markerWidth == MarkerWidth::Text;
+    }
     if (themed.rowStyles.unset()) {
       // Expand the theme's selection style over its base row styles; explicit
       // rowStyles or a caller-set marker win.
@@ -294,6 +318,7 @@ public:
       }
       themed.rowStyles = styles;
     }
+    if (componentStyle()) componentStyle()->apply(themed.rowStyles);
     if (themed.rowHeight <= 0) {
       if (themed.rowPaddingY < 0) {
         const int16_t padding = device().hasTouch ? theme_.listTouchRowPaddingY : theme_.listRowPaddingY;
@@ -339,13 +364,20 @@ public:
   void syncListViewport(ListNav &nav, ListProps &props, const int count,
                         const int selectionOffset = 0) {
     props = resolveListProps(props);
+    if (componentStyle() && componentStyle()->contentAlign != Align::Start && count > 0) {
+      const int height = listContentHeight(target(), frame_.assets(), content_, props);
+      content_ = componentStyle()->alignContent(content_, height);
+    }
     nav.syncToProps(content_, props.rowHeight, props.rowGap, count, props, selectionOffset);
   }
 
   void list(const ListProps &props, int16_t height = 0,
             LayoutAnchor anchor = LayoutAnchor::Top) {
     const ListProps themed = resolveListProps(props);
-    ui::list(frame_, height > 0 ? take(anchor, height) : content_, themed);
+    Rect rect = height > 0 ? take(anchor, height) : content_;
+    if (componentStyle() && componentStyle()->contentAlign != Align::Start)
+      rect = componentStyle()->alignContent(rect, listContentHeight(target(), frame_.assets(), rect, themed));
+    ui::list(frame_, rect, themed);
   }
 
   void checkbox(const CheckboxProps &props,
@@ -747,8 +779,21 @@ private:
     return margin > safeInset ? static_cast<int16_t>(margin - safeInset) : 0;
   }
 
+  // The style set by setComponentStyle(); a constant nullptr when compiled out, so every override
+  // path folds away.
+  const ComponentStyle* componentStyle() const {
+#if FREEINK_UI_COMPONENT_STYLE
+    return componentStyle_;
+#else
+    return nullptr;
+#endif
+  }
+
   FrameType &frame_;
   const ThemeTokens &theme_;
+#if FREEINK_UI_COMPONENT_STYLE
+  const ComponentStyle* componentStyle_ = nullptr;
+#endif
   Rect content_{};
 };
 
