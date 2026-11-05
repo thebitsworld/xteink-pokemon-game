@@ -12,10 +12,12 @@ namespace language_bundle {
 constexpr char ROOT_PATH[] = "/xteink-pokemon-languages.zip";
 constexpr char DOWNLOAD_PATH[] = "/.crosspoint/language-bundle.zip";
 constexpr char FAILED_PATH[] = "/.crosspoint/language-bundle.failed";
-constexpr char URL[] =
-    "https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-languages.zip";
-constexpr char SHA256_URL[] =
-    "https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/xteink-pokemon-languages.zip.sha256";
+// Where the bundle is downloaded from; a test build can point at a prerelease, which releases/latest skips.
+#ifndef CROSSINK_LANGUAGE_BUNDLE_BASE_URL
+#define CROSSINK_LANGUAGE_BUNDLE_BASE_URL "https://github.com/thebitsworld/xteink-pokemon-game/releases/latest/download/"
+#endif
+constexpr char URL[] = CROSSINK_LANGUAGE_BUNDLE_BASE_URL "xteink-pokemon-languages.zip";
+constexpr char SHA256_URL[] = CROSSINK_LANGUAGE_BUNDLE_BASE_URL "xteink-pokemon-languages.zip.sha256";
 
 // Boot, before I18N.begin(): unpacks a waiting bundle and removes it. A bundle
 // that cannot be unpacked is set aside, so it is not tried at every start.
