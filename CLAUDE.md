@@ -19,6 +19,11 @@ is in git history (before 2026-10-08).
   re-installs the saved language; `LanguageBundleDownloadActivity` is what every `NetworkBootTarget::DOWNLOAD_ASSETS`
   opens. It downloads from `releases/latest`, which skips prereleases, so the Wi-Fi path has never run against GitHub
   until a stable release carries the ZIP. Test the SD path with `run_simulator_smoke_test.py --language-bundle <zip>`.
+  pokemon-x4-pro internal RAM: IRAM Walnut and the merge left too little with Bluetooth up, so `CROSSINK_TLS_PSRAM`
+  (`src/TlsPsramMemory.cpp`, wraps `esp_mbedtls_mem_calloc`) and `CROSSINK_EXTMEM_MALLOC_BYTES=256` (setup()) move TLS
+  and plain malloc to PSRAM. Measured 2026-11-05, radio up, at Home: 57.9 KB free, largest block 31.7 KB; a book that
+  aborted layout at 26-28 KB free now opens. The bundle download uses wolfSSL, pinned by a checksum fetched over the
+  verified client, and logs to `/.crosspoint/language-bundle-log.txt` (the X3 has no serial console).
   `pokemon-*` envs do not set `CROSSINK_SCALABLE_FONTS`: upstream's EPUB embedded fonts and UI fallback font are compiled
   out. Unit tests not passing: PokemonEffectArtTest (needs PIL), ui_font_errors and OpdsServerStoreTest (do not link:
   `CrossPointSettings::defaultIndexingMethod`).
