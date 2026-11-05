@@ -1,5 +1,6 @@
 #include "LanguageBundleDownloadActivity.h"
 
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -91,7 +92,22 @@ void LanguageBundleDownloadActivity::download() {
   // The checksum first: the bundle is only kept if it matches.
   std::string expected;
   noteResult("start", 0);
+#if FREEINK_MCU_C3
+  // ~59 KB free here is too little for esp_http_client's mbedTLS, and there is no PSRAM to give it. wolfSSL has no
+  // CA bundle, so on the X3 this checksum only catches a damaged file; a bundle can only write language files.
+  HttpDownloader::DownloadOptions checksumOptions;
+  checksumOptions.transport = HttpDownloader::Transport::WOLFSSL;
+  const bool fetched =
+      HttpDownloader::streamUrl(
+          language_bundle::SHA256_URL,
+          [&expected](const uint8_t* data, const size_t length) {
+            expected.append(reinterpret_cast<const char*>(data), length);
+            return true;
+          },
+          nullptr, "", "", checksumOptions) == HttpDownloader::OK;
+#else
   const bool fetched = HttpDownloader::fetchUrl(language_bundle::SHA256_URL, expected);
+#endif
   noteResult("checksum", fetched ? static_cast<int>(expected.size()) : -1);
   if (fetched && expected.size() >= 64) {
     expected.resize(64);
