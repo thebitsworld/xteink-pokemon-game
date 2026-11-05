@@ -102,6 +102,9 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "SdCardFontSystem.h"
 #include "HyphenationPackStore.h"
 #include "LanguageBundle.h"
+#ifndef SIMULATOR
+#include <esp_heap_caps.h>
+#endif
 #include "SilentRestart.h"
 #include "activities/settings/LanguageBundleDownloadActivity.h"
 #include "activities/Activity.h"
@@ -1237,6 +1240,12 @@ void setupDisplayAndFonts(const bool seamless, const bool loadReaderResources, c
 }
 
 void setup() {
+#if defined(CROSSINK_EXTMEM_MALLOC_BYTES) && !defined(SIMULATOR)
+  // Plain malloc from this size up goes to PSRAM (internal RAM if it is full). Radio, DMA and stacks ask for
+  // internal RAM by capability and are not affected. With the Game Boy core in IRAM and Bluetooth up, internal RAM
+  // is otherwise too short to lay out a book.
+  heap_caps_malloc_extmem_enable(CROSSINK_EXTMEM_MALLOC_BYTES);
+#endif
 #ifdef SIMULATOR
   SimulatorLifecycle::restoreSilentRebootToken(silentRebootMagic, silentRebootTarget, silentRebootPayload);
 #endif

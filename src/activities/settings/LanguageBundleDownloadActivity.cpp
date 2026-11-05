@@ -6,6 +6,8 @@
 #include <Logging.h>
 #include <WiFi.h>
 
+#include <cstdio>
+
 #include "LanguageBundle.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
@@ -19,6 +21,19 @@ namespace {
 
 constexpr int DOWNLOAD_MAX_ATTEMPTS = 3;
 constexpr uint32_t DOWNLOAD_RETRY_DELAY_MS = 500;
+
+// The X3 has no serial console: what happened goes on the SD card too.
+void noteResult(const char* step, const int code) {
+  LOG_INF("LANGBUNDLE", "%s: %d (free=%u maxAlloc=%u)", step, code, static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  HalFile log = Storage.open("/.crosspoint/language-bundle-log.txt", O_WRONLY | O_CREAT | O_APPEND);
+  if (!log) return;
+  char line[96];
+  const int length = snprintf(line, sizeof(line), "%s: %d free=%u maxAlloc=%u\n", step, code,
+                              static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  if (length > 0) log.write(line, static_cast<size_t>(length));
+  log.close();
+}
 
 bool validateBundle(const std::string& path, void* expectedSha256) {
   return language_bundle::fileMatchesSha256(path, *static_cast<const std::string*>(expectedSha256));
@@ -75,7 +90,10 @@ void LanguageBundleDownloadActivity::download() {
 
   // The checksum first: the bundle is only kept if it matches.
   std::string expected;
-  if (HttpDownloader::fetchUrl(language_bundle::SHA256_URL, expected) && expected.size() >= 64) {
+  noteResult("start", 0);
+  const bool fetched = HttpDownloader::fetchUrl(language_bundle::SHA256_URL, expected);
+  noteResult("checksum", fetched ? static_cast<int>(expected.size()) : -1);
+  if (fetched && expected.size() >= 64) {
     expected.resize(64);
   } else {
     LOG_ERR("LANGBUNDLE", "Could not fetch the bundle checksum");
@@ -95,6 +113,9 @@ void LanguageBundleDownloadActivity::download() {
   options.validateWithContext = &validateBundle;
   options.validationContext = &expected;
   options.checkFreeSpace = true;
+  // As for firmware updates: wolfSSL has no CA bundle, but the checksum fetched above over the verified client
+  // pins these bytes. It takes far less RAM than esp_http_client, which has also stalled on C3 file downloads.
+  options.transport = HttpDownloader::Transport::WOLFSSL;
   options.shouldCancel = [this]() { return pollCancelInput(); };
   HttpDownloader::DownloadError result = HttpDownloader::HTTP_ERROR;
   for (int attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS && result != HttpDownloader::OK; ++attempt) {
@@ -108,7 +129,7 @@ void LanguageBundleDownloadActivity::download() {
         },
         &cancelRequested_, "", "", options);
     if (result == HttpDownloader::ABORTED) break;
-    if (result != HttpDownloader::OK) LOG_ERR("LANGBUNDLE", "Download attempt %d failed (%d)", attempt, result);
+    noteResult("download", static_cast<int>(result));
   }
 
   if (result == HttpDownloader::ABORTED) {
