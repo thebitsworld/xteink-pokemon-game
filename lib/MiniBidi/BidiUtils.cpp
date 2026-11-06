@@ -10,6 +10,7 @@ extern "C" {
 #include <Logging.h>
 #include <Utf8.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 
@@ -38,9 +39,16 @@ bool isNaturalDirectionClass(const uchar cls) {
 // computeVisualWordOrder(). Both run on the single render task and never call
 // each other, so one buffer is reused instead of a per-function static — saving
 // ~1.5 KB of always-resident RAM. Not reentrant (same assumption as the
-// previous per-function statics).
-bidi_char sharedBidiLine[BIDI_MAX_LINE];
-bidi_char sharedBidiShaped[BIDI_MAX_LINE];
+// previous per-function statics). Taken at the first right-to-left text, as
+// other books have no use for these 3 KB; kept from then on.
+bidi_char* sharedBidiLine = nullptr;
+bidi_char* sharedBidiShaped = nullptr;
+
+bool ensureSharedBidiBuffers() {
+  if (!sharedBidiLine) sharedBidiLine = static_cast<bidi_char*>(malloc(sizeof(bidi_char) * BIDI_MAX_LINE));
+  if (!sharedBidiShaped) sharedBidiShaped = static_cast<bidi_char*>(malloc(sizeof(bidi_char) * BIDI_MAX_LINE));
+  return sharedBidiLine && sharedBidiShaped;
+}
 
 }  // namespace
 
@@ -96,6 +104,7 @@ bool isTransparentMark(const uint32_t cp) {
 bool applyBidiVisual(const char* utf8, std::string& out, int paragraphLevel) {
   if (!utf8 || !*utf8) return false;
   const std::lock_guard<std::mutex> lock(bidiMutex);
+  if (!ensureSharedBidiBuffers()) return false;
 
   bidi_char* const line = sharedBidiLine;
   bidi_char* const shaped = sharedBidiShaped;
@@ -183,6 +192,7 @@ bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragrap
   const size_t nWords = words.size();
   if (nWords <= 1 || nWords > BIDI_MAX_LINE) return false;
   const std::lock_guard<std::mutex> lock(bidiMutex);
+  if (!ensureSharedBidiBuffers()) return false;
 
   bidi_char* const line = sharedBidiLine;
   int count = 0;

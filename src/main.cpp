@@ -88,16 +88,26 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include <nvs.h>
 #endif
 
+#if FREEINK_MCU_C3 && !defined(SIMULATOR)
+// FreeInkUI's weak 16 KB default is for apps that render on the loop task; here
+// the render task does. On the C3 those 6 KB are what the radio needs in a book.
+SET_LOOP_TASK_STACK_SIZE(10 * 1024);
+#endif
+
 #include "AppVersion.h"
 #include "BluetoothInput.h"
 #include "activities/RenderLock.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "FeatureToggles.h"
 #include "FilenameFontSystem.h"
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonService.h"
+#endif
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "HyphenationPackStore.h"
@@ -1207,6 +1217,13 @@ void setupDisplayAndFonts(const bool seamless, const bool loadReaderResources, c
   renderer.begin();
   renderer.setViewableInsets(HalScreenCalibration::load());
   display.setInverted(SETTINGS.screenInverted != 0);
+#if FREEINK_MCU_C3 && defined(CROSSINK_ENABLE_POKEMON)
+  // The C3's heap is split in hardware at 0x3FCC0000, and the framebuffer only
+  // leaves the upper region's ~115 KB block whole if it fits below that line.
+  // The Pokemon stores are then taken here, before anything can scatter what is
+  // left of the lower region, rather than from the upper block at first use.
+  if (features::pokemonGame()) pokemon::devicePokemonService();
+#endif
   // FreeInkUI headers need more than 4 KB once the render loop and nested
   // screen builders share the task stack. Some S3 network flows can render a
   // parent screen before their deferred Wi-Fi child is promoted, so their
