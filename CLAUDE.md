@@ -105,6 +105,10 @@ is in git history (before 2026-10-08).
   no `BaseSettingsListHold` holds it (it used to be a boot-to-off static), BASE_SETTINGS_CAPACITY = 113. X3 is
   USB-locked: the Bluetooth screen shows start failures as "free/largest" KB; crash_report.txt on the SD card
   decodes with the matching ELF (its app desc elf_sha256 at offset 0x90 of the esp_app_desc).
+  C3 heap: hardware split at 0x3FCC0000 (`heap_caps_walk`: 3 regions, tried low first). The radio's 70 KB block
+  exists only if the 53 KB X3 framebuffer fits in the lower region, so every KB of .bss or early allocation counts
+  (.bss ends there): at 2873363f5, 91 KB outside a book, 75 KB in one, with a 10 KB loop stack (3.8 KB used reading;
+  FreeInkUI's weak default is 16 KB). Task names over 15 chars assert in `xTaskGetHandle`.
 - Game Boy library (`GameLibraryActivity`, opened by the Applications row; `GameLibraryStore` keeps favourites
   and recents in `/.crosspoint/gameboy_library.txt`; GameBoyActivity notes each started ROM). Scans 3 folders
   deep from `/`, skipping hidden folders, `pokemon`, `sleep`, `fonts`, `dictionaries`; max 200 games.
