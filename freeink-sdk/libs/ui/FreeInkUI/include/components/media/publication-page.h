@@ -135,6 +135,10 @@ struct PublicationPageProps {
   PublicationAvailabilityProps availability{};
   const char* descriptionHeading = "About this book";
   const char* description = nullptr;  // plain text, not raw OPDS HTML
+  // Optional app-drawn description body (e.g. styled HTML), given the area
+  // below the heading. Returning false falls back to `description` as text.
+  bool (*descriptionPainter)(DrawTarget&, Rect, const PublicationPageProps&, void*) = nullptr;
+  void* descriptionPainterUserData = nullptr;
   const char* metadata = nullptr;     // localized publisher / date / language
   TextStyle headingText{};
   TextStyle bodyText{};
@@ -216,11 +220,13 @@ void publicationPage(Frame<N>& frame, Rect rect, const PublicationPageProps& pro
   if (availabilityH) publicationAvailability(frame, take(body, availabilityH, props.sectionGap), availability);
   TextStyle bodyText = textStyleWithForeground(props.bodyText, style.foreground);
   text(frame.target(), body, props.metadata, bodyText, props.metadataLines, props.sectionGap);
-  if (present(props.description)) {
+  if (present(props.description) || props.descriptionPainter) {
     TextStyle heading = textStyleWithForeground(props.headingText, style.foreground);
     heading.bold = props.headingBold;
     text(frame.target(), body, props.descriptionHeading, heading, 1, props.descriptionGap);
-    text(frame.target(), body, props.description, bodyText, props.descriptionLines, 0);
+    const bool painted = props.descriptionPainter && !body.empty() &&
+        props.descriptionPainter(frame.target(), body, props, props.descriptionPainterUserData);
+    if (!painted) text(frame.target(), body, props.description, bodyText, props.descriptionLines, 0);
   }
 }
 

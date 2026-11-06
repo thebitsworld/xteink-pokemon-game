@@ -43,6 +43,12 @@ class TtfFont : public RasterFont {
   bool init(const uint8_t* data, uint32_t len, Arena& glyphArena);
   bool ready() const { return ready_; }
 
+  // What sizePx measures: by default the font's ascent-to-descent height
+  // (stbtt_ScaleForPixelHeight); with em sizing, its em square — CSS's
+  // font-size, and what LVGL's lv_font_conv --size means, so a pixel font
+  // drawn at its em lands on its own grid. Set before the first use.
+  void setEmSizing(bool em) { emSizing_ = em; }
+
   bool hasGlyph(uint32_t codepoint) const override;
 
   // Font metrics.
@@ -63,6 +69,7 @@ class TtfFont : public RasterFont {
   const GlyphBitmap* rasterize(uint32_t codepoint, uint16_t sizePx) override;
 
  private:
+  bool emSizing_ = false;
   struct AdvanceSlot {
     uint32_t key = 0xFFFFFFFF;  // codepoint
     int32_t glyphIndex = 0;

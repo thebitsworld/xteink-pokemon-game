@@ -59,7 +59,8 @@ bool TtfFont::init(const uint8_t* data, uint32_t len, Arena& glyphArena) {
 }
 
 float TtfFont::scaleFor(uint16_t sizePx) const {
-  return stbtt_ScaleForPixelHeight(fontOf(fontInfo_), static_cast<float>(sizePx));
+  return emSizing_ ? stbtt_ScaleForMappingEmToPixels(fontOf(fontInfo_), static_cast<float>(sizePx))
+                   : stbtt_ScaleForPixelHeight(fontOf(fontInfo_), static_cast<float>(sizePx));
 }
 
 int32_t TtfFont::glyphIndexFor(uint32_t codepoint) const {

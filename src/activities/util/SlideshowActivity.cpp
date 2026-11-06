@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Bitmap.h>
+#include <ImageToneProfile.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalPowerManager.h>
@@ -348,7 +349,7 @@ void SlideshowActivity::renderCurrentImage() {
     return;
   }
 
-  Bitmap bitmap(file, true, renderer.supportsAbsoluteGrayscale());
+  Bitmap bitmap(file, true, imageToneProfile(renderer.supportsAbsoluteGrayscale()));
   if (bitmap.parseHeaders() != BmpReaderError::Ok) {
     drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
     file.close();

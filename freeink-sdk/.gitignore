@@ -3,6 +3,7 @@
 .cache/
 *.o
 *.a
+__pycache__/
 .DS_Store
 tools/firmware/DisplayAudit.java
 docs/xteink-x4pro-licorice-analysis.md

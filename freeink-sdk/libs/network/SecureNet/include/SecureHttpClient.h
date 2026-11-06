@@ -37,10 +37,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <iterator>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,6 +66,9 @@ class SecureHttpClient {
   // Skip peer verification (SecureClient does likewise). Required today because
   // the wolfSSL transport has no CA bundle wired up; see setCACert().
   void setInsecure() { _insecure = true; }
+  // Bulk download: lend wolfSSL a full-record buffer once the request is sent
+  // (see SecureClient::reserveFullRecord()). Applies to https connections.
+  void setReserveFullRecord(bool on) { _reserveFullRecord = on; }
   // Verify against a single PEM root. Clears the insecure flag.
   void setCACert(const char* rootCA) {
     _rootCA = rootCA;
@@ -119,9 +122,19 @@ class SecureHttpClient {
   // Closes the kept-alive connection (if any). Call when done with a server;
   // the next request transparently reconnects.
   void end() { closeConnection(); }
+  // Opens (or keeps) the connection for the URL given to begin(). Optional:
+  // sendRequest() connects on demand. Connecting before addHeader() keeps large
+  // headers out of the heap while the TLS handshake needs its working set. A
+  // request that fails on a connection opened here is not sent again.
+  bool connect(const AbortCallback& shouldAbort = nullptr) { return ensureConnected(shouldAbort); }
 
   void addHeader(const std::string& name, const std::string& value) {
-    _headers.push_back(name + ": " + value + "\r\n");
+    // Sized once: chained operator+ grows the string by doubling, so a few-KB
+    // cookie would take twice its size from the block the TLS handshake needs.
+    std::string line;
+    line.reserve(name.size() + value.size() + 4);
+    line.append(name).append(": ").append(value).append("\r\n");
+    _headers.push_back(std::move(line));
   }
 
   int GET() { return sendRequest("GET", nullptr, 0); }
@@ -207,17 +220,20 @@ class SecureHttpClient {
     // or a missing status line on a socket that looked connected. That is a
     // property of the reused connection, not of the request, so it earns one
     // attempt on a fresh connection. A request that failed on a fresh
-    // connection is a real error and is not retried.
+    // connection is a real error and is not retried. A connection opened by
+    // connect() is fresh until a response has completed on it.
     for (int attempt = 0; attempt < 2; ++attempt) {
-      const bool reusing = connectionMatches();
       if (isAborted(shouldAbort)) return -1;
       if (!ensureConnected(shouldAbort)) return -1;
+      // Read after ensureConnected(): if it had to reconnect, it cleared the flag.
+      const bool reusing = _connKeptAlive;
 
       if (!writeRequest(method, payload, payloadLen)) {
         closeConnection();
         if (reusing && attempt == 0) continue;
         return -1;
       }
+      if (_reserveFullRecord && _connHttps) _secure.reserveFullRecord();
 
       const unsigned long headerDeadline = millis() + _timeoutMs;
       std::string line;
@@ -232,9 +248,19 @@ class SecureHttpClient {
       // Connection: keep-alive header (below) overrides that.
       bool keepAlive = line.compare(0, 9, "HTTP/1.0 ") != 0;
 
+      bool headersComplete = false;
+      size_t headerBytes = 0;
       std::string transferEncoding;
       while (readLine(*_conn, line, headerDeadline, shouldAbort)) {
-        if (line.empty()) break;  // end of headers
+        if (line.empty()) {
+          headersComplete = true;
+          break;
+        }  // end of headers
+        headerBytes += line.size();
+        if (headerBytes > 8192 || _responseHeaders.size() >= 64) {
+          closeConnection();
+          return -1;
+        }
         const size_t colon = line.find(':');
         if (colon == std::string::npos) continue;
         std::string name = line.substr(0, colon);
@@ -253,11 +279,13 @@ class SecureHttpClient {
         } else if (name == "connection") {
           std::string v = value;
           std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
-          if (v.find("close") != std::string::npos) keepAlive = false;
-          else if (v.find("keep-alive") != std::string::npos) keepAlive = true;
+          if (v.find("close") != std::string::npos)
+            keepAlive = false;
+          else if (v.find("keep-alive") != std::string::npos)
+            keepAlive = true;
         }
       }
-      if (_aborted) {
+      if (_aborted || !headersComplete) {
         closeConnection();
         return -1;
       }
@@ -290,7 +318,11 @@ class SecureHttpClient {
       // Reuse only a provably clean connection. An aborted/truncated body
       // leaves undrained bytes on the socket, and the next request would parse
       // leftover body data as its status line.
-      if (!_reuse || !keepAlive || !_bodyComplete || !reusableFraming) closeConnection();
+      if (!_reuse || !keepAlive || !_bodyComplete || !reusableFraming) {
+        closeConnection();
+      } else {
+        _connKeptAlive = true;
+      }
       return _status;
     }
     return -1;
@@ -312,6 +344,20 @@ class SecureHttpClient {
     const auto found = std::find_if(_responseHeaders.begin(), _responseHeaders.end(),
                                     [&normalized](const Header& header) { return header.name == normalized; });
     return found == _responseHeaders.end() ? "" : found->value;
+  }
+
+  // Borrow one unambiguous response header without copying the header collection
+  // or its values. Pass a lowercased name. Null means absent or duplicated;
+  // the pointer stays valid only until begin(), another request, or destruction.
+  const std::string* getUniqueHeader(const char* lowercaseName) const {
+    if (!lowercaseName) return nullptr;
+    const std::string* value = nullptr;
+    for (const auto& header : _responseHeaders) {
+      if (header.name != lowercaseName) continue;
+      if (value) return nullptr;
+      value = &header.value;
+    }
+    return value;
   }
 
   // All response headers, in receive order, as (lowercased-name, value) pairs.
@@ -385,9 +431,7 @@ class SecureHttpClient {
     return !host.empty() && (scheme == "http" || scheme == "https");
   }
 
-  std::string hostHeader() const {
-    return hostHeaderFor(_scheme, _host, _port);
-  }
+  std::string hostHeader() const { return hostHeaderFor(_scheme, _host, _port); }
 
   static std::string hostHeaderFor(const std::string& scheme, const std::string& host, uint16_t port) {
     const uint16_t defaultPort = scheme == "https" ? 443 : 80;
@@ -430,7 +474,7 @@ class SecureHttpClient {
     } else {
       _plain.setTimeout(_timeoutMs);
       _plain.setConnectionTimeout(_timeoutMs);
-      if (!_plain.connect(_host.c_str(), _port)) return false;
+      if (!hostResolves(_host.c_str()) || !_plain.connect(_host.c_str(), _port)) return false;
       _conn = &_plain;
       _connHttps = false;
     }
@@ -447,13 +491,19 @@ class SecureHttpClient {
     _connHost.clear();
     _connPort = 0;
     _connHttps = false;
+    _connKeptAlive = false;
   }
 
   // Request line + headers (+ body). Write results are checked: a stale
   // keep-alive socket often surfaces first as a failed write.
   bool writeRequest(const char* method, const uint8_t* payload, size_t payloadLen) {
-    std::string req = std::string(method) + " " + _path + " HTTP/1.1\r\nHost: " + hostHeader() + "\r\n";
-    req += "User-Agent: " + _userAgent + "\r\n";
+    // Reserved up front so a few-KB cookie isn't doubled by append growth.
+    size_t size = 256 + _path.size() + _host.size() + _userAgent.size() + 2 * (_authUser.size() + _authPass.size());
+    for (const std::string& h : _headers) size += h.size();
+    std::string req;
+    req.reserve(size);
+    req.append(method).append(" ").append(_path).append(" HTTP/1.1\r\nHost: ").append(hostHeader()).append("\r\n");
+    req.append("User-Agent: ").append(_userAgent).append("\r\n");
     req += _reuse ? "Connection: keep-alive\r\n" : "Connection: close\r\n";
     if (!_authUser.empty()) {
       const std::string creds = _authUser + ":" + _authPass;
@@ -582,11 +632,13 @@ class SecureHttpClient {
   // Kept-alive connection state. _conn points at _secure or _plain while a
   // connection is held open, and null otherwise.
   WiFiClient _plain;
+  bool _reserveFullRecord = false;
   SecureClient _secure;
   Client* _conn = nullptr;
   std::string _connHost;
   uint16_t _connPort = 0;
   bool _connHttps = false;
+  bool _connKeptAlive = false;  // a response completed on _conn and left it open
   bool _reuse = true;
 
   std::string _scheme;

@@ -15,7 +15,7 @@
 #endif
 
 // The icons along the bottom of the cover grid, in order.
-enum class CoverGridTab : uint8_t { Files, Library, Opds, Applications, Slideshow, Transfer, Settings };
+enum class CoverGridTab : uint8_t { Files, Library, Plugins, Applications, Slideshow, Transfer, Settings };
 
 class CoverGridHomeUi final : public UiAppHost<16, 1> {
  public:
@@ -30,7 +30,7 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   static constexpr int MAX_TABS = 7;
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
   explicit CoverGridHomeUi(GfxRenderer& renderer);
-  void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading, float featuredProgress);
+  void begin(const std::vector<RecentBook>& books, bool hasPlugins, bool hasContinueReading, float featuredProgress);
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
 #if defined(CROSSINK_ENABLE_POKEMON)
@@ -78,7 +78,7 @@ class CoverGridHomeUi final : public UiAppHost<16, 1> {
   int selected = 0;
   int pending = -1;
   int progress = -1;
-  bool hasOpds = false;
+  bool hasPlugins = false;
   char progressText[12]{};
   // Component styles and interaction tables stay off the render task's stack.
   freeink::ui::BookCardProps card;

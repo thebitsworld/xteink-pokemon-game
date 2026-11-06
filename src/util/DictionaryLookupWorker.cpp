@@ -2,6 +2,8 @@
 
 #include <Logging.h>
 
+#include <cstdlib>
+
 #include "DictionaryLookupController.h"
 
 DictionaryLookupWorker& DictionaryLookupWorker::instance() {
@@ -11,6 +13,12 @@ DictionaryLookupWorker& DictionaryLookupWorker::instance() {
 
 bool DictionaryLookupWorker::start(DictionaryLookupController& owner) {
   if (taskHandle_ == nullptr) {
+    // ESP-IDF's xTaskCreateStatic takes its depth in bytes.
+    if (stack_ == nullptr) stack_ = static_cast<StackType_t*>(malloc(kStackBytes));
+    if (stack_ == nullptr) {
+      LOG_ERR("DICT", "No memory for the dictionary lookup stack");
+      return false;
+    }
     taskHandle_ = xTaskCreateStatic(taskEntry, "DictLookup", kStackBytes, this, 1, stack_, &taskStorage_);
     if (taskHandle_ == nullptr) {
       LOG_ERR("DICT", "Could not start static dictionary lookup worker");

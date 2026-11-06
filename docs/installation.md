@@ -107,20 +107,18 @@ reader" and does not open.
 
 ## Step 2.7 — Other languages (optional)
 
-The firmware has English and Vietnamese built in (and word hyphenation for English and German
-books). The other 26 menu languages, and hyphenation for French, Spanish, Italian, Portuguese,
-Polish, Swedish, Russian and Ukrainian books, come in a language pack (about 0.9 MB) that you
-install once:
+English and Vietnamese are built in. The other menu languages, and hyphenation for German, Spanish, French, Italian,
+Polish, Portuguese, Russian, Swedish and Ukrainian books, come in one file of about 0.8 MB that you install once:
 
-- **Over Wi-Fi:** Settings > System > Device > Language > **Download more languages**. The
-  reader joins Wi-Fi, downloads the pack and restarts to install it.
-- **From an SD card:** download `language-pack.bin` from the same release, copy it to the
-  **root** of the SD card and restart the reader. It installs the pack at start (a few
-  seconds) and moves the file into `.crosspoint`.
+- **Over Wi-Fi:** Settings > System > Device > **Download more languages**. The reader joins Wi-Fi, downloads the file,
+  checks it and restarts to install it.
+- **From an SD card:** download `xteink-pokemon-languages.zip` from the same release, copy it to the **root** of the SD
+  card without unpacking it and restart the reader. It installs the files by itself and removes the ZIP.
 
-Then pick your language in Settings > System > Device > Language. A firmware update keeps
-the pack; text added in newer firmware shows in English until you download the pack again.
-Without the pack, a reader set to another language shows English.
+Then pick your language in Settings > Language. If you already had another language chosen, the reader goes back to it
+by itself. The files take about 2.2 MB on the card, in `.crossink/languages` and `.crossink/hyphenation`. Text added in
+newer firmware shows in English until you install that release's file, and in Arabic, Belarusian, Hebrew, Kazakh,
+Russian and Ukrainian some Pokemon text stays in English to fit the reader's language storage.
 
 ## Your saves are safe
 

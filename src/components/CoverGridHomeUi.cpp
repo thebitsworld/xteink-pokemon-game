@@ -32,9 +32,10 @@ constexpr int16_t COVER_CELL_INSET = 6;
 CoverGridHomeUi::CoverGridHomeUi(GfxRenderer& renderer)
     : UiAppHost(renderer), coverCache(renderer), renderer(renderer) {}
 
-void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bool continuing, float featuredProgress) {
+void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool plugins, bool continuing,
+                            float featuredProgress) {
   books = &recent;
-  hasOpds = opds;
+  hasPlugins = plugins;
   pokemonTile = features::pokemonGame();
   buildTabs();
   if (!recent.empty()) coverCache.begin();
@@ -140,7 +141,7 @@ void CoverGridHomeUi::draw(UiScreen& screen) {
 
 void CoverGridHomeUi::drawHeaderBand() {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.homeTopPadding}, nullptr);
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer, metrics.homeTopPadding), nullptr);
 }
 
 void CoverGridHomeUi::drawEmpty(UiScreen& screen) {
@@ -216,7 +217,10 @@ void CoverGridHomeUi::drawCurrent(UiScreen& screen, fui::Rect rect, const int co
   card.coverPainter = [](fui::DrawTarget& target, fui::Rect cover, const fui::BookCardProps&, void* user) {
     return static_cast<CoverGridHomeUi*>(user)->paintFramedCover(target, cover, 0);
   };
-  fui::bookCard(screen.frame(), rect, card);
+  {
+    FilenameUiFontScope fonts(target, renderer);
+    fui::bookCard(screen.frame(), rect, card);
+  }
 
   if (selected == 0 && !BoardConfig::hasTouch()) {
     const int16_t barHeight = card.coverSize.height;
@@ -277,7 +281,7 @@ void CoverGridHomeUi::buildTabs() {
   const auto add = [this](const CoverGridTab tab) { tabOrder[tabTotal++] = tab; };
   add(CoverGridTab::Files);
   add(CoverGridTab::Library);
-  if (hasOpds) add(CoverGridTab::Opds);
+  if (hasPlugins) add(CoverGridTab::Plugins);
 #if defined(CROSSINK_ENABLE_POKEMON) && defined(CROSSINK_ENABLE_LUA_APPS)
   if (features::applications()) add(CoverGridTab::Applications);
 #endif
@@ -309,7 +313,7 @@ void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
   tabs.iconSize = 32;
   tabs.iconPainterUserData = this;
   tabs.iconPainter = [](fui::DrawTarget&, fui::Rect iconRect, const fui::TabItem& tab, uint8_t, void* user) {
-    static constexpr const freeink::Icon* ICONS[] = {&icon_folder_32,  &icon_landmark_32,      &icon_lyra_library_32,
+    static constexpr const freeink::Icon* ICONS[] = {&icon_folder_32,  &icon_landmark_32,      &icon_puzzle_32,
                                                      &icon_gamepad_32, &icon_image_32,         &icon_lyra_transfer_32,
                                                      &icon_lyra_settings_32};
     const auto& self = *static_cast<CoverGridHomeUi*>(user);

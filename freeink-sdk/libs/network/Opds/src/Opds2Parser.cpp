@@ -20,7 +20,8 @@ static_assert(MAX_HREF_CHARS < StreamingJsonParser::TOKEN_BUF_SIZE - 1 &&
 Opds2Parser::Opds2Parser()
     : parser(JsonCallbacks{this, &sOnKey, &sOnString, &sOnNumber, &sOnBool, nullptr, &sOnObjectStart, &sOnObjectEnd,
                            &sOnArrayStart, &sOnArrayEnd}) {
-  entries.reserve(ENTRY_STORAGE_CAPACITY);
+  entryLimit = reserveFeedEntries(entries);
+  if (entryLimit == 0) errorOccured = true;
 }
 
 void Opds2Parser::setPreferredLanguage(const char* lang) {
@@ -114,6 +115,7 @@ void Opds2Parser::resetLink() {
   link.typeEpub = false;
   link.typeIndirect = false;
   link.typePubDoc = false;
+  link.typeLcp = false;
   link.templated = false;
   link.numberOfItems = -1;
   link.priceValue.clear();
@@ -223,7 +225,7 @@ void Opds2Parser::beginGroup() {
 void Opds2Parser::endGroup() {
   // Field order in the group object is not guaranteed, so the heading and the
   // "see all" entry are applied only once the whole group has been read.
-  if (!groupSelfHref.empty() && entries.size() < MAX_ENTRIES) {
+  if (!groupSelfHref.empty() && entries.size() < entryLimit) {
     OpdsEntry seeAll;
     seeAll.type = OpdsEntryType::NAVIGATION;
     seeAll.id = OPDS_SEE_ALL_ID;
@@ -336,6 +338,7 @@ void Opds2Parser::onStringValue(const char* value, const size_t len) {
           link.typeIndirect = true;
           link.typePubDoc = true;
         }
+        if (strcmp(value, "application/vnd.readium.lcp.license.v1.0+json") == 0) link.typeLcp = true;
       }
       break;
     case Scope::LINK_REL:
@@ -449,7 +452,7 @@ void Opds2Parser::commitFeedLink() {
 
 void Opds2Parser::commitNavLink() {
   if (link.href.empty() || link.title.empty()) return;
-  if (entries.size() >= MAX_ENTRIES) {
+  if (entries.size() >= entryLimit) {
     feedTruncated = true;
     return;
   }
@@ -471,7 +474,11 @@ void Opds2Parser::commitGroupLink() {
 
 void Opds2Parser::commitFacetLink() {
   if (link.href.empty() || link.title.empty()) return;
-  if (facetEntries.size() >= MAX_FACET_ENTRIES) return;
+  if (facetEntries.capacity() == 0) reserveFacetEntries(facetEntries);
+  if (facetEntries.size() >= facetEntries.capacity()) {
+    feedTruncated = true;
+    return;
+  }
   OpdsEntry entry;
   entry.type = OpdsEntryType::NAVIGATION;
   entry.title = std::move(link.title);
@@ -498,7 +505,7 @@ void Opds2Parser::commitPubLink() {
   // reader can't download directly. Still record the purchase + price so the
   // book lists and opens its detail page; a real EPUB/indirect link, if any,
   // supplies the download href below.
-  if (!(link.typeEpub || link.typeIndirect)) {
+  if (!(link.typeEpub || link.typeIndirect || link.typeLcp)) {
     if (link.acqRank == 0 && !currentEntry.purchase) {
       currentEntry.purchase = true;
       if (currentEntry.detail.empty() && !link.priceValue.empty()) {
@@ -520,16 +527,19 @@ void Opds2Parser::commitPubLink() {
   // direct EPUBs a plain .epub path beats a derived format (kepub etc.).
   bool better = currentEntry.href.empty() || link.acqRank > pubAcqRank;
   if (!better && link.acqRank == pubAcqRank) {
-    if (link.typeEpub && currentEntry.indirect) {
-      better = true;
+    if (link.typeEpub && (currentEntry.indirect || currentEntry.lcpLicense)) {
+      better = true;  // a direct EPUB beats both an indirect hop and an LCP license
     } else if (link.typeEpub && !currentEntry.indirect && isPlainEpub && !pubHasPlainEpub) {
       better = true;
+    } else if (link.typeLcp && currentEntry.indirect && !currentEntry.lcpLicense) {
+      better = true;  // a fulfillable LCP license beats an opaque indirect hop
     }
   }
   if (!better) return;
 
   currentEntry.href = std::move(link.href);
-  currentEntry.indirect = !link.typeEpub;
+  currentEntry.lcpLicense = link.typeLcp;
+  currentEntry.indirect = !link.typeEpub && !link.typeLcp;
   pubAcqRank = link.acqRank;
   pubHasPlainEpub = isPlainEpub;
   currentEntry.purchase = link.acqRank == 0;
@@ -551,7 +561,7 @@ void Opds2Parser::commitPublication() {
   // preview: keep only the first MAX_GROUP_PREVIEW so a large group doesn't
   // starve the rest. Top-level (flat-feed) publications are not capped.
   if (depth >= 2 && stack[depth - 2] == Scope::GROUP && ++groupPubCount > MAX_GROUP_PREVIEW) return;
-  if (entries.size() >= MAX_ENTRIES) {
+  if (entries.size() >= entryLimit) {
     feedTruncated = true;
     return;
   }

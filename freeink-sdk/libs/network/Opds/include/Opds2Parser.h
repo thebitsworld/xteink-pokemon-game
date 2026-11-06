@@ -158,6 +158,7 @@ class Opds2Parser final : public Print {
   bool pendingKeyIsPreferred() const;
 
   std::vector<OpdsEntry> entries;
+  size_t entryLimit = 0;  // set by reserveFeedEntries()
   std::vector<OpdsEntry> facetEntries;
   OpdsEntry currentEntry;
 
@@ -179,6 +180,7 @@ class Opds2Parser final : public Print {
     bool typeEpub = false;
     bool typeIndirect = false;  // application/opds-publication+json acquisition
     bool typePubDoc = false;    // application/opds-publication+json (any rel)
+    bool typeLcp = false;  // application/vnd.readium.lcp.license.v1.0+json
     bool templated = false;
     int32_t numberOfItems = -1;
     std::string priceValue;     // raw decimal from the price object

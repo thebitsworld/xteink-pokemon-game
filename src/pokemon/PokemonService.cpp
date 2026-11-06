@@ -1684,9 +1684,12 @@ PokemonService& devicePokemonService() {
   [[maybe_unused]] static const bool transferRecovered = save_transfer::applyPendingSaveTransfer();
   static PokemonStore store;
   static PokemonBattleStore battleStore;
-  static PokemonIvEvStore ivEvStore;
+  // These two (15 KB) stay out of .bss, which ends in the C3's lower heap region:
+  // that region must keep room for the framebuffer. See setupDisplayAndFonts().
+  static auto& ivEvStore = *new PokemonIvEvStore();
   static PokemonHallOfFameStore hallOfFameStore;
-  static PokemonService service(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, deviceRandomBelow});
+  static auto& service =
+      *new PokemonService(store, battleStore, ivEvStore, hallOfFameStore, {nullptr, deviceRandomBelow});
   return service;
 }
 #endif

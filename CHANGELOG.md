@@ -1,12 +1,36 @@
-## [Unreleased]
+## [2.1.0] - 2026-11-06
+
+Everything since 2.0.1, including 2.0.2-beta.1-x4pro.
+
+> **Update notes:** your Pokémon save and books are kept. `language-pack.bin` is gone: English and Vietnamese are built in, and any other language now comes from `xteink-pokemon-languages.zip`. If your reader uses another language, it may show English after the update until you install the file: use Settings > System > Device > Download more languages, or copy the ZIP to the root of the SD card.
+>
+> **Tried on real readers for this release:** X3 and X4 Pro, on test builds of this code (the only differences are the version number and where the language file is downloaded from). The X4 and X4 Classic files are built from the same code but were not tried on those readers; keep the 2.0.1 firmware at hand if you install them. The download from this release's own language ZIP had only been tried from a test release.
+>
+> 🇻🇳 **Lưu ý khi cập nhật:** save Pokémon và sách được giữ nguyên. `language-pack.bin` đã bỏ: tiếng Anh và tiếng Việt có sẵn trong firmware, các ngôn ngữ khác nay nằm trong `xteink-pokemon-languages.zip`. Nếu máy đang dùng ngôn ngữ khác, sau khi cập nhật có thể hiện tiếng Anh cho đến khi cài file này: vào Settings > System > Device > Download more languages, hoặc chép file ZIP vào thư mục gốc của thẻ SD.
+>
+> **Đã thử trên máy thật cho bản này:** X3 và X4 Pro, bằng các bản thử của cùng mã nguồn (chỉ khác số phiên bản và nơi tải file ngôn ngữ). File cho X4 và X4 Classic build từ cùng mã nguồn nhưng chưa thử trên các máy đó; nếu cài, hãy giữ sẵn firmware 2.0.1. Việc tải file ngôn ngữ mới chỉ được thử từ một bản phát hành thử nghiệm.
+
+### New
+
+- Built on CrossInk 2.0.0-rc: syncing reading stats and clippings with CrossPoint Sync, Sync Books, plugins, screen edge calibration, character spacing and much more.
 
 ### Changed
 
+- OPDS Browser moved to File Transfer. Its place on the Home screen goes to Plugins when they are switched on.
+- Long-press behaviour for the front buttons is now set per button in Controls; your earlier choice carries over.
+- Languages: `language-pack.bin` is gone. English and Vietnamese stay built in; every other language and hyphenation pack comes in `xteink-pokemon-languages.zip`. Download it from Settings > System > Device > Download more languages, or copy it to the root of the SD card: the reader installs it by itself and returns to the language you had chosen. In Arabic, Belarusian, Hebrew, Kazakh, Russian and Ukrainian, some Pokemon text stays in English to fit the reader's language storage.
 - Game Boy (X4 Pro): Game Boy Color games run close to full speed. The emulator's busiest code now runs from the reader's fast internal memory instead of flash: Pokemon Gold takes about 8 ms a frame instead of about 19 ms, and went from 80-86% to 98-99% of full speed on a real X4 Pro with Bluetooth off. This uses about 40 KB of internal memory.
 
 ### Fixed
 
 - X4 Pro: Bluetooth keeps most of its memory in the larger external memory, about 29 KB less in the internal memory, so that a Game Boy game still opens with Bluetooth on and a controller connected.
+- X3: Bluetooth starts inside a book and reconnects to a paired controller. After the move to CrossInk 2.0.0-rc the reader refused it for lack of one large enough block of memory. The reader now keeps about 99 KB free in a book, with a 75 KB block, up from about 85 KB and 63 KB.
+- X4 Pro: books open with Bluetooth on, and downloads over Wi-Fi connect. Most small allocations and the secure connection's memory moved to the larger external memory, as the internal memory ran short after the Game Boy speed-up.
+- Settings > System: the version line no longer covers the last row of the list.
+
+### Known issues
+
+- X4 Pro: in Game Boy games with the Pulse polish display preset, the screen updated somewhat less often than in test builds before the move to CrossInk 2.0.0-rc (about 8.7 against 10 times a second). The game itself runs at full speed. The sessions compared were not the same scene, so the cause is not settled.
 
 ## [2.0.2-beta.1-x4pro] - 2026-10-31
 
@@ -1014,6 +1038,8 @@ First stable release. No gameplay or save-format changes from 0.31.0 - documenta
 - The on-screen keyboard now uses wider outlined keys with clearer spacing on touch and button devices.
 - Long status titles shorten faster when they do not fit the screen.
 - Leaving an EPUB or TXT reader releases rebuildable font buffers for other screens.
+- Global reader spacing and margin controls now show a live text preview on touch and button devices; the font preview also includes the Latin sample text.
+- Font previews now separate the sample text from the font name with a horizontal line.
 - Menu buttons now follow the device layout: Left/Right switch tabs and Up/Down select rows in reader menus and global settings.
 - The KOReader Sync progress choice now shows remote and local progress as clear cards with large percentages, progress bars, and an "Ahead" marker on the further position.
 - Saving unchanged reading statistics and session state avoids unnecessary SD card writes.
@@ -1029,6 +1055,7 @@ First stable release. No gameplay or save-format changes from 0.31.0 - documenta
 
 ### Fixed
 
+- Touch keyboards keep up with faster typing by polling during screen updates and avoiding extra key-highlight redraws.
 - File Transfer choices no longer appear preselected when opened on a touch device.
 - EPUB paragraphs now inherit first-line indentation from HTML and body styles while retaining paragraph-level overrides.
 - Saved clipping lists now show a scrollbar when more clippings are available below the visible rows.
@@ -1054,6 +1081,12 @@ First stable release. No gameplay or save-format changes from 0.31.0 - documenta
 - Changing global font or page layout settings from the pull-down panel on touch devices now updates the open book when it inherits those settings.
 - KOReader authentication now rejects unexpectedly large server responses to avoid crashes.
 - EPUBs rewritten with alternate XML namespace prefixes now open normally instead of jumping straight to End of Book.
+- Global font previews load all letters and punctuation in the Latin sample instead of showing missing-character diamonds.
+- Touch keyboard key hit-testing no longer waits for a screen refresh on devices with TTF support.
+- Touch keyboards show consistent brief key feedback while keeping fast typing responsive.
+- Server connection errors during manual stats uploads no longer appear as Wi-Fi failures.
+- Folder progress sync follows the global Smart or Ask setting and rebuilds missing book metadata instead of silently skipping saved progress.
+- Skip a failed book during folder sync and continue with the remaining books, with failed books counted in the summary.
 - Carousel Home screen reuses cached cover artwork after reading and prepares other positions only when viewed, while keeping progress, reading time, and menu choices current.
 - Sleep entry skips unnecessary pauses. PSRAM devices show independent sleep screens before saving reader progress, and Direct grayscale images skip an unused decode.
 - Renaming books in the web portal preserves reading progress, stats, bookmarks, clippings, reader settings, and cached content.
@@ -1089,6 +1122,7 @@ First stable release. No gameplay or save-format changes from 0.31.0 - documenta
 - Support the second X4 Classic display panel variant.
 - The frontlight drawer stays within the screen at large UI scales.
 - Nested EPUB paragraphs and blocks keep inherited bold and italic styles.
+- Sync Progress from the File Browser shows one loading notice and returns to the same folder and selection.
 - Keep saved clock and date status-bar positions when the clock is temporarily unavailable at startup.
 - Stay in Settings if there is not enough memory to open TTF Rendering.
 - Translate month names in Library date headings and device dates.

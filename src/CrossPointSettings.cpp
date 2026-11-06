@@ -11,6 +11,7 @@
 #include <PersistableStore.h>
 #include <ScalableBuiltins.h>
 #include <Serialization.h>
+#include <WifiTransmitPower.h>
 
 #include <algorithm>
 #include <cstring>
@@ -24,6 +25,7 @@
 #include "SettingsList.h"
 #include "fontIds.h"
 #include "util/FrontlightSchedule.h"
+#include "util/PluginLocations.h"
 #include "util/ReaderStatusBarJson.h"
 #include "util/TwoFingerSwipe.h"
 
@@ -62,6 +64,7 @@ constexpr uint8_t SLEEP_SCREEN_STORAGE_ORDER[] = {
     static_cast<uint8_t>(CrossPointSettings::QUICK_RESUME),
     static_cast<uint8_t>(CrossPointSettings::MINIMAL_STATS_SLEEP),
     static_cast<uint8_t>(CrossPointSettings::DASHBOARD_SLEEP),
+    static_cast<uint8_t>(CrossPointSettings::COVER_OVERLAY),
 };
 constexpr uint8_t SLEEP_SCREEN_STORAGE_ORDER_COUNT =
     sizeof(SLEEP_SCREEN_STORAGE_ORDER) / sizeof(SLEEP_SCREEN_STORAGE_ORDER[0]);
@@ -170,6 +173,14 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
   }
 }
 
+// Hide Battery % (Never / In Reader / Always) predates per-bar battery styles.
+// In Reader hid the percentage only in reader bars, so the UI header kept it.
+ReaderStatusBarBatteryStyle legacyBatteryStyle(const uint8_t hideBatteryPercentage, const bool displayBar) {
+  const bool hidden = displayBar ? hideBatteryPercentage == CrossPointSettings::HIDE_ALWAYS
+                                 : hideBatteryPercentage != CrossPointSettings::HIDE_NEVER;
+  return hidden ? ReaderStatusBarBatteryStyle::IconOnly : ReaderStatusBarBatteryStyle::IconAndPercent;
+}
+
 void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
   switch (static_cast<CrossPointSettings::STATUS_BAR_MODE>(settings.statusBar)) {
     case CrossPointSettings::NONE:
@@ -235,7 +246,9 @@ bool isValidQuickActionSlot(const uint8_t action) {
          action == CrossPointSettings::TOGGLE_HOME_BUTTON_IN_READER ||
          action == CrossPointSettings::TOGGLE_FRONTLIGHT || action == CrossPointSettings::TOGGLE_TOUCHSCREEN ||
          action == CrossPointSettings::PREVIOUS_PAGE || action == CrossPointSettings::NEARBY_POSITION_SYNC ||
-         action == CrossPointSettings::LIBRARY;
+         action == CrossPointSettings::LIBRARY || action == CrossPointSettings::HOME_READER ||
+         action == CrossPointSettings::BACK_HOME || action == CrossPointSettings::SELECT_CHAPTER ||
+         action == CrossPointSettings::TOGGLE_PAGE_TURN_GESTURES || action == CrossPointSettings::ROTATE_FLIP;
 }
 
 uint8_t migrateTiltDirectionValue(const uint8_t direction) {
@@ -281,6 +294,10 @@ bool CrossPointSettings::isTwoFingerSwipeActionAvailable(const uint8_t action, c
                                                          const bool hasColorTemperature) {
   switch (static_cast<TWO_FINGER_SWIPE_ACTION>(action)) {
     case TWO_FINGER_SWIPE_NOT_SET:
+    case TWO_FINGER_SWIPE_BACK_HOME:
+    case TWO_FINGER_SWIPE_HOME_READER:
+    case TWO_FINGER_SWIPE_SELECT_CHAPTER:
+    case TWO_FINGER_SWIPE_TOGGLE_PAGE_TURN_GESTURES:
     case TWO_FINGER_SWIPE_NEXT_CHAPTER:
     case TWO_FINGER_SWIPE_PREVIOUS_CHAPTER:
     case TWO_FINGER_SWIPE_INCREASE_FONT_SIZE:
@@ -346,6 +363,14 @@ void CrossPointSettings::validateReaderFrontButtonMapping(CrossPointSettings& se
 }
 
 uint8_t CrossPointSettings::defaultUiScale() { return UI_SCALE_SMALL; }
+
+uint8_t CrossPointSettings::defaultIndexingMethod() {
+#if FREEINK_MCU_S3
+  return INDEXING_INCREMENTAL;
+#else
+  return INDEXING_FULL_SECTION;
+#endif
+}
 
 uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue) {
   switch (legacyValue) {
@@ -464,8 +489,13 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     }
   }
 
+  // Images is a combined UI choice; retain the original persisted pair for compatibility.
+  doc["imageRendering"] = imageRendering;
+  doc["imageGrayscale"] = imageGrayscale;
+
   JsonArray displaySlots = doc["displayStatusBar"].to<JsonArray>();
   for (const auto item : displayStatusBar.slots) displaySlots.add(static_cast<uint8_t>(item));
+  doc["displayBatteryStyle"] = static_cast<uint8_t>(displayStatusBar.batteryStyle);
 
   JsonObject bars = doc["readerStatusBars"].to<JsonObject>();
   bars["version"] = 1;
@@ -487,6 +517,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["libraryShowMarkdown"] = libraryShowMarkdown;
   doc["libraryHideFinishedBooks"] = libraryHideFinishedBooks;
 
+  doc["disablePageTurnGestures"] = disablePageTurnGestures;
   doc["frontButtonBack"] = frontButtonBack;
   doc["frontButtonConfirm"] = frontButtonConfirm;
   doc["frontButtonLeft"] = frontButtonLeft;
@@ -505,15 +536,21 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     quickActionSlotsJson.add(action);
   }
   doc["quickActionsTrigger"] = quickActionsTrigger;
-  doc["language"] = (language < getLanguageCount()) ? LANGUAGE_CODES[language] : "EN";
+  doc["filenameFallbackFont"] = filenameFallbackFont;
+  doc["language"] = languageCode;
+  doc["languageCacheGeneration"] = languageCacheGeneration;
   if (keyboardLayouts != 0) doc["keyboardLayouts"] = keyboardLayouts;
   doc["tiltPageTurnDirectionSchema"] = TILT_DIRECTION_SCHEMA_CURRENT;
   doc["clockDateHasBeenSynced"] = clockDateHasBeenSynced;
   doc["screenInverted"] = screenInverted;
+  doc["pluginsEnabled"] = pluginsEnabled;
+  doc["pluginHubPromptHidden"] = pluginHubPromptHidden;
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint) {
   std::lock_guard<std::mutex> lock(_mutex);
+  // Old settings files must not retain a previously selected runtime override.
+  wifiTransmitPower = 0;
   bool needsResave = false;
   auto clamp = [](const uint8_t value, const uint8_t maxValue, const uint8_t fallback) {
     return value < maxValue ? value : fallback;
@@ -583,8 +620,19 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
       continue;
     }
 
-    const uint8_t fieldDefault = this->*(info.valuePtr);
+    // Missing keys in older exports restore the original status font size and
+    // bidirectional tilt behavior, even if this session changed them.
+    const uint8_t fieldDefault = info.valuePtr == &CrossPointSettings::displayStatusBarTextSize ||
+                                         info.valuePtr == &CrossPointSettings::tiltNextPageOnly
+                                     ? 0
+                                     : this->*(info.valuePtr);
     uint8_t value = doc[info.key] | fieldDefault;
+    // CrossPoint stores normal spacing as 100%; CrossInk stores it as level 0.
+    // Keep native CrossInk levels intact, including files at the legacy path.
+    if (importingCrossPoint && info.valuePtr == &CrossPointSettings::wordSpacing && value == 100) {
+      value = 0;
+      needsResave = true;
+    }
     if (strcmp(info.key, "sdFontSizeRange") == 0 && value == SD_FONT_RANGE_NO_EMOJI_LEGACY) {
       value = SD_FONT_RANGE_ALL;
       needsResave = true;
@@ -616,6 +664,38 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
       value = std::clamp(value, static_cast<uint8_t>(info.valueRange.min), static_cast<uint8_t>(info.valueRange.max));
     }
     this->*(info.valuePtr) = value;
+  }
+
+  // The dynamic Images setting is intentionally absent from the generic field loop.
+  imageRendering = clamp(doc["imageRendering"] | imageRendering, IMAGE_RENDERING_COUNT, imageRendering);
+  imageGrayscale = clamp(doc["imageGrayscale"] | imageGrayscale, 2, imageGrayscale);
+
+  // Retire the old blanket touch gate. Its saved value must not leave hidden restrictions.
+  disablePageTurnGestures = clamp(doc["disablePageTurnGestures"] | uint8_t{0}, 2, 0);
+  if (!doc["touchReaderControls"].isNull()) needsResave = true;
+  const uint8_t legacyFront =
+      clamp(doc["longPressButtonBehavior"] | uint8_t{OFF}, LONG_PRESS_BUTTON_BEHAVIOR_COUNT, OFF);
+  const auto frontAction = [&](bool left) -> uint8_t {
+    switch (legacyFront) {
+      case CHAPTER_SKIP:
+        return left ? SIDE_PREVIOUS_CHAPTER : SIDE_NEXT_CHAPTER;
+      case FONT_SIZE_CHANGE:
+        return left ? SIDE_DECREASE_FONT : SIDE_INCREASE_FONT;
+      case ORIENTATION_CHANGE:
+        return left ? SIDE_ROTATE_CLOCKWISE : SIDE_ROTATE_COUNTERCLOCKWISE;
+      case ORIENTATION_FLIP:
+        return SIDE_ROTATE_FLIP;
+      default:
+        return IGNORE;
+    }
+  };
+  if (doc["frontButtonLeftLong"].isNull()) {
+    frontButtonLeftLong = frontAction(true);
+    needsResave = true;
+  }
+  if (doc["frontButtonRightLong"].isNull()) {
+    frontButtonRightLong = frontAction(false);
+    needsResave = true;
   }
 
   // Old settings assigned one layout and one long-press mode to both side
@@ -690,7 +770,6 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
     if (doc["touchReaderControls"].is<uint8_t>()) {
       const uint8_t mode = doc["touchReaderControls"].as<uint8_t>();
       if (mode <= 3) {
-        touchReaderControls = mode == 0 ? TOUCH_READER_OFF : TOUCH_READER_ON;
         // CrossPoint: 0=off, 1=tap, 2=swipe, 3=inverted tap.
         pageTurnGesture = mode == 0 ? TAP_AND_SWIPE : mode == 1 ? TAP_ONLY : mode == 2 ? SWIPE_ONLY : INVERTED_TAP;
         previousPageGesture = pageTurnGesture;
@@ -711,7 +790,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
     screenInverted = clamp(doc["readerDarkMode"] | static_cast<uint8_t>(0), 2, 0);
     needsResave = true;
   }
-  if (refreshFrequency == REFRESH_NEVER && !Frontlight.present()) {
+  if (refreshFrequency == REFRESH_NEVER && !isRefreshNeverAvailable()) {
     refreshFrequency = REFRESH_15;
     needsResave = true;
   }
@@ -811,6 +890,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
   }
   const JsonVariantConst bars = doc["readerStatusBars"];
   if (bars["version"] != 1) {
+    topReaderStatusBar = ReaderStatusBarConfig{};
     bottomReaderStatusBar = migrateBottomStatusBar(
         {statusBarChapterPageCount != 0, stablePageNumbers != 0, statusBarBookProgressPercentage != 0, statusBarTitle,
          statusBarTimeLeft, statusBarBattery != 0, statusBarBookPercentageFormat, statusBarProgressBar,
@@ -832,6 +912,22 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
       needsResave = true;
     }
     legacyXtcTopUsesBottom = bars["legacyXtcTopUsesBottom"].as<bool>() ? 1 : 0;
+  }
+  const uint8_t legacyHideBattery =
+      clamp(doc["hideBatteryPercentage"] | static_cast<uint8_t>(HIDE_NEVER), HIDE_BATTERY_PERCENTAGE_COUNT, HIDE_NEVER);
+  const auto migrateReaderBatteryStyle = [&](const char* key, ReaderStatusBarConfig& bar) {
+    if (bars["version"] == 1 && !bars[key]["battery"].isUnbound()) return;
+    bar.batteryStyle = legacyBatteryStyle(legacyHideBattery, false);
+    needsResave = true;
+  };
+  migrateReaderBatteryStyle("top", topReaderStatusBar);
+  migrateReaderBatteryStyle("bottom", bottomReaderStatusBar);
+  if (doc["displayBatteryStyle"].isUnbound()) {
+    displayStatusBar.batteryStyle = legacyBatteryStyle(legacyHideBattery, true);
+    needsResave = true;
+  } else if (!readReaderStatusBarBatteryStyle(doc["displayBatteryStyle"], displayStatusBar.batteryStyle)) {
+    displayStatusBar.batteryStyle = ReaderStatusBarBatteryStyle::IconAndPercent;
+    needsResave = true;
   }
   if (doc["sleepTimeoutMinutes"].isNull() && !doc["sleepTimeout"].isNull()) {
     const uint8_t legacyValue =
@@ -886,7 +982,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
   const bool unavailableHomeTrigger =
       !gpio.hasHomeKey() && persistedQuickActionsTrigger >= static_cast<uint8_t>(QuickActions::Trigger::TapHome) &&
       persistedQuickActionsTrigger <= static_cast<uint8_t>(QuickActions::Trigger::DoubleTapHome);
-  if (persistedQuickActionsTrigger <= static_cast<uint8_t>(QuickActions::Trigger::SideDownLong) &&
+  if (persistedQuickActionsTrigger <= static_cast<uint8_t>(QuickActions::Trigger::FrontRightLong) &&
       !unavailableHomeTrigger) {
     quickActionsTrigger = persistedQuickActionsTrigger;
   } else {
@@ -908,14 +1004,36 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
     needsResave = true;
   }
   if (doc["language"].is<const char*>()) {
-    language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
+    const char* code = doc["language"].as<const char*>();
+    if (language_cache::validCode(code)) {
+      std::strcpy(languageCode, code);
+      for (char* p = languageCode; *p; ++p)
+        if (*p >= 'a' && *p <= 'z') *p -= 'a' - 'A';
+    }
+  } else if (doc["language"].is<uint8_t>()) {
+    const auto legacy = doc["language"].as<uint8_t>();
+    if (legacy < getLanguageCount()) std::strcpy(languageCode, LANGUAGE_CODES[legacy]);
+  }
+  languageCacheGeneration = doc["languageCacheGeneration"] | uint64_t{0};
+  const char* filenameFont = doc["filenameFallbackFont"] | "";
+  if (std::strlen(filenameFont) < sizeof(filenameFallbackFont) && !std::strchr(filenameFont, '/') &&
+      !std::strchr(filenameFont, '\\') && std::strcmp(filenameFont, ".") != 0 && std::strcmp(filenameFont, "..") != 0) {
+    std::strcpy(filenameFallbackFont, filenameFont);
   }
   if (doc["keyboardLayouts"].is<uint16_t>()) {
     keyboardLayouts = doc["keyboardLayouts"].as<uint16_t>();
   }
   clockDateHasBeenSynced = clamp(doc["clockDateHasBeenSynced"] | static_cast<uint8_t>(0), 2, 0);
 
+  if (doc["pluginsEnabled"].isNull()) {
+    pluginsEnabled = PluginLocations::anyPluginInstalledOnDisk() ? 1 : 0;
+    needsResave = true;
+  } else {
+    pluginsEnabled = clamp(doc["pluginsEnabled"] | uint8_t{0}, 2, 0);
+  }
+  pluginHubPromptHidden = clamp(doc["pluginHubPromptHidden"] | uint8_t{0}, 2, 0);
   if (needsResave) requestResave();
+  WifiTransmitPower::setLimit(wifiTransmitPower);
   LOG_DBG("CPS", "Settings loaded from file");
   return true;
 }
@@ -924,10 +1042,12 @@ bool CrossPointSettings::saveToFile() const {
   std::lock_guard<std::mutex> lock(storeMutex);
   JsonDocument doc;
   toJson(doc);
-  return PersistableStoreBase::writeDocToFileAtomically(SETTINGS_FILE_JSON, doc);
+  WifiTransmitPower::setLimit(doc["wifiTransmitPower"] | uint8_t{0});
+  return PersistableStoreBase::writeDocToFileAtomic(SETTINGS_FILE_JSON, doc);
 }
 
 bool CrossPointSettings::loadFromFile() {
+  if (!PersistableStoreBase::recoverAtomicFile(SETTINGS_FILE_JSON)) return false;
   enum class JsonLoadStatus : uint8_t { MissingOrEmpty, Loaded, Failed };
 
   auto loadJsonSettings = [this](const char* path, bool migrateToCurrentPath) -> JsonLoadStatus {
@@ -983,6 +1103,9 @@ bool CrossPointSettings::loadFromFile() {
           {statusBarChapterPageCount != 0, stablePageNumbers != 0, statusBarBookProgressPercentage != 0, statusBarTitle,
            statusBarTimeLeft, statusBarBattery != 0, statusBarBookPercentageFormat, statusBarProgressBar,
            statusBarProgressBarThickness});
+      topReaderStatusBar.batteryStyle = legacyBatteryStyle(hideBatteryPercentage, false);
+      bottomReaderStatusBar.batteryStyle = legacyBatteryStyle(hideBatteryPercentage, false);
+      displayStatusBar.batteryStyle = legacyBatteryStyle(hideBatteryPercentage, true);
       migrateLanguageBinaryFile();
       if (saveToFile()) {
         Storage.rename(SETTINGS_FILE_BIN, SETTINGS_FILE_BAK);
@@ -1012,10 +1135,12 @@ bool CrossPointSettings::migrateLanguageBinaryFile() {
       uint8_t oldIndex;
       serialization::readPod(f, oldIndex);
       if (oldIndex < V1_LANGUAGE_COUNT) {
-        language = static_cast<uint8_t>(V1_LANGUAGES[oldIndex]);
+        std::strcpy(languageCode, LANGUAGE_CODES[static_cast<uint8_t>(V1_LANGUAGES[oldIndex])]);
+        languageCacheGeneration = 0;
       }
     }
   }
+  f.close();
   Storage.rename(LANG_FILE_BIN, LANG_FILE_BAK);
   saveToFile();
   LOG_DBG("CPS", "Migrated language.bin into crossink-settings.json");
@@ -1152,6 +1277,27 @@ bool CrossPointSettings::loadFromBinaryFile() {
       break;
   }
 
+  switch (longPressButtonBehavior) {
+    case CHAPTER_SKIP:
+      frontButtonLeftLong = SIDE_PREVIOUS_CHAPTER;
+      frontButtonRightLong = SIDE_NEXT_CHAPTER;
+      break;
+    case FONT_SIZE_CHANGE:
+      frontButtonLeftLong = SIDE_DECREASE_FONT;
+      frontButtonRightLong = SIDE_INCREASE_FONT;
+      break;
+    case ORIENTATION_CHANGE:
+      frontButtonLeftLong = SIDE_ROTATE_CLOCKWISE;
+      frontButtonRightLong = SIDE_ROTATE_COUNTERCLOCKWISE;
+      break;
+    case ORIENTATION_FLIP:
+      frontButtonLeftLong = frontButtonRightLong = SIDE_ROTATE_FLIP;
+      break;
+    default:
+      frontButtonLeftLong = frontButtonRightLong = IGNORE;
+      break;
+  }
+
   lineHeightPercent = legacyLineSpacingToPercent(lineSpacing, fontFamily, sdFontFamilyName[0] != '\0');
 
   return true;
@@ -1172,8 +1318,14 @@ void CrossPointSettings::setReaderStatusBar(const ReaderStatusBarPosition positi
                                             const ReaderStatusBarConfig& config) {
   std::lock_guard<std::mutex> lock(_mutex);
   if (position == ReaderStatusBarPosition::Top) {
+    if (topReaderStatusBar.slots != config.slots || topReaderStatusBar.percentageFormat != config.percentageFormat ||
+        topReaderStatusBar.progressBar != config.progressBar ||
+        topReaderStatusBar.progressBarThickness != config.progressBarThickness ||
+        topReaderStatusBar.batteryStyle != config.batteryStyle || topReaderStatusBar.centered != config.centered ||
+        topReaderStatusBar.separator != config.separator) {
+      legacyXtcTopUsesBottom = 0;
+    }
     topReaderStatusBar = config;
-    legacyXtcTopUsesBottom = 0;
   } else {
     bottomReaderStatusBar = config;
   }
@@ -1195,7 +1347,13 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.focusReadingEnabled = focusReadingEnabled != 0;
   spec.guideReadingEnabled = guideReadingEnabled != 0;
   spec.wordSpacing = wordSpacing;
+  spec.characterSpacing = characterSpacingLevel(characterSpacing);
   spec.renderMode = renderMode;
+#if CROSSINK_SCALABLE_FONTS
+  if (spec.embeddedStyle && renderMode != EpubRenderMode::Light &&
+      publisherFonts <= static_cast<uint8_t>(PublisherFonts::All))
+    spec.publisherFonts = static_cast<PublisherFonts>(publisherFonts);
+#endif
   return spec;
 }
 
@@ -1245,9 +1403,19 @@ bool CrossPointSettings::verifySleepScreenMigrationContract() {
          sleepScreenModeToStorage(MINIMAL_STATS_SLEEP) == minimalStatsStorageValue &&
          sleepScreenStorageToMode(dashboardSleepStorageValue) == DASHBOARD_SLEEP &&
          sleepScreenModeToStorage(DASHBOARD_SLEEP) == dashboardSleepStorageValue &&
+         sleepScreenStorageToMode(12) == COVER_OVERLAY && sleepScreenModeToStorage(COVER_OVERLAY) == 12 &&
          sleepScreenStorageToMode(UINT8_MAX) == DARK;
 }
 #endif
+
+bool CrossPointSettings::isRefreshNeverAvailable() {
+#if defined(FREEINK_DEVICE_PICCO) && FREEINK_DEVICE_PICCO
+  // Keep periodic cleanup on Picco until its panels are validated without it.
+  return false;
+#else
+  return Frontlight.present();
+#endif
+}
 
 int CrossPointSettings::getRefreshFrequency() const {
   switch (refreshFrequency) {
@@ -1263,9 +1431,9 @@ int CrossPointSettings::getRefreshFrequency() const {
     case REFRESH_30:
       return 30;
     case REFRESH_NEVER:
-      // Never is available only on frontlit boards. Persisted settings can be
-      // shared between devices, so retain a safe cadence everywhere else.
-      return Frontlight.present() ? std::numeric_limits<int>::max() : 15;
+      // Persisted settings can be shared between devices. Keep a safe cadence
+      // on boards where Never is unavailable, including Picco.
+      return isRefreshNeverAvailable() ? std::numeric_limits<int>::max() : 15;
   }
 }
 
@@ -1379,4 +1547,14 @@ int CrossPointSettings::getBuiltInReaderFontId() const {
   }
   return getFallbackReaderFontIdForFamily(static_cast<FONT_FAMILY>(fontFamily));
 #endif
+}
+
+void CrossPointSettings::formatCharacterSpacing(const int value, char* buffer, const size_t length) {
+  const int level = characterSpacingLevel(static_cast<uint8_t>(std::clamp(value, 0, 10)));
+  snprintf(buffer, length, level > 0 ? "+%d" : "%d", level);
+}
+
+void CrossPointSettings::formatWordSpacingSlider(const int value, char* buffer, const size_t length) {
+  const int level = WordSpacing::level(WordSpacing::fromSlider(value));
+  snprintf(buffer, length, "%d", level);
 }

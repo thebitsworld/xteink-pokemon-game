@@ -31,10 +31,11 @@ std::string primarySubtag(const std::string& acceptLang) {
 }
 }  // namespace
 
-void OpdsClient::setServer(std::string url, std::string user, std::string pass) {
+void OpdsClient::setServer(std::string url, std::string user, std::string pass, std::vector<HttpHeader> headers) {
   serverUrl = std::move(url);
   username = std::move(user);
   password = std::move(pass);
+  customHeaders = std::move(headers);
 }
 
 void OpdsClient::setTokens(std::string access, std::string refresh, std::string refreshUrl) {
@@ -55,6 +56,7 @@ HttpAuth OpdsClient::currentAuth() const {
     a.password = password;
   }
   a.bearer = bearerToken;
+  a.headers = customHeaders;
   return a;
 }
 
@@ -169,7 +171,10 @@ bool OpdsClient::fetchSearchTemplate(const std::string& descUrl, std::string& ou
 bool OpdsClient::authenticate(const std::string& resourceUrl) {
   std::string body;
   body.reserve(1024);
-  const HttpResult res = http.get(resourceUrl, HttpAuth{}, nullptr, nullptr, true,
+  // No credentials on the probe, but an auth proxy still needs its headers.
+  HttpAuth probe;
+  probe.headers = customHeaders;
+  const HttpResult res = http.get(resourceUrl, probe, nullptr, nullptr, true,
                                   [&body](const uint8_t* data, const size_t len) {
                                     const size_t room = MAX_AUTH_DOC_BYTES - body.size();
                                     body.append(reinterpret_cast<const char*>(data), len < room ? len : room);

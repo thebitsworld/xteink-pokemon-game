@@ -88,15 +88,21 @@ struct HeaderProps {
   int16_t trailingSize = 0;
   // Battery + clock status chrome drawn inside the band.
   HeaderStatusProps status{};
+  // How far the band's background and border extend past `rect` on each side,
+  // so the chrome can span the screen while the content stays inset.
+  Insets bleed{};
 };
 
 template <size_t MaxInteractions>
 void header(Frame<MaxInteractions>& frame, Rect rect, const HeaderProps& props) {
   StyleSet styles = props.styles.unset() ? defaultPopupStyles() : props.styles;
   const BoxStyle& style = styles.resolve(StateNormal);
-  frame.target().fill(rect, style.background, style.radius, style.corners);
+  const Rect chrome{static_cast<int16_t>(rect.x - props.bleed.left), static_cast<int16_t>(rect.y - props.bleed.top),
+                    static_cast<int16_t>(rect.width + props.bleed.left + props.bleed.right),
+                    static_cast<int16_t>(rect.height + props.bleed.top + props.bleed.bottom)};
+  frame.target().fill(chrome, style.background, style.radius, style.corners);
   if (style.border.kind != PaintKind::None && style.borderWidth > 0) {
-    drawBorderEdges(frame.target(), rect, style.border, style.borderWidth, style.radius, style.corners,
+    drawBorderEdges(frame.target(), chrome, style.border, style.borderWidth, style.radius, style.corners,
                     props.borderEdges);
   }
 
