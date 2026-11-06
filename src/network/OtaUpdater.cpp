@@ -33,6 +33,17 @@ namespace {
 
 constexpr char latestReleaseUrl[] = CROSSINK_OTA_RELEASE_URL;
 
+// The X3 has no serial console: what a failed update did can only be read from the card.
+void noteOta(const char* step, const int code, const int detail = 0) {
+  HalFile log = Storage.open("/.crosspoint/ota-log.txt", O_WRONLY | O_CREAT | O_APPEND);
+  if (!log) return;
+  char line[96];
+  const int length = snprintf(line, sizeof(line), "%s: %d %d free=%u maxAlloc=%u\n", step, code, detail,
+                              static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  if (length > 0) log.write(line, static_cast<size_t>(length));
+  log.close();
+}
+
 #ifdef CROSSINK_FIRMWARE_DEVICE_TYPE
 constexpr char firmwareAssetStem[] = "firmware-" CROSSINK_FIRMWARE_DEVICE_TYPE;
 constexpr char firmwareAssetName[] = "firmware-" CROSSINK_FIRMWARE_DEVICE_TYPE ".bin";
@@ -314,9 +325,14 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
     return INTERNAL_UPDATE_ERROR;
   }
 
+  noteOta("check", 0);
   esp_err = esp_http_client_perform(client_handle);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_http_client_perform Failed : %s", esp_err_to_name(esp_err));
+    int tlsCode = 0;
+    int tlsFlags = 0;
+    esp_http_client_get_and_clear_last_tls_error(client_handle, &tlsCode, &tlsFlags);
+    noteOta("check failed", esp_err, tlsCode);
     esp_http_client_cleanup(client_handle);
     return HTTP_ERROR;
   }
@@ -333,6 +349,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 
   if (!releaseParser.foundTag()) {
     LOG_ERR("OTA", "No tag_name in release JSON");
+    noteOta("no tag", static_cast<int>(totalBytesReceived));
     return JSON_PARSE_ERROR;
   }
 
@@ -340,6 +357,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 
   if (!releaseParser.foundFirmware()) {
     LOG_ERR("OTA", "No matching %s asset found for release %s", firmwareAssetStem, latestVersion.c_str());
+    noteOta("no asset", static_cast<int>(totalBytesReceived));
     return NO_UPDATE;
   }
 
@@ -348,6 +366,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   otaSize = releaseParser.getFirmwareSize();
   totalSize = otaSize;
   updateAvailable = true;
+  noteOta("found", static_cast<int>(otaSize));
 
   LOG_DBG("OTA", "Found update: tag=%s size=%zu sha256=%s", latestVersion.c_str(), otaSize,
           otaSha256.empty() ? "missing" : "present");
@@ -401,6 +420,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
 
   if (otaSize > 0 && otaSize > updatePartition->size) {
     LOG_ERR("OTA", "Firmware too large: %zu > %zu", otaSize, updatePartition->size);
+    noteOta("too large", static_cast<int>(otaSize), static_cast<int>(updatePartition->size));
     return INTERNAL_UPDATE_ERROR;
   }
   // OTA reports download and flash as one unit of work, so the progress bar
@@ -434,6 +454,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   // manifest supplied a digest that pins the firmware bytes. Older HTTPS
   // releases without a digest retain the verified esp_http_client path.
   if (hasManifestSha256) downloadOptions.transport = HttpDownloader::Transport::WOLFSSL;
+  noteOta("download", 0);
   LOG_INF("OTA", "Staging firmware download: url=%s heap=%u maxAlloc=%u", otaUrl.c_str(), ESP.getFreeHeap(),
           ESP.getMaxAllocHeap());
   const auto transferResult = HttpDownloader::downloadToFile(
@@ -455,6 +476,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
       return CANCELLED_ERROR;
     }
     LOG_ERR("OTA", "Firmware download failed after %zu/%zu bytes", processedSize, totalSize);
+    noteOta("download failed", static_cast<int>(transferResult), static_cast<int>(processedSize));
     return HTTP_ERROR;
   }
 
@@ -470,6 +492,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
     const StagedHashResult hashResult = verifyStagedHash(stagedFile, otaSha256.c_str(), &stagedSize);
     if (hashResult == StagedHashResult::MISMATCH) {
       LOG_ERR("OTA", "Firmware sha256 mismatch: expected=%s", otaSha256.c_str());
+      noteOta("sha256 mismatch", 0);
       stagedFile.close();
       Storage.remove(OTA_STAGE_PATH);
       return HASH_MISMATCH_ERROR;
@@ -492,6 +515,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   const auto validationResult = firmware_flash::validateOpenImageFile(stagedFile, updatePartition->size);
   if (validationResult != firmware_flash::Result::OK) {
     LOG_ERR("OTA", "Staged firmware validation failed: %s", firmware_flash::resultName(validationResult));
+    noteOta("validation failed", static_cast<int>(validationResult));
     stagedFile.close();
     Storage.remove(OTA_STAGE_PATH);
     if (validationResult == firmware_flash::Result::BAD_CHIP ||
@@ -520,11 +544,13 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   Storage.remove(OTA_STAGE_PATH);
   if (flashResult != firmware_flash::Result::OK) {
     LOG_ERR("OTA", "Firmware flash failed: %s", firmware_flash::resultName(flashResult));
+    noteOta("flash failed", static_cast<int>(flashResult));
     return flashResult == firmware_flash::Result::OOM ? OOM_ERROR : INTERNAL_UPDATE_ERROR;
   }
 
   notifyOtaProgress(&installCtx, true);
   LOG_INF("OTA", "Update completed: %zu bytes", processedSize);
+  noteOta("done", static_cast<int>(processedSize));
   return OK;
 }
 #endif
