@@ -1,4 +1,14 @@
-## [Unreleased]
+## [2.1.0] - 2026-11-06
+
+Everything since 2.0.1, including 2.0.2-beta.1-x4pro.
+
+> **Update notes:** your Pokémon save and books are kept. `language-pack.bin` is gone: English and Vietnamese are built in, and any other language now comes from `xteink-pokemon-languages.zip`. If your reader uses another language, it may show English after the update until you install the file: use Settings > System > Device > Download more languages, or copy the ZIP to the root of the SD card.
+>
+> **Tried on real readers for this release:** X3 and X4 Pro, on test builds of this code (the only differences are the version number and where the language file is downloaded from). The X4 and X4 Classic files are built from the same code but were not tried on those readers; keep the 2.0.1 firmware at hand if you install them. The download from this release's own language ZIP had only been tried from a test release.
+>
+> 🇻🇳 **Lưu ý khi cập nhật:** save Pokémon và sách được giữ nguyên. `language-pack.bin` đã bỏ: tiếng Anh và tiếng Việt có sẵn trong firmware, các ngôn ngữ khác nay nằm trong `xteink-pokemon-languages.zip`. Nếu máy đang dùng ngôn ngữ khác, sau khi cập nhật có thể hiện tiếng Anh cho đến khi cài file này: vào Settings > System > Device > Download more languages, hoặc chép file ZIP vào thư mục gốc của thẻ SD.
+>
+> **Đã thử trên máy thật cho bản này:** X3 và X4 Pro, bằng các bản thử của cùng mã nguồn (chỉ khác số phiên bản và nơi tải file ngôn ngữ). File cho X4 và X4 Classic build từ cùng mã nguồn nhưng chưa thử trên các máy đó; nếu cài, hãy giữ sẵn firmware 2.0.1. Việc tải file ngôn ngữ mới chỉ được thử từ một bản phát hành thử nghiệm.
 
 ### New
 
@@ -14,6 +24,13 @@
 ### Fixed
 
 - X4 Pro: Bluetooth keeps most of its memory in the larger external memory, about 29 KB less in the internal memory, so that a Game Boy game still opens with Bluetooth on and a controller connected.
+- X3: Bluetooth starts inside a book and reconnects to a paired controller. After the move to CrossInk 2.0.0-rc the reader refused it for lack of one large enough block of memory. The reader now keeps about 99 KB free in a book, with a 75 KB block, up from about 85 KB and 63 KB.
+- X4 Pro: books open with Bluetooth on, and downloads over Wi-Fi connect. Most small allocations and the secure connection's memory moved to the larger external memory, as the internal memory ran short after the Game Boy speed-up.
+- Settings > System: the version line no longer covers the last row of the list.
+
+### Known issues
+
+- X4 Pro: in Game Boy games with the Pulse polish display preset, the screen updated somewhat less often than in test builds before the move to CrossInk 2.0.0-rc (about 8.7 against 10 times a second). The game itself runs at full speed. The sessions compared were not the same scene, so the cause is not settled.
 
 ## [2.0.2-beta.1-x4pro] - 2026-10-31
 
