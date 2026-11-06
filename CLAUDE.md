@@ -17,8 +17,8 @@ is in git history (before 2026-10-08).
   (`package_languages.py --bundle-output`, with `.sha256`) on each release holds every file; `src/LanguageBundle.*`
   unpacks it at boot from the SD root or `/.crosspoint/language-bundle.zip` by `.crossink/bundle-manifest.txt` and
   re-installs the saved language; `LanguageBundleDownloadActivity` is what every `NetworkBootTarget::DOWNLOAD_ASSETS`
-  opens. It downloads from `releases/latest`, which skips prereleases, so the Wi-Fi path has never run against GitHub
-  until a stable release carries the ZIP. Test the SD path with `run_simulator_smoke_test.py --language-bundle <zip>`.
+  opens. It downloads from `releases/latest`, which skips prereleases, so until a stable release carries the ZIP it only
+  works in a build with `-DCROSSINK_LANGUAGE_BUNDLE_BASE_URL` set to a prerelease (how X3 and X4 Pro were tested, 2026-11). Test the SD path with `run_simulator_smoke_test.py --language-bundle <zip>`.
   pokemon-x4-pro internal RAM: IRAM Walnut and the merge left too little with Bluetooth up, so `CROSSINK_TLS_PSRAM`
   (`src/TlsPsramMemory.cpp`, wraps `esp_mbedtls_mem_calloc`) and `CROSSINK_EXTMEM_MALLOC_BYTES=256` (setup()) move TLS
   and plain malloc to PSRAM. Measured 2026-11-05, radio up, at Home: 57.9 KB free, largest block 31.7 KB; a book that
