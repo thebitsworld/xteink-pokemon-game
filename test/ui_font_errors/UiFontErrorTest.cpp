@@ -15,6 +15,9 @@
 #include <string>
 #include <vector>
 
+// CrossPointSettings.cpp is not linked here; the header's member initializer needs this.
+uint8_t CrossPointSettings::defaultIndexingMethod() { return 0; }
+
 // Scale policy and settings persistence are outside this font-loader test.
 uint8_t CrossPointSettings::defaultUiScale() { return UI_SCALE_SMALL; }
 

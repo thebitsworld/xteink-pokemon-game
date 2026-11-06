@@ -4,6 +4,9 @@
 #include "OpdsServerStore.h"
 #include "util/OpdsDownloadFolder.h"
 
+// CrossPointSettings.cpp is not linked here; the header's member initializer needs this.
+uint8_t CrossPointSettings::defaultIndexingMethod() { return 0; }
+
 // The legacy global settings are outside this store's test; migration uses only
 // their existing OPDS fields and save method.
 void CrossPointSettings::toJson(JsonDocument&) const {}
