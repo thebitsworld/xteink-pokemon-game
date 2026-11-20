@@ -1,0 +1,200 @@
+---
+title: Desk mode plan (X3 Lite)
+parent: Development
+nav_order: 30
+---
+
+# Desk mode plan (X3 Lite)
+
+Status: **design, not started** (2026-11-20, branch `feat/x3-lite`). Screen mockups (portrait
+528x792): <https://claude.ai/artifact/BnmoCtXQh1Anxk455VjPkX> (private to the owner).
+
+Desk mode turns a spare Xteink X3 into a desk clock / dashboard: clock, Gregorian + Vietnamese
+lunar calendar, weather, PC stats + Claude quota, photo frame and Pomodoro. It ships only in the
+`pokemon-x3-lite` firmware (no Bluetooth, ~705 KB of flash free at 89.0%), behind
+`CROSSINK_DESK=1`, so pokemon-x3 / X4 Pro / X4 Classic are unchanged.
+
+## Decisions taken (with the owner, 2026-11-20)
+
+| Topic | Decision |
+|---|---|
+| Firmware | `pokemon-x3-lite` only, compile flag `CROSSINK_DESK=1` |
+| Where | A **Desk** entry on Home + setting **Start in Desk** (on: boot goes straight to Desk). Back leaves to Home; reading and Pokemon keep working |
+| Orientation | Portrait 528x792, same as the reader; the 4 front buttons stay at the bottom |
+| Layout | One main screen + sub-pages: PC + Claude, photo frame, Pomodoro; Settings from the menu |
+| Power | Both USB and battery, with separate update intervals per source (table below) |
+| Weather | Fetched **on the X3** from Open-Meteo (no API key), not through the PC |
+| PC stats | The X3 polls a small agent on the PC over the LAN (plain HTTP, found by mDNS) |
+
+## Screens
+
+Mockups are the reference; text here only lists content and button roles.
+
+1. **Main**: status bar (place, last update, battery or "charging"); big clock; weekday + date;
+   lunar date `12/10 năm Bính Ngọ`, `Ngày Mậu Tuất · tháng Kỷ Hợi`; next lunar event ("Còn 3 ngày:
+   Rằm tháng Mười"); weather card (icon, temp, condition, low/high, "rain around 15h", 4 hourly
+   slots); a 3-bar strip CPU / RAM / Claude 5h (hidden when the agent is off).
+2. **PC + Claude**: host name; bars for CPU, RAM, each disk; network down/up; uptime; Claude card
+   with session (5 h) and weekly usage + reset times. Agent unreachable: "Không thấy máy tính" +
+   last seen time.
+3. **Photo frame**: one image from `/desk/photos` (fit to 528x792, 4-grey dither, the existing
+   slideshow decoder); optional bottom strip with time, lunar date, weather, index n/N.
+4. **Pomodoro**: ring with minutes left, phase (Tập trung / Nghỉ), round n/4, end time, today's
+   total. Running Pomodoro blocks deep power saving (see Power).
+5. **Desk settings**: two-column list (USB / battery), rows below.
+6. **Night sleep** (battery): static screen shown for the night window, wakes on any button.
+
+Buttons (Back, Select, Up, Down = left pair, right pair):
+
+| Screen | Back | Select | Up | Down |
+|---|---|---|---|---|
+| Main / PC / Photo | Exit to Home (PC, Photo: to Main) | Refresh now | Previous page | Next page |
+| Pomodoro | To Main | Start / Pause | Skip phase | Reset |
+| Settings | Back | Change value | Up | Down |
+
+Long-press Select on Main opens Desk settings (no extra page in the cycle).
+
+## Settings
+
+Stored in `CrossPointSettings` (JSON on the SD card, existing mechanism), prefix `desk`.
+
+| Setting | USB default | Battery default | Choices |
+|---|---|---|---|
+| Start in Desk | On | (shared) | On / Off |
+| Clock update | 1 min | 1 min | 1 / 5 / 15 min / date only |
+| Weather | 10 min | 60 min | 10 / 30 / 60 / 180 min |
+| PC + Claude | 1 min | Off | 1 / 5 / 15 min / Off |
+| Photo: next image | 30 min | Off | 5 / 30 / 60 min / Off |
+| Full refresh (ghosting) | 1 h | 3 h | 1 / 3 / 6 h |
+| Night sleep | Off | 23:00-06:00 | start / end hour, Off |
+| Weather place | (shared) | | city name; empty = guess from IP |
+| PC agent | (shared) | | Auto (mDNS) / fixed IP:port |
+| Battery log | Off | On | On / Off |
+
+City name and agent address are typed on the reader's web page (File Transfer), not with buttons.
+
+## Architecture
+
+```
+src/activities/desk/
+  DeskActivity.{h,cpp}        page state machine, input, scheduling, render dispatch
+  DeskMainView / DeskPcView / DeskPhotoView / DeskPomodoroView / DeskSettingsView
+  DeskScheduler.{h,cpp}       pure: next wake time per source from settings + power + clock
+lib/Desk/                     pure C++, host-tested (test/desk/)
+  Lunar.{h,cpp}               Ho Ngoc Duc algorithm in double, can-chi, VN festivals
+  Weather.{h,cpp}             ported from esp32-pet pet/weather.{h,cpp}: WMO -> Sky, hot/cold,
+                              hours until rain, report freshness
+  OpenMeteoParse.{h,cpp}      JSON (JsonSax) -> WeatherReport
+  AgentParse.{h,cpp}          agent JSON -> PcStats
+src/network/DeskNet.{h,cpp}   one fetch round: Wi-Fi up, NTP (when due), weather, agent, Wi-Fi down
+tools/desk-agent/             the PC agent (Python)
+```
+
+### Lunar calendar
+
+- `double` arithmetic in C++ (the on-device Lua is 32-bit float, which is why this is not a Lua
+  app). Time zone fixed at UTC+7.
+- Output: lunar day/month/year, leap month flag, can-chi of day/month/year, next event from a fixed
+  table (Tết, Rằm/mùng 1, Giỗ Tổ 10/3, Vu Lan 15/7, Trung thu 15/8, ông Công ông Táo 23/12) plus
+  Gregorian holidays (1/1, 30/4, 1/5, 2/9).
+- Tests: Tết dates 2000-2050 and the leap months of that range against a published table;
+  20/11/2026 = 12/10 Bính Ngọ, day Mậu Tuất (checked while drawing the mockups).
+- Computed once per day, cached.
+
+### Weather (from esp32-pet, D36/D77)
+
+- Request: `api.open-meteo.com/v1/forecast?latitude=..&longitude=..&current=temperature_2m,
+  weather_code,is_day&hourly=weather_code,temperature_2m&forecast_hours=12&daily=
+  temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto` (~1-2 KB).
+- Place: `geocoding-api.open-meteo.com/v1/search?count=1&language=vi&name=<city>`, or
+  `http://ip-api.com/json/?fields=status,city,lat,lon` when empty. Coordinates cached in settings.
+- HTTPS through the existing wolfSSL streaming client (`SecureNet`), parsed with `JsonSax`, no
+  certificate pinning needed for public data (as esp32-pet D36), one TLS session at a time.
+- Rules ported as is: hot >= 33 C, cold < 17 C, stale after 3 h (hide the card's numbers, keep the
+  last icon greyed), "rain around HH" from the hourly codes.
+- Lessons from esp32-pet to keep: read bodies with our own loop that yields (no busy
+  `readBytes`), declare the client before the HTTP object in the same scope.
+- OpenWeatherMap (needs a key) is not in v1.
+
+### PC agent (tools/desk-agent)
+
+- Python 3, `psutil` + `zeroconf`, one file, runs at Windows log-on (Task Scheduler entry created
+  by a documented command, not by the script).
+- Advertises `_xdesk._tcp` on mDNS; serves `GET /v1/stats` on port 8765, LAN only, read-only, no
+  auth (it exposes only the numbers below). The reader caches the resolved address and re-resolves
+  on failure; a fixed IP:port setting skips mDNS.
+- Response (< 1 KB):
+
+```json
+{"v": 1, "host": "DESKTOP-VU", "ts": 1795174800,
+ "cpu": 23, "ram": [19.5, 32.0], "disks": [["C:", 412, 1000], ["D:", 1638, 2000]],
+ "net": [2400000, 310000], "uptime": 274000,
+ "claude": {"session": [42, 1795183200], "week": [18, 1795417200]}}
+```
+
+- `claude` is `null` until its source is settled (open question 1). Units: GB, bytes/s, seconds,
+  percent; reset times are Unix seconds, formatted on the reader.
+
+### Rendering
+
+- Built-in UI fonts stop at Inter 12 and Lexend 16. The clock (~150 px), Pomodoro (~110 px) and
+  temperature (~52 px) need **digit-only fonts** (`0-9 : ° % -`), generated with the existing
+  `lib/EpdFont` tooling: estimate 10-25 KB total, measured in phase 1.
+- Clock ticks redraw only the time box with a fast partial refresh; everything else redraws when
+  its data changes; a full refresh on the "Full refresh" interval and when the page changes.
+- Photos reuse the slideshow's decode + dither path (`SlideshowActivity`), not a new decoder.
+
+## Power
+
+Facts from the board config: the X3 has a DS3231 RTC and a BQ27220 fuel gauge (650 mAh cell) on
+I2C, and **no USB-detect pin** (GPIO20 is I2C SDA). The SDK's RTC countdown wake
+(`Rtc::armWakeTimer`) is RX8130-only, so it does not apply to the X3.
+
+Plan, to be confirmed by phase 0 measurements on a real X3:
+
+- **USB**: stay awake between ticks with the existing USB light-sleep loop (it already wakes every
+  30 s); Wi-Fi rounds on the USB intervals.
+- **Battery, minute ticks**: ESP32-C3 **light sleep with timer wake** (RAM, display state and Wi-Fi
+  config kept; wake in ms), Wi-Fi off. Each tick: read clock, partial-refresh the time box, sleep.
+  Deep sleep per minute is rejected: every deep-sleep wake is a full boot on this hardware.
+- **Battery, long gaps** (night sleep, "date only"): deep sleep with ESP timer wake, boot straight
+  into Desk (`Start in Desk`), no splash.
+- **Charging detection**: from the fuel gauge (current sign / charging flag), since there is no pin.
+- **Pomodoro running**: minute ticks as above, never deep sleep.
+
+Rough budget (estimate, not measured): light-sleep floor + 1440 short wakes + 24 Wi-Fi rounds a day
+comes to a few tens of mAh per day, i.e. two to five weeks on 650 mAh with the battery defaults.
+Phase 0's battery log replaces this guess.
+
+## Phases
+
+Each phase: its own commits (code and docs apart), `pio run -e pokemon-x3-lite` flash/RAM noted in
+the commit message, host tests green, simulator check where it applies.
+
+0. **Hardware probes on a real X3** (throwaway build): light sleep on battery keeps display + RTC
+   and wakes on timer and on buttons; partial refresh time and quality of a 528x200 box; current
+   draw via the gauge in light sleep / awake / Wi-Fi; charging detection from the gauge; battery
+   log to `/.crosspoint/desk-battery.txt`. Result decides the power design above.
+1. **Skeleton + main screen offline**: flag, Home entry, Start in Desk, DeskActivity with clock,
+   date and lunar (+ tests), digit fonts, settings page (USB mode only). Simulator env
+   `pokemon-simulator-X3-lite` with `CROSSINK_DESK=1`.
+2. **Weather**: port rules + tests, Open-Meteo/geocoding/ip-api client, place setting on the web
+   page, weather card + stale handling.
+3. **PC agent**: `tools/desk-agent` + parser tests, mDNS discovery, PC page, main-screen strip,
+   offline state.
+4. **Photo frame + Pomodoro** pages.
+5. **Battery mode**: light-sleep ticks, Wi-Fi schedule, night sleep, full-refresh schedule,
+   gauge-based source switching; 48 h battery log with defaults, then tune defaults.
+6. **Claude quota** once open question 1 is settled.
+
+## Open questions
+
+1. **Claude quota source.** Session/weekly percentages and reset times as shown by Claude Code's
+   `/usage` are not known to be exposed in a stable, documented form. Options to check: data
+   passed to a Claude Code status line command, local session logs (token counts only, no plan
+   limit), an official API. Until settled the agent sends `"claude": null` and the reader hides
+   the card.
+2. Does light sleep on battery behave on the X3 (phase 0)? If not, battery mode falls back to deep
+   sleep with 5-15 min clock ticks.
+3. Exact flash cost of digit fonts and the Desk code (budget: stay under ~92% so later features
+   still fit).
