@@ -283,7 +283,6 @@ void DeskProbeActivity::sleepUntilNextTick(const uint32_t tickStartMs) {
   // Mask the normal edge interrupt first, as HalPowerManager::holdWhileUsbPowered() does, so
   // the level wake cannot trap the CPU in an interrupt storm.
   const bool gpioWake = hasPowerPin && gpio_intr_disable(powerPin) == ESP_OK;
-  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(sleepMs) * 1000ULL);
   if (gpioWake) {
     gpio_wakeup_enable(powerPin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
@@ -299,15 +298,37 @@ void DeskProbeActivity::sleepUntilNextTick(const uint32_t tickStartMs) {
     esp_sleep_enable_gpio_switch(false);
     holdPins(true);
   }
-  const esp_err_t sleepErr = esp_light_sleep_start();
+  // v4: sleep in chunks of at most kChunkMs. Probe v3 woke from a 10 s light sleep but not
+  // from a 59 s one (2026-11-20); chunks tell a duration limit from anything else.
+  constexpr uint32_t kChunkMs = 10000;
+  const uint32_t sleepStart = millis();
+  uint32_t chunks = 0;
+  uint32_t errors = 0;
+  esp_err_t sleepErr = ESP_OK;
+  lastWake = 0;
+  while (millis() - sleepStart + 20 < sleepMs) {
+    const uint32_t left = sleepMs - (millis() - sleepStart);
+    const uint32_t chunk = left < kChunkMs ? left : kChunkMs;
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(chunk) * 1000ULL);
+    sleepErr = esp_light_sleep_start();
+    lastWake = static_cast<int>(esp_sleep_get_wakeup_cause());
+    ++chunks;
+    crumbStage = 2;
+    crumbWake = static_cast<uint32_t>(lastWake);
+    crumbSleepMs = chunks;  // after a wake: chunks done so far
+    if (lastWake == ESP_SLEEP_WAKEUP_GPIO) break;
+    if (sleepErr != ESP_OK) {
+      ++errors;
+      if (errors > 20) break;
+      delay(50);  // rejected (e.g. a wake source already pending): try again shortly
+    }
+  }
   if (keepPins) {
     holdPins(false);
     esp_sleep_enable_gpio_switch(true);
   }
-  lastWake = static_cast<int>(esp_sleep_get_wakeup_cause());
-  crumbStage = 2;
-  crumbWake = static_cast<uint32_t>(lastWake);
   trace("sleep-exit", static_cast<long>(lastWake));
+  trace("sleep-chunks", static_cast<long>(chunks * 100 + errors));
   if (sleepErr != ESP_OK) trace("sleep-error", static_cast<long>(sleepErr));
   if (gpioWake) {
     gpio_wakeup_disable(powerPin);
