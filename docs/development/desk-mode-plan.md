@@ -166,6 +166,27 @@ Rough budget (estimate, not measured): light-sleep floor + 1440 short wakes + 24
 comes to a few tens of mAh per day, i.e. two to five weeks on 650 mAh with the battery defaults.
 Phase 0's battery log replaces this guess.
 
+### Phase 0 results so far (Desk probe on the owner's X3, 2026-11-20)
+
+| Probe | Result |
+|---|---|
+| v1/v2: plain light sleep, 59 s timer | `esp_light_sleep_start()` never returns (trace ends at `sleep-enter`) |
+| v2: same tick loop with `delay()` | Ticks every minute; awake ~530 ms per tick, fast refresh 479 ms, half refresh 783 ms, about -21 mA awake |
+| v3: light sleep with GPIO sleep switching off and display + SD pins held | A 10 s sleep wakes on the timer; the next 59 s sleep does not (no reboot either: a power-button press resumed the same boot) |
+| v4: as v3, sleep cut into chunks of at most 10 s | **Ticks every minute** (owner, 5 min watched) |
+
+So minute ticks on battery use light sleep with two rules, both required:
+
+1. `esp_sleep_enable_gpio_switch(false)` and `gpio_hold_en()` on the display pins (SCLK, MOSI, CS,
+   DC, RST) and the SD pins (CS, power enable) for the duration of the sleep.
+2. No single light sleep longer than 10 s: re-arm the timer and sleep again (a chunk wake costs
+   no render). Why longer sleeps never wake is not known; 10 s is the longest length tried.
+
+Also seen: a sleep entered while the power button is held is rejected with
+`ESP_ERR_INVALID_STATE` (retry after a short delay), and the BQ27220's RemainingCapacity reads
+~2.9 Ah on a 650 mAh cell, so battery use is computed from SoC, voltage and current, not from it.
+Overnight battery run with Wi-Fi rounds: pending.
+
 ## Phases
 
 Each phase: its own commits (code and docs apart), `pio run -e pokemon-x3-lite` flash/RAM noted in
@@ -194,7 +215,7 @@ the commit message, host tests green, simulator check where it applies.
    passed to a Claude Code status line command, local session logs (token counts only, no plan
    limit), an official API. Until settled the agent sends `"claude": null` and the reader hides
    the card.
-2. Does light sleep on battery behave on the X3 (phase 0)? If not, battery mode falls back to deep
-   sleep with 5-15 min clock ticks.
+2. ~~Does light sleep on battery behave on the X3?~~ Yes, with held pins and chunks of at most
+   10 s (Phase 0 results). Still open: why one long light sleep never wakes.
 3. Exact flash cost of digit fonts and the Desk code (budget: stay under ~92% so later features
    still fit).
