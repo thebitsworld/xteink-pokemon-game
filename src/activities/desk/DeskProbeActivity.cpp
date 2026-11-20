@@ -47,6 +47,30 @@ constexpr uint8_t kRegAverageCurrent = 0x14;
 constexpr uint8_t kRegStateOfCharge = 0x2C;
 
 #ifndef SIMULATOR
+// Survive a software reset (not a power cut): set before light sleep, updated right after the
+// wake before any SD or display access, so a hang after the wake can be told from no wake.
+constexpr uint32_t kCrumbMagic = 0xDE5C0003;
+RTC_NOINIT_ATTR uint32_t crumbMagic;
+RTC_NOINIT_ATTR uint32_t crumbStage;  // 1 = entered light sleep, 2 = woke from it
+RTC_NOINIT_ATTR uint32_t crumbTick;
+RTC_NOINIT_ATTR uint32_t crumbMode;
+RTC_NOINIT_ATTR uint32_t crumbWake;
+RTC_NOINIT_ATTR uint32_t crumbSleepMs;
+
+void holdPins(const bool hold) {
+  const auto& b = BoardConfig::ACTIVE;
+  const int8_t pins[] = {b.display.sclk, b.display.mosi, b.display.cs,   b.display.dc,
+                         b.display.rst,  b.sd.cs,        b.sd.powerEnable};
+  for (const int8_t p : pins) {
+    if (p < 0) continue;
+    if (hold) {
+      gpio_hold_en(static_cast<gpio_num_t>(p));
+    } else {
+      gpio_hold_dis(static_cast<gpio_num_t>(p));
+    }
+  }
+}
+
 bool readReg16(const uint8_t addr, const uint8_t reg, uint16_t& out) {
   Wire.beginTransmission(addr);
   Wire.write(reg);
@@ -78,8 +102,39 @@ const char* wakeName(const int cause) {
 
 }  // namespace
 
+const char* DeskProbeActivity::modeName() const {
+  switch (sleepMode) {
+    case SleepMode::LightSleepKeepPins:
+      return "light-keep";
+    case SleepMode::LightSleep:
+      return "light";
+    case SleepMode::Delay:
+      break;
+  }
+  return "delay";
+}
+
+void DeskProbeActivity::readBreadcrumbs() {
+  lastRunNote[0] = '\0';
+#ifndef SIMULATOR
+  if (crumbMagic != kCrumbMagic) return;
+  static const char* const kModes[] = {"light-keep", "light", "delay"};
+  const char* mode = crumbMode < 3 ? kModes[crumbMode] : "?";
+  if (crumbStage == 1) {
+    snprintf(lastRunNote, sizeof(lastRunNote), "Last run (%s): slept at tick %lu, NO wake", mode,
+             static_cast<unsigned long>(crumbTick));
+  } else if (crumbStage == 2) {
+    snprintf(lastRunNote, sizeof(lastRunNote), "Last run (%s): woke at tick %lu, cause %s", mode,
+             static_cast<unsigned long>(crumbTick), wakeName(static_cast<int>(crumbWake)));
+  }
+  trace("previous-run", static_cast<long>(crumbStage * 1000 + crumbTick));
+  crumbMagic = 0;
+#endif
+}
+
 void DeskProbeActivity::onEnter() {
   Activity::onEnter();
+  readBreadcrumbs();
   running = false;
   stoppedByButton = false;
   halfThisTick = true;
@@ -153,8 +208,7 @@ void DeskProbeActivity::appendLog(const bool usb) const {
 void DeskProbeActivity::trace(const char* step, const long value) const {
   char line[96];
   const int len = snprintf(line, sizeof(line), "%lu,%lu,%s,%s,%ld\n", static_cast<unsigned long>(millis()),
-                           static_cast<unsigned long>(tick),
-                           sleepMode == SleepMode::LightSleep ? "light" : "delay", step, value);
+                           static_cast<unsigned long>(tick), modeName(), step, value);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
   HalFile file = Storage.open(kTracePath, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return;
@@ -192,7 +246,8 @@ void DeskProbeActivity::runTick() {
 void DeskProbeActivity::sleepUntilNextTick(const uint32_t tickStartMs) {
 #ifndef SIMULATOR
   const uint32_t elapsed = millis() - tickStartMs;
-  const uint32_t sleepMs = elapsed < kTickMs ? kTickMs - elapsed : 1000;
+  // The first sleep is short so a failed wake shows within seconds.
+  const uint32_t sleepMs = tick == 1 ? 10000 : (elapsed < kTickMs ? kTickMs - elapsed : 1000);
   if (WiFi.getMode() != WIFI_MODE_NULL) WiFi.mode(WIFI_OFF);
 
   if (sleepMode == SleepMode::Delay) {
@@ -233,9 +288,25 @@ void DeskProbeActivity::sleepUntilNextTick(const uint32_t tickStartMs) {
     gpio_wakeup_enable(powerPin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
   }
+  const bool keepPins = sleepMode == SleepMode::LightSleepKeepPins;
   trace("sleep-enter", static_cast<long>(sleepMs));
+  crumbMagic = kCrumbMagic;
+  crumbStage = 1;
+  crumbTick = tick;
+  crumbMode = static_cast<uint32_t>(sleepMode);
+  crumbSleepMs = sleepMs;
+  if (keepPins) {
+    esp_sleep_enable_gpio_switch(false);
+    holdPins(true);
+  }
   const esp_err_t sleepErr = esp_light_sleep_start();
+  if (keepPins) {
+    holdPins(false);
+    esp_sleep_enable_gpio_switch(true);
+  }
   lastWake = static_cast<int>(esp_sleep_get_wakeup_cause());
+  crumbStage = 2;
+  crumbWake = static_cast<uint32_t>(lastWake);
   trace("sleep-exit", static_cast<long>(lastWake));
   if (sleepErr != ESP_OK) trace("sleep-error", static_cast<long>(sleepErr));
   if (gpioWake) {
@@ -279,7 +350,9 @@ void DeskProbeActivity::loop() {
     requestUpdate();
   }
   if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-    sleepMode = sleepMode == SleepMode::LightSleep ? SleepMode::Delay : SleepMode::LightSleep;
+    sleepMode = sleepMode == SleepMode::LightSleepKeepPins ? SleepMode::LightSleep
+                : sleepMode == SleepMode::LightSleep       ? SleepMode::Delay
+                                                           : SleepMode::LightSleepKeepPins;
     requestUpdate();
   }
 }
@@ -316,16 +389,20 @@ void DeskProbeActivity::render(RenderLock&&) {
   renderer.drawText(UI_10_FONT_ID, left, y, buf);
   y += 32;
   snprintf(buf, sizeof(buf), "Between ticks: %s",
-           sleepMode == SleepMode::LightSleep ? "LIGHT SLEEP" : "DELAY (control, no sleep)");
+           sleepMode == SleepMode::LightSleepKeepPins ? "LIGHT SLEEP, KEEP PINS"
+           : sleepMode == SleepMode::LightSleep       ? "LIGHT SLEEP (plain)"
+                                                      : "DELAY (control, no sleep)");
   renderer.drawText(UI_10_FONT_ID, left, y, buf, true, EpdFontFamily::BOLD);
-  y += 56;
+  y += 32;
+  if (lastRunNote[0] != '\0') renderer.drawText(UI_10_FONT_ID, left, y, lastRunNote);
+  y += 40;
 
   if (running) {
     renderer.drawText(UI_10_FONT_ID, left, y, "Running. Unplug USB and leave it.", true, EpdFontFamily::BOLD);
     y += 32;
     renderer.drawText(UI_10_FONT_ID, left, y,
-                      sleepMode == SleepMode::LightSleep ? "Power button stops the run."
-                                                         : "Hold the power button to stop.");
+                      sleepMode == SleepMode::Delay ? "Hold the power button to stop."
+                                                    : "Power button stops the run.");
     y += 32;
     renderer.drawText(UI_10_FONT_ID, left, y, "Log: /.crosspoint/desk-probe.csv");
   } else {

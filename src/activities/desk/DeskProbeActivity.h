@@ -41,11 +41,14 @@ class DeskProbeActivity final : public Activity {
 
   // LightSleep: the real test. Delay: same tick loop with delay() instead of light sleep, as
   // a control (probe v1 never got past its first light sleep on an X3, 2026-11-20).
-  enum class SleepMode : uint8_t { LightSleep, Delay };
+  // LightSleepKeepPins (v3): GPIO sleep switching off and the display / SD pins held, in case
+  // the pins' sleep state (SD power off, display lines floating) is what hangs the wake.
+  enum class SleepMode : uint8_t { LightSleepKeepPins, LightSleep, Delay };
 
   bool running = false;
   bool wifiRounds = true;
-  SleepMode sleepMode = SleepMode::LightSleep;
+  SleepMode sleepMode = SleepMode::LightSleepKeepPins;
+  char lastRunNote[96] = "";  // what the RTC breadcrumbs say about the previous run
   bool stoppedByButton = false;
   bool halfThisTick = true;
   bool lastWifiOk = false;
@@ -64,6 +67,8 @@ class DeskProbeActivity final : public Activity {
   // One line per step to /.crosspoint/desk-probe-trace.txt, opened and closed each time, so
   // the last line on the card shows where a hang happened.
   void trace(const char* step, long value = -1) const;
+  const char* modeName() const;
+  void readBreadcrumbs();
   static Gauge readGauge();
 };
 
