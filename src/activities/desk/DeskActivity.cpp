@@ -3,10 +3,15 @@
 #if CROSSINK_DESK
 
 #include <Arduino.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
+#include <HalStorage.h>
+
+#include <algorithm>
+#include <cmath>
 
 #include <cstdio>
 #include <cstring>
@@ -16,10 +21,15 @@
 #include "DeskFonts.h"
 #include "Lunar.h"
 #include "MappedInputManager.h"
+#include "activities/util/PhotoRender.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
+
+constexpr char kPhotoDir[] = "/desk/photos";
+constexpr uint32_t kPhotoEveryMs = 30 * 60 * 1000;  // USB default of "Photo: next image"
+constexpr size_t kMaxPhotos = 500;
 
 constexpr uint32_t kPollMs = 1000;
 constexpr int kHalfRefreshEveryMinutes = 60;          // USB default of "Full refresh" (plan)
@@ -33,6 +43,8 @@ constexpr int kMargin = 16;
 }  // namespace
 
 // ---- time ------------------------------------------------------------------------------------
+
+uint32_t DeskActivity::nowSec() { return millis() / 1000; }
 
 int DeskActivity::utcOffsetMinutes() {
   // The reader's UTC offset in quarter hours, biased by 48 (as HalClock::formatTime reads it).
@@ -99,6 +111,35 @@ void DeskActivity::onEnter() {
   weatherAttempted = false;
   pcPollPending = true;
   pcAttempted = false;
+  loadPhotos();
+  lastPhotoChangeMs = millis();
+  requestUpdate();
+}
+
+void DeskActivity::loadPhotos() {
+  photos.clear();
+  auto dir = Storage.open(kPhotoDir);
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    return;
+  }
+  char name[256];
+  for (auto file = dir.openNextFile(); file && photos.size() < kMaxPhotos; file = dir.openNextFile()) {
+    if (!file.isDirectory()) {
+      file.getName(name, sizeof(name));
+      const std::string n(name);
+      if (name[0] != '.' && (FsHelpers::hasBmpExtension(n) || FsHelpers::hasPngExtension(n))) photos.push_back(n);
+    }
+    file.close();
+  }
+  dir.close();
+  std::sort(photos.begin(), photos.end());
+  if (photoIndex >= static_cast<int>(photos.size())) photoIndex = 0;
+}
+
+void DeskActivity::switchPage(const Page to) {
+  page = to;
+  forceHalfRefresh = true;
   requestUpdate();
 }
 
@@ -108,7 +149,9 @@ void DeskActivity::onExit() {
   wifiKeptForUsb = false;
 }
 
-bool DeskActivity::preventAutoSleep() { return gpio.isUsbConnected() || weatherFetching || pcPolling; }
+bool DeskActivity::preventAutoSleep() {
+  return gpio.isUsbConnected() || weatherFetching || pcPolling || pomodoro.running();
+}
 
 void DeskActivity::runWeatherFetch() {
   weatherFetchPending = false;
@@ -145,33 +188,77 @@ bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
 }
 
 void DeskActivity::loop() {
+  const bool up = mappedInput.wasPressed(MappedInputManager::Button::Up);
+  const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down);
+  const bool select = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     if (page != Page::Main) {
-      page = Page::Main;
-      forceHalfRefresh = true;
-      requestUpdate();
+      switchPage(Page::Main);
       return;
     }
     finish();
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-      mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-    const int n = static_cast<int>(Page::Count);
-    const int step = mappedInput.wasPressed(MappedInputManager::Button::Down) ? 1 : n - 1;
-    page = static_cast<Page>((static_cast<int>(page) + step) % n);
-    forceHalfRefresh = true;
+  // On the Pomodoro page with a timer set, Up skips the phase and Down resets; elsewhere (and
+  // with the timer idle) Up/Down switch pages.
+  if (page == Page::Pomodoro && pomodoro.phase() != desk::Pomodoro::Phase::Idle && (up || down)) {
+    if (up) {
+      pomodoro.skip(nowSec());
+    } else {
+      pomodoro.reset();
+    }
     requestUpdate();
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400) {
-    shown = readLocalTime();
-    if (page == Page::Main) runWeatherFetch();
-    runPcPoll();
+  if (up || down) {
+    const int n = static_cast<int>(Page::Count);
+    const int step = down ? 1 : n - 1;
+    switchPage(static_cast<Page>((static_cast<int>(page) + step) % n));
+    return;
+  }
+  if (select) {
+    switch (page) {
+      case Page::Main:
+        shown = readLocalTime();
+        runWeatherFetch();
+        runPcPoll();
+        break;
+      case Page::Pc:
+        runPcPoll();
+        break;
+      case Page::Photo:
+        if (!photos.empty()) photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
+        lastPhotoChangeMs = millis();
+        requestUpdate();
+        break;
+      case Page::Pomodoro:
+        pomodoro.toggle(nowSec());
+        requestUpdate();
+        break;
+      case Page::Count:
+        break;
+    }
     return;
   }
 
+  // Pomodoro runs on every page; the screen jumps to it when a phase ends.
+  if (pomodoro.update(nowSec()) == desk::Pomodoro::Event::PhaseEnded) {
+    switchPage(Page::Pomodoro);
+    return;
+  }
+  if (page == Page::Pomodoro && pomodoro.remainingMinutes(nowSec()) != shownPomodoroMinutes) {
+    requestUpdate();
+  }
+
   const uint32_t nowMs = millis();
+  if (page == Page::Photo && gpio.isUsbConnected() && photos.size() > 1 &&
+      nowMs - lastPhotoChangeMs >= kPhotoEveryMs) {
+    photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
+    lastPhotoChangeMs = nowMs;
+    requestUpdate();
+    return;
+  }
   if (weatherFetchPending) {
     runWeatherFetch();
     return;
@@ -199,6 +286,8 @@ void DeskActivity::loop() {
   if (t.valid == shown.valid && t.minute == shown.minute && t.hour == shown.hour && t.day == shown.day) return;
   const bool newDay = t.day != shown.day || t.month != shown.month || t.year != shown.year;
   shown = t;
+  if (newDay) pomodoro.newDay();
+  if (page == Page::Photo) return;  // a photo is not redrawn for the clock
   if (newDay || ++minutesSinceFull >= kHalfRefreshEveryMinutes) forceHalfRefresh = true;
   requestUpdate();
 }
@@ -558,12 +647,156 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
+void DeskActivity::renderPhoto(const uint32_t nowUnix) {
+  const int w = renderer.getScreenWidth();
+  const int h = renderer.getScreenHeight();
+  char line1[64];
+  char line2[64];
+
+  if (photos.empty()) {
+    renderer.clearScreen();
+    drawStatusBar("Khung ảnh", "");
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 60, "Chưa có ảnh", true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, "Chép ảnh .bmp hoặc .png vào");
+    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, "/desk/photos trên thẻ nhớ", true, EpdFontFamily::BOLD);
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Về"), "", "Trang", "Trang");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return;
+  }
+
+  // The info strip: date, lunar date, weather and the photo's number. No clock: a photo is
+  // only redrawn when it changes.
+  line1[0] = '\0';
+  if (shown.valid) {
+    const int32_t jd = desk::julianDay(shown.day, shown.month, shown.year);
+    const int wd = desk::weekdayOf(jd);
+    const desk::LunarDate lunar = desk::solarToLunar(shown.day, shown.month, shown.year);
+    char wdName[8];
+    if (wd == 0) {
+      snprintf(wdName, sizeof(wdName), "CN");
+    } else {
+      snprintf(wdName, sizeof(wdName), "T%d", wd + 1);
+    }
+    snprintf(line1, sizeof(line1), "%s %d/%d · %d/%d ÂL", wdName, shown.day, shown.month, lunar.day, lunar.month);
+  }
+  if (weather.valid && desk::weatherFresh(weather, nowUnix)) {
+    snprintf(line2, sizeof(line2), "%d° %s · ảnh %d/%d", weather.tempC, desk::skyLabel(weather.sky), photoIndex + 1,
+             static_cast<int>(photos.size()));
+  } else {
+    snprintf(line2, sizeof(line2), "Ảnh %d/%d", photoIndex + 1, static_cast<int>(photos.size()));
+  }
+  const int stripH = 76;
+  const int stripX = 14;
+  const int stripY = h - 14 - stripH;
+  const int stripW = w - 28;
+  const auto overlay = [&](const bool gray) {
+    if (gray) {
+      // No gray under the strip: the B/W pass draws it alone.
+      renderer.fillRect(stripX, stripY, stripW, stripH, false);
+      return;
+    }
+    renderer.fillRoundedRect(stripX, stripY, stripW, stripH, 10, Color::White);
+    renderer.drawRoundedRect(stripX, stripY, stripW, stripH, 2, 10, true);
+    renderer.drawText(UI_12_FONT_ID, stripX + 16, stripY + 8, line1, true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, stripX + 16, stripY + 44, line2);
+  };
+
+  const std::string path = std::string(kPhotoDir) + "/" + photos[photoIndex];
+  if (photo::render(renderer, path, false, overlay) != photo::Result::Ok) {
+    renderer.clearScreen();
+    drawStatusBar("Khung ảnh", "");
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 30, "Không đọc được ảnh", true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 10, photos[photoIndex].c_str());
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  }
+}
+
+void DeskActivity::renderPomodoro() {
+  const int w = renderer.getScreenWidth();
+  const uint32_t t = nowSec();
+  char buf[96];
+  drawStatusBar("Pomodoro", "");
+
+  const bool idle = pomodoro.phase() == desk::Pomodoro::Phase::Idle;
+  int y = 66;
+  renderer.drawCenteredText(UI_12_FONT_ID, y, desk::pomodoroPhaseLabel(pomodoro.phase()), true, EpdFontFamily::BOLD);
+
+  // A ring of one dot per minute of the phase; filled dots are the minutes left.
+  const uint32_t minutes = pomodoro.remainingMinutes(t);
+  shownPomodoroMinutes = minutes;
+  const int total = static_cast<int>(pomodoro.phaseLengthSec() / 60);
+  const int cx = w / 2;
+  const int cy = 300;
+  const int radius = 160;
+  for (int i = 0; i < total; ++i) {
+    const double a = -M_PI / 2 + 2 * M_PI * i / total;
+    const int dx = cx + static_cast<int>(std::lround(radius * std::cos(a)));
+    const int dy = cy + static_cast<int>(std::lround(radius * std::sin(a)));
+    const int r = 9;
+    if (i < static_cast<int>(minutes)) {
+      renderer.fillRoundedRect(dx - r, dy - r, 2 * r, 2 * r, r, Color::Black);
+    } else {
+      renderer.drawRoundedRect(dx - r, dy - r, 2 * r, 2 * r, 2, r, true);
+    }
+  }
+  snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(minutes));
+  renderer.drawCenteredText(DESK_CLOCK_FONT_ID, cy - renderer.getLineHeight(DESK_CLOCK_FONT_ID) / 2 - 14, buf);
+  renderer.drawCenteredText(UI_10_FONT_ID, cy + 58, pomodoro.paused() ? "đã tạm dừng" : "phút còn lại");
+
+  y = cy + radius + 40;
+  // Round dots: done rounds filled.
+  snprintf(buf, sizeof(buf), "Lượt %d / %d", pomodoro.round(), pomodoro.rounds());
+  const int labelW = renderer.getTextWidth(UI_12_FONT_ID, buf);
+  const int dotsW = pomodoro.rounds() * 24;
+  int x = (w - (labelW + 16 + dotsW)) / 2;
+  renderer.drawText(UI_12_FONT_ID, x, y, buf);
+  x += labelW + 16;
+  for (int i = 0; i < pomodoro.rounds(); ++i) {
+    const bool done = i < pomodoro.round() - 1 || (i == pomodoro.round() - 1 &&
+                                                   pomodoro.phase() != desk::Pomodoro::Phase::Focus && !idle);
+    if (done) {
+      renderer.fillRoundedRect(x + i * 24, y + 6, 16, 16, 8, Color::Black);
+    } else {
+      renderer.drawRoundedRect(x + i * 24, y + 6, 16, 16, 2, 8, true);
+    }
+  }
+  y += 44;
+
+  if (idle) {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, "Bấm Chọn để bắt đầu 25 phút tập trung");
+  } else if (shown.valid && !pomodoro.paused()) {
+    const int endMin = (shown.hour * 60 + shown.minute + static_cast<int>(minutes)) % 1440;
+    snprintf(buf, sizeof(buf), "Kết thúc lúc %02d:%02d", endMin / 60, endMin % 60);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+  }
+  y += 40;
+  renderer.drawLine(kMargin, y, w - kMargin, y, 1, true);
+  y += 12;
+  snprintf(buf, sizeof(buf), "Hôm nay: %d lượt · %lu phút tập trung", pomodoro.focusRoundsToday(),
+           static_cast<unsigned long>(pomodoro.focusMinutesToday()));
+  renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+
+  const char* selectLabel = idle ? "Bắt đầu" : (pomodoro.paused() ? "Tiếp tục" : "Tạm dừng");
+  const auto labels = idle ? mappedInput.mapLabels(mappedInput.withBackArrow("Về"), selectLabel, "Trang", "Trang")
+                           : mappedInput.mapLabels(mappedInput.withBackArrow("Về"), selectLabel, "Bỏ qua", "Đặt lại");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
 void DeskActivity::render(RenderLock&&) {
-  renderer.clearScreen();
   uint32_t nowUnix = 0;
   readUtcUnix(nowUnix);
+  if (page == Page::Photo) {
+    forceHalfRefresh = false;
+    minutesSinceFull = 0;
+    renderPhoto(nowUnix);  // pushes to the panel itself
+    return;
+  }
+  renderer.clearScreen();
   if (page == Page::Pc) {
     renderPc(nowUnix);
+  } else if (page == Page::Pomodoro) {
+    renderPomodoro();
   } else {
     renderMain(nowUnix);
   }

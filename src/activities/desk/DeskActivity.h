@@ -3,8 +3,11 @@
 #if CROSSINK_DESK
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include "AgentStats.h"
+#include "Pomodoro.h"
 #include "DeskWeather.h"
 #include "DeskWeatherService.h"
 #include "activities/Activity.h"
@@ -13,7 +16,9 @@
 // Phase 1: main screen offline - clock, Gregorian and lunar date, next calendar event - redrawn
 // once a minute. Phase 2: the weather card from Open-Meteo (on entry when older than 10 min,
 // every 10 min on USB, on Select). Phase 3: the PC page and the main screen's PC strip from the
-// agent in tools/desk-agent (on entry, every minute on USB, on Select). Up/Down switch pages.
+// agent in tools/desk-agent (on entry, every minute on USB, on Select). Phase 4: the photo
+// frame (/desk/photos, next photo on Select and every 30 min on USB) and Pomodoro (runs in the
+// background; the screen jumps to it when a phase ends). Up/Down switch pages.
 // Battery ticks (light sleep in <= 10 s chunks, pins held) come in phase 5; for now the screen
 // keeps the reader awake only on USB, where Wi-Fi also stays up between polls.
 class DeskActivity final : public Activity {
@@ -28,7 +33,7 @@ class DeskActivity final : public Activity {
   bool needsFullPowerWhilePreventingSleep() override { return false; }
 
  private:
-  enum class Page : uint8_t { Main, Pc, Count };
+  enum class Page : uint8_t { Main, Pc, Photo, Pomodoro, Count };
 
   struct LocalTime {
     bool valid = false;
@@ -58,6 +63,13 @@ class DeskActivity final : public Activity {
   uint32_t lastPcAttemptMs = 0;
   bool wifiKeptForUsb = false;
 
+  std::vector<std::string> photos;
+  int photoIndex = 0;
+  uint32_t lastPhotoChangeMs = 0;
+
+  desk::Pomodoro pomodoro;
+  uint32_t shownPomodoroMinutes = 0;
+
   static LocalTime readLocalTime();
   static bool readUtcUnix(uint32_t& out);
   static int utcOffsetMinutes();
@@ -73,6 +85,12 @@ class DeskActivity final : public Activity {
   void drawSkyIcon(int x, int y, int size, desk::Sky sky, bool day) const;
   void renderMain(uint32_t nowUnix);
   void renderPc(uint32_t nowUnix);
+  // Pushes to the panel itself (photo::render's grayscale passes).
+  void renderPhoto(uint32_t nowUnix);
+  void renderPomodoro();
+  void loadPhotos();
+  void switchPage(Page to);
+  static uint32_t nowSec();  // monotonic seconds for Pomodoro
 };
 
 #endif  // CROSSINK_DESK

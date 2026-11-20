@@ -2,7 +2,9 @@ add_executable(DeskLibTest
   DeskLibTest.cpp
   OpenMeteoTest.cpp
   AgentStatsTest.cpp
+  PomodoroTest.cpp
   ${REPO_ROOT}/lib/Desk/AgentStats.cpp
+  ${REPO_ROOT}/lib/Desk/Pomodoro.cpp
   ${REPO_ROOT}/lib/Desk/Lunar.cpp
   ${REPO_ROOT}/lib/Desk/DeskWeather.cpp
   ${REPO_ROOT}/lib/Desk/OpenMeteo.cpp

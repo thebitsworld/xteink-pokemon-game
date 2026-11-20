@@ -16,6 +16,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "Epub/converters/PngToFramebufferConverter.h"
+#include "activities/util/PhotoRender.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "fontIds.h"
@@ -239,205 +240,23 @@ void SlideshowActivity::drawEmptyMessage() { drawSlideshowMessage(renderer, mapp
 void SlideshowActivity::renderCurrentImage() {
   if (currentIndex < 0 || currentIndex >= static_cast<int>(images.size())) return;
 
-  // needsFullPowerWhilePreventingSleep() lets the CPU downclock during the
-  // idle wait between auto-advances, but the decode + multi-pass grayscale
-  // SPI writes below must not run at that reduced frequency: on the X3
-  // (ESP32-C3, no PSRAM) the low-power floor is 10 MHz, and below 80 MHz the
-  // C3's APB clock tracks the CPU clock instead of staying pinned at 80 MHz -
-  // which throws off the e-ink panel's SPI timing and made this block run so
-  // long that button input during it was never sampled (loop() only polls
-  // GPIO once per iteration), i.e. an apparent freeze with no way to exit.
-  // This call site runs on the main loop task, not the render task, so it
-  // isn't already covered by ActivityManager::renderTaskLoop()'s own Lock.
-  HalPowerManager::Lock powerLock;
-
   std::string dirPath = APP_STATE.slideshowFolderPath;
   if (dirPath.back() != '/') dirPath += "/";
   const std::string filePath = dirPath + images[currentIndex];
-
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   const bool cropMode = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
 
-  if (FsHelpers::hasPngExtension(filePath)) {
-    ImageDimensions dims;
-    if (!PngToFramebufferConverter::getDimensionsStatic(filePath, dims)) {
-      // Every other failure path in this function resets the render mode
-      // before drawing its message; do the same here.
-      renderer.setRenderMode(GfxRenderer::BW);
+  // Drawing (and the power lock it needs on the X3) lives in photo::render(), shared with
+  // Desk mode's photo frame.
+  switch (photo::render(renderer, filePath, cropMode)) {
+    case photo::Result::Ok:
+      return;
+    case photo::Result::ImageError:
       drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
       return;
-    }
-
-    float scale = 1.0f;
-    const float scaleX = static_cast<float>(pageWidth) / static_cast<float>(dims.width);
-    const float scaleY = static_cast<float>(pageHeight) / static_cast<float>(dims.height);
-    if (cropMode) {
-      scale = std::max(scaleX, scaleY);
-    } else if (dims.width > pageWidth || dims.height > pageHeight) {
-      scale = std::min(scaleX, scaleY);
-    }
-
-    const int drawWidth = std::max(1, static_cast<int>(static_cast<float>(dims.width) * scale));
-    const int drawHeight = std::max(1, static_cast<int>(static_cast<float>(dims.height) * scale));
-    const int x = (pageWidth - drawWidth) / 2;
-    const int y = (pageHeight - drawHeight) / 2;
-
-    RenderConfig config;
-    config.x = x;
-    config.y = y;
-    config.maxWidth = drawWidth;
-    config.maxHeight = drawHeight;
-    config.useGrayscale = true;
-    config.useDithering = true;
-    config.performanceMode = false;
-    config.useExactDimensions = true;
-
-    PngToFramebufferConverter converter;
-    // Same grayscale sequence as SleepActivity::renderBitmapSleepScreen() (the
-    // custom sleep cover, no filter), which is known-good on X3: HALF_REFRESH
-    // base pass, gray planes cleared to 0x00 on non-absolute panels, no button
-    // hints painted into any plane, and no extra BW redraw afterwards. Each
-    // pass re-decodes the PNG (the dither is purely positional, so every pass
-    // quantizes identically).
-    const auto drawFrame = [&]() {
-      if (!converter.decodeToFramebuffer(filePath, renderer, config)) return false;
-      renderer.preserveImagePolarity(x, y, drawWidth, drawHeight);
-      return true;
-    };
-
-    renderer.clearScreen();
-    bool success = drawFrame();
-    if (success) {
-      // Prefer the Direct waveform where the panel implements it (see the
-      // matching comment in SleepActivity::renderBitmapSleepScreen()): it
-      // folds the B/W base into the grayscale pass instead of pushing a
-      // separate base refresh first. `absolute` alone still gates the plane
-      // fill value below and Bitmap's own dither/level mode elsewhere -
-      // Direct is only ever an upgrade on top of it, never a substitute.
-      const bool absolute = renderer.supportsAbsoluteGrayscale();
-      const bool direct = absolute && renderer.supportsDirectGrayscale();
-      if (absolute) {
-        success = direct ? renderer.displayDirectGrayscaleBase() : renderer.displayAbsoluteGrayscaleBase();
-      } else {
-        renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
-      }
-      for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
-        if (!success) break;
-        renderer.clearScreen(absolute ? 0xFF : 0x00);
-        renderer.setRenderMode(mode);
-        success = drawFrame();
-        if (!success) break;
-        if (mode == GfxRenderer::GRAYSCALE_LSB)
-          renderer.copyGrayscaleLsbBuffers();
-        else
-          renderer.copyGrayscaleMsbBuffers();
-      }
-      if (success) renderer.displayGrayBuffer();
-      renderer.setRenderMode(GfxRenderer::BW);
-    }
-    if (!success) {
-      renderer.setRenderMode(GfxRenderer::BW);
-      drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
-    }
-    return;
+    case photo::Result::RenderFailed:
+      drawSlideshowMessage(renderer, mappedInput, tr(STR_FAILED_LOWER));
+      return;
   }
-
-  HalFile file;
-  if (!Storage.openFileForRead("SLDSHW", filePath, file)) {
-    drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
-    return;
-  }
-
-  Bitmap bitmap(file, true, imageToneProfile(renderer.supportsAbsoluteGrayscale()));
-  if (bitmap.parseHeaders() != BmpReaderError::Ok) {
-    drawSlideshowMessage(renderer, mappedInput, tr(STR_SLIDESHOW_IMAGE_ERROR));
-    file.close();
-    return;
-  }
-
-  // Keep error diffusion on the screen-sized grid (see the same note in
-  // SleepActivity::renderBitmapSleepScreen()): resampling an already dithered
-  // source makes the source pattern alias into regular seams/haze.
-  if (!cropMode && (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight)) {
-    const float fitScale = std::min(static_cast<float>(pageWidth) / bitmap.getWidth(),
-                                    static_cast<float>(pageHeight) / bitmap.getHeight());
-    bitmap.setDitheredOutputSize(static_cast<int>(std::floor((bitmap.getWidth() - 1) * fitScale)) + 1,
-                                 static_cast<int>(std::floor((bitmap.getHeight() - 1) * fitScale)) + 1);
-  }
-
-  int x, y;
-  float cropX = 0, cropY = 0;
-  if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
-    float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-    const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
-
-    if (ratio > screenRatio) {
-      if (cropMode) {
-        cropX = 1.0f - (screenRatio / ratio);
-        ratio = (1.0f - cropX) * static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-      }
-      x = 0;
-      y = std::round((static_cast<float>(pageHeight) - static_cast<float>(pageWidth) / ratio) / 2);
-    } else {
-      if (cropMode) {
-        cropY = 1.0f - (ratio / screenRatio);
-        ratio = static_cast<float>(bitmap.getWidth()) / ((1.0f - cropY) * static_cast<float>(bitmap.getHeight()));
-      }
-      x = std::round((static_cast<float>(pageWidth) - static_cast<float>(pageHeight) * ratio) / 2);
-      y = 0;
-    }
-  } else {
-    x = (pageWidth - bitmap.getWidth()) / 2;
-    y = (pageHeight - bitmap.getHeight()) / 2;
-  }
-
-  // Same sequence as SleepActivity::renderBitmapSleepScreen() (custom sleep
-  // cover, no filter): no button hints in any plane, HALF_REFRESH base pass,
-  // gray planes cleared to 0x00 on non-absolute (X3) panels, no BW redraw.
-  const auto drawFrame = [&]() { return renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY); };
-
-  renderer.clearScreen();
-  bool success = drawFrame();
-  if (success && bitmap.hasGreyscale()) {
-    // Prefer the Direct waveform where the panel implements it (see the
-    // matching comment in SleepActivity::renderBitmapSleepScreen()): it folds
-    // the B/W base into the grayscale pass instead of pushing a separate base
-    // refresh first. `absolute` alone still gates the plane fill value below
-    // and the Bitmap constructor's own dither/level mode above - Direct is
-    // only ever an upgrade on top of it, never a substitute.
-    const bool absolute = renderer.supportsAbsoluteGrayscale();
-    const bool direct = absolute && renderer.supportsDirectGrayscale();
-    if (absolute) {
-      success = direct ? renderer.displayDirectGrayscaleBase() : renderer.displayAbsoluteGrayscaleBase();
-    } else {
-      renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
-    }
-    for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
-      if (!success) break;
-      success = bitmap.rewindToData() == BmpReaderError::Ok;
-      if (!success) break;
-      renderer.clearScreen(absolute ? 0xFF : 0x00);
-      renderer.setRenderMode(mode);
-      success = drawFrame();
-      if (!success) break;
-      if (mode == GfxRenderer::GRAYSCALE_LSB)
-        renderer.copyGrayscaleLsbBuffers();
-      else
-        renderer.copyGrayscaleMsbBuffers();
-    }
-    if (success) renderer.displayGrayBuffer();
-    renderer.setRenderMode(GfxRenderer::BW);
-  } else if (success) {
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-  }
-  if (!success) {
-    renderer.setRenderMode(GfxRenderer::BW);
-    LOG_ERR("SLDSHW", "Failed to render complete BMP image");
-    drawSlideshowMessage(renderer, mappedInput, tr(STR_FAILED_LOWER));
-  }
-
-  file.close();
 }
 
 void SlideshowActivity::advanceImage(const int delta) {
