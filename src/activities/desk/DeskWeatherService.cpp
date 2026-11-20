@@ -36,9 +36,13 @@ bool fetch(const std::string& url, std::string& body) {
   return ok && !body.empty();
 }
 
-// Up with the last-used saved network; returns true when this call started Wi-Fi.
-Result ensureWifi(bool& started) {
+}  // namespace
+
+Result wifiUp(bool& started) {
   started = false;
+#ifdef SIMULATOR
+  return Result::Ok;  // the simulator uses the host's network directly
+#endif
   if (hasActiveStationWifiConnection()) return Result::Ok;
   const std::string ssid = WIFI_STORE.getLastConnectedSsid();
   const auto credential = ssid.empty() ? std::nullopt : WIFI_STORE.findCredential(ssid);
@@ -56,13 +60,11 @@ Result ensureWifi(bool& started) {
   return Result::Ok;
 }
 
-void stopWifi() {
+void wifiDown() {
   WiFi.disconnect(true);
   delay(30);
   WiFi.mode(WIFI_OFF);
 }
-
-}  // namespace
 
 bool loadConfig(Config& out) {
   out = Config{};
@@ -72,6 +74,7 @@ bool loadConfig(Config& out) {
   if (deserializeJson(doc, text)) return false;
   copyText(out.city, sizeof(out.city), doc["city"].as<const char*>());
   copyText(out.resolvedFor, sizeof(out.resolvedFor), doc["resolvedFor"].as<const char*>());
+  copyText(out.agent, sizeof(out.agent), doc["agent"].as<const char*>());
   if (!doc["lat"].isNull() && !doc["lon"].isNull()) {
     out.place.valid = true;
     out.place.lat = doc["lat"].as<double>();
@@ -85,6 +88,7 @@ bool saveConfig(const Config& cfg) {
   JsonDocument doc;
   doc["city"] = cfg.city;
   doc["resolvedFor"] = cfg.resolvedFor;
+  if (cfg.agent[0] != '\0') doc["agent"] = cfg.agent;
   if (cfg.place.valid) {
     doc["lat"] = cfg.place.lat;
     doc["lon"] = cfg.place.lon;
@@ -104,13 +108,14 @@ bool loadCache(desk::WeatherReport& out) {
   return desk::parseForecast(text.c_str() + nl + 1, text.size() - nl - 1, fetchedAt, out);
 }
 
-Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix) {
+Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, const bool keepWifi) {
   bool started = false;
-  Result r = ensureWifi(started);
+  Result r = wifiUp(started);
   if (r != Result::Ok) {
-    if (started) stopWifi();
+    if (started) wifiDown();
     return r;
   }
+  if (keepWifi) started = false;  // leave it up for the next round
 
   std::string body;
   const bool placeStale = !cfg.place.valid || std::strcmp(cfg.city, cfg.resolvedFor) != 0;
@@ -121,7 +126,7 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix) {
                                  desk::parseGeocoding(body.data(), body.size(), place)
                            : fetch(desk::kIpLocateUrl, body) && desk::parseIpLocate(body.data(), body.size(), place);
     if (!ok) {
-      if (started) stopWifi();
+      if (started) wifiDown();
       return Result::PlaceFailed;
     }
     // Keep the name as typed when there is one: the geocoder may return a different spelling.
@@ -133,7 +138,7 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix) {
   }
 
   const bool fetched = fetch(desk::forecastUrl(cfg.place.lat, cfg.place.lon), body);
-  if (started) stopWifi();
+  if (started) wifiDown();
   if (!fetched) return Result::FetchFailed;
   desk::WeatherReport report;
   if (!desk::parseForecast(body.data(), body.size(), nowUnix, report)) return Result::ParseFailed;
@@ -159,6 +164,8 @@ const char* resultText(const Result r) {
       return "Không tải được thời tiết";
     case Result::ParseFailed:
       return "Dữ liệu thời tiết lỗi";
+    case Result::NoAgent:
+      return "Không thấy agent trên máy tính";
   }
   return "";
 }

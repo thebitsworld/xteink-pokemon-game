@@ -9,8 +9,10 @@
 #include <HalPowerManager.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "CrossPointSettings.h"
+#include "DeskAgentService.h"
 #include "DeskFonts.h"
 #include "Lunar.h"
 #include "MappedInputManager.h"
@@ -20,12 +22,17 @@
 namespace {
 
 constexpr uint32_t kPollMs = 1000;
-constexpr int kHalfRefreshEveryMinutes = 60;          // the USB default of "Full refresh" (plan)
-constexpr uint32_t kWeatherEveryMs = 10 * 60 * 1000;  // the USB default of "Weather" (plan)
+constexpr int kHalfRefreshEveryMinutes = 60;          // USB default of "Full refresh" (plan)
+constexpr uint32_t kWeatherEveryMs = 10 * 60 * 1000;  // USB default of "Weather"
 constexpr uint32_t kWeatherRetryMs = 2 * 60 * 1000;   // after a failed attempt
+constexpr uint32_t kPcEveryMs = 60 * 1000;            // USB default of "PC + Claude"
+constexpr uint32_t kPcRetryMs = 2 * 60 * 1000;
+constexpr uint32_t kPcFreshSec = 5 * 60;  // older PC numbers are hidden from the main screen
 constexpr int kMargin = 16;
 
 }  // namespace
+
+// ---- time ------------------------------------------------------------------------------------
 
 int DeskActivity::utcOffsetMinutes() {
   // The reader's UTC offset in quarter hours, biased by 48 (as HalClock::formatTime reads it).
@@ -41,6 +48,11 @@ bool DeskActivity::readUtcUnix(uint32_t& out) {
   if (days < 0) return false;
   out = static_cast<uint32_t>(days) * 86400u + h * 3600u + mi * 60u;
   return true;
+}
+
+void DeskActivity::formatLocalHm(const uint32_t unixSec, char* out, const size_t size) {
+  const int localMin = (static_cast<int>((unixSec / 60) % 1440) + utcOffsetMinutes() + 2 * 1440) % 1440;
+  snprintf(out, size, "%02d:%02d", localMin / 60, localMin % 60);
 }
 
 DeskActivity::LocalTime DeskActivity::readLocalTime() {
@@ -66,14 +78,18 @@ DeskActivity::LocalTime DeskActivity::readLocalTime() {
   return t;
 }
 
+// ---- lifecycle and scheduling ------------------------------------------------------------------
+
 void DeskActivity::onEnter() {
   Activity::onEnter();
+  page = Page::Main;
   shown = readLocalTime();
   forceHalfRefresh = true;
   minutesSinceFull = 0;
   lastPollMs = millis();
+  enteredMs = lastPollMs;
 
-  deskweather::loadConfig(weatherConfig);
+  deskweather::loadConfig(config);
   deskweather::loadCache(weather);
   uint32_t now = 0;
   const bool haveNow = readUtcUnix(now);
@@ -81,33 +97,77 @@ void DeskActivity::onEnter() {
   weatherFetchPending = !(weather.valid && haveNow && now >= weather.fetchedAt &&
                           now - weather.fetchedAt < kWeatherEveryMs / 1000);
   weatherAttempted = false;
+  pcPollPending = true;
+  pcAttempted = false;
   requestUpdate();
 }
 
-bool DeskActivity::preventAutoSleep() { return gpio.isUsbConnected() || weatherFetching; }
+void DeskActivity::onExit() {
+  Activity::onExit();
+  if (wifiKeptForUsb) deskweather::wifiDown();
+  wifiKeptForUsb = false;
+}
+
+bool DeskActivity::preventAutoSleep() { return gpio.isUsbConnected() || weatherFetching || pcPolling; }
 
 void DeskActivity::runWeatherFetch() {
   weatherFetchPending = false;
   weatherFetching = true;
-  requestUpdateAndWait();  // shows "Đang cập nhật..." before the blocking fetch
+  if (page == Page::Main) requestUpdateAndWait();  // shows "Đang cập nhật..." before blocking
   uint32_t now = 0;
   if (!readUtcUnix(now)) now = weather.fetchedAt;
-  weatherResult = deskweather::refresh(weatherConfig, weather, now);
+  const bool usb = gpio.isUsbConnected();
+  weatherResult = deskweather::refresh(config, weather, now, usb);
+  wifiKeptForUsb = wifiKeptForUsb || usb;
   weatherFetching = false;
   weatherAttempted = true;
   lastWeatherAttemptMs = millis();
-  forceHalfRefresh = true;
+  if (page == Page::Main) forceHalfRefresh = true;
   requestUpdate();
+}
+
+void DeskActivity::runPcPoll() {
+  pcPollPending = false;
+  pcPolling = true;
+  uint32_t now = 0;
+  readUtcUnix(now);
+  const bool usb = gpio.isUsbConnected();
+  pcResult = deskagent::poll(config, pc, now, usb);
+  wifiKeptForUsb = wifiKeptForUsb || usb;
+  pcPolling = false;
+  pcAttempted = true;
+  lastPcAttemptMs = millis();
+  requestUpdate();
+}
+
+bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
+  return pc.valid && nowUnix >= pc.receivedAt && nowUnix - pc.receivedAt <= kPcFreshSec;
 }
 
 void DeskActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    if (page != Page::Main) {
+      page = Page::Main;
+      forceHalfRefresh = true;
+      requestUpdate();
+      return;
+    }
     finish();
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+      mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+    const int n = static_cast<int>(Page::Count);
+    const int step = mappedInput.wasPressed(MappedInputManager::Button::Down) ? 1 : n - 1;
+    page = static_cast<Page>((static_cast<int>(page) + step) % n);
+    forceHalfRefresh = true;
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400) {
     shown = readLocalTime();
-    runWeatherFetch();
+    if (page == Page::Main) runWeatherFetch();
+    runPcPoll();
     return;
   }
 
@@ -116,10 +176,19 @@ void DeskActivity::loop() {
     runWeatherFetch();
     return;
   }
-  if (gpio.isUsbConnected() && weatherAttempted) {
-    const uint32_t wait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
-    if (nowMs - lastWeatherAttemptMs >= wait) {
+  if (pcPollPending) {
+    runPcPoll();
+    return;
+  }
+  if (gpio.isUsbConnected()) {
+    const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
+    if (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait) {
       runWeatherFetch();
+      return;
+    }
+    const uint32_t pcWait = pcResult == deskweather::Result::Ok ? kPcEveryMs : kPcRetryMs;
+    if (pcAttempted && nowMs - lastPcAttemptMs >= pcWait) {
+      runPcPoll();
       return;
     }
   }
@@ -132,6 +201,28 @@ void DeskActivity::loop() {
   shown = t;
   if (newDay || ++minutesSinceFull >= kHalfRefreshEveryMinutes) forceHalfRefresh = true;
   requestUpdate();
+}
+
+// ---- drawing ---------------------------------------------------------------------------------
+
+void DeskActivity::drawStatusBar(const char* title, const char* middle) const {
+  const int w = renderer.getScreenWidth();
+  char buf[32];
+  renderer.drawText(UI_10_FONT_ID, kMargin, 14, title, true, EpdFontFamily::BOLD);
+  if (gpio.isUsbConnected()) {
+    snprintf(buf, sizeof(buf), "Đang sạc");
+  } else {
+    snprintf(buf, sizeof(buf), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
+  }
+  renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), 14, buf);
+  if (middle != nullptr && middle[0] != '\0') renderer.drawCenteredText(UI_10_FONT_ID, 14, middle);
+  renderer.fillRect(0, 44, w, 2, true);
+}
+
+void DeskActivity::drawBar(const int x, const int y, const int w, const int h, const int pct) const {
+  renderer.drawRect(x, y, w, h, 2, true);
+  const int inner = (w - 4) * (pct < 0 ? 0 : (pct > 100 ? 100 : pct)) / 100;
+  if (inner > 0) renderer.fillRect(x + 2, y + 2, inner, h - 4, true);
 }
 
 void DeskActivity::drawSkyIcon(const int x, const int y, const int s, const desk::Sky sky, const bool day) const {
@@ -187,7 +278,9 @@ void DeskActivity::drawSkyIcon(const int x, const int y, const int s, const desk
         const int by[5] = {dropTop - 4, dropTop + s * 18 / 100, dropTop + s * 18 / 100, y + s, dropTop + s * 10 / 100};
         renderer.fillPolygon(bx, by, 5, true);
       } else if (sky == Sky::Snow) {
-        for (int i = 0; i < 3; ++i) disc(x + s * (28 + i * 22) / 100, dropTop + s * (i % 2 ? 18 : 10) / 100, 4, Color::Black);
+        for (int i = 0; i < 3; ++i) {
+          disc(x + s * (28 + i * 22) / 100, dropTop + s * (i % 2 ? 18 : 10) / 100, 4, Color::Black);
+        }
       } else {
         const int n = sky == Sky::Drizzle ? 2 : 3;
         for (int i = 0; i < n; ++i) {
@@ -233,13 +326,13 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   renderer.drawText(UI_10_FONT_ID, textX, top + pad + 42, buf);
 
   int y = top + pad + 86;
-  char hint[48];
+  char hint[64];
   desk::rainHint(weather, nowUnix, hint, sizeof(hint));
-  if (!fresh) {
+  if (weatherFetching) {
+    snprintf(hint, sizeof(hint), "Đang cập nhật...");
+  } else if (!fresh) {
     snprintf(hint, sizeof(hint), "Dữ liệu cũ%s%s", weatherAttempted ? " · " : "",
              weatherAttempted ? deskweather::resultText(weatherResult) : "");
-  } else if (weatherFetching) {
-    snprintf(hint, sizeof(hint), "Đang cập nhật...");
   }
   renderer.drawText(UI_10_FONT_ID, left + pad, y, hint, true, EpdFontFamily::BOLD);
   y += 34;
@@ -260,28 +353,17 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   }
 }
 
-void DeskActivity::render(RenderLock&&) {
+void DeskActivity::renderMain(const uint32_t nowUnix) {
   const int w = renderer.getScreenWidth();
   char buf[96];
-  renderer.clearScreen();
-  uint32_t nowUnix = 0;
-  readUtcUnix(nowUnix);
 
-  // Status bar: Desk · place and update time · battery.
-  renderer.drawText(UI_10_FONT_ID, kMargin, 14, "Desk", true, EpdFontFamily::BOLD);
-  const bool usb = gpio.isUsbConnected();
-  if (usb) {
-    snprintf(buf, sizeof(buf), "Đang sạc");
-  } else {
-    snprintf(buf, sizeof(buf), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
+  char middle[64] = "";
+  if (weather.valid && config.place.valid) {
+    char hm[8];
+    formatLocalHm(weather.fetchedAt, hm, sizeof(hm));
+    snprintf(middle, sizeof(middle), "%s · %s", config.place.name, hm);
   }
-  renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), 14, buf);
-  if (weather.valid && weatherConfig.place.valid) {
-    const int localMin = (static_cast<int>((weather.fetchedAt / 60) % 1440) + utcOffsetMinutes() + 2 * 1440) % 1440;
-    snprintf(buf, sizeof(buf), "%s · %02d:%02d", weatherConfig.place.name, localMin / 60, localMin % 60);
-    renderer.drawCenteredText(UI_10_FONT_ID, 14, buf);
-  }
-  renderer.fillRect(0, 44, w, 2, true);
+  drawStatusBar("Desk", middle);
 
   int y = 62;
   if (!shown.valid) {
@@ -337,10 +419,154 @@ void DeskActivity::render(RenderLock&&) {
   }
 
   drawWeatherCard(y, 240, nowUnix);
+  y += 240 + 14;
 
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Thoát"), "Làm mới", "", "");
+  // PC strip: three bars, shown while the agent's numbers are fresh.
+  if (pcFresh(nowUnix)) {
+    renderer.fillRect(kMargin, y, w - 2 * kMargin, 2, true);
+    y += 10;
+    struct Item {
+      const char* label;
+      int pct;
+    };
+    Item items[3] = {{"CPU", pc.cpuPct}, {"RAM", desk::percentOf(pc.ramUsedGb, pc.ramTotalGb)}, {"", 0}};
+    if (pc.claude.known) {
+      items[2] = {"Claude 5h", pc.claude.sessionPct};
+    } else if (pc.diskCount > 0) {
+      // A drive letter fits the column; a long mount path does not.
+      static char diskLabel[16];
+      if (strlen(pc.disks[0].name) <= 3) {
+        snprintf(diskLabel, sizeof(diskLabel), "Ổ %s", pc.disks[0].name);
+      } else {
+        snprintf(diskLabel, sizeof(diskLabel), "Ổ đĩa");
+      }
+      items[2] = {diskLabel, desk::percentOf(pc.disks[0].usedGb, pc.disks[0].totalGb)};
+    }
+    const int colW = (w - 2 * kMargin) / 3;
+    for (int i = 0; i < 3; ++i) {
+      if (items[i].label[0] == '\0') continue;
+      const int x = kMargin + i * colW;
+      renderer.drawText(UI_10_FONT_ID, x, y, items[i].label);
+      snprintf(buf, sizeof(buf), "%d%%", items[i].pct);
+      renderer.drawText(UI_10_FONT_ID, x + colW - 14 - renderer.getTextWidth(UI_10_FONT_ID, buf, EpdFontFamily::BOLD),
+                        y, buf, true, EpdFontFamily::BOLD);
+      drawBar(x, y + 28, colW - 14, 12, items[i].pct);
+    }
+  }
+
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Thoát"), "Làm mới", "Trang", "Trang");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
 
+void DeskActivity::renderPc(const uint32_t nowUnix) {
+  const int w = renderer.getScreenWidth();
+  const int h = renderer.getScreenHeight();
+  char buf[96];
+  char hm[8];
+  drawStatusBar("Máy tính", "");
+
+  if (!pc.valid || !pcFresh(nowUnix)) {
+    int y = h / 2 - 90;
+    renderer.drawCenteredText(UI_12_FONT_ID, y, pcPolling ? "Đang tìm máy tính..." : "Không thấy máy tính", true,
+                              EpdFontFamily::BOLD);
+    y += 44;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, "Agent chưa chạy hoặc PC đang tắt.");
+    y += 30;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, "Đồng hồ, lịch và thời tiết vẫn hoạt động.");
+    y += 44;
+    if (pcAttempted && pcResult != deskweather::Result::Ok) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, deskweather::resultText(pcResult));
+      y += 30;
+    }
+    if (pc.valid) {
+      formatLocalHm(pc.receivedAt, hm, sizeof(hm));
+      snprintf(buf, sizeof(buf), "Lần cuối thấy lúc %s", hm);
+      renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    }
+  } else {
+    int y = 62;
+    renderer.drawText(UI_12_FONT_ID, kMargin, y, pc.host, true, EpdFontFamily::BOLD);
+    formatLocalHm(pc.receivedAt, hm, sizeof(hm));
+    snprintf(buf, sizeof(buf), "cập nhật %s", hm);
+    renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), y + 6, buf);
+    y += 48;
+
+    auto row = [&](const char* label, const char* value, const int pct) {
+      renderer.drawText(UI_10_FONT_ID, kMargin, y, label);
+      renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, value, EpdFontFamily::BOLD),
+                        y, value, true, EpdFontFamily::BOLD);
+      drawBar(kMargin, y + 30, w - 2 * kMargin, 18, pct);
+      y += 66;
+    };
+    snprintf(buf, sizeof(buf), "%d%%", pc.cpuPct);
+    row("CPU", buf, pc.cpuPct);
+    desk::formatSize(pc.ramUsedGb, pc.ramTotalGb, buf, sizeof(buf));
+    row("RAM", buf, desk::percentOf(pc.ramUsedGb, pc.ramTotalGb));
+    for (int i = 0; i < pc.diskCount && i < 3; ++i) {
+      char label[24];
+      snprintf(label, sizeof(label), "Ổ %s", pc.disks[i].name);
+      desk::formatSize(pc.disks[i].usedGb, pc.disks[i].totalGb, buf, sizeof(buf));
+      row(label, buf, desk::percentOf(pc.disks[i].usedGb, pc.disks[i].totalGb));
+    }
+
+    renderer.drawLine(kMargin, y, w - kMargin, y, 1, true);
+    y += 12;
+    char down[24];
+    char up[24];
+    char uptime[32];
+    desk::formatRate(pc.netDownBps, down, sizeof(down));
+    desk::formatRate(pc.netUpBps, up, sizeof(up));
+    desk::formatUptime(pc.uptimeSec, uptime, sizeof(uptime));
+    snprintf(buf, sizeof(buf), "Mạng ↓ %s   ↑ %s", down, up);
+    renderer.drawText(UI_10_FONT_ID, kMargin, y, buf);
+    y += 30;
+    snprintf(buf, sizeof(buf), "Đã chạy %s", uptime);
+    renderer.drawText(UI_10_FONT_ID, kMargin, y, buf);
+    y += 44;
+
+    // Claude card.
+    const int cardH = pc.claude.known ? 150 : 70;
+    renderer.drawRoundedRect(kMargin, y, w - 2 * kMargin, cardH, 2, 10, true);
+    renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 12, "Claude", true, EpdFontFamily::BOLD);
+    if (!pc.claude.known) {
+      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 18, "Chưa có nguồn số liệu");
+    } else {
+      const int colW = (w - 2 * kMargin - 28) / 2;
+      const struct {
+        const char* label;
+        int pct;
+        uint32_t reset;
+      } q[2] = {{"Phiên 5 giờ", pc.claude.sessionPct, pc.claude.sessionReset},
+                {"Tuần này", pc.claude.weekPct, pc.claude.weekReset}};
+      for (int i = 0; i < 2; ++i) {
+        const int x = kMargin + 14 + i * colW;
+        const int cy = y + 52;
+        renderer.drawText(UI_10_FONT_ID, x, cy, q[i].label);
+        snprintf(buf, sizeof(buf), "%d%%", q[i].pct);
+        renderer.drawText(UI_12_FONT_ID, x, cy + 26, buf, true, EpdFontFamily::BOLD);
+        drawBar(x, cy + 62, colW - 16, 12, q[i].pct);
+        if (q[i].reset != 0) {
+          formatLocalHm(q[i].reset, hm, sizeof(hm));
+          snprintf(buf, sizeof(buf), "Làm mới %s", hm);
+          renderer.drawText(UI_10_FONT_ID, x + 70, cy + 30, buf);
+        }
+      }
+    }
+  }
+
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Về"), "Làm mới", "Trang", "Trang");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+void DeskActivity::render(RenderLock&&) {
+  renderer.clearScreen();
+  uint32_t nowUnix = 0;
+  readUtcUnix(nowUnix);
+  if (page == Page::Pc) {
+    renderPc(nowUnix);
+  } else {
+    renderMain(nowUnix);
+  }
   const bool half = forceHalfRefresh;
   forceHalfRefresh = false;
   if (half) minutesSinceFull = 0;

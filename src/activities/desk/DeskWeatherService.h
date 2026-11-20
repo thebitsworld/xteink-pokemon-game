@@ -20,16 +20,23 @@ struct Config {
   char city[48] = {};      // as typed in desk.json; empty = locate by IP
   char resolvedFor[48] = {};  // the city the cached place was resolved from
   desk::Place place;
+  char agent[64] = {};  // PC agent "host:port"; empty = find it by mDNS (_xdesk._tcp)
 };
 
-enum class Result : uint8_t { Ok, NoSavedWifi, WifiFailed, PlaceFailed, FetchFailed, ParseFailed };
+enum class Result : uint8_t { Ok, NoSavedWifi, WifiFailed, PlaceFailed, FetchFailed, ParseFailed, NoAgent };
 
 bool loadConfig(Config& out);
 bool saveConfig(const Config& cfg);
 // The last good forecast body, so a restart shows weather before the next fetch.
 bool loadCache(desk::WeatherReport& out);
 
-Result refresh(Config& cfg, desk::WeatherReport& out, uint32_t nowUnix);
+// Wi-Fi with the last-used saved network. started: this call turned it on.
+Result wifiUp(bool& started);
+void wifiDown();
+
+// keepWifi: leave Wi-Fi on afterwards (on USB, for the next PC poll) even if this call
+// started it.
+Result refresh(Config& cfg, desk::WeatherReport& out, uint32_t nowUnix, bool keepWifi);
 const char* resultText(Result r);  // Vietnamese, for the card
 
 }  // namespace deskweather
