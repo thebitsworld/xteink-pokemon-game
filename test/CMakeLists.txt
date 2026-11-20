@@ -254,5 +254,6 @@ add_subdirectory(gif_support)
 
 add_subdirectory(clipping_sync)
 add_subdirectory(progress_slots)
+add_subdirectory(desk)
 add_test(NAME PiccoDisplayIdleRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_picco_display_idle.py)
