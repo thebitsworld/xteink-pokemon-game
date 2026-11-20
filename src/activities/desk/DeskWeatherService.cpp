@@ -1,0 +1,168 @@
+#include "DeskWeatherService.h"
+
+#if CROSSINK_DESK
+
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <HalStorage.h>
+#include <Logging.h>
+#include <WiFi.h>
+
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+#include "WifiCredentialStore.h"
+#include "network/HttpDownloader.h"
+#include "network/WifiUtils.h"
+
+namespace deskweather {
+
+namespace {
+
+constexpr char TAG[] = "DESKWX";
+constexpr uint32_t kWifiTimeoutMs = 20000;
+constexpr size_t kMaxBody = 8 * 1024;
+
+void copyText(char* dst, const size_t size, const char* src) {
+  std::snprintf(dst, size, "%s", src == nullptr ? "" : src);
+}
+
+bool fetch(const std::string& url, std::string& body) {
+  body.clear();
+  const bool ok = HttpDownloader::fetchUrl(url, body);
+  if (!ok) LOG_ERR(TAG, "Fetch failed: %s", url.c_str());
+  if (body.size() > kMaxBody) body.resize(kMaxBody);
+  return ok && !body.empty();
+}
+
+// Up with the last-used saved network; returns true when this call started Wi-Fi.
+Result ensureWifi(bool& started) {
+  started = false;
+  if (hasActiveStationWifiConnection()) return Result::Ok;
+  const std::string ssid = WIFI_STORE.getLastConnectedSsid();
+  const auto credential = ssid.empty() ? std::nullopt : WIFI_STORE.findCredential(ssid);
+  if (!credential) return Result::NoSavedWifi;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
+  started = true;
+  const uint32_t t0 = millis();
+  while (!hasActiveStationWifiConnection() && millis() - t0 < kWifiTimeoutMs) delay(50);
+  if (!hasActiveStationWifiConnection()) {
+    LOG_ERR(TAG, "Wi-Fi %s did not connect", ssid.c_str());
+    return Result::WifiFailed;
+  }
+  LOG_INF(TAG, "Wi-Fi up in %lu ms", static_cast<unsigned long>(millis() - t0));
+  return Result::Ok;
+}
+
+void stopWifi() {
+  WiFi.disconnect(true);
+  delay(30);
+  WiFi.mode(WIFI_OFF);
+}
+
+}  // namespace
+
+bool loadConfig(Config& out) {
+  out = Config{};
+  std::string text;
+  if (!Storage.readFileToString(TAG, kConfigPath, 2048, text)) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, text)) return false;
+  copyText(out.city, sizeof(out.city), doc["city"].as<const char*>());
+  copyText(out.resolvedFor, sizeof(out.resolvedFor), doc["resolvedFor"].as<const char*>());
+  if (!doc["lat"].isNull() && !doc["lon"].isNull()) {
+    out.place.valid = true;
+    out.place.lat = doc["lat"].as<double>();
+    out.place.lon = doc["lon"].as<double>();
+    copyText(out.place.name, sizeof(out.place.name), doc["place"].as<const char*>());
+  }
+  return true;
+}
+
+bool saveConfig(const Config& cfg) {
+  JsonDocument doc;
+  doc["city"] = cfg.city;
+  doc["resolvedFor"] = cfg.resolvedFor;
+  if (cfg.place.valid) {
+    doc["lat"] = cfg.place.lat;
+    doc["lon"] = cfg.place.lon;
+    doc["place"] = cfg.place.name;
+  }
+  String text;
+  serializeJsonPretty(doc, text);
+  return Storage.writeFile(kConfigPath, text);
+}
+
+bool loadCache(desk::WeatherReport& out) {
+  std::string text;
+  if (!Storage.readFileToString(TAG, kCachePath, kMaxBody + 32, text)) return false;
+  const size_t nl = text.find('\n');
+  if (nl == std::string::npos) return false;
+  const uint32_t fetchedAt = static_cast<uint32_t>(std::strtoul(text.c_str(), nullptr, 10));
+  return desk::parseForecast(text.c_str() + nl + 1, text.size() - nl - 1, fetchedAt, out);
+}
+
+Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix) {
+  bool started = false;
+  Result r = ensureWifi(started);
+  if (r != Result::Ok) {
+    if (started) stopWifi();
+    return r;
+  }
+
+  std::string body;
+  const bool placeStale = !cfg.place.valid || std::strcmp(cfg.city, cfg.resolvedFor) != 0;
+  if (placeStale) {
+    desk::Place place;
+    const bool byName = cfg.city[0] != '\0';
+    const bool ok = byName ? fetch(desk::geocodingUrl(cfg.city), body) &&
+                                 desk::parseGeocoding(body.data(), body.size(), place)
+                           : fetch(desk::kIpLocateUrl, body) && desk::parseIpLocate(body.data(), body.size(), place);
+    if (!ok) {
+      if (started) stopWifi();
+      return Result::PlaceFailed;
+    }
+    // Keep the name as typed when there is one: the geocoder may return a different spelling.
+    if (byName) copyText(place.name, sizeof(place.name), cfg.city);
+    cfg.place = place;
+    copyText(cfg.resolvedFor, sizeof(cfg.resolvedFor), cfg.city);
+    saveConfig(cfg);
+    LOG_INF(TAG, "Place %s: %.3f, %.3f", cfg.place.name, cfg.place.lat, cfg.place.lon);
+  }
+
+  const bool fetched = fetch(desk::forecastUrl(cfg.place.lat, cfg.place.lon), body);
+  if (started) stopWifi();
+  if (!fetched) return Result::FetchFailed;
+  desk::WeatherReport report;
+  if (!desk::parseForecast(body.data(), body.size(), nowUnix, report)) return Result::ParseFailed;
+  out = report;
+
+  char header[16];
+  std::snprintf(header, sizeof(header), "%lu\n", static_cast<unsigned long>(nowUnix));
+  Storage.writeFile(kCachePath, String(header) + String(body.c_str()));
+  return Result::Ok;
+}
+
+const char* resultText(const Result r) {
+  switch (r) {
+    case Result::Ok:
+      return "";
+    case Result::NoSavedWifi:
+      return "Chưa có Wi-Fi đã lưu";
+    case Result::WifiFailed:
+      return "Không kết nối được Wi-Fi";
+    case Result::PlaceFailed:
+      return "Không tìm được vị trí";
+    case Result::FetchFailed:
+      return "Không tải được thời tiết";
+    case Result::ParseFailed:
+      return "Dữ liệu thời tiết lỗi";
+  }
+  return "";
+}
+
+}  // namespace deskweather
+
+#endif  // CROSSINK_DESK
