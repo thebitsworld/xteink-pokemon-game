@@ -199,8 +199,17 @@ the commit message, host tests green, simulator check where it applies.
 1. **Skeleton + main screen offline**: flag, Home entry, Start in Desk, DeskActivity with clock,
    date and lunar (+ tests), digit fonts, settings page (USB mode only). Simulator env
    `pokemon-simulator-X3-lite` with `CROSSINK_DESK=1`.
+   *Done (2026-11-20):* flag, simulator env, digit fonts, DeskActivity main screen, lunar library
+   and tests, opened from Applications > Desk. *Left:* Home entry, Start in Desk, settings page.
 2. **Weather**: port rules + tests, Open-Meteo/geocoding/ip-api client, place setting on the web
    page, weather card + stale handling.
+   *Done (2026-11-20):* rules, parsers and URL building in `lib/Desk` with tests; fetch through
+   the last-used Wi-Fi network and `HttpDownloader`; card with drawn sky icons, low/high, rain
+   hint, 4 slots (now, +3, +6, +9 h), stale handling. Place, until the settings page exists:
+   `/.crosspoint/desk.json` `{"city": "Hà Nội"}` (empty or missing = locate by IP); the resolved
+   coordinates are written back there, the last forecast to `/.crosspoint/desk-weather.json`.
+   Fetched on entry when older than 10 min, every 10 min on USB (2 min after a failure), on
+   Select. *Left:* city on the web page; not yet tried against the real API on the reader.
 3. **PC agent**: `tools/desk-agent` + parser tests, mDNS discovery, PC page, main-screen strip,
    offline state.
 4. **Photo frame + Pomodoro** pages.
