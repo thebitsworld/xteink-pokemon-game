@@ -212,6 +212,14 @@ the commit message, host tests green, simulator check where it applies.
    Select. *Left:* city on the web page; not yet tried against the real API on the reader.
 3. **PC agent**: `tools/desk-agent` + parser tests, mDNS discovery, PC page, main-screen strip,
    offline state.
+   *Done (2026-11-20):* `tools/desk-agent/desk_agent.py` (psutil + zeroconf, `GET /v1/stats`,
+   `_xdesk._tcp`), tried on the owner's Windows PC; `lib/Desk/AgentStats` parser and formatting
+   with tests; on the reader, mDNS discovery (`MDNS.queryService`) or `"agent": "host:port"` in
+   desk.json, PC page (CPU, RAM, up to 3 disks, network, uptime, Claude card), a 3-bar strip on
+   the main screen while the numbers are under 5 min old, Up/Down page switching. Polled on
+   entry, every minute on USB (Wi-Fi kept up on USB), on Select. Checked in the simulator against
+   the agent running in WSL (the simulator has no mDNS queries, so it used the fixed address).
+   *Left:* mDNS discovery on a real X3.
 4. **Photo frame + Pomodoro** pages.
 5. **Battery mode**: light-sleep ticks, Wi-Fi schedule, night sleep, full-refresh schedule,
    gauge-based source switching; 48 h battery log with defaults, then tune defaults.
