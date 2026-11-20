@@ -25,6 +25,9 @@
 #include "activities/gameboy/PulseTestActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #endif
+#if CROSSINK_DESK_PROBE
+#include "activities/desk/DeskProbeActivity.h"
+#endif
 #include "fontIds.h"
 
 class ApplicationsActivity : public Activity {
@@ -90,6 +93,16 @@ class ApplicationsActivity : public Activity {
                                });
         return;
       }
+#if CROSSINK_DESK_PROBE
+      if (app.deskProbe) {
+        startActivityForResult(std::make_unique<DeskProbeActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) {
+                                 refreshMenuList();
+                                 requestUpdate();
+                               });
+        return;
+      }
+#endif
 #if CROSSINK_GAMEBOY
       if (app.pulseTest) {
         startActivityForResult(std::make_unique<PulseTestActivity>(renderer, mappedInput),
@@ -261,6 +274,7 @@ class ApplicationsActivity : public Activity {
     bool gameBoy = false;    // the built-in Game Boy launcher (X4 Pro)
     bool slideshow = false;  // the built-in Photo Slideshow
     bool pulseTest = false;  // the screen's pulse-drive test (X4 Pro, UC8279-0x68)
+    bool deskProbe = false;  // Desk mode phase-0 power probe (CROSSINK_DESK_PROBE builds)
     bool pokemon = false;    // the built-in Pokemon game
     bool hasGuide = false;   // a "How to play" guide in its folder (GuideViewerActivity)
     std::string dir;        // SD-card app: its folder and entry script
@@ -389,6 +403,19 @@ class ApplicationsActivity : public Activity {
       pulse.builtIn = true;
       pulse.pulseTest = true;
       visibleApps.push_back(std::move(pulse));
+    }
+#endif
+
+#if CROSSINK_DESK_PROBE
+    // Desk mode phase 0 (docs/development/desk-mode-plan.md), test builds only.
+    {
+      AppEntry probe;
+      probe.name = "Desk probe";
+      probe.detail = "Light-sleep and battery test for Desk mode";
+      probe.icon = UIIcon::Library;
+      probe.builtIn = true;
+      probe.deskProbe = true;
+      visibleApps.push_back(std::move(probe));
     }
 #endif
 
