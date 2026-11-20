@@ -32,6 +32,17 @@ is in git history (before 2026-10-08).
   X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.1; latest release `v1.9.1` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
+- X3 Lite (`pokemon-x3-lite`, branch feat/x3-lite, 2026-11-20, not released yet): pokemon-x3 without
+  Bluetooth (extends `firmware_tuned`, not `firmware_tuned_bt_c3`), to free flash for new features
+  on a spare X3 (desk dashboard ideas: clock + lunar calendar + weather, photo frame, pomodoro, PC
+  stats). Device type `x3-lite`, so OTA looks for `firmware-x3-lite.bin` and never crosses with
+  `firmware-x3-x4`. Measured: flash 89.0% (5,831,915 B) vs pokemon-x3 95.1% (6,232,993 B), -392 KB;
+  static RAM 69.6 KB vs 79.2 KB. CI's release workflow builds it (`build-x3-lite`). README and
+  docs/installation.md do not list it yet: add the download link once a release carries it.
+  Switching between it and pokemon-x3 rebuilds the shared C3 core (BT on/off).
+- Dev machine (2026-11-20): Windows 11 + WSL `Ubuntu-26.04`, clone at `~/xteink-pokemon-game`,
+  `~/bin/xenv <cmd>` runs a command there with PlatformIO on PATH. Native Windows builds fail
+  (pioarduino "Two environments ... FrameworkArduino/ColorFormat.c.o", cause not found): build in WSL.
 - Pokémon pace (1.9.0, plan and simulations in docs/development/pokemon-pace-plan.md, re-run with
   `scripts/dev/simulate_pokemon_pace.py`): battle XP is Gen 5-scaled `battleVictoryXp(Lo, Lp)` (x1, gyms
   and wild alike); road trainers from the crosslingua fork (`lib/Pokemon/PokemonTrainers.*`, 30-min roll
