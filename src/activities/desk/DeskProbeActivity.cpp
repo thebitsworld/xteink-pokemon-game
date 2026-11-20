@@ -31,6 +31,8 @@ namespace {
 
 constexpr char TAG[] = "DESKPROBE";
 constexpr char kLogPath[] = "/.crosspoint/desk-probe.csv";
+constexpr char kTracePath[] = "/.crosspoint/desk-probe-trace.txt";
+constexpr size_t kMaxTraceBytes = 256 * 1024;
 constexpr uint32_t kTickMs = 60000;
 constexpr uint32_t kHalfRefreshEvery = 60;  // ticks
 constexpr uint32_t kWifiEvery = 30;         // ticks
@@ -148,21 +150,42 @@ void DeskProbeActivity::appendLog(const bool usb) const {
   file.close();
 }
 
+void DeskProbeActivity::trace(const char* step, const long value) const {
+  char line[96];
+  const int len = snprintf(line, sizeof(line), "%lu,%lu,%s,%s,%ld\n", static_cast<unsigned long>(millis()),
+                           static_cast<unsigned long>(tick),
+                           sleepMode == SleepMode::LightSleep ? "light" : "delay", step, value);
+  if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
+  HalFile file = Storage.open(kTracePath, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return;
+  if (file.size() < kMaxTraceBytes) file.write(line, static_cast<size_t>(len));
+  file.close();
+}
+
 void DeskProbeActivity::runTick() {
   const uint32_t start = millis();
   ++tick;
+  trace("tick-start");
   halfThisTick = (tick % kHalfRefreshEvery) == 1;
   if (!halClock.formatTime(timeText, sizeof(timeText), SETTINGS.clockUtcOffsetQ, false)) {
     snprintf(timeText, sizeof(timeText), "--:--");
   }
+  trace("clock-read");
   gauge = readGauge();
+  trace("gauge-read", gauge.ok ? gauge.curMa : -9999);
   lastWifiMs = 0;
   lastWifiOk = false;
-  if (wifiRounds && tick % kWifiEvery == 0) lastWifiMs = wifiRound();
+  if (wifiRounds && tick % kWifiEvery == 0) {
+    lastWifiMs = wifiRound();
+    trace("wifi-done", static_cast<long>(lastWifiMs));
+  }
+  trace("render-request");
   requestUpdateAndWait();  // render() times the refresh into lastRefreshMs
+  trace("render-done", static_cast<long>(lastRefreshMs));
   const bool usb = gpio.isUsbConnected();
   lastAwakeMs = millis() - start;
   appendLog(usb);
+  trace("log-written", usb ? 1 : 0);
   sleepUntilNextTick(start);
 }
 
@@ -171,6 +194,29 @@ void DeskProbeActivity::sleepUntilNextTick(const uint32_t tickStartMs) {
   const uint32_t elapsed = millis() - tickStartMs;
   const uint32_t sleepMs = elapsed < kTickMs ? kTickMs - elapsed : 1000;
   if (WiFi.getMode() != WIFI_MODE_NULL) WiFi.mode(WIFI_OFF);
+
+  if (sleepMode == SleepMode::Delay) {
+    // Control run: wait awake in short steps, still stoppable with the power button.
+    trace("delay-enter", static_cast<long>(sleepMs));
+    // Input state is only refreshed by the main loop, which this wait blocks: read the power
+    // pin directly.
+    const int8_t pin = BoardConfig::ACTIVE.input.power;
+    const int pressedLevel = BoardConfig::ACTIVE.input.powerActiveHigh ? HIGH : LOW;
+    const uint32_t t0 = millis();
+    while (millis() - t0 < sleepMs) {
+      delay(100);
+      if (pin >= 0 && digitalRead(pin) == pressedLevel) {
+        running = false;
+        stoppedByButton = true;
+        trace("delay-stopped");
+        requestUpdate();
+        return;
+      }
+    }
+    lastWake = 0;
+    trace("delay-exit");
+    return;
+  }
 
   const auto powerPin = static_cast<gpio_num_t>(BoardConfig::ACTIVE.input.power);
   const bool activeHigh = BoardConfig::ACTIVE.input.powerActiveHigh;
@@ -187,8 +233,11 @@ void DeskProbeActivity::sleepUntilNextTick(const uint32_t tickStartMs) {
     gpio_wakeup_enable(powerPin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
   }
-  esp_light_sleep_start();
+  trace("sleep-enter", static_cast<long>(sleepMs));
+  const esp_err_t sleepErr = esp_light_sleep_start();
   lastWake = static_cast<int>(esp_sleep_get_wakeup_cause());
+  trace("sleep-exit", static_cast<long>(lastWake));
+  if (sleepErr != ESP_OK) trace("sleep-error", static_cast<long>(sleepErr));
   if (gpioWake) {
     gpio_wakeup_disable(powerPin);
     gpio_set_intr_type(powerPin, GPIO_INTR_ANYEDGE);  // InputWake's own setting
@@ -225,9 +274,12 @@ void DeskProbeActivity::loop() {
     LOG_INF(TAG, "Run started, Wi-Fi rounds %s", wifiRounds ? "on" : "off");
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-      mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     wifiRounds = !wifiRounds;
+    requestUpdate();
+  }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+    sleepMode = sleepMode == SleepMode::LightSleep ? SleepMode::Delay : SleepMode::LightSleep;
     requestUpdate();
   }
 }
@@ -262,19 +314,25 @@ void DeskProbeActivity::render(RenderLock&&) {
   snprintf(buf, sizeof(buf), "Wi-Fi rounds: %s   last %lu ms %s", wifiRounds ? "every 30 min" : "off",
            static_cast<unsigned long>(lastWifiMs), lastWifiMs == 0 ? "" : (lastWifiOk ? "ok" : "FAIL"));
   renderer.drawText(UI_10_FONT_ID, left, y, buf);
+  y += 32;
+  snprintf(buf, sizeof(buf), "Between ticks: %s",
+           sleepMode == SleepMode::LightSleep ? "LIGHT SLEEP" : "DELAY (control, no sleep)");
+  renderer.drawText(UI_10_FONT_ID, left, y, buf, true, EpdFontFamily::BOLD);
   y += 56;
 
   if (running) {
     renderer.drawText(UI_10_FONT_ID, left, y, "Running. Unplug USB and leave it.", true, EpdFontFamily::BOLD);
     y += 32;
-    renderer.drawText(UI_10_FONT_ID, left, y, "Power button stops the run.");
+    renderer.drawText(UI_10_FONT_ID, left, y,
+                      sleepMode == SleepMode::LightSleep ? "Power button stops the run."
+                                                         : "Hold the power button to stop.");
     y += 32;
     renderer.drawText(UI_10_FONT_ID, left, y, "Log: /.crosspoint/desk-probe.csv");
   } else {
     renderer.drawText(UI_10_FONT_ID, left, y, stoppedByButton ? "Stopped." : "Ready.", true, EpdFontFamily::BOLD);
     y += 32;
-    renderer.drawText(UI_10_FONT_ID, left, y, "Confirm: start   Up/Down: Wi-Fi rounds");
-    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Back"), "Start", "Wi-Fi", "Wi-Fi");
+    renderer.drawText(UI_10_FONT_ID, left, y, "Confirm: start   Up: Wi-Fi   Down: sleep mode");
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Back"), "Start", "Wi-Fi", "Mode");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 

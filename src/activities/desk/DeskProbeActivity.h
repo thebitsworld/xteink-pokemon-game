@@ -39,8 +39,13 @@ class DeskProbeActivity final : public Activity {
     bool ok = false;
   };
 
+  // LightSleep: the real test. Delay: same tick loop with delay() instead of light sleep, as
+  // a control (probe v1 never got past its first light sleep on an X3, 2026-11-20).
+  enum class SleepMode : uint8_t { LightSleep, Delay };
+
   bool running = false;
   bool wifiRounds = true;
+  SleepMode sleepMode = SleepMode::LightSleep;
   bool stoppedByButton = false;
   bool halfThisTick = true;
   bool lastWifiOk = false;
@@ -56,6 +61,9 @@ class DeskProbeActivity final : public Activity {
   void sleepUntilNextTick(uint32_t tickStartMs);
   uint32_t wifiRound();
   void appendLog(bool usb) const;
+  // One line per step to /.crosspoint/desk-probe-trace.txt, opened and closed each time, so
+  // the last line on the card shows where a hang happened.
+  void trace(const char* step, long value = -1) const;
   static Gauge readGauge();
 };
 
