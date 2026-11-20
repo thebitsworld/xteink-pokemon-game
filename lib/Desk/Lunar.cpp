@@ -94,6 +94,26 @@ int32_t julianDay(const int day, const int month, const int year) {
   return jd;
 }
 
+void gregorianFromJulianDay(const int32_t jdn, int& day, int& month, int& year) {
+  const int32_t a = jdn + 32044;
+  const int32_t b = (4 * a + 3) / 146097;
+  const int32_t c = a - 146097 * b / 4;
+  const int32_t d = (4 * c + 3) / 1461;
+  const int32_t e = c - 1461 * d / 4;
+  const int32_t m = (5 * e + 2) / 153;
+  day = static_cast<int>(e - (153 * m + 2) / 5 + 1);
+  month = static_cast<int>(m + 3 - 12 * (m / 10));
+  year = static_cast<int>(100 * b + d - 4800 + m / 10);
+}
+
+int weekdayOf(const int32_t jdn) { return static_cast<int>((jdn + 1) % 7); }
+
+const char* weekdayName(const int weekday) {
+  static const char* const kNames[7] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
+  if (weekday < 0 || weekday > 6) return "";
+  return kNames[weekday];
+}
+
 LunarDate solarToLunar(const int day, const int month, const int year, const double timeZone) {
   const int32_t dayNumber = julianDay(day, month, year);
   const int k = floorToInt((dayNumber - 2415021.076998695) / 29.530588853);
@@ -151,17 +171,10 @@ CalendarEvent nextCalendarEvent(const int day, const int month, const int year, 
   CalendarEvent ev;
   const int32_t start = julianDay(day, month, year);
   for (int offset = 0; offset <= horizonDays; ++offset) {
-    // Gregorian date of start + offset (inverse of julianDay, Gregorian calendar).
-    const int32_t jd = start + offset;
-    const int32_t a = jd + 32044;
-    const int32_t b = (4 * a + 3) / 146097;
-    const int32_t c = a - 146097 * b / 4;
-    const int32_t d = (4 * c + 3) / 1461;
-    const int32_t e = c - 1461 * d / 4;
-    const int32_t m = (5 * e + 2) / 153;
-    const int sd = static_cast<int>(e - (153 * m + 2) / 5 + 1);
-    const int sm = static_cast<int>(m + 3 - 12 * (m / 10));
-    const int sy = static_cast<int>(100 * b + d - 4800 + m / 10);
+    int sd = 0;
+    int sm = 0;
+    int sy = 0;
+    gregorianFromJulianDay(start + offset, sd, sm, sy);
 
     const char* fixed = nullptr;
     if (sd == 1 && sm == 1) fixed = "Tết Dương lịch";

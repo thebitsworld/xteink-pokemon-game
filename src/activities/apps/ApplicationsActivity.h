@@ -28,6 +28,9 @@
 #if CROSSINK_DESK_PROBE
 #include "activities/desk/DeskProbeActivity.h"
 #endif
+#if CROSSINK_DESK
+#include "activities/desk/DeskActivity.h"
+#endif
 #include "fontIds.h"
 
 class ApplicationsActivity : public Activity {
@@ -93,6 +96,16 @@ class ApplicationsActivity : public Activity {
                                });
         return;
       }
+#if CROSSINK_DESK
+      if (app.desk) {
+        startActivityForResult(std::make_unique<DeskActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) {
+                                 refreshMenuList();
+                                 requestUpdate();
+                               });
+        return;
+      }
+#endif
 #if CROSSINK_DESK_PROBE
       if (app.deskProbe) {
         startActivityForResult(std::make_unique<DeskProbeActivity>(renderer, mappedInput),
@@ -275,6 +288,7 @@ class ApplicationsActivity : public Activity {
     bool slideshow = false;  // the built-in Photo Slideshow
     bool pulseTest = false;  // the screen's pulse-drive test (X4 Pro, UC8279-0x68)
     bool deskProbe = false;  // Desk mode phase-0 power probe (CROSSINK_DESK_PROBE builds)
+    bool desk = false;       // Desk mode (CROSSINK_DESK builds: X3 Lite)
     bool pokemon = false;    // the built-in Pokemon game
     bool hasGuide = false;   // a "How to play" guide in its folder (GuideViewerActivity)
     std::string dir;        // SD-card app: its folder and entry script
@@ -406,6 +420,19 @@ class ApplicationsActivity : public Activity {
     }
 #endif
 
+#if CROSSINK_DESK
+    // Desk mode (docs/development/desk-mode-plan.md). A Home entry and "Start in Desk" come
+    // with its settings page.
+    {
+      AppEntry deskApp;
+      deskApp.name = "Desk";
+      deskApp.detail = "Đồng hồ, lịch âm, thời tiết";
+      deskApp.icon = UIIcon::Library;
+      deskApp.builtIn = true;
+      deskApp.desk = true;
+      visibleApps.insert(visibleApps.begin(), std::move(deskApp));
+    }
+#endif
 #if CROSSINK_DESK_PROBE
     // Desk mode phase 0 (docs/development/desk-mode-plan.md), test builds only.
     {

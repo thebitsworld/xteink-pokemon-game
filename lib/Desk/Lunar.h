@@ -21,6 +21,12 @@ struct LunarDate {
 
 // Julian day number of a Gregorian date (Julian calendar before 1582-10-15).
 int32_t julianDay(int day, int month, int year);
+// Gregorian date of a Julian day number (inverse of julianDay for Gregorian dates).
+void gregorianFromJulianDay(int32_t jdn, int& day, int& month, int& year);
+// 0 = Sunday .. 6 = Saturday.
+int weekdayOf(int32_t jdn);
+// "Chủ Nhật", "Thứ Hai", ..., "Thứ Bảy" for 0..6.
+const char* weekdayName(int weekday);
 
 LunarDate solarToLunar(int day, int month, int year, double timeZone = 7.0);
 

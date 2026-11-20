@@ -96,6 +96,18 @@ TEST(Lunar, CanChi) {
   EXPECT_STREQ(desk::lunarMonthName(13), "");
 }
 
+TEST(Lunar, GregorianRoundTripAndWeekday) {
+  for (int32_t jd = desk::julianDay(1, 1, 1999); jd < desk::julianDay(1, 1, 2032); jd += 17) {
+    int d = 0, m = 0, y = 0;
+    desk::gregorianFromJulianDay(jd, d, m, y);
+    EXPECT_EQ(desk::julianDay(d, m, y), jd);
+  }
+  EXPECT_EQ(desk::weekdayOf(desk::julianDay(20, 11, 2026)), 5);  // a Friday
+  EXPECT_EQ(desk::weekdayOf(desk::julianDay(1, 1, 2000)), 6);    // a Saturday
+  EXPECT_STREQ(desk::weekdayName(5), "Thứ Sáu");
+  EXPECT_STREQ(desk::weekdayName(0), "Chủ Nhật");
+}
+
 TEST(Lunar, NextEvent) {
   desk::CalendarEvent e = desk::nextCalendarEvent(20, 11, 2026);
   ASSERT_TRUE(e.found);

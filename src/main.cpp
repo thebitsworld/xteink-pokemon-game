@@ -249,6 +249,17 @@ EpdFont ui12RegularFont(&inter_12_regular);
 EpdFont ui12BoldFont(&inter_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont, nullptr, nullptr, &uiSymbols10Font);
 
+#if CROSSINK_DESK
+#include <builtinFonts/desk_clock_72.h>
+#include <builtinFonts/desk_digits_28.h>
+
+#include "activities/desk/DeskFonts.h"
+EpdFont deskClockFont(&desk_clock_72);
+EpdFontFamily deskClockFontFamily(&deskClockFont);
+EpdFont deskDigitsFont(&desk_digits_28);
+EpdFontFamily deskDigitsFontFamily(&deskDigitsFont);
+#endif
+
 const char* resetReasonName(const esp_reset_reason_t reason) {
   switch (reason) {
     case ESP_RST_POWERON:
@@ -1247,6 +1258,10 @@ void setupDisplayAndFonts(const bool seamless, const bool loadReaderResources, c
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+#if CROSSINK_DESK
+  renderer.insertFont(DESK_CLOCK_FONT_ID, deskClockFontFamily);
+  renderer.insertFont(DESK_DIGITS_FONT_ID, deskDigitsFontFamily);
+#endif
   if (loadReaderResources) {
     sdFontSystem.begin(renderer);
   } else {
