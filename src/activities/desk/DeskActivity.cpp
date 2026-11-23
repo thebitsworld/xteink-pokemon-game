@@ -1105,16 +1105,36 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
     snprintf(line2, sizeof(line2), tr(STR_DESK_PHOTO_N), photoIndex + 1, static_cast<int>(photos.size()));
   }
   // The photo is fitted above the strip (photo::render's reserveBottom), so the strip sits on
-  // blank paper: it is drawn on the B/W pass only, and the gray planes stay empty there.
-  // (Drawing white over it on the gray passes wiped the text on the X3.)
+  // blank paper. The B/W pass draws it and keeps a 1-bit copy; the gray passes need it again on
+  // panels with absolute gray planes (the X3: the planes alone make the final picture, so text
+  // drawn on the B/W pass only came out as a blank white strip - owner's report, 2026-11-23).
+  // On non-absolute planes (cleared to "no gray") the strip needs nothing there.
   const int stripX = kMargin;
   const int stripY = h - kPhotoStripH;
   const int stripW = w - 2 * kMargin;
+  const int stripRowBytes = (stripW + 7) / 8;
+  std::vector<uint8_t> stripMask;
   const auto overlay = [&](const bool gray) {
-    if (gray) return;
-    renderer.drawLine(stripX, stripY + 4, stripX + stripW, stripY + 4, 2, true);
-    renderer.drawText(UI_12_FONT_ID, stripX, stripY + 12, line1, true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, stripX, stripY + 44, line2);
+    if (!gray) {
+      renderer.drawLine(stripX, stripY + 4, stripX + stripW, stripY + 4, 2, true);
+      renderer.drawText(UI_12_FONT_ID, stripX, stripY + 12, line1, true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, stripX, stripY + 44, line2);
+      stripMask.assign(static_cast<size_t>(stripRowBytes) * kPhotoStripH, 0);
+      for (int y = 0; y < kPhotoStripH; ++y) {
+        for (int x = 0; x < stripW; ++x) {
+          if (renderer.isPixelBlack(stripX + x, stripY + y)) {
+            stripMask[y * stripRowBytes + x / 8] |= static_cast<uint8_t>(0x80 >> (x % 8));
+          }
+        }
+      }
+      return;
+    }
+    if (!renderer.grayPlanesAreAbsolute() || stripMask.empty()) return;
+    for (int y = 0; y < kPhotoStripH; ++y) {
+      for (int x = 0; x < stripW; ++x) {
+        if (stripMask[y * stripRowBytes + x / 8] & (0x80 >> (x % 8))) renderer.drawPixel(stripX + x, stripY + y, true);
+      }
+    }
   };
 
   const std::string path = photoFolder() + "/" + photos[photoIndex];
