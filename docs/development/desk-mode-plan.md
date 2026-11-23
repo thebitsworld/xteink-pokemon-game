@@ -185,7 +185,17 @@ So minute ticks on battery use light sleep with two rules, both required:
 Also seen: a sleep entered while the power button is held is rejected with
 `ESP_ERR_INVALID_STATE` (retry after a short delay), and the BQ27220's RemainingCapacity reads
 ~2.9 Ah on a 650 mAh cell, so battery use is computed from SoC, voltage and current, not from it.
-Overnight battery run with Wi-Fi rounds: pending.
+Unattended runs (2026-11-20 to 23) overturned this:
+
+| Probe | Result |
+|---|---|
+| v4 overnight: light sleep in 10 s chunks, pins held | Ran 3 to 11 ticks per run, then one chunk never returned (trace ends at `sleep-enter`, the reader stayed hung until a power cycle). While it ran: gauge average about -3 mA, a tick awake ~590 ms |
+| v5: deep sleep with an ESP timer wake per tick | No second tick, ever. The next boot (power button) found the RTC_NOINIT run marker gone, i.e. it was a power-on reset: on the X3 the chip appears to lose power in deep sleep (as the "Xteink wake is a power-on reset" note in platformio.ini says), so an ESP timer cannot wake it |
+
+So on battery neither sleep mode gives unattended minute ticks yet. Options under discussion:
+light sleep guarded by the RTC watchdog (a hung chunk resets the chip and Desk resumes), staying
+awake at a low CPU clock (est. a few days per charge), or Desk on USB only with a static
+"date only" screen on battery.
 
 ## Phases
 
