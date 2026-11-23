@@ -39,8 +39,9 @@ Mockups are the reference; text here only lists content and button roles.
    last seen time.
 3. **Photo frame**: one image from Photo Slideshow's folder with Photo Slideshow's settings
    (Fit/Crop, random order, interval; owner's choice 2026-11-23, instead of a fixed
-   `/desk/photos`), drawn by the slideshow's own code (`PhotoRender`); a bottom strip with the
-   date, lunar date, weather and index n/N.
+   `/desk/photos`), drawn by the slideshow's own code (`PhotoRender`) fitted above a bottom
+   strip with the date, lunar date, weather and index n/N (B/W pass only). The interval runs on
+   USB and battery; on battery the page goes back to the clock after an hour without input.
 4. **Pomodoro**: ring with minutes left, phase (Tập trung / Nghỉ), round n/4, end time, today's
    total. Running Pomodoro blocks deep power saving (see Power).
 5. **Desk settings**: two-column list (USB / battery), rows below.
@@ -249,6 +250,8 @@ the commit message, host tests green, simulator check where it applies.
    (`consumeOpenDeskRequest()` in setup); a watchdog reset resumes it from setup
    (`resumeBatteryFromBoot()`, gives up after 50 resets). *Left:* night sleep, the settings
    page's battery intervals, a long battery run on the reader.
+   *Then (2026-11-23):* weather and PC fetches outside the battery loop run in a background task
+   ("DeskNet") so the buttons answer at once; the two page buttons name the page they open.
 6. **Claude quota** once open question 1 is settled.
 
 ## Open questions
