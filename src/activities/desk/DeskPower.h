@@ -17,6 +17,20 @@
 // ladder).
 namespace deskpower {
 
+// USB power: the X3 has no USB-detect pin and HalGPIO infers USB from a charging current, which
+// is zero once the cell is full; a PC connection (USB Serial/JTAG host) counts too.
+bool externalPower();
+
+// BQ27220 readings for the battery log.
+struct GaugeSample {
+  int soc = -1;
+  int mv = -1;
+  int curMa = 0;  // > 0 charging
+};
+GaugeSample readGauge();
+// One line per battery-loop event to /.crosspoint/desk-battery.csv (with a header).
+void logBattery(const char* event, const char* localTime, const GaugeSample& g, uint32_t resets);
+
 void watchdogArm(uint32_t timeoutMs);
 void watchdogFeed();
 void watchdogDisarm();

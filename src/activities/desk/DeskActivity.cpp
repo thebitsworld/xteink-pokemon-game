@@ -23,6 +23,7 @@
 #include "DeskPower.h"
 #include "Lunar.h"
 #include "MappedInputManager.h"
+#include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/PhotoRender.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -160,7 +161,7 @@ void DeskActivity::onExit() {
 }
 
 bool DeskActivity::preventAutoSleep() {
-  return gpio.isUsbConnected() || weatherFetching || pcPolling || pomodoro.running();
+  return deskpower::externalPower() || weatherFetching || pcPolling || pomodoro.running();
 }
 
 void DeskActivity::runWeatherFetch() {
@@ -169,7 +170,7 @@ void DeskActivity::runWeatherFetch() {
   if (page == Page::Main) requestUpdateAndWait();  // shows "Đang cập nhật..." before blocking
   uint32_t now = 0;
   if (!readUtcUnix(now)) now = weather.fetchedAt;
-  const bool usb = gpio.isUsbConnected();
+  const bool usb = deskpower::externalPower();
   weatherResult = deskweather::refresh(config, weather, now, usb);
   wifiKeptForUsb = wifiKeptForUsb || usb;
   weatherFetching = false;
@@ -184,7 +185,7 @@ void DeskActivity::runPcPoll() {
   pcPolling = true;
   uint32_t now = 0;
   readUtcUnix(now);
-  const bool usb = gpio.isUsbConnected();
+  const bool usb = deskpower::externalPower();
   pcResult = deskagent::poll(config, pc, now, usb);
   wifiKeptForUsb = wifiKeptForUsb || usb;
   pcPolling = false;
@@ -205,7 +206,20 @@ void DeskActivity::resumeBatteryFromBoot() {
   runBatteryLoop(true);
 }
 
+namespace {
+void batteryLogNow(const char* event) {
+  char when[24] = "--";
+  uint16_t y = 0;
+  uint8_t mo = 0, d = 0, h = 0, mi = 0;
+  if (halClock.getDateTime(y, mo, d, h, mi)) {
+    snprintf(when, sizeof(when), "%04u-%02u-%02u %02u:%02uZ", y, mo, d, h, mi);  // UTC, as the RTC keeps it
+  }
+  deskpower::logBattery(event, when, deskpower::readGauge(), deskpower::batteryResets());
+}
+}  // namespace
+
 void DeskActivity::leaveBatteryLoop() {
+  batteryLogNow(deskpower::externalPower() ? "exit-usb" : "exit-button");
   deskpower::watchdogDisarm();
   deskpower::setBatteryRunArmed(false);
   deskpower::requestOpenDeskAfterRestart();
@@ -230,11 +244,13 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 #endif
   deskpower::setBatteryRunArmed(true);
   deskpower::watchdogArm(kBatteryWatchdogMs);
+  batteryLogNow(fromBoot ? "resume" : "enter");
 
   int ticksSinceHalf = 0;
   for (;;) {
     deskpower::watchdogFeed();
-    if (gpio.isUsbConnected()) leaveBatteryLoop();  // charging: the full Desk again
+    if (deskpower::externalPower()) leaveBatteryLoop();  // charging: the full Desk again
+    batteryLogNow("tick");
 
     const LocalTime t = readLocalTime();
     const bool newDay = t.day != shown.day || t.month != shown.month || t.year != shown.year;
@@ -260,13 +276,16 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 }
 
 void DeskActivity::loop() {
-  const bool up = mappedInput.wasPressed(MappedInputManager::Button::Up);
-  const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down);
+  // On the X3 the two right-hand front buttons report Left/Right; Up/Down are the side keys.
+  const bool up = mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+                  mappedInput.wasPressed(MappedInputManager::Button::Left);
+  const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down) ||
+                    mappedInput.wasPressed(MappedInputManager::Button::Right);
   const bool select = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
   if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
 
   // On battery and left alone: the minute-tick loop in light sleep (does not return).
-  if (!gpio.isUsbConnected() && !pomodoro.running() && !weatherFetchPending && !pcPollPending &&
+  if (!deskpower::externalPower() && !pomodoro.running() && !weatherFetchPending && !pcPollPending &&
       millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo) {
     runBatteryLoop(false);
   }
@@ -301,6 +320,20 @@ void DeskActivity::loop() {
       case Page::Main:
         shown = readLocalTime();
         runWeatherFetch();
+        if (weatherResult == deskweather::Result::NoSavedWifi || weatherResult == deskweather::Result::WifiFailed) {
+          // No network to use: pick or join one (the picker saves it), then fetch again.
+          startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                                 [this](const ActivityResult& result) {
+                                   if (!result.isCancelled) {
+                                     weatherFetchPending = true;
+                                     pcPollPending = true;
+                                   }
+                                   lastInputMs = millis();
+                                   forceHalfRefresh = true;
+                                   requestUpdate();
+                                 });
+          return;
+        }
         runPcPoll();
         break;
       case Page::Pc:
@@ -331,7 +364,7 @@ void DeskActivity::loop() {
   }
 
   const uint32_t nowMs = millis();
-  if (page == Page::Photo && gpio.isUsbConnected() && photos.size() > 1 &&
+  if (page == Page::Photo && deskpower::externalPower() && photos.size() > 1 &&
       nowMs - lastPhotoChangeMs >= kPhotoEveryMs) {
     photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
     lastPhotoChangeMs = nowMs;
@@ -346,7 +379,7 @@ void DeskActivity::loop() {
     runPcPoll();
     return;
   }
-  if (gpio.isUsbConnected()) {
+  if (deskpower::externalPower()) {
     const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
     if (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait) {
       runWeatherFetch();
@@ -377,7 +410,7 @@ void DeskActivity::drawStatusBar(const char* title, const char* middle) const {
   const int w = renderer.getScreenWidth();
   char buf[32];
   renderer.drawText(UI_10_FONT_ID, kMargin, 14, title, true, EpdFontFamily::BOLD);
-  if (gpio.isUsbConnected()) {
+  if (deskpower::externalPower()) {
     snprintf(buf, sizeof(buf), "Đang sạc");
   } else {
     snprintf(buf, sizeof(buf), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));

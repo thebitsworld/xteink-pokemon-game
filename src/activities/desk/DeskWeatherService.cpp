@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <WiFi.h>
@@ -12,6 +13,7 @@
 #include <cstring>
 #include <string>
 
+#include "CrossPointSettings.h"
 #include "WifiCredentialStore.h"
 #include "network/HttpDownloader.h"
 #include "network/WifiUtils.h"
@@ -116,6 +118,22 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
     return r;
   }
   if (keepWifi) started = false;  // leave it up for the next round
+
+  // Set the clock while Wi-Fi is up: on entry, then every 6 hours. A Desk is a clock first.
+  static uint32_t lastNtpMs = 0;
+  static bool ntpDone = false;
+  if (!ntpDone || millis() - lastNtpMs > 6UL * 3600UL * 1000UL) {
+    if (halClock.syncFromNTP()) {
+      if (!SETTINGS.clockHasBeenSynced || !SETTINGS.clockDateHasBeenSynced) {
+        SETTINGS.clockHasBeenSynced = 1;
+        SETTINGS.clockDateHasBeenSynced = 1;
+        SETTINGS.saveToFile();
+      }
+      LOG_INF(TAG, "Clock set from NTP");
+    }
+    ntpDone = true;
+    lastNtpMs = millis();
+  }
 
   std::string body;
   const bool placeStale = !cfg.place.valid || std::strcmp(cfg.city, cfg.resolvedFor) != 0;

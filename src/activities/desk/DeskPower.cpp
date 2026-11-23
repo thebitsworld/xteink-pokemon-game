@@ -3,11 +3,18 @@
 #if CROSSINK_DESK
 
 #include <Arduino.h>
+#include <HalGPIO.h>
+#include <HalStorage.h>
+
+#include <cstdio>
+#include <cstring>
 
 #ifndef SIMULATOR
 #include <BoardConfig.h>
+#include <Wire.h>
 #include <Rtc.h>
 #include <driver/gpio.h>
+#include <driver/usb_serial_jtag.h>
 #include <esp_private/esp_clk.h>
 #include <esp_sleep.h>
 #include <hal/wdt_hal.h>
@@ -50,7 +57,59 @@ void holdPins(const bool hold) {
 }
 #endif
 
+#ifndef SIMULATOR
+bool readReg16(const uint8_t addr, const uint8_t reg, uint16_t& out) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(static_cast<uint16_t>(addr), static_cast<size_t>(2)) != 2) return false;
+  const uint8_t lo = static_cast<uint8_t>(Wire.read());
+  const uint8_t hi = static_cast<uint8_t>(Wire.read());
+  out = static_cast<uint16_t>(lo | (hi << 8));
+  return true;
+}
+#endif
+
+constexpr char kBatteryLogPath[] = "/.crosspoint/desk-battery.csv";
+constexpr size_t kMaxBatteryLog = 512 * 1024;
+
 }  // namespace
+
+bool externalPower() {
+#ifndef SIMULATOR
+  return gpio.isUsbConnected() || usb_serial_jtag_is_connected();
+#else
+  return gpio.isUsbConnected();
+#endif
+}
+
+GaugeSample readGauge() {
+  GaugeSample g;
+#ifndef SIMULATOR
+  const uint8_t addr = BoardConfig::ACTIVE.batteryGauge.gaugeAddr;
+  if (addr == 0) return g;
+  uint16_t v = 0;
+  if (readReg16(addr, 0x2C, v)) g.soc = v;  // StateOfCharge
+  if (readReg16(addr, 0x08, v)) g.mv = v;   // Voltage
+  if (readReg16(addr, 0x0C, v)) g.curMa = static_cast<int16_t>(v);  // Current
+#endif
+  return g;
+}
+
+void logBattery(const char* event, const char* localTime, const GaugeSample& g, const uint32_t resets) {
+  char line[128];
+  const int len = snprintf(line, sizeof(line), "%s,%s,%d,%d,%d,%lu\n", localTime, event, g.soc, g.mv, g.curMa,
+                           static_cast<unsigned long>(resets));
+  if (len <= 0 || static_cast<size_t>(len) >= sizeof(line)) return;
+  HalFile file = Storage.open(kBatteryLogPath, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return;
+  if (file.size() == 0) {
+    static constexpr char kHeader[] = "# time,event,soc,mv,cur_ma,resets\n";
+    file.write(kHeader, sizeof(kHeader) - 1);
+  }
+  if (file.size() < kMaxBatteryLog) file.write(line, static_cast<size_t>(len));
+  file.close();
+}
 
 void watchdogArm(const uint32_t timeoutMs) {
 #ifndef SIMULATOR
