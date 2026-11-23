@@ -253,6 +253,9 @@ the commit message, host tests green, simulator check where it applies.
    *Then (2026-11-23):* weather and PC fetches outside the battery loop run in a background task
    ("DeskNet") so the buttons answer at once; the two page buttons name the page they open.
 6. **Claude quota** once open question 1 is settled.
+   *Done (2026-11-23):* source = Claude Code's status line data (`rate_limits`), saved by
+   `tools/desk-agent/desk_statusline.py` and served by the agent; the PC page stays up like the
+   photo frame and its address can be typed on the reader (hold Select).
 
 ## Open questions
 
