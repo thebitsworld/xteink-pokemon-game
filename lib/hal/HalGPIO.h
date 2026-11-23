@@ -145,6 +145,15 @@ class HalGPIO {
   constexpr bool wasHomeKeyTapped() const { return false; }
   constexpr bool wasHomeKeyLongPressed() const { return false; }
 #endif
+  // The touch controller's INT line when the build arms it as a light-sleep wake
+  // (FREEINK_GT911_INT_WAKE), else -1; and the level it asserts.
+#if CROSSPOINT_EMULATED == 0
+  int8_t touchWakeIrqPin() const { return inputMgr.touchWakeIrqPin(); }
+  bool touchWakeIrqActiveLow() const { return inputMgr.touchWakeIrqActiveLow(); }
+#else
+  int8_t touchWakeIrqPin() const { return -1; }
+  bool touchWakeIrqActiveLow() const { return true; }
+#endif
   void setSharedConfirmPowerShortPressEmitsPower(bool enabled);
 
   // Verify the physical power button through debounce, then require a long

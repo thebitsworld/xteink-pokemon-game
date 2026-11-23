@@ -26,19 +26,22 @@ std::string discovered;
 
 bool discover(std::string& hostPort) {
 #ifndef SIMULATOR
-  static bool mdnsStarted = false;
-  if (!mdnsStarted) mdnsStarted = MDNS.begin("xteink-desk");
-  if (!mdnsStarted) return false;
+  // mDNS only for the query: left running, its task and buffers stayed on the heap after Desk
+  // closed (the X4 Pro's folder picker then reported a memory error, 2026-11-23).
+  if (!MDNS.begin("xteink-desk")) return false;
   const int n = MDNS.queryService("xdesk", "tcp");
+  bool found = false;
   if (n <= 0) {
     LOG_INF(TAG, "No _xdesk._tcp agent on the network");
-    return false;
+  } else {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%s:%u", MDNS.address(0).toString().c_str(), static_cast<unsigned>(MDNS.port(0)));
+    hostPort = buf;
+    LOG_INF(TAG, "Agent %s at %s", MDNS.hostname(0).c_str(), buf);
+    found = true;
   }
-  char buf[64];
-  std::snprintf(buf, sizeof(buf), "%s:%u", MDNS.address(0).toString().c_str(), static_cast<unsigned>(MDNS.port(0)));
-  hostPort = buf;
-  LOG_INF(TAG, "Agent %s at %s", MDNS.hostname(0).c_str(), buf);
-  return true;
+  MDNS.end();
+  return found;
 #else
   (void)hostPort;
   return false;  // the simulator has no mDNS queries: use "agent" in desk.json

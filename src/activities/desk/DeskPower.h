@@ -13,8 +13,9 @@
 //   stopped (probe v6: 25 ticks, no hang, about -3 mA);
 // - the RTC watchdog guards each sleep: a sleep that never returns resets the chip, and the
 //   boot resumes the battery loop from RTC memory.
-// The light sleep wakes on the timer and the power button only (the front buttons are an ADC
-// ladder).
+// The light sleep wakes on the timer and the power button (the front buttons are an ADC
+// ladder), and on a touch where the build arms the touch controller's INT line (the X4 Pro test
+// build).
 namespace deskpower {
 
 // The light-sleep battery loop (pins held, RTC minute ticks, RWDT recovery) was proven on the
@@ -39,9 +40,9 @@ void watchdogArm(uint32_t timeoutMs);
 void watchdogFeed();
 void watchdogDisarm();
 
-enum class Wake : uint8_t { Timer, PowerButton };
+enum class Wake : uint8_t { Timer, PowerButton, Touch };
 // Light sleep for up to ms, in chunks of at most 10 s, pins held, the watchdog fed per chunk.
-// Returns early on the power button.
+// Returns early on the power button or a touch.
 Wake sleepFor(uint32_t ms);
 
 // Milliseconds until the next minute starts by the RTC (falls back to 60 s).

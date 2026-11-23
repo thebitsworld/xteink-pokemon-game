@@ -3,6 +3,7 @@
 #if CROSSINK_DESK
 
 #include <Arduino.h>
+#include <CrossInkHalFrontlight.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
@@ -680,8 +681,8 @@ void batteryLogNow(const char* event) {
 }
 }  // namespace
 
-void DeskActivity::leaveBatteryLoop() {
-  batteryLogNow(deskpower::externalPower() ? "exit-usb" : "exit-button");
+void DeskActivity::leaveBatteryLoop(const bool touch) {
+  batteryLogNow(deskpower::externalPower() ? "exit-usb" : touch ? "exit-touch" : "exit-button");
   // The press that woke the sleep is still held: restarting now would hand its release to the
   // new boot as a short press, i.e. a sleep (owner's report, 2026-11-23).
   deskpower::waitPowerButtonRelease();
@@ -705,6 +706,10 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
   }
   if (wifiKeptForUsb || WiFi.getMode() != WIFI_MODE_NULL) deskweather::wifiDown();
   wifiKeptForUsb = false;
+  // The frontlight's PWM stops in light sleep, so a light left on blinked on and off with every
+  // tick (X4 Pro, owner's report 2026-11-23). Off for the run; leaving it restarts the reader,
+  // which restores the light by its own settings.
+  Frontlight.setOn(false);
 #ifndef SIMULATOR
   gpio.stopButtonCapture();
 #endif
@@ -761,7 +766,8 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
       const int minutesLeft = kNightTickMinutes - (t.minute % kNightTickMinutes);
       sleepMs += static_cast<uint32_t>(minutesLeft - 1) * 60000u;
     }
-    if (deskpower::sleepFor(sleepMs) == deskpower::Wake::PowerButton) leaveBatteryLoop();
+    const deskpower::Wake wake = deskpower::sleepFor(sleepMs);
+    if (wake != deskpower::Wake::Timer) leaveBatteryLoop(wake == deskpower::Wake::Touch);
   }
 }
 
@@ -807,10 +813,14 @@ void DeskActivity::loop() {
     finish();
     return;
   }
-  // On the Pomodoro page with a timer set, Up skips the phase and Down resets; elsewhere (and
-  // with the timer idle) Up/Down switch pages.
-  if (page == Page::Pomodoro && pomodoro.phase() != desk::Pomodoro::Phase::Idle && (up || down)) {
-    if (up) {
+  // The side keys (Up/Down) always switch pages. The two right-hand front buttons (Left/Right)
+  // switch pages too, except where their labels say otherwise: on the calendar they change the
+  // month, and with a Pomodoro timer set they skip the phase and reset. The side keys changed
+  // the month once, which left them no way off the calendar (owner's report, 2026-11-23).
+  const bool frontPrev = mappedInput.wasPressed(MappedInputManager::Button::Left);
+  const bool frontNext = mappedInput.wasPressed(MappedInputManager::Button::Right);
+  if (page == Page::Pomodoro && pomodoro.phase() != desk::Pomodoro::Phase::Idle && (frontPrev || frontNext)) {
+    if (frontPrev) {
       pomodoro.skip(nowSec());
     } else {
       pomodoro.reset();
@@ -818,9 +828,8 @@ void DeskActivity::loop() {
     requestUpdate();
     return;
   }
-  if (page == Page::Calendar && (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-                                 mappedInput.wasPressed(MappedInputManager::Button::Down))) {
-    calendarOffset += mappedInput.wasPressed(MappedInputManager::Button::Down) ? 1 : -1;
+  if (page == Page::Calendar && (frontPrev || frontNext)) {
+    calendarOffset += frontNext ? 1 : -1;
     requestUpdate();
     return;
   }
@@ -1560,7 +1569,8 @@ void DeskActivity::renderPomodoro() {
 
 // Month calendar (lịch tháng): Monday-first grid, each day with its lunar day ("1/11" on a lunar
 // month's first day; Mùng 1 and Rằm in bold), today inverted; under it today's lunar date, can
-// chi and giờ hoàng đạo. Side keys: previous / next month; Select: back to this month.
+// chi and giờ hoàng đạo. Front buttons: previous / next month; Select: back to this month; side
+// keys: other pages.
 void DeskActivity::renderCalendar() {
   const int w = renderer.getScreenWidth();
   char buf[128];
@@ -1660,7 +1670,9 @@ void DeskActivity::renderCalendar() {
     y += 34;
   }
   renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40 - 34, tr(STR_DESK_CAL_HINT));
-  drawPageHints(tr(STR_DESK_BACK), tr(STR_DESK_TODAY));
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), tr(STR_DESK_TODAY),
+                                            tr(STR_DESK_PREV_MONTH), tr(STR_DESK_NEXT_MONTH));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void DeskActivity::render(RenderLock&&) { drawPage(); }

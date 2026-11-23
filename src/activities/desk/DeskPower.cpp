@@ -179,11 +179,19 @@ Wake sleepFor(const uint32_t ms) {
     const uint32_t t0 = millis();
     while (digitalRead(pin) == (activeHigh ? HIGH : LOW) && millis() - t0 < 3000) delay(10);
   }
+  // The touch controller's INT (X4 Pro test build): held asserted while a report waits, so an
+  // asserted line now is a touch already.
+  const int8_t touchPin = gpio.touchWakeIrqPin();
+  const bool touchActiveLow = gpio.touchWakeIrqActiveLow();
+  const auto touchGpio = static_cast<gpio_num_t>(touchPin);
+  if (touchPin >= 0 && digitalRead(touchPin) == (touchActiveLow ? LOW : HIGH)) return Wake::Touch;
   const bool gpioWake = pin >= 0 && gpio_intr_disable(powerPin) == ESP_OK;
-  if (gpioWake) {
-    gpio_wakeup_enable(powerPin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
-    esp_sleep_enable_gpio_wakeup();
-  }
+  if (gpioWake) gpio_wakeup_enable(powerPin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
+  // A touch wake leaves the loop, which restarts the reader: the line's own interrupt setting
+  // does not need restoring.
+  const bool touchWake = touchPin >= 0 && gpio_intr_disable(touchGpio) == ESP_OK;
+  if (touchWake) gpio_wakeup_enable(touchGpio, touchActiveLow ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
+  if (gpioWake || touchWake) esp_sleep_enable_gpio_wakeup();
   esp_sleep_enable_gpio_switch(false);
   holdPins(true);
   Wake result = Wake::Timer;
@@ -194,7 +202,8 @@ Wake sleepFor(const uint32_t ms) {
     watchdogFeed();
     const esp_err_t err = esp_light_sleep_start();
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
-      result = Wake::PowerButton;
+      const bool powerDown = pin >= 0 && digitalRead(pin) == (activeHigh ? HIGH : LOW);
+      result = touchWake && !powerDown ? Wake::Touch : Wake::PowerButton;
       break;
     }
     if (err != ESP_OK) delay(50);  // rejected: a wake source was pending; try again
@@ -206,6 +215,7 @@ Wake sleepFor(const uint32_t ms) {
     gpio_set_intr_type(powerPin, GPIO_INTR_ANYEDGE);  // InputWake's own setting
     gpio_intr_enable(powerPin);
   }
+  if (touchWake) gpio_wakeup_disable(touchGpio);
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
   watchdogFeed();
   return result;

@@ -150,7 +150,7 @@ class DeskActivity final : public Activity {
   void drawPage();
   void loadState();
   [[noreturn]] void runBatteryLoop(bool fromBoot);
-  [[noreturn]] void leaveBatteryLoop();
+  [[noreturn]] void leaveBatteryLoop(bool touch = false);
 };
 
 #endif  // CROSSINK_DESK
