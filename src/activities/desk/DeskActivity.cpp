@@ -787,30 +787,33 @@ void DeskActivity::drawBar(const int x, const int y, const int w, const int h, c
   if (inner > 0) renderer.fillRect(x + 2, y + 2, inner, h - 4, true);
 }
 
-// A speedometer dial: 240 degrees from lower left over the top to lower right, ticks bold up to
-// pct, a needle at pct; the open bottom is left for the value.
-void DeskActivity::drawGauge(const int cx, const int cy, const int r, int pct, const bool big) const {
+// A three-quarter ring gauge (owner's pick, design C, 2026-11-23) centred on (cx, cy): a band of
+// the given thickness from lower left, over the top, to lower right (270 degrees), filled black
+// clockwise up to pct and outlined beyond; the gap at the bottom is left for a label. Drawn
+// pixel by pixel so the band is solid at any size.
+void DeskActivity::drawGauge(const int cx, const int cy, const int r, int pct, const int thickness) const {
   pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
-  const int ticks = big ? 41 : 25;  // a major tick every 25 %
-  const int majorEvery = (ticks - 1) / 4;
-  const int tickLen = big ? 16 : 11;
-  for (int i = 0; i < ticks; ++i) {
-    const double a = (150.0 + 240.0 * i / (ticks - 1)) * M_PI / 180.0;
-    const double c = std::cos(a);
-    const double sn = std::sin(a);
-    const bool major = i % majorEvery == 0;
-    const bool on = pct > 0 && i * 100 <= pct * (ticks - 1);
-    const int inner = r - tickLen - (major ? 6 : 0);
-    renderer.drawLine(cx + static_cast<int>(std::lround(inner * c)), cy + static_cast<int>(std::lround(inner * sn)),
-                      cx + static_cast<int>(std::lround(r * c)), cy + static_cast<int>(std::lround(r * sn)),
-                      on ? (big ? 5 : 4) : (major ? 3 : 1), true);
+  constexpr double kStart = 0.75 * M_PI;  // lower left, screen angles (y down, clockwise)
+  constexpr double kSweep = 1.5 * M_PI;
+  const int ri = r - thickness;
+  const int outer2 = r * r;
+  const int inner2 = ri * ri;
+  const int edgeOut2 = (r - 2) * (r - 2);
+  const int edgeIn2 = (ri + 2) * (ri + 2);
+  for (int dy = -r; dy <= r; ++dy) {
+    for (int dx = -r; dx <= r; ++dx) {
+      const int d2 = dx * dx + dy * dy;
+      if (d2 > outer2 || d2 < inner2) continue;
+      double a = std::atan2(static_cast<double>(dy), static_cast<double>(dx)) - kStart;
+      while (a < 0) a += 2 * M_PI;
+      if (a > kSweep) continue;  // the gap at the bottom
+      const double f = a / kSweep;
+      const double d = std::sqrt(static_cast<double>(d2));
+      const bool filled = pct > 0 && f * 100.0 <= pct;
+      const bool outline = d2 >= edgeOut2 || d2 <= edgeIn2 || a * d <= 2.0 || (kSweep - a) * d <= 2.0;
+      if (filled || outline) renderer.drawPixel(cx + dx, cy + dy, true);
+    }
   }
-  const double a = (150.0 + 240.0 * pct / 100.0) * M_PI / 180.0;
-  const int len = r - tickLen - 12;
-  renderer.drawLine(cx, cy, cx + static_cast<int>(std::lround(len * std::cos(a))),
-                    cy + static_cast<int>(std::lround(len * std::sin(a))), big ? 4 : 3, true);
-  const int hub = big ? 8 : 6;
-  renderer.fillRoundedRect(cx - hub, cy - hub, 2 * hub, 2 * hub, hub, Color::Black);
 }
 
 void DeskActivity::drawSkyIcon(const int x, const int y, const int s, const desk::Sky sky, const bool day) const {
@@ -1094,9 +1097,9 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     snprintf(buf, sizeof(buf), tr(STR_DESK_UPDATED), hm);
     renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), y + 6, buf);
 
-    // CPU and RAM: two dials side by side, the value in the dial's open bottom.
-    const int r = 100;
-    const int cy = 200;
+    // CPU and RAM: two equal three-quarter rings, the percent in the middle, the name in the gap.
+    const int r = 96;
+    const int cy = 200;  // the rings' centre
     const int ramPct = desk::percentOf(pc.ramUsedGb, pc.ramTotalGb);
     char ramText[32];
     desk::formatSize(pc.ramUsedGb, pc.ramTotalGb, ramText, sizeof(ramText), decimalMark());
@@ -1105,22 +1108,23 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
       int pct;
       const char* detail;
     } dials[2] = {{"CPU", pc.cpuPct, ""}, {"RAM", ramPct, ramText}};
+    const int digitsH = renderer.getLineHeight(DESK_DIGITS_FONT_ID);
     for (int i = 0; i < 2; ++i) {
       const int cx = w / 4 + i * w / 2;
-      drawGauge(cx, cy, r, dials[i].pct, true);
+      drawGauge(cx, cy, r, dials[i].pct, 24);
       snprintf(buf, sizeof(buf), "%d%%", dials[i].pct);
-      int ty = cy + 12;
-      renderer.drawText(DESK_DIGITS_FONT_ID, cx - renderer.getTextWidth(DESK_DIGITS_FONT_ID, buf) / 2, ty, buf);
-      ty += renderer.getLineHeight(DESK_DIGITS_FONT_ID) + 2;
+      renderer.drawText(DESK_DIGITS_FONT_ID, cx - renderer.getTextWidth(DESK_DIGITS_FONT_ID, buf) / 2,
+                        cy - digitsH / 2 - 4, buf);
       renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, dials[i].name, EpdFontFamily::BOLD) / 2,
-                        ty, dials[i].name, true, EpdFontFamily::BOLD);
-      ty += 26;
+                        cy + 58, dials[i].name, true, EpdFontFamily::BOLD);
       if (dials[i].detail[0] != '\0') {
-        renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, dials[i].detail) / 2, ty,
+        renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, dials[i].detail) / 2, cy + 86,
                           dials[i].detail);
       }
-      y = std::max(y, ty + 38);
     }
+    y = cy + 122;
+    renderer.drawLine(kMargin, y, w - kMargin, y, 1, true);
+    y += 12;
 
     // Disks: thin bars (up to 3; 2 when the Claude card needs the room).
     const int maxDisks = pc.claude.known ? 2 : 3;
@@ -1148,14 +1152,15 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
     y += 40;
 
-    // Claude: two small dials (5-hour session, week) with their reset times.
+    // Claude: two smaller three-quarter rings (5-hour session, week) with their reset times.
     const int cardW = w - 2 * kMargin;
     if (!pc.claude.known) {
       renderer.drawRoundedRect(kMargin, y, cardW, 64, 2, 10, true);
       renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 14, "Claude", true, EpdFontFamily::BOLD);
       renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 20, tr(STR_DESK_CLAUDE_NO_SOURCE));
     } else {
-      const int cardH = 190;
+      const int qr = 58;
+      const int cardH = 236;
       renderer.drawRoundedRect(kMargin, y, cardW, cardH, 2, 10, true);
       renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 10, "Claude", true, EpdFontFamily::BOLD);
       const struct {
@@ -1164,16 +1169,15 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
         uint32_t reset;
       } q[2] = {{tr(STR_DESK_CLAUDE_SESSION), pc.claude.sessionPct, pc.claude.sessionReset},
                 {tr(STR_DESK_CLAUDE_WEEK), pc.claude.weekPct, pc.claude.weekReset}};
-      const int qr = 56;
-      const int qcy = y + 40 + qr + 4;
+      const int qcy = y + 110;
       for (int i = 0; i < 2; ++i) {
         const int cx = kMargin + cardW / 4 + i * cardW / 2;
-        drawGauge(cx, qcy, qr, q[i].pct, false);
+        drawGauge(cx, qcy, qr, q[i].pct, 16);
         snprintf(buf, sizeof(buf), "%d%%", q[i].pct);
         renderer.drawText(UI_12_FONT_ID, cx - renderer.getTextWidth(UI_12_FONT_ID, buf, EpdFontFamily::BOLD) / 2,
-                          qcy + 6, buf, true, EpdFontFamily::BOLD);
-        renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, q[i].label) / 2, qcy + 38,
-                          q[i].label);
+                          qcy - 16, buf, true, EpdFontFamily::BOLD);
+        renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, q[i].label, EpdFontFamily::BOLD) / 2,
+                          qcy + 58, q[i].label, true, EpdFontFamily::BOLD);
         if (q[i].reset != 0) {
           formatLocalHm(q[i].reset, hm, sizeof(hm));
           char when[24];
@@ -1186,7 +1190,7 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
             snprintf(when, sizeof(when), "%s", hm);
           }
           snprintf(buf, sizeof(buf), tr(STR_DESK_RESETS_AT), when);
-          renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, qcy + 64, buf);
+          renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, qcy + 84, buf);
         }
       }
     }
