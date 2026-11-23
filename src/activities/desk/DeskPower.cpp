@@ -46,13 +46,18 @@ void holdPins(const bool hold) {
   const auto& b = BoardConfig::ACTIVE;
   const int8_t pins[] = {b.display.sclk, b.display.mosi, b.display.cs, b.display.dc,
                          b.display.rst,  b.sd.cs,        b.sd.powerEnable};
-  for (const int8_t p : pins) {
-    if (p < 0) continue;
+  auto set = [hold](const int8_t p) {
+    if (p < 0) return;
     if (hold) {
       gpio_hold_en(static_cast<gpio_num_t>(p));
     } else {
       gpio_hold_dis(static_cast<gpio_num_t>(p));
     }
+  };
+  for (const int8_t p : pins) set(p);
+  // Native SDMMC boards (X4 Pro, X4 Classic): the card's own lines.
+  if (b.sdmmc.busWidth > 0) {
+    for (const int8_t p : {b.sdmmc.clk, b.sdmmc.cmd, b.sdmmc.d0, b.sdmmc.d1, b.sdmmc.d2, b.sdmmc.d3}) set(p);
   }
 }
 #endif
@@ -76,7 +81,9 @@ constexpr size_t kMaxBatteryLog = 512 * 1024;
 }  // namespace
 
 bool batteryLoopSupported() {
-#ifndef SIMULATOR
+#if defined(CROSSINK_DESK_BATTERY_TEST)
+  return true;  // a test build for a reader the loop is being tried on
+#elif !defined(SIMULATOR)
   return gpio.deviceIsX3();
 #else
   return false;
@@ -96,6 +103,18 @@ GaugeSample readGauge() {
 #ifndef SIMULATOR
   const uint8_t addr = BoardConfig::ACTIVE.batteryGauge.gaugeAddr;
   if (addr == 0) return g;
+  if (BoardConfig::ACTIVE.batteryGauge.gaugeType == BoardConfig::GaugeType::Cw2017) {
+    // CW2017: VCELL 0x02-0x03 big-endian, 14 bits of 312.5 uV; SOC 0x04 in %. No current reading.
+    Wire.beginTransmission(addr);
+    Wire.write(0x02);
+    if (Wire.endTransmission(false) == 0 && Wire.requestFrom(static_cast<uint16_t>(addr), static_cast<size_t>(3)) == 3) {
+      const uint8_t hi = static_cast<uint8_t>(Wire.read());
+      const uint8_t lo = static_cast<uint8_t>(Wire.read());
+      g.soc = Wire.read();
+      g.mv = static_cast<int>((((hi & 0x3F) << 8) | lo) * 5 / 16);
+    }
+    return g;
+  }
   uint16_t v = 0;
   if (readReg16(addr, 0x2C, v)) g.soc = v;  // StateOfCharge
   if (readReg16(addr, 0x08, v)) g.mv = v;   // Voltage
