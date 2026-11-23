@@ -46,11 +46,14 @@ class DeskProbeActivity final : public Activity {
   // the pins' sleep state (SD power off, display lines floating) is what hangs the wake.
   // DeepSleep (v5): every tick is a deep sleep with a timer wake; the boot goes straight to
   // deskprobe::handleBoot() (light sleep hung at random after 3-11 ticks, 2026-11-23).
-  enum class SleepMode : uint8_t { LightSleepKeepPins, LightSleep, Delay, DeepSleep };
+  // LightWatchdog (v6): light sleep in 10 s chunks with pins held, run from a standalone loop
+  // with the RTC watchdog armed, so a chunk that never returns resets the chip and the boot
+  // resumes the run (deep sleep cannot wake on a timer on the X3, 2026-11-23).
+  enum class SleepMode : uint8_t { LightSleepKeepPins, LightSleep, Delay, DeepSleep, LightWatchdog };
 
   bool running = false;
   bool wifiRounds = true;
-  SleepMode sleepMode = SleepMode::DeepSleep;
+  SleepMode sleepMode = SleepMode::LightWatchdog;
   char lastRunNote[96] = "";  // what the RTC breadcrumbs say about the previous run
   bool stoppedByButton = false;
   bool halfThisTick = true;
@@ -78,14 +81,20 @@ class DeskProbeActivity final : public Activity {
 // deep sleep with a timer wake for the rest of the minute. The next boot calls handleBoot()
 // right after the display and fonts are up and never returns while the run lasts. Any other
 // wake (the power button) ends the run and boots normally.
+//
+// Light-sleep watchdog runs (probe v6): a standalone tick loop (draw, log to
+// /.crosspoint/desk-probe-wdt.csv, light sleep in 10 s chunks with pins held) with the RTC
+// watchdog armed; if a chunk never returns, the watchdog resets the chip and handleBoot()
+// resumes the loop, counting the reset. The power button ends the run (restart).
 namespace deskprobe {
-// True while a deep-sleep run is armed (pick a seamless display start for its timer wakes).
-bool deepRunArmed();
-// From setup(): runs the tick when this is the run's timer wake (does not return then).
+// True when this boot continues a probe run (start the display seamlessly).
+bool bootContinuesRun(int wakeupCause);
+// From setup(): continues a run when this boot belongs to one (does not return then).
 // Returns false for every other boot.
 bool handleBoot(int wakeupCause, GfxRenderer& renderer);
-// From the probe screen: arms the run and does its first tick (does not return).
+// From the probe screen: arm a run and do its first tick (do not return).
 [[noreturn]] void startDeepRun(GfxRenderer& renderer);
+[[noreturn]] void startWatchdogRun(GfxRenderer& renderer);
 }  // namespace deskprobe
 
 #endif  // CROSSINK_DESK_PROBE

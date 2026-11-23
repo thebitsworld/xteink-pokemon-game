@@ -18,8 +18,11 @@
 #ifndef SIMULATOR
 #include <BoardConfig.h>
 #include <driver/gpio.h>
+#include <esp_private/esp_clk.h>
 #include <esp_rtc_time.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
+#include <hal/wdt_hal.h>
 #endif
 
 #include <cstdio>
@@ -115,6 +118,8 @@ const char* DeskProbeActivity::modeName() const {
       return "light";
     case SleepMode::DeepSleep:
       return "deep";
+    case SleepMode::LightWatchdog:
+      return "light-wdt";
     case SleepMode::Delay:
       break;
   }
@@ -368,6 +373,9 @@ void DeskProbeActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && sleepMode == SleepMode::DeepSleep) {
     deskprobe::startDeepRun(renderer);  // does not return
   }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && sleepMode == SleepMode::LightWatchdog) {
+    deskprobe::startWatchdogRun(renderer);  // does not return
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     running = true;
     stoppedByButton = false;
@@ -381,10 +389,11 @@ void DeskProbeActivity::loop() {
     requestUpdate();
   }
   if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-    sleepMode = sleepMode == SleepMode::DeepSleep          ? SleepMode::LightSleepKeepPins
+    sleepMode = sleepMode == SleepMode::LightWatchdog      ? SleepMode::DeepSleep
+                : sleepMode == SleepMode::DeepSleep          ? SleepMode::LightSleepKeepPins
                 : sleepMode == SleepMode::LightSleepKeepPins ? SleepMode::LightSleep
                 : sleepMode == SleepMode::LightSleep         ? SleepMode::Delay
-                                                             : SleepMode::DeepSleep;
+                                                             : SleepMode::LightWatchdog;
     requestUpdate();
   }
 }
@@ -421,7 +430,8 @@ void DeskProbeActivity::render(RenderLock&&) {
   renderer.drawText(UI_10_FONT_ID, left, y, buf);
   y += 32;
   snprintf(buf, sizeof(buf), "Between ticks: %s",
-           sleepMode == SleepMode::DeepSleep            ? "DEEP SLEEP (reboot each tick)"
+           sleepMode == SleepMode::LightWatchdog        ? "LIGHT SLEEP + WATCHDOG"
+           : sleepMode == SleepMode::DeepSleep          ? "DEEP SLEEP (reboot each tick)"
            : sleepMode == SleepMode::LightSleepKeepPins ? "LIGHT SLEEP, KEEP PINS"
            : sleepMode == SleepMode::LightSleep         ? "LIGHT SLEEP (plain)"
                                                         : "DELAY (control, no sleep)");
@@ -553,18 +563,214 @@ void appendLine(const char* path, const char* header, const char* line) {
   }
 }
 
+// ---- light sleep + RTC watchdog (v6) ----
+
+constexpr char kWdtLogPath[] = "/.crosspoint/desk-probe-wdt.csv";
+constexpr uint32_t kWdtMagic = 0xDE5C0D06;
+constexpr uint32_t kChunkMs = 10000;
+constexpr uint32_t kWatchdogMs = 30000;  // > one chunk plus a tick's work
+
+#ifndef SIMULATOR
+RTC_NOINIT_ATTR uint32_t wdtMagic;
+RTC_NOINIT_ATTR uint32_t wdtTick;
+RTC_NOINIT_ATTR uint32_t wdtResets;  // watchdog (or other) resets the run came back from
+RTC_NOINIT_ATTR uint32_t wdtStage;   // 1 = in a light sleep chunk, 2 = awake
+
+wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
+
+uint32_t msToSlowTicks(const uint32_t ms) {
+  // esp_clk_slowclk_cal_get(): microseconds per slow clock cycle, Q13.19.
+  const uint64_t cal = esp_clk_slowclk_cal_get();
+  if (cal == 0) return ms * 136;  // ~136 kHz internal RC
+  return static_cast<uint32_t>((static_cast<uint64_t>(ms) * 1000ULL << 19) / cal);
+}
+
+void watchdogArm() {
+  wdt_hal_init(&rwdt, WDT_RWDT, 0, false);
+  wdt_hal_write_protect_disable(&rwdt);
+  // Stage 0 resets the digital system (RTC memory kept: the run resumes); stage 1, 10 s
+  // later, resets the RTC domain too in case stage 0 cannot.
+  wdt_hal_config_stage(&rwdt, WDT_STAGE0, msToSlowTicks(kWatchdogMs), WDT_STAGE_ACTION_RESET_SYSTEM);
+  wdt_hal_config_stage(&rwdt, WDT_STAGE1, msToSlowTicks(10000), WDT_STAGE_ACTION_RESET_RTC);
+  wdt_hal_enable(&rwdt);
+  wdt_hal_write_protect_enable(&rwdt);
+}
+
+void watchdogFeed() {
+  wdt_hal_write_protect_disable(&rwdt);
+  wdt_hal_feed(&rwdt);
+  wdt_hal_write_protect_enable(&rwdt);
+}
+
+void watchdogDisarm() {
+  wdt_hal_write_protect_disable(&rwdt);
+  wdt_hal_disable(&rwdt);
+  wdt_hal_write_protect_enable(&rwdt);
+}
+
+const char* resetName(const esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:
+      return "poweron";
+    case ESP_RST_SW:
+      return "sw";
+    case ESP_RST_PANIC:
+      return "panic";
+    case ESP_RST_INT_WDT:
+      return "int_wdt";
+    case ESP_RST_TASK_WDT:
+      return "task_wdt";
+    case ESP_RST_WDT:
+      return "rtc_wdt";
+    case ESP_RST_DEEPSLEEP:
+      return "deepsleep";
+    case ESP_RST_BROWNOUT:
+      return "brownout";
+    default:
+      return "other";
+  }
+}
+
+[[noreturn]] void stopWatchdogRun(const char* why) {
+  watchdogDisarm();
+  wdtMagic = 0;
+  char line[96];
+  snprintf(line, sizeof(line), "# stopped after tick %lu (%s), resets %lu\n", static_cast<unsigned long>(wdtTick), why,
+           static_cast<unsigned long>(wdtResets));
+  appendLine(kWdtLogPath, nullptr, line);
+  esp_restart();
+  for (;;) {
+  }
+}
+
+[[noreturn]] void runWatchdogLoop(GfxRenderer& renderer) {
+  gpio.stopButtonCapture();
+  if (WiFi.getMode() != WIFI_MODE_NULL) WiFi.mode(WIFI_OFF);
+  watchdogArm();
+  const auto powerPin = static_cast<gpio_num_t>(BoardConfig::ACTIVE.input.power);
+  const bool activeHigh = BoardConfig::ACTIVE.input.powerActiveHigh;
+  const bool hasPowerPin = BoardConfig::ACTIVE.input.power >= 0;
+  if (hasPowerPin) {
+    pinMode(powerPin, activeHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+    const uint32_t t0 = millis();
+    while (digitalRead(powerPin) == (activeHigh ? HIGH : LOW) && millis() - t0 < 3000) delay(10);
+  }
+
+  for (;;) {
+    const uint32_t tickStart = millis();
+    watchdogFeed();
+    wdtStage = 2;
+    ++wdtTick;
+    char timeText[16];
+    if (!halClock.formatTime(timeText, sizeof(timeText), SETTINGS.clockUtcOffsetQ, false)) {
+      snprintf(timeText, sizeof(timeText), "--:--");
+    }
+    const DeskProbeActivity::Gauge g = DeskProbeActivity::readGauge();
+    const bool half = wdtTick % kHalfRefreshEvery == 1;
+
+    char buf[96];
+    renderer.clearScreen();
+    int y = 40;
+    renderer.drawCenteredText(UI_12_FONT_ID, y, "Desk probe · light + watchdog", true, EpdFontFamily::BOLD);
+    y += 60;
+    renderer.drawCenteredText(UI_12_FONT_ID, y, timeText, true, EpdFontFamily::BOLD);
+    y += 50;
+    snprintf(buf, sizeof(buf), "Tick %lu   watchdog resets %lu", static_cast<unsigned long>(wdtTick),
+             static_cast<unsigned long>(wdtResets));
+    renderer.drawText(UI_10_FONT_ID, 24, y, buf);
+    y += 32;
+    snprintf(buf, sizeof(buf), "Battery %d%%   %d mV   %d / %d mA", g.soc, g.mv, g.curMa, g.avgMa);
+    renderer.drawText(UI_10_FONT_ID, 24, y, buf);
+    y += 56;
+    renderer.drawText(UI_10_FONT_ID, 24, y, "Unplug USB and leave it.", true, EpdFontFamily::BOLD);
+    y += 32;
+    renderer.drawText(UI_10_FONT_ID, 24, y, "Power button stops the run.");
+    y += 32;
+    renderer.drawText(UI_10_FONT_ID, 24, y, "Log: /.crosspoint/desk-probe-wdt.csv");
+    const uint32_t refreshStart = millis();
+    renderer.displayBuffer(half ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+    const uint32_t refreshMs = millis() - refreshStart;
+
+    char line[200];
+    snprintf(line, sizeof(line), "%s,%lu,%s,%lu,%lu,%s,%lu,%d,%d,%d,%d,%d\n", AppVersion::version(),
+             static_cast<unsigned long>(wdtTick), timeText, static_cast<unsigned long>(millis() - tickStart),
+             static_cast<unsigned long>(refreshMs), half ? "half" : "fast", static_cast<unsigned long>(wdtResets),
+             g.soc, g.mv, g.curMa, g.avgMa, gpio.isUsbConnected() ? 1 : 0);
+    appendLine(kWdtLogPath, "# version,tick,clock,awake_ms,refresh_ms,refresh,resets,soc,mv,cur_ma,avg_ma,usb\n",
+               line);
+
+    // Light sleep for the rest of the minute in chunks, pins held, the watchdog fed per chunk.
+    const uint32_t sleepStart = millis();
+    const uint32_t used = sleepStart - tickStart;
+    const uint32_t sleepMs = used < kTickMs - 1000 ? kTickMs - used : 1000;
+    const bool gpioWake = hasPowerPin && gpio_intr_disable(powerPin) == ESP_OK;
+    if (gpioWake) {
+      gpio_wakeup_enable(powerPin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
+      esp_sleep_enable_gpio_wakeup();
+    }
+    esp_sleep_enable_gpio_switch(false);
+    holdPins(true);
+    bool stop = false;
+    while (millis() - sleepStart + 20 < sleepMs) {
+      const uint32_t left = sleepMs - (millis() - sleepStart);
+      esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < kChunkMs ? left : kChunkMs) * 1000ULL);
+      watchdogFeed();
+      wdtStage = 1;
+      const esp_err_t err = esp_light_sleep_start();
+      wdtStage = 2;
+      if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+        stop = true;
+        break;
+      }
+      if (err != ESP_OK) delay(50);
+    }
+    holdPins(false);
+    esp_sleep_enable_gpio_switch(true);
+    if (gpioWake) gpio_wakeup_disable(powerPin);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    if (stop) stopWatchdogRun("power button");
+  }
+}
+#endif
+
 }  // namespace
 
-bool deepRunArmed() {
+bool bootContinuesRun(const int wakeupCause) {
 #ifndef SIMULATOR
-  return deepMagic == kDeepMagic;
+  return (deepMagic == kDeepMagic && wakeupCause == ESP_SLEEP_WAKEUP_TIMER) || wdtMagic == kWdtMagic;
 #else
+  (void)wakeupCause;
   return false;
+#endif
+}
+
+void startWatchdogRun(GfxRenderer& renderer) {
+#ifndef SIMULATOR
+  wdtMagic = kWdtMagic;
+  wdtTick = 0;
+  wdtResets = 0;
+  wdtStage = 2;
+  runWatchdogLoop(renderer);
+#else
+  (void)renderer;
+  for (;;) {
+    delay(1000);
+  }
 #endif
 }
 
 bool handleBoot(const int wakeupCause, GfxRenderer& renderer) {
 #ifndef SIMULATOR
+  if (wdtMagic == kWdtMagic) {
+    // Back from a reset inside a run (the RTC watchdog, a panic...): count it and go on.
+    ++wdtResets;
+    const esp_reset_reason_t reason = esp_reset_reason();
+    char line[96];
+    snprintf(line, sizeof(line), "# reset (%s) at tick %lu while %s\n", resetName(reason),
+             static_cast<unsigned long>(wdtTick), wdtStage == 1 ? "sleeping" : "awake");
+    appendLine(kWdtLogPath, nullptr, line);
+    runWatchdogLoop(renderer);
+  }
   if (deepMagic != kDeepMagic) return false;
   if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER) {
     deepMagic = 0;  // any other wake ends the run

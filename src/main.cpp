@@ -1565,8 +1565,8 @@ void setup() {
   bool quickResumeFrameVisible = false;
 
 #if CROSSINK_DESK_PROBE
-  // A Desk probe deep-sleep tick keeps the panel's picture and redraws over it.
-  const bool deskProbeTick = deskprobe::deepRunArmed() && rawWakeupCause == ESP_SLEEP_WAKEUP_TIMER;
+  // A boot inside a Desk probe run keeps the panel's picture and redraws over it.
+  const bool deskProbeTick = deskprobe::bootContinuesRun(static_cast<int>(rawWakeupCause));
 #else
   constexpr bool deskProbeTick = false;
 #endif
