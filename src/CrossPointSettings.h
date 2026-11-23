@@ -645,6 +645,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Bluetooth controllers / page turners (Settings > System > Bluetooth).
   uint8_t bluetoothEnabled = 0;
 #endif
+#if CROSSINK_DESK
+  // Desk mode: a sleep (power button, idle timeout) opens Desk instead (its battery loop on
+  // battery) - for a reader kept on a desk.
+  uint8_t deskOnSleep = 0;
+#endif
   // Settings > System feature switches (see FeatureToggles.h).
   uint8_t slideshowEnabled = 1;
 #if defined(CROSSINK_ENABLE_POKEMON)

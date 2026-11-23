@@ -636,10 +636,17 @@ inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 1;
 #else
 inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 0;
 #endif
-#if CROSSINK_SCALABLE_FONTS
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 119 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT;
+#if CROSSINK_DESK
+inline constexpr size_t DESK_SETTINGS_COUNT = 1;  // Desk mode: "Sleep opens Desk"
 #else
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 118 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT;
+inline constexpr size_t DESK_SETTINGS_COUNT = 0;
+#endif
+#if CROSSINK_SCALABLE_FONTS
+inline constexpr size_t BASE_SETTINGS_CAPACITY =
+    119 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT + DESK_SETTINGS_COUNT;
+#else
+inline constexpr size_t BASE_SETTINGS_CAPACITY =
+    118 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT + DESK_SETTINGS_COUNT;
 #endif
 
 #if FREEINK_DEVICE_PICCO

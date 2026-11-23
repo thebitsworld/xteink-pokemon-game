@@ -638,11 +638,29 @@ void notifyQuickLockChanged() {
   }
 }
 
+// "Sleep opens Desk" (Settings > System, X3 Lite): a sleep from the power button or the idle
+// timeout opens Desk instead, which goes to its battery loop at once when on battery. A low
+// battery still sleeps for real. Returns true when it took over the sleep.
+bool deskTakesSleep() {
+#if CROSSINK_DESK
+  if (!SETTINGS.deskOnSleep) return false;
+  if (!deskpower::externalPower() && powerManager.getBatteryPercentage() < 10) return false;
+  DeskActivity::requestBatteryNow();
+  if (!DeskActivity::isOpen()) {
+    activityManager.replaceActivity(std::make_unique<DeskActivity>(renderer, mappedInputManager));
+  }
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool handleGlobalPowerButtonAction(const CrossPointSettings::SHORT_PWRBTN action,
                                    const QuickLockTrigger quickLockTrigger) {
   switch (action) {
     case CrossPointSettings::SHORT_PWRBTN::SLEEP:
     case CrossPointSettings::SHORT_PWRBTN::SLEEP_ONLY:
+      if (deskTakesSleep()) return true;
       enterDeepSleep();
       return true;
     case CrossPointSettings::SHORT_PWRBTN::WAKE_ONLY:
@@ -2096,6 +2114,10 @@ void loop() {
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (sleepTimeoutMs > 0 && !activityManager.preventAutoSleep() && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
+    if (deskTakesSleep()) {
+      lastActivityTime = millis();
+      return;
+    }
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     // In the simulator, deep sleep is a no-op and returns — reset the timer so

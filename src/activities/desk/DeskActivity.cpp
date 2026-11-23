@@ -49,6 +49,9 @@ constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and
 
 }  // namespace
 
+bool DeskActivity::batteryNowRequested = false;
+bool DeskActivity::open = false;
+
 // ---- time ------------------------------------------------------------------------------------
 
 uint32_t DeskActivity::nowSec() { return millis() / 1000; }
@@ -113,6 +116,7 @@ void DeskActivity::loadState() {
 
 void DeskActivity::onEnter() {
   Activity::onEnter();
+  open = true;
   loadState();
   uint32_t now = 0;
   const bool haveNow = readUtcUnix(now);
@@ -156,6 +160,8 @@ void DeskActivity::switchPage(const Page to) {
 
 void DeskActivity::onExit() {
   Activity::onExit();
+  open = false;
+  batteryNowRequested = false;
   if (wifiKeptForUsb) deskweather::wifiDown();
   wifiKeptForUsb = false;
 }
@@ -220,6 +226,9 @@ void batteryLogNow(const char* event) {
 
 void DeskActivity::leaveBatteryLoop() {
   batteryLogNow(deskpower::externalPower() ? "exit-usb" : "exit-button");
+  // The press that woke the sleep is still held: restarting now would hand its release to the
+  // new boot as a short press, i.e. a sleep (owner's report, 2026-11-23).
+  deskpower::waitPowerButtonRelease();
   deskpower::watchdogDisarm();
   deskpower::setBatteryRunArmed(false);
   deskpower::requestOpenDeskAfterRestart();
@@ -284,6 +293,11 @@ void DeskActivity::loop() {
   const bool select = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
   if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
 
+  // A sleep asked for (power button, idle timeout) with "Sleep opens Desk" on: battery loop now.
+  if (batteryNowRequested) {
+    batteryNowRequested = false;
+    if (!deskpower::externalPower()) runBatteryLoop(false);
+  }
   // On battery and left alone: the minute-tick loop in light sleep (does not return).
   if (!deskpower::externalPower() && !pomodoro.running() && !weatherFetchPending && !pcPollPending &&
       millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo) {

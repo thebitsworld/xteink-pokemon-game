@@ -188,6 +188,17 @@ Wake sleepFor(const uint32_t ms) {
 #endif
 }
 
+void waitPowerButtonRelease() {
+#ifndef SIMULATOR
+  const int8_t pin = BoardConfig::ACTIVE.input.power;
+  if (pin < 0) return;
+  const int pressed = BoardConfig::ACTIVE.input.powerActiveHigh ? HIGH : LOW;
+  const uint32_t t0 = millis();
+  while (digitalRead(pin) == pressed && millis() - t0 < 5000) delay(10);
+  delay(50);  // let the contact settle
+#endif
+}
+
 uint32_t msToNextMinute() {
 #ifndef SIMULATOR
   static freeink::Rtc rtc;

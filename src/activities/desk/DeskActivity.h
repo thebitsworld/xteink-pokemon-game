@@ -32,6 +32,11 @@ class DeskActivity final : public Activity {
   // cached weather and goes on with the battery loop. Does not return.
   [[noreturn]] void resumeBatteryFromBoot();
 
+  // "Sleep opens Desk" (SETTINGS.deskOnSleep): a sleep asked for while Desk is open, or that
+  // opens it, goes to the battery loop at once when on battery.
+  static void requestBatteryNow() { batteryNowRequested = true; }
+  static bool isOpen() { return open; }
+
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -79,6 +84,8 @@ class DeskActivity final : public Activity {
 
   uint32_t lastInputMs = 0;
   bool batteryMode = false;  // drawn by the battery loop: no button hints
+  static bool batteryNowRequested;
+  static bool open;
 
   static LocalTime readLocalTime();
   static bool readUtcUnix(uint32_t& out);

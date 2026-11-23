@@ -43,6 +43,9 @@ Wake sleepFor(uint32_t ms);
 // Milliseconds until the next minute starts by the RTC (falls back to 60 s).
 uint32_t msToNextMinute();
 
+// Waits (up to 5 s) until the power button is up.
+void waitPowerButtonRelease();
+
 // RTC-memory markers (kept through the watchdog's system reset, lost on a power cut).
 bool batteryRunArmed();
 void setBatteryRunArmed(bool armed);

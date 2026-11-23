@@ -349,6 +349,10 @@ std::vector<SettingInfo> buildBaseSettingsList() {
 #endif
     add(SettingInfo::Toggle(StrId::STR_SLIDESHOW, &CrossPointSettings::slideshowEnabled, "slideshowEnabled",
                             StrId::STR_CAT_SYSTEM));
+#if CROSSINK_DESK
+    add(SettingInfo::Toggle(StrId::STR_DESK_ON_SLEEP, &CrossPointSettings::deskOnSleep, "deskOnSleep",
+                            StrId::STR_CAT_SYSTEM));
+#endif
 
     // Frontlight quick-panel state: persisted + web-exposed, category-less so
     // it stays off the Settings screen (edited from the swipe-down panel).
