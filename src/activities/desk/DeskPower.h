@@ -17,6 +17,10 @@
 // ladder).
 namespace deskpower {
 
+// The light-sleep battery loop (pins held, RTC minute ticks, RWDT recovery) was proven on the
+// X3 only. Elsewhere Desk leaves sleeping on battery to the reader's own sleep.
+bool batteryLoopSupported();
+
 // USB power: the X3 has no USB-detect pin and HalGPIO infers USB from a charging current, which
 // is zero once the cell is full; a PC connection (USB Serial/JTAG host) counts too.
 bool externalPower();

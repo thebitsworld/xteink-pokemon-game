@@ -271,7 +271,7 @@ def inject_version(env):
         scoped.append(('CROSSINK_VERSION', f'\\"{version_string}\\"'))
         print(f'CrossInk RC build version: {version_string}')
 
-    elif pioenv in {'pokemon-x3', 'pokemon-x3-lite', 'pokemon-x4-pro', 'pokemon-x4-classic'}:
+    elif pioenv in {'pokemon-x3', 'pokemon-x4-pro', 'pokemon-x4-classic'}:
         # This fork's own release versioning (see [pokemon] in
         # platformio.ini), independent of the upstream CrossInk engine
         # version - these environments are the only ones actually

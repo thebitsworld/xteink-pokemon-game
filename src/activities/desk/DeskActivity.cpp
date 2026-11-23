@@ -790,10 +790,11 @@ void DeskActivity::loop() {
   // A sleep asked for (power button, idle timeout) with "Sleep opens Desk" on: battery loop now.
   if (batteryNowRequested) {
     batteryNowRequested = false;
-    if (!deskpower::externalPower()) runBatteryLoop(false);
+    if (!deskpower::externalPower() && deskpower::batteryLoopSupported()) runBatteryLoop(false);
   }
   // On battery and left alone: the minute-tick loop in light sleep (does not return).
-  if (!deskpower::externalPower() && !pomodoro.running() && !weatherFetchPending && !pcPollPending && !netBusy &&
+  if (deskpower::batteryLoopSupported() && !deskpower::externalPower() && !pomodoro.running() &&
+      !weatherFetchPending && !pcPollPending && !netBusy &&
       millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo && page != Page::Pc) {
     runBatteryLoop(false);
   }

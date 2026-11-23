@@ -75,6 +75,14 @@ constexpr size_t kMaxBatteryLog = 512 * 1024;
 
 }  // namespace
 
+bool batteryLoopSupported() {
+#ifndef SIMULATOR
+  return gpio.deviceIsX3();
+#else
+  return false;
+#endif
+}
+
 bool externalPower() {
 #ifndef SIMULATOR
   return gpio.isUsbConnected() || usb_serial_jtag_is_connected();
