@@ -41,5 +41,19 @@ Without mDNS, put the agent's address in `/.crosspoint/desk.json` on the SD card
  "disks": [["C:", 412.0, 1000.0]], "net": [2400000, 310000], "uptime": 274000, "claude": null}
 ```
 
-Percent, GB, bytes per second, seconds. `claude` stays `null` until a stable source for the
-Claude usage limits is found.
+Percent, GB, bytes per second, seconds.
+
+## Claude usage limits
+
+`claude` is `{"session": [pct, resets_at], "week": [pct, resets_at]}` or `null`. Claude Code
+gives its status line command the subscription limits (Pro, Max and Ultra; `rate_limits` in
+the [status line data](https://code.claude.com/docs/en/statusline.md)). `desk_statusline.py`
+is such a command: it saves them to `~/.claude/desk-rate-limits.json`, which the agent reads.
+In `~/.claude/settings.json`:
+
+```json
+"statusLine": {"type": "command", "command": "python C:/path/to/desk_statusline.py", "refreshInterval": 60}
+```
+
+The numbers only move while a Claude Code session is open and has talked to the API; a window
+whose reset time has passed reads 0 % until Claude Code reports it again.

@@ -9,8 +9,12 @@ Response, under 1 KB:
   {"v": 1, "host": "DESKTOP", "ts": 1795174800,
    "cpu": 23, "ram": [19.5, 32.0], "disks": [["C:", 412.0, 1000.0]],
    "net": [2400000, 310000], "uptime": 274000, "claude": null}
-Units: percent, GB, bytes per second, seconds. "claude" stays null until its source is
-settled (open question 1 of the plan).
+Units: percent, GB, bytes per second, seconds.
+
+"claude": {"session": [pct, resets_at], "week": [pct, resets_at]} from the Claude Code
+subscription limits that desk_statusline.py saves (Claude Code's status line data), or null
+when there is none. A window whose reset time has passed reads 0 % until Claude Code reports it
+again; the numbers only move while a Claude Code session is open.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import psutil
 
@@ -29,6 +34,7 @@ DEFAULT_PORT = 8765
 SAMPLE_SECONDS = 2.0
 MAX_DISKS = 4
 GB = 1024**3
+CLAUDE_LIMITS_PATH = Path.home() / ".claude" / "desk-rate-limits.json"  # desk_statusline.py
 
 
 class Sampler:
@@ -86,9 +92,37 @@ def list_disks() -> list[list]:
     return disks
 
 
+def claude_usage(now: float) -> dict | None:
+    """The saved Claude Code limits as {"session": [pct, reset], "week": [pct, reset]}."""
+    try:
+        saved = json.loads(CLAUDE_LIMITS_PATH.read_text(encoding="utf-8"))
+        limits = saved["rate_limits"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    out = {}
+    for key, name in (("five_hour", "session"), ("seven_day", "week")):
+        window = limits.get(key) if isinstance(limits, dict) else None
+        if not isinstance(window, dict):
+            continue
+        try:
+            pct = int(round(float(window.get("used_percentage") or 0)))
+            reset = int(window.get("resets_at") or 0)
+        except (TypeError, ValueError):
+            continue
+        if reset and reset <= now:
+            pct, reset = 0, 0  # the window has reset since Claude Code last reported it
+        out[name] = [max(0, min(100, pct)), reset]
+    if "session" not in out and "week" not in out:
+        return None
+    out.setdefault("session", [0, 0])
+    out.setdefault("week", [0, 0])
+    return out
+
+
 def build_stats(sampler: Sampler, host: str) -> dict:
     cpu, down, up = sampler.snapshot()
     mem = psutil.virtual_memory()
+    now = time.time()
     return {
         "v": 1,
         "host": host,
@@ -98,7 +132,7 @@ def build_stats(sampler: Sampler, host: str) -> dict:
         "disks": list_disks(),
         "net": [down, up],
         "uptime": int(time.time() - psutil.boot_time()),
-        "claude": None,
+        "claude": claude_usage(now),
     }
 
 
