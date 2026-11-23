@@ -121,6 +121,7 @@ class DeskActivity final : public Activity {
 
   void drawStatusBar(const char* title, const char* middle) const;
   void drawBar(int x, int y, int w, int h, int pct) const;
+  void drawGauge(int cx, int cy, int r, int pct, bool big) const;
   void drawWeatherCard(int top, int height, uint32_t nowUnix) const;
   void drawSkyIcon(int x, int y, int size, desk::Sky sky, bool day) const;
   void renderMain(uint32_t nowUnix);

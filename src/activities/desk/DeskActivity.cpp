@@ -787,6 +787,32 @@ void DeskActivity::drawBar(const int x, const int y, const int w, const int h, c
   if (inner > 0) renderer.fillRect(x + 2, y + 2, inner, h - 4, true);
 }
 
+// A speedometer dial: 240 degrees from lower left over the top to lower right, ticks bold up to
+// pct, a needle at pct; the open bottom is left for the value.
+void DeskActivity::drawGauge(const int cx, const int cy, const int r, int pct, const bool big) const {
+  pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+  const int ticks = big ? 41 : 25;  // a major tick every 25 %
+  const int majorEvery = (ticks - 1) / 4;
+  const int tickLen = big ? 16 : 11;
+  for (int i = 0; i < ticks; ++i) {
+    const double a = (150.0 + 240.0 * i / (ticks - 1)) * M_PI / 180.0;
+    const double c = std::cos(a);
+    const double sn = std::sin(a);
+    const bool major = i % majorEvery == 0;
+    const bool on = pct > 0 && i * 100 <= pct * (ticks - 1);
+    const int inner = r - tickLen - (major ? 6 : 0);
+    renderer.drawLine(cx + static_cast<int>(std::lround(inner * c)), cy + static_cast<int>(std::lround(inner * sn)),
+                      cx + static_cast<int>(std::lround(r * c)), cy + static_cast<int>(std::lround(r * sn)),
+                      on ? (big ? 5 : 4) : (major ? 3 : 1), true);
+  }
+  const double a = (150.0 + 240.0 * pct / 100.0) * M_PI / 180.0;
+  const int len = r - tickLen - 12;
+  renderer.drawLine(cx, cy, cx + static_cast<int>(std::lround(len * std::cos(a))),
+                    cy + static_cast<int>(std::lround(len * std::sin(a))), big ? 4 : 3, true);
+  const int hub = big ? 8 : 6;
+  renderer.fillRoundedRect(cx - hub, cy - hub, 2 * hub, 2 * hub, hub, Color::Black);
+}
+
 void DeskActivity::drawSkyIcon(const int x, const int y, const int s, const desk::Sky sky, const bool day) const {
   using desk::Sky;
   auto disc = [this](const int cx, const int cy, const int r, const Color c) {
@@ -1062,67 +1088,92 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     y += 14;
     renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_ADDRESS_HINT), true, EpdFontFamily::BOLD);
   } else {
-    int y = 62;
+    int y = 58;
     renderer.drawText(UI_12_FONT_ID, kMargin, y, pc.host, true, EpdFontFamily::BOLD);
     formatLocalHm(pc.receivedAt, hm, sizeof(hm));
     snprintf(buf, sizeof(buf), tr(STR_DESK_UPDATED), hm);
     renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), y + 6, buf);
-    y += 48;
 
-    auto row = [&](const char* label, const char* value, const int pct) {
-      renderer.drawText(UI_10_FONT_ID, kMargin, y, label);
-      renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, value, EpdFontFamily::BOLD),
-                        y, value, true, EpdFontFamily::BOLD);
-      drawBar(kMargin, y + 30, w - 2 * kMargin, 18, pct);
-      y += 66;
-    };
-    snprintf(buf, sizeof(buf), "%d%%", pc.cpuPct);
-    row("CPU", buf, pc.cpuPct);
-    desk::formatSize(pc.ramUsedGb, pc.ramTotalGb, buf, sizeof(buf), decimalMark());
-    row("RAM", buf, desk::percentOf(pc.ramUsedGb, pc.ramTotalGb));
-    for (int i = 0; i < pc.diskCount && i < 3; ++i) {
+    // CPU and RAM: two dials side by side, the value in the dial's open bottom.
+    const int r = 100;
+    const int cy = 200;
+    const int ramPct = desk::percentOf(pc.ramUsedGb, pc.ramTotalGb);
+    char ramText[32];
+    desk::formatSize(pc.ramUsedGb, pc.ramTotalGb, ramText, sizeof(ramText), decimalMark());
+    const struct {
+      const char* name;
+      int pct;
+      const char* detail;
+    } dials[2] = {{"CPU", pc.cpuPct, ""}, {"RAM", ramPct, ramText}};
+    for (int i = 0; i < 2; ++i) {
+      const int cx = w / 4 + i * w / 2;
+      drawGauge(cx, cy, r, dials[i].pct, true);
+      snprintf(buf, sizeof(buf), "%d%%", dials[i].pct);
+      int ty = cy + 12;
+      renderer.drawText(DESK_DIGITS_FONT_ID, cx - renderer.getTextWidth(DESK_DIGITS_FONT_ID, buf) / 2, ty, buf);
+      ty += renderer.getLineHeight(DESK_DIGITS_FONT_ID) + 2;
+      renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, dials[i].name, EpdFontFamily::BOLD) / 2,
+                        ty, dials[i].name, true, EpdFontFamily::BOLD);
+      ty += 26;
+      if (dials[i].detail[0] != '\0') {
+        renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, dials[i].detail) / 2, ty,
+                          dials[i].detail);
+      }
+      y = std::max(y, ty + 38);
+    }
+
+    // Disks: thin bars (up to 3; 2 when the Claude card needs the room).
+    const int maxDisks = pc.claude.known ? 2 : 3;
+    for (int i = 0; i < pc.diskCount && i < maxDisks; ++i) {
       char label[24];
       snprintf(label, sizeof(label), tr(STR_DESK_DISK), pc.disks[i].name);
       desk::formatSize(pc.disks[i].usedGb, pc.disks[i].totalGb, buf, sizeof(buf), decimalMark());
-      row(label, buf, desk::percentOf(pc.disks[i].usedGb, pc.disks[i].totalGb));
+      renderer.drawText(UI_10_FONT_ID, kMargin, y, label);
+      renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf, EpdFontFamily::BOLD), y,
+                        buf, true, EpdFontFamily::BOLD);
+      drawBar(kMargin, y + 28, w - 2 * kMargin, 14, desk::percentOf(pc.disks[i].usedGb, pc.disks[i].totalGb));
+      y += 54;
     }
 
-    renderer.drawLine(kMargin, y, w - kMargin, y, 1, true);
-    y += 12;
+    // Network and uptime on one line.
     char down[24];
     char up[24];
     char uptime[32];
+    char upFor[48];
     desk::formatRate(pc.netDownBps, down, sizeof(down), decimalMark());
     desk::formatRate(pc.netUpBps, up, sizeof(up), decimalMark());
     uptimeText(pc.uptimeSec, uptime, sizeof(uptime));
-    snprintf(buf, sizeof(buf), tr(STR_DESK_NETWORK), down, up);
-    renderer.drawText(UI_10_FONT_ID, kMargin, y, buf);
-    y += 30;
-    snprintf(buf, sizeof(buf), tr(STR_DESK_UP_FOR), uptime);
-    renderer.drawText(UI_10_FONT_ID, kMargin, y, buf);
-    y += 44;
+    snprintf(upFor, sizeof(upFor), tr(STR_DESK_UP_FOR), uptime);
+    snprintf(buf, sizeof(buf), "↓ %s  ↑ %s  ·  %s", down, up, upFor);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    y += 40;
 
-    // Claude card.
-    const int cardH = pc.claude.known ? 150 : 70;
-    renderer.drawRoundedRect(kMargin, y, w - 2 * kMargin, cardH, 2, 10, true);
-    renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 12, "Claude", true, EpdFontFamily::BOLD);
+    // Claude: two small dials (5-hour session, week) with their reset times.
+    const int cardW = w - 2 * kMargin;
     if (!pc.claude.known) {
-      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 18, tr(STR_DESK_CLAUDE_NO_SOURCE));
+      renderer.drawRoundedRect(kMargin, y, cardW, 64, 2, 10, true);
+      renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 14, "Claude", true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 20, tr(STR_DESK_CLAUDE_NO_SOURCE));
     } else {
-      const int colW = (w - 2 * kMargin - 28) / 2;
+      const int cardH = 190;
+      renderer.drawRoundedRect(kMargin, y, cardW, cardH, 2, 10, true);
+      renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 10, "Claude", true, EpdFontFamily::BOLD);
       const struct {
         const char* label;
         int pct;
         uint32_t reset;
       } q[2] = {{tr(STR_DESK_CLAUDE_SESSION), pc.claude.sessionPct, pc.claude.sessionReset},
                 {tr(STR_DESK_CLAUDE_WEEK), pc.claude.weekPct, pc.claude.weekReset}};
+      const int qr = 56;
+      const int qcy = y + 40 + qr + 4;
       for (int i = 0; i < 2; ++i) {
-        const int x = kMargin + 14 + i * colW;
-        const int cy = y + 52;
-        renderer.drawText(UI_10_FONT_ID, x, cy, q[i].label);
+        const int cx = kMargin + cardW / 4 + i * cardW / 2;
+        drawGauge(cx, qcy, qr, q[i].pct, false);
         snprintf(buf, sizeof(buf), "%d%%", q[i].pct);
-        renderer.drawText(UI_12_FONT_ID, x, cy + 26, buf, true, EpdFontFamily::BOLD);
-        drawBar(x, cy + 62, colW - 16, 12, q[i].pct);
+        renderer.drawText(UI_12_FONT_ID, cx - renderer.getTextWidth(UI_12_FONT_ID, buf, EpdFontFamily::BOLD) / 2,
+                          qcy + 6, buf, true, EpdFontFamily::BOLD);
+        renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, q[i].label) / 2, qcy + 38,
+                          q[i].label);
         if (q[i].reset != 0) {
           formatLocalHm(q[i].reset, hm, sizeof(hm));
           char when[24];
@@ -1135,7 +1186,7 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
             snprintf(when, sizeof(when), "%s", hm);
           }
           snprintf(buf, sizeof(buf), tr(STR_DESK_RESETS_AT), when);
-          renderer.drawText(UI_10_FONT_ID, x + 70, cy + 30, buf);
+          renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, qcy + 64, buf);
         }
       }
     }
