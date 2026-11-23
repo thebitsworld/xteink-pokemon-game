@@ -47,6 +47,7 @@ constexpr uint32_t kPcFreshSec = 5 * 60;  // older PC numbers are hidden from th
 constexpr int kMargin = 16;
 constexpr uint32_t kBatteryIdleMs = 30 * 1000;       // no input this long on battery: battery loop
 constexpr uint32_t kBatteryWeatherSec = 60 * 60;     // battery default of "Weather"
+constexpr uint32_t kBatteryWeatherRetrySec = 15 * 60;  // after a failed try (was: every minute)
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
 constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo frame on battery: back to the clock
@@ -562,6 +563,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
   batteryLogNow(fromBoot ? "resume" : "enter");
 
   int ticksSinceHalf = 0;
+  uint32_t lastWeatherTry = 0;  // RTC seconds of the last failed try in this run
   for (;;) {
     deskpower::watchdogFeed();
     if (deskpower::externalPower()) leaveBatteryLoop();  // charging: the full Desk again
@@ -578,11 +580,20 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
     if (forceHalfRefresh) ticksSinceHalf = 0;
 
     uint32_t now = 0;
-    if (readUtcUnix(now) && (!weather.valid || now < weather.fetchedAt ||
-                             now - weather.fetchedAt >= kBatteryWeatherSec)) {
+    const bool haveNow = readUtcUnix(now);
+    const bool due = !weather.valid || now < weather.fetchedAt || now - weather.fetchedAt >= kBatteryWeatherSec;
+    const bool backingOff = lastWeatherTry != 0 && now >= lastWeatherTry && now - lastWeatherTry < kBatteryWeatherRetrySec;
+    if (haveNow && due && !backingOff) {
+      const uint32_t startMs = millis();
       weatherResult = deskweather::refresh(config, weather, now, false);
       weatherAttempted = true;
+      lastWeatherTry = weatherResult == deskweather::Result::Ok ? 0 : now;
       deskpower::watchdogFeed();
+      // In the battery log: why a forecast went missing, and how long Wi-Fi was up.
+      char event[32];
+      snprintf(event, sizeof(event), "weather-%d-%lums", static_cast<int>(weatherResult),
+               static_cast<unsigned long>(millis() - startMs));
+      batteryLogNow(event);
     }
 
     drawPage();
@@ -861,9 +872,13 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
 
   char middle[64] = "";
   if (weather.valid && config.place.valid) {
+    // The time of the last good forecast, said as such: a bare "Hà Nội · 15:00" next to a
+    // 17:00 clock read as a wrong clock (owner's report, 2026-11-23).
     char hm[8];
+    char updated[32];
     formatLocalHm(weather.fetchedAt, hm, sizeof(hm));
-    snprintf(middle, sizeof(middle), "%s · %s", config.place.name, hm);
+    snprintf(updated, sizeof(updated), tr(STR_DESK_UPDATED), hm);
+    snprintf(middle, sizeof(middle), "%s · %s", config.place.name, updated);
   }
   drawStatusBar("Desk", middle);
 
