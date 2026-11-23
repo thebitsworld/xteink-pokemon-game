@@ -49,8 +49,10 @@ concurrency:
   cancel-in-progress: false
 
 # A pre-release tag ending in "-x4pro" (v1.8.5-beta.4-x4pro) is an X4 Pro-only
-# test build: the X3/X4, X3 Lite and X4 Classic firmwares are not built and the
-# release carries the X4 Pro file alone. Every other tag builds all four.
+# test build: the X3/X4 and X4 Classic firmwares are not built and the release
+# carries the X4 Pro file alone. One ending in "-desktest-x4pro" builds the X4 Pro
+# file from pokemon-x4-pro-desk-test (Desk's battery loop turned on for the X4 Pro).
+# Every other tag builds all three.
 jobs:
   build-x3-x4:
     if: ${{ !endsWith(github.ref_name, '-x4pro') }}
@@ -160,7 +162,15 @@ jobs:
         env:
           # See the matching comment on the pokemon-x3 build step above.
           CROSSINK_RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-rc.{0}', github.run_number) }}
-        run: pio run -e pokemon-x4-pro
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" == *-desktest-x4pro ]]; then
+            pio run -e pokemon-x4-pro-desk-test
+            mkdir -p .pio/build/pokemon-x4-pro
+            cp .pio/build/pokemon-x4-pro-desk-test/firmware-x4-pro.bin .pio/build/pokemon-x4-pro/firmware-x4-pro.bin
+          else
+            pio run -e pokemon-x4-pro
+          fi
 
       - name: Verify build output
         run: test -s .pio/build/pokemon-x4-pro/firmware-x4-pro.bin
