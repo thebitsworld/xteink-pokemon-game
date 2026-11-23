@@ -13,6 +13,9 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
+#ifndef SIMULATOR
+#include <esp_system.h>
+#endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -771,7 +774,18 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
   HalPowerManager::Lock powerLock;
   deskpower::setBatteryRunArmed(true);
   deskpower::watchdogArm(kBatteryWatchdogMs);
-  batteryLogNow(fromBoot ? "resume" : "enter");
+  {
+    // With the last reset's cause (esp_reset_reason_t: 1 power-on, 3 software restart, 6/7 task
+    // watchdog, 9 RTC watchdog...), so a freeze cleared by hand shows up as the next run's cause.
+    char event[24];
+#ifndef SIMULATOR
+    const int reason = static_cast<int>(esp_reset_reason());
+#else
+    const int reason = 0;
+#endif
+    snprintf(event, sizeof(event), "%s-r%d", fromBoot ? "resume" : "enter", reason);
+    batteryLogNow(event);
+  }
 
   int ticksSinceHalf = 0;
   uint32_t lastWeatherTry = 0;  // RTC seconds of the last failed try in this run
