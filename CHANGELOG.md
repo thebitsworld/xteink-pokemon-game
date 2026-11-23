@@ -1,3 +1,13 @@
+## [2.2.0-beta.2-desktest-x4pro] - 2026-11-23
+
+> ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.1 to try Desk). There is no X3/X4 or X4 Classic file in this release.
+>
+> ⚠️ **KHÔNG CÀI ĐẶT - bản thử cho một máy X4 Pro.** File này chỉ để thử chế độ tiết kiệm pin của Desk trên X4 Pro; có thể làm đứng màn hình hoặc hao pin. Mọi người khác hãy giữ v2.1.0 (hoặc v2.2.0-beta.1 nếu muốn thử Desk). Bản này không có file cho X3/X4 hay X4 Classic.
+
+### Changed
+
+- X4 Pro (test only): Desk's battery saver is turned on. After 30 s on battery the clock redraws once a minute in light sleep; the power button brings Desk back. The battery log (`/.crosspoint/desk-battery.csv`) reads the X4 Pro's gauge, and the SD card's lines are held through the sleep.
+
 ## [2.2.0-beta.1] - 2026-11-23
 
 > **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use. Everything else is the same as 2.1.0. Desk mode was tried on a real X3 (clock, weather, PC page, photo frame, battery loop) and in the simulator; the newest parts (month calendar, air quality, quiet nights, photos from the PC, the settings menu) only in the simulator, and the X4, X4 Pro and X4 Classic not at all. If something goes wrong, go back to v2.1.0: your Pokémon save and books are kept. A reader flashed with the earlier "X3 Lite" test file needs this file flashed by hand once.
