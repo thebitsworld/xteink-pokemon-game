@@ -117,6 +117,7 @@ class DeskActivity final : public Activity {
   static void netTaskEntry(void* arg);
   void runNetJob();
   bool pcFresh(uint32_t nowUnix) const;
+  void editPcAddress();
 
   void drawStatusBar(const char* title, const char* middle) const;
   void drawBar(int x, int y, int w, int h, int pct) const;

@@ -29,6 +29,7 @@
 #include "Lunar.h"
 #include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/PhotoRender.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -50,7 +51,8 @@ constexpr uint32_t kBatteryWeatherSec = 60 * 60;     // battery default of "Weat
 constexpr uint32_t kBatteryWeatherRetrySec = 15 * 60;  // after a failed try (was: every minute)
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
-constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo frame on battery: back to the clock
+constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo / PC page on battery: back to the clock
+constexpr uint32_t kAddressHoldMs = 800;               // hold Select on the PC page: PC address
 constexpr uint32_t kNetTaskStackBytes = 10240;         // HTTPS + JSON; the loop task has 8192
 constexpr int kPhotoStripH = 104;                      // the info strip under a photo
 constexpr int kPhotoStripGap = 10;
@@ -376,8 +378,8 @@ void DeskActivity::onExit() {
 }
 
 bool DeskActivity::preventAutoSleep() {
-  // The photo frame stays up on battery too (it goes back to the clock after an hour alone).
-  return deskpower::externalPower() || netBusy || pomodoro.running() || page == Page::Photo;
+  // The photo frame and the PC page stay up on battery too (back to the clock after an hour alone).
+  return deskpower::externalPower() || netBusy || pomodoro.running() || page == Page::Photo || page == Page::Pc;
 }
 
 void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const bool userAsked) {
@@ -391,7 +393,7 @@ void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const 
   uint32_t now = 0;
   if (!readUtcUnix(now)) now = weather.fetchedAt;
   netNow = now;
-  netKeepWifi = deskpower::externalPower();
+  netKeepWifi = deskpower::externalPower() || page == Page::Pc;  // the PC page polls every minute
   netConfig = config;
   netWeather = weather;
   netPc = pc;
@@ -475,6 +477,30 @@ bool DeskActivity::applyNetJob() {
                            requestUpdate();
                          });
   return true;
+}
+
+// The PC agent's address in desk.json, typed on the reader ("host:port" or an IP; port 8765 when
+// left out). Empty: find it by mDNS.
+void DeskActivity::editPcAddress() {
+  if (netBusy) return;  // the job holds a copy of the config
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_DESK_PC_ADDRESS), config.agent,
+                                              sizeof(config.agent) - 1, InputType::Text),
+      [this](const ActivityResult& result) {
+        lastInputMs = millis();
+        forceHalfRefresh = true;
+        if (!result.isCancelled) {
+          std::string text = std::get<KeyboardResult>(result.data).text;
+          text.erase(0, text.find_first_not_of(' '));
+          text.erase(text.find_last_not_of(' ') + 1);
+          if (!text.empty() && text.find(':') == std::string::npos) text += ":8765";
+          snprintf(config.agent, sizeof(config.agent), "%s", text.c_str());
+          deskweather::saveConfig(config);
+          pc = desk::AgentStats{};  // numbers from another PC must not linger
+          pcPollPending = true;
+        }
+        requestUpdate();
+      });
 }
 
 const char* DeskActivity::pageName(const Page p) {
@@ -614,7 +640,12 @@ void DeskActivity::loop() {
                   mappedInput.wasPressed(MappedInputManager::Button::Left);
   const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down) ||
                     mappedInput.wasPressed(MappedInputManager::Button::Right);
-  const bool select = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
+  // On the PC page Select acts on release: a short press refreshes, a hold edits the PC address.
+  const bool selectPressed = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
+  const bool selectReleased =
+      mappedInput.wasReleased(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
+  const bool select = page == Page::Pc ? selectReleased : selectPressed;
+  const bool selectHeld = page == Page::Pc && selectReleased && mappedInput.getHeldTime() >= kAddressHoldMs;
   if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
 
   if (applyNetJob()) return;  // opened the Wi-Fi picker
@@ -626,7 +657,7 @@ void DeskActivity::loop() {
   }
   // On battery and left alone: the minute-tick loop in light sleep (does not return).
   if (!deskpower::externalPower() && !pomodoro.running() && !weatherFetchPending && !pcPollPending && !netBusy &&
-      millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo) {
+      millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo && page != Page::Pc) {
     runBatteryLoop(false);
   }
 
@@ -660,7 +691,11 @@ void DeskActivity::loop() {
         startNetJob(true, true, true);
         break;
       case Page::Pc:
-        startNetJob(false, true, false);
+        if (selectHeld) {
+          editPcAddress();
+        } else {
+          startNetJob(false, true, false);
+        }
         break;
       case Page::Photo:
         if (!photos.empty()) photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
@@ -688,9 +723,15 @@ void DeskActivity::loop() {
 
   const uint32_t nowMs = millis();
   const uint32_t photoEveryMs = static_cast<uint32_t>(SETTINGS.slideshowIntervalSeconds) * 1000u;
-  if (page == Page::Photo && !deskpower::externalPower() && nowMs - lastInputMs >= kPhotoUnattendedMs) {
+  if ((page == Page::Photo || page == Page::Pc) && !deskpower::externalPower() &&
+      nowMs - lastInputMs >= kPhotoUnattendedMs) {
     switchPage(Page::Main);  // on battery: the clock (and its battery loop) after an hour alone
     return;
+  }
+  // Off the PC page on battery: Wi-Fi kept up for its polls goes down.
+  if (wifiKeptForUsb && !netBusy && page != Page::Pc && !deskpower::externalPower()) {
+    deskweather::wifiDown();
+    wifiKeptForUsb = false;
   }
   if (page == Page::Photo && photos.size() > 1 && photoEveryMs > 0 && nowMs - lastPhotoChangeMs >= photoEveryMs) {
     photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
@@ -704,6 +745,8 @@ void DeskActivity::loop() {
     if (deskpower::externalPower()) {
       const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
       wantWeather = wantWeather || (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait);
+    }
+    if (deskpower::externalPower() || page == Page::Pc) {
       const uint32_t pcWait = pcResult == deskweather::Result::Ok ? kPcEveryMs : kPcRetryMs;
       wantPc = wantPc || (pcAttempted && nowMs - lastPcAttemptMs >= pcWait);
     }
@@ -995,7 +1038,7 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
   const int h = renderer.getScreenHeight();
   char buf[96];
   char hm[8];
-  drawStatusBar(tr(STR_DESK_PC), "");
+  drawStatusBar(tr(STR_DESK_PC), config.agent[0] != '\0' ? config.agent : tr(STR_DESK_PC_AUTO));
 
   if (!pc.valid || !pcFresh(nowUnix)) {
     int y = h / 2 - 90;
@@ -1014,7 +1057,10 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
       formatLocalHm(pc.receivedAt, hm, sizeof(hm));
       snprintf(buf, sizeof(buf), tr(STR_DESK_LAST_SEEN), hm);
       renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+      y += 30;
     }
+    y += 14;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_ADDRESS_HINT), true, EpdFontFamily::BOLD);
   } else {
     int y = 62;
     renderer.drawText(UI_12_FONT_ID, kMargin, y, pc.host, true, EpdFontFamily::BOLD);
@@ -1079,7 +1125,16 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
         drawBar(x, cy + 62, colW - 16, 12, q[i].pct);
         if (q[i].reset != 0) {
           formatLocalHm(q[i].reset, hm, sizeof(hm));
-          snprintf(buf, sizeof(buf), tr(STR_DESK_RESETS_AT), hm);
+          char when[24];
+          if (q[i].reset > nowUnix + 20 * 3600) {
+            // The weekly reset is days away: its weekday too ("Thu 14:00").
+            const int64_t localSec = static_cast<int64_t>(q[i].reset) + utcOffsetMinutes() * 60;
+            const int wd = desk::weekdayOf(static_cast<int32_t>(2440588 + localSec / 86400));  // JDN of 1970-01-01
+            snprintf(when, sizeof(when), "%s %s", weekdayShortText(wd), hm);
+          } else {
+            snprintf(when, sizeof(when), "%s", hm);
+          }
+          snprintf(buf, sizeof(buf), tr(STR_DESK_RESETS_AT), when);
           renderer.drawText(UI_10_FONT_ID, x + 70, cy + 30, buf);
         }
       }
