@@ -77,6 +77,8 @@ class DeskActivity final : public Activity {
   bool pcPolling = false;
   bool pcAttempted = false;
   uint32_t lastPcAttemptMs = 0;
+  uint8_t pcFailStreak = 0;  // polls in a row that found no PC
+  uint32_t pcRetryMs() const;
   bool wifiKeptForUsb = false;
 
   bool netBusy = false;  // a job was started and not applied yet

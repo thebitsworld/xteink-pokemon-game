@@ -357,6 +357,7 @@ void DeskActivity::onEnter() {
   weatherAttempted = false;
   pcPollPending = true;
   pcAttempted = false;
+  pcFailStreak = 0;
   loadPhotos();
   lastPhotoChangeMs = millis();
   requestUpdate();
@@ -525,6 +526,11 @@ bool DeskActivity::applyNetJob() {
       pcResult = netPcResult;
       pcAttempted = true;
       lastPcAttemptMs = nowMs;
+      if (pcResult == deskweather::Result::Ok) {
+        pcFailStreak = 0;
+      } else if (pcFailStreak < 255) {
+        ++pcFailStreak;
+      }
     }
   }
   if (netPhotoIndex >= 0) {
@@ -583,6 +589,7 @@ void DeskActivity::openSettings() {
     if (oldPc != SETTINGS.deskPcAddress) {
       pc = desk::AgentStats{};  // numbers from another PC must not linger
       pcPollPending = true;
+      pcFailStreak = 0;
     }
     if (oldPhotoSource != SETTINGS.deskPhotoSource) loadPhotos();
     if (!pageEnabled(page)) page = Page::Main;
@@ -655,6 +662,15 @@ bool DeskActivity::isNight(const LocalTime& t) {
   const int to = SETTINGS.deskNightEnd % 24;
   if (from == to) return false;
   return from < to ? (t.hour >= from && t.hour < to) : (t.hour >= from || t.hour < to);
+}
+
+// No PC answering (switched off, agent not running, none at all): each try brings Wi-Fi up and,
+// without a fixed address, waits on an mDNS query. The wait doubles with every miss in a row -
+// 2, 4, 8, 16 min - and stays at 30 min; an answer, a new address or Refresh starts it over.
+uint32_t DeskActivity::pcRetryMs() const {
+  constexpr uint32_t kMaxMs = 30 * 60 * 1000;
+  const uint8_t doublings = pcFailStreak > 1 ? static_cast<uint8_t>(std::min<int>(pcFailStreak - 1, 4)) : 0;
+  return std::min<uint32_t>(kPcRetryMs << doublings, kMaxMs);
 }
 
 bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
@@ -849,6 +865,7 @@ void DeskActivity::loop() {
         startNetJob(true, true, true);
         break;
       case Page::Pc:
+        pcFailStreak = 0;  // asked for: back to the short retries
         startNetJob(false, true, false);
         break;
       case Page::Calendar:
@@ -897,7 +914,7 @@ void DeskActivity::loop() {
   // Photos from the PC: the count comes with the PC numbers, each photo is downloaded when shown.
   if (page == Page::Photo && pcPhotos() && !netBusy) {
     if (photos.empty()) {
-      if (!pcPollPending && (!pcAttempted || nowMs - lastPcAttemptMs >= kPcRetryMs)) pcPollPending = true;
+      if (!pcPollPending && (!pcAttempted || nowMs - lastPcAttemptMs >= pcRetryMs())) pcPollPending = true;
     } else if (pcPhotoLoaded != photoIndex && !pcPhotoFailed) {
       startNetJob(false, false, false, photoIndex);
       return;
@@ -911,7 +928,7 @@ void DeskActivity::loop() {
       wantWeather = wantWeather || (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait);
     }
     if (deskpower::externalPower() || page == Page::Pc) {
-      const uint32_t pcWait = pcResult == deskweather::Result::Ok ? kPcEveryMs : kPcRetryMs;
+      const uint32_t pcWait = pcResult == deskweather::Result::Ok ? kPcEveryMs : pcRetryMs();
       wantPc = wantPc || (pcAttempted && nowMs - lastPcAttemptMs >= pcWait);
     }
     if (wantWeather || wantPc) startNetJob(wantWeather, wantPc, false);
