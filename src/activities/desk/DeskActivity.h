@@ -17,7 +17,8 @@
 // once a minute. Phase 2: the weather card from Open-Meteo (on entry when older than 10 min,
 // every 10 min on USB, on Select). Phase 3: the PC page and the main screen's PC strip from the
 // agent in tools/desk-agent (on entry, every minute on USB, on Select). Phase 4: the photo
-// frame (/desk/photos, next photo on Select and every 30 min on USB) and Pomodoro (runs in the
+// frame (Photo Slideshow's folder and settings - Fit/Crop, random order, interval on USB - next
+// photo on Select, with a date/lunar/weather strip) and Pomodoro (runs in the
 // background; the screen jumps to it when a phase ends). Up/Down switch pages.
 // On USB the screen keeps the reader awake and Wi-Fi stays up between polls. Phase 5: on
 // battery, after 30 s without input (no Pomodoro running), the main screen switches to the
@@ -106,6 +107,7 @@ class DeskActivity final : public Activity {
   void renderPhoto(uint32_t nowUnix);
   void renderPomodoro();
   void loadPhotos();
+  static std::string photoFolder();  // Photo Slideshow's folder, no trailing slash
   void switchPage(Page to);
   static uint32_t nowSec();  // monotonic seconds for Pomodoro
   // The page as render() draws it, without the render lock (also used by the battery loop).

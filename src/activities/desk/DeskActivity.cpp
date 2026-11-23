@@ -19,6 +19,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "DeskAgentService.h"
 #include "DeskFonts.h"
 #include "DeskPower.h"
@@ -31,8 +32,6 @@
 
 namespace {
 
-constexpr char kPhotoDir[] = "/desk/photos";
-constexpr uint32_t kPhotoEveryMs = 30 * 60 * 1000;  // USB default of "Photo: next image"
 constexpr size_t kMaxPhotos = 500;
 
 constexpr uint32_t kPollMs = 1000;
@@ -315,9 +314,20 @@ void DeskActivity::onEnter() {
   requestUpdate();
 }
 
+// The photo frame shows Photo Slideshow's folder with its settings (owner's choice,
+// 2026-11-23): folder from APP_STATE, Fit/Crop, random order, interval.
+std::string DeskActivity::photoFolder() {
+  std::string dir = APP_STATE.slideshowFolderPath;
+  while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+  return dir;
+}
+
 void DeskActivity::loadPhotos() {
   photos.clear();
-  auto dir = Storage.open(kPhotoDir);
+  photoIndex = 0;
+  const std::string folder = photoFolder();
+  if (folder.empty()) return;
+  auto dir = Storage.open(folder.c_str());
   if (!dir || !dir.isDirectory()) {
     if (dir) dir.close();
     return;
@@ -327,13 +337,19 @@ void DeskActivity::loadPhotos() {
     if (!file.isDirectory()) {
       file.getName(name, sizeof(name));
       const std::string n(name);
+      // The slideshow's rule: BMP or PNG, no hidden files or macOS "._" sidecars.
       if (name[0] != '.' && (FsHelpers::hasBmpExtension(n) || FsHelpers::hasPngExtension(n))) photos.push_back(n);
     }
     file.close();
   }
   dir.close();
-  std::sort(photos.begin(), photos.end());
-  if (photoIndex >= static_cast<int>(photos.size())) photoIndex = 0;
+  FsHelpers::sortFileList(photos);
+  if (SETTINGS.slideshowRandomOrder && photos.size() > 1) {
+    for (size_t i = photos.size() - 1; i > 0; --i) {
+      const size_t j = static_cast<size_t>(random(static_cast<long>(i + 1)));
+      std::swap(photos[i], photos[j]);
+    }
+  }
 }
 
 void DeskActivity::switchPage(const Page to) {
@@ -562,8 +578,9 @@ void DeskActivity::loop() {
   }
 
   const uint32_t nowMs = millis();
-  if (page == Page::Photo && deskpower::externalPower() && photos.size() > 1 &&
-      nowMs - lastPhotoChangeMs >= kPhotoEveryMs) {
+  const uint32_t photoEveryMs = static_cast<uint32_t>(SETTINGS.slideshowIntervalSeconds) * 1000u;
+  if (page == Page::Photo && deskpower::externalPower() && photos.size() > 1 && photoEveryMs > 0 &&
+      nowMs - lastPhotoChangeMs >= photoEveryMs) {
     photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
     lastPhotoChangeMs = nowMs;
     requestUpdate();
@@ -979,8 +996,12 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
     renderer.clearScreen();
     drawStatusBar(tr(STR_DESK_PHOTOS), "");
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 60, tr(STR_DESK_NO_PHOTOS), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, tr(STR_DESK_PHOTOS_HINT));
-    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, tr(STR_DESK_PHOTOS_DIR), true, EpdFontFamily::BOLD);
+    const std::string folder = photoFolder();
+    if (!folder.empty()) {
+      snprintf(line1, sizeof(line1), tr(STR_DESK_PHOTOS_FOLDER), folder.c_str());
+      renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, line1);
+    }
+    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, tr(STR_DESK_PHOTOS_HINT), true, EpdFontFamily::BOLD);
     const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), "", tr(STR_DESK_PAGE),
                                                 tr(STR_DESK_PAGE));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -1020,8 +1041,9 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
     renderer.drawText(UI_10_FONT_ID, stripX + 16, stripY + 44, line2);
   };
 
-  const std::string path = std::string(kPhotoDir) + "/" + photos[photoIndex];
-  if (photo::render(renderer, path, false, overlay) != photo::Result::Ok) {
+  const std::string path = photoFolder() + "/" + photos[photoIndex];
+  const bool crop = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
+  if (photo::render(renderer, path, crop, overlay) != photo::Result::Ok) {
     renderer.clearScreen();
     drawStatusBar(tr(STR_DESK_PHOTOS), "");
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 30, tr(STR_DESK_PHOTO_ERROR), true, EpdFontFamily::BOLD);
