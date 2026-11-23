@@ -32,6 +32,8 @@ constexpr uint32_t kOpenDeskMagic = 0xDE5C0B02;
 RTC_NOINIT_ATTR uint32_t runMagic;
 RTC_NOINIT_ATTR uint32_t runResets;
 RTC_NOINIT_ATTR uint32_t openDeskMagic;
+RTC_NOINIT_ATTR uint32_t crumbWord;  // 0xC2B70000 | stage
+constexpr uint32_t kCrumbMagic = 0xC2B70000;
 
 wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
 
@@ -200,7 +202,9 @@ Wake sleepFor(const uint32_t ms) {
     const uint32_t left = ms - (millis() - start);
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < kChunkMs ? left : kChunkMs) * 1000ULL);
     watchdogFeed();
+    setCrumb(1);
     const esp_err_t err = esp_light_sleep_start();
+    setCrumb(2);
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
       const bool powerDown = pin >= 0 && digitalRead(pin) == (activeHigh ? HIGH : LOW);
       result = touchWake && !powerDown ? Wake::Touch : Wake::PowerButton;
@@ -275,6 +279,28 @@ uint32_t batteryResets() {
 void countBatteryReset() {
 #ifndef SIMULATOR
   ++runResets;
+#endif
+}
+
+void setCrumb(const uint8_t stage) {
+#ifndef SIMULATOR
+  crumbWord = kCrumbMagic | stage;
+#else
+  (void)stage;
+#endif
+}
+
+uint8_t lastCrumb() {
+#ifndef SIMULATOR
+  return (crumbWord & 0xFFFF0000u) == kCrumbMagic ? static_cast<uint8_t>(crumbWord & 0xFF) : 0;
+#else
+  return 0;
+#endif
+}
+
+void releasePinHolds() {
+#ifndef SIMULATOR
+  holdPins(false);
 #endif
 }
 

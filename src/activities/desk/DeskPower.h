@@ -59,6 +59,16 @@ void countBatteryReset();
 void requestOpenDeskAfterRestart();
 bool consumeOpenDeskRequest();
 
+// Where the battery loop last was (kept through a reset, so the next run's first log line can
+// tell where a freeze stopped it): 1 light sleep entered, 2 woke from it, 3 back in the loop,
+// 4 tick logged, 5 drawing, 6 drawn. 0: none recorded.
+void setCrumb(uint8_t stage);
+uint8_t lastCrumb();
+
+// The battery loop holds the SD and panel lines through light sleep, and a hold outlives a
+// watchdog reset: setup() lets them go before it touches the card.
+void releasePinHolds();
+
 }  // namespace deskpower
 
 #endif  // CROSSINK_DESK

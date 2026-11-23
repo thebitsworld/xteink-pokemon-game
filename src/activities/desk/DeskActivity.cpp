@@ -802,8 +802,11 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 #else
     const int reason = 0;
 #endif
-    snprintf(event, sizeof(event), "%s-r%d", fromBoot ? "resume" : "enter", reason);
+    // And where the last run was when it stopped ("-c1": in light sleep, see setCrumb).
+    snprintf(event, sizeof(event), "%s-r%d-c%u", fromBoot ? "resume" : "enter", reason,
+             static_cast<unsigned>(deskpower::lastCrumb()));
     batteryLogNow(event);
+    deskpower::setCrumb(0);
   }
 
   int ticksSinceHalf = 0;
@@ -812,6 +815,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
     deskpower::watchdogFeed();
     if (deskpower::externalPower()) leaveBatteryLoop();  // charging: the full Desk again
     batteryLogNow("tick");
+    deskpower::setCrumb(4);
 
     const LocalTime t = readLocalTime();
     const bool newDay = t.day != shown.day || t.month != shown.month || t.year != shown.year;
@@ -848,7 +852,9 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
       batteryLogNow(event);
     }
 
+    deskpower::setCrumb(5);
     drawPage();
+    deskpower::setCrumb(6);
     batteryLogNow("drawn");  // a run that stops after "tick" hangs drawing, after "drawn" sleeping
     uint32_t sleepMs = deskpower::msToNextMinute();
     if (night && t.valid) {
@@ -857,6 +863,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
       sleepMs += static_cast<uint32_t>(minutesLeft - 1) * 60000u;
     }
     const deskpower::Wake wake = deskpower::sleepFor(sleepMs);
+    deskpower::setCrumb(3);
     if (wake != deskpower::Wake::Timer) leaveBatteryLoop(wake == deskpower::Wake::Touch);
   }
 }

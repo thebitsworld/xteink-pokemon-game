@@ -1466,6 +1466,12 @@ void setup() {
       break;
   }
 
+#if CROSSINK_DESK
+  // A watchdog reset in Desk's battery loop can come while the SD and panel lines are held for
+  // light sleep, and the hold outlives the reset: without this the card and panel stay dead.
+  deskpower::releasePinHolds();
+#endif
+
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
   if (!Storage.begin()) {
