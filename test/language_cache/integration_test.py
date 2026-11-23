@@ -144,8 +144,10 @@ with tempfile.TemporaryDirectory(prefix="crossink-language-") as temporary:
     code, generation = "ZZ-CUSTOM", 2
     for path in sorted((root / "lib/I18n/translations").glob("*.yaml")):
         # These sources exceed the device's language slot; only their packaged form installs.
+        # Vietnamese is built into every firmware; with the Desk mode strings (X3 Lite) its
+        # source passed the 64 KB slot too (2026-11-23).
         if path.name in ("english.yaml", "arabic.yaml", "belarusian.yaml", "kazakh.yaml", "russian.yaml",
-                         "ukrainian.yaml"):
+                         "ukrainian.yaml", "vietnamese.yaml"):
             continue
         shutil.copy2(path, languages / path.name)
         installed = run("install", code, generation, f"/.crossink/languages/{path.name}")

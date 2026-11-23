@@ -113,11 +113,15 @@ TEST(Lunar, NextEvent) {
   ASSERT_TRUE(e.found);
   EXPECT_EQ(e.daysUntil, 3);
   EXPECT_STREQ(e.name, "Rằm tháng Mười");
+  EXPECT_EQ(e.kind, desk::EventKind::FullMoon);
+  EXPECT_EQ(e.lunarMonth, 10);
+  EXPECT_FALSE(e.leap);
 
   e = desk::nextCalendarEvent(16, 2, 2026);
   ASSERT_TRUE(e.found);
   EXPECT_EQ(e.daysUntil, 1);
   EXPECT_STREQ(e.name, "Tết Nguyên đán");
+  EXPECT_EQ(e.kind, desk::EventKind::Tet);
 
   e = desk::nextCalendarEvent(2, 9, 2026);  // Quốc khánh today
   ASSERT_TRUE(e.found);

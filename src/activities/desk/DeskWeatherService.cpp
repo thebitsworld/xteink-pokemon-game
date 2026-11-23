@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <HalClock.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -173,17 +174,17 @@ const char* resultText(const Result r) {
     case Result::Ok:
       return "";
     case Result::NoSavedWifi:
-      return "Chưa có Wi-Fi đã lưu";
+      return tr(STR_DESK_ERR_NO_WIFI);
     case Result::WifiFailed:
-      return "Không kết nối được Wi-Fi";
+      return tr(STR_DESK_ERR_WIFI);
     case Result::PlaceFailed:
-      return "Không tìm được vị trí";
+      return tr(STR_DESK_ERR_PLACE);
     case Result::FetchFailed:
-      return "Không tải được thời tiết";
+      return tr(STR_DESK_ERR_FETCH);
     case Result::ParseFailed:
-      return "Dữ liệu thời tiết lỗi";
+      return tr(STR_DESK_ERR_PARSE);
     case Result::NoAgent:
-      return "Không thấy agent trên máy tính";
+      return tr(STR_DESK_ERR_AGENT);
   }
   return "";
 }

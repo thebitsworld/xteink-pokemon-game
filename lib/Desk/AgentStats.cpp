@@ -11,13 +11,13 @@ namespace {
 
 int clampPct(const int v) { return v < 0 ? 0 : (v > 100 ? 100 : v); }
 
-// "%.1f" with a decimal comma, and no ",0".
-void decimal(const float v, char* out, const size_t size) {
+// "%.1f" with the given decimal mark, and no ",0".
+void decimal(const float v, char* out, const size_t size, const char mark) {
   const long tenths = std::lround(v * 10.0f);
   if (tenths % 10 == 0) {
     std::snprintf(out, size, "%ld", tenths / 10);
   } else {
-    std::snprintf(out, size, "%ld,%ld", tenths / 10, std::labs(tenths % 10));
+    std::snprintf(out, size, "%ld%c%ld", tenths / 10, mark, std::labs(tenths % 10));
   }
 }
 
@@ -63,24 +63,24 @@ int percentOf(const float used, const float total) {
   return clampPct(static_cast<int>(std::lround(used * 100.0f / total)));
 }
 
-void formatSize(const float usedGb, const float totalGb, char* out, const size_t outSize) {
+void formatSize(const float usedGb, const float totalGb, char* out, const size_t outSize, const char mark) {
   char a[16];
   char b[16];
   if (totalGb >= 1000.0f) {
-    decimal(usedGb / 1000.0f, a, sizeof(a));
-    decimal(totalGb / 1000.0f, b, sizeof(b));
+    decimal(usedGb / 1000.0f, a, sizeof(a), mark);
+    decimal(totalGb / 1000.0f, b, sizeof(b), mark);
     std::snprintf(out, outSize, "%s / %s TB", a, b);
   } else {
-    decimal(usedGb, a, sizeof(a));
-    decimal(totalGb, b, sizeof(b));
+    decimal(usedGb, a, sizeof(a), mark);
+    decimal(totalGb, b, sizeof(b), mark);
     std::snprintf(out, outSize, "%s / %s GB", a, b);
   }
 }
 
-void formatRate(const uint32_t bps, char* out, const size_t outSize) {
+void formatRate(const uint32_t bps, char* out, const size_t outSize, const char mark) {
   char v[16];
   if (bps >= 1000000) {
-    decimal(bps / 1000000.0f, v, sizeof(v));
+    decimal(bps / 1000000.0f, v, sizeof(v), mark);
     std::snprintf(out, outSize, "%s MB/s", v);
   } else if (bps >= 1000) {
     std::snprintf(out, outSize, "%lu KB/s", static_cast<unsigned long>(bps / 1000));

@@ -44,10 +44,10 @@ bool parseAgentStats(const char* json, size_t length, uint32_t receivedAt, Agent
 
 // 0..100 from used/total; 0 when total is 0.
 int percentOf(float used, float total);
-// "19,5 / 32 GB", "1,6 / 2 TB" (Vietnamese decimal comma; TB from 1000 GB).
-void formatSize(float usedGb, float totalGb, char* out, size_t outSize);
+// "19,5 / 32 GB", "1,6 / 2 TB" (TB from 1000 GB); decimalMark ',' (Vietnamese) or '.'.
+void formatSize(float usedGb, float totalGb, char* out, size_t outSize, char decimalMark = ',');
 // "2,4 MB/s", "310 KB/s", "0 B/s".
-void formatRate(uint32_t bytesPerSecond, char* out, size_t outSize);
+void formatRate(uint32_t bytesPerSecond, char* out, size_t outSize, char decimalMark = ',');
 // "3 ngày 4 giờ", "5 giờ 12 phút", "8 phút".
 void formatUptime(uint32_t seconds, char* out, size_t outSize);
 

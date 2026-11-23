@@ -9,6 +9,7 @@
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -46,6 +47,189 @@ constexpr uint32_t kBatteryIdleMs = 30 * 1000;       // no input this long on ba
 constexpr uint32_t kBatteryWeatherSec = 60 * 60;     // battery default of "Weather"
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
+
+// ---- text in the reader's language (I18n: English and Vietnamese; others show English) ----
+
+const char* skyText(const desk::Sky s) {
+  switch (s) {
+    case desk::Sky::Clear:
+      return tr(STR_DESK_SKY_CLEAR);
+    case desk::Sky::PartlyCloudy:
+      return tr(STR_DESK_SKY_PARTLY);
+    case desk::Sky::Cloudy:
+      return tr(STR_DESK_SKY_CLOUDY);
+    case desk::Sky::Fog:
+      return tr(STR_DESK_SKY_FOG);
+    case desk::Sky::Drizzle:
+      return tr(STR_DESK_SKY_DRIZZLE);
+    case desk::Sky::Rain:
+      return tr(STR_DESK_SKY_RAIN);
+    case desk::Sky::Storm:
+      return tr(STR_DESK_SKY_STORM);
+    case desk::Sky::Snow:
+      return tr(STR_DESK_SKY_SNOW);
+    case desk::Sky::Unknown:
+      break;
+  }
+  return tr(STR_DESK_SKY_UNKNOWN);
+}
+
+void rainHintText(const desk::WeatherReport& w, const uint32_t nowUnix, char* out, const size_t size) {
+  out[0] = '\0';
+  if (!desk::weatherFresh(w, nowUnix)) return;
+  const int in = desk::hoursUntilRain(w);
+  if (in == 0) {
+    snprintf(out, size, "%s", tr(STR_DESK_RAIN_NOW));
+  } else if (in > 0) {
+    snprintf(out, size, tr(STR_DESK_RAIN_AT), (w.firstHour + in) % 24);
+  } else {
+    snprintf(out, size, tr(STR_DESK_NO_RAIN), desk::kForecastHours);
+  }
+}
+
+const char* weekdayText(const int wd) {
+  switch (wd) {
+    case 0:
+      return tr(STR_DESK_WEEKDAY_0);
+    case 1:
+      return tr(STR_DESK_WEEKDAY_1);
+    case 2:
+      return tr(STR_DESK_WEEKDAY_2);
+    case 3:
+      return tr(STR_DESK_WEEKDAY_3);
+    case 4:
+      return tr(STR_DESK_WEEKDAY_4);
+    case 5:
+      return tr(STR_DESK_WEEKDAY_5);
+    default:
+      return tr(STR_DESK_WEEKDAY_6);
+  }
+}
+
+const char* weekdayShortText(const int wd) {
+  switch (wd) {
+    case 0:
+      return tr(STR_DESK_WEEKDAY_SHORT_0);
+    case 1:
+      return tr(STR_DESK_WEEKDAY_SHORT_1);
+    case 2:
+      return tr(STR_DESK_WEEKDAY_SHORT_2);
+    case 3:
+      return tr(STR_DESK_WEEKDAY_SHORT_3);
+    case 4:
+      return tr(STR_DESK_WEEKDAY_SHORT_4);
+    case 5:
+      return tr(STR_DESK_WEEKDAY_SHORT_5);
+    default:
+      return tr(STR_DESK_WEEKDAY_SHORT_6);
+  }
+}
+
+const char* lunarMonthText(const int m) {
+  switch (m) {
+    case 1:
+      return tr(STR_DESK_LUNAR_MONTH_1);
+    case 2:
+      return tr(STR_DESK_LUNAR_MONTH_2);
+    case 3:
+      return tr(STR_DESK_LUNAR_MONTH_3);
+    case 4:
+      return tr(STR_DESK_LUNAR_MONTH_4);
+    case 5:
+      return tr(STR_DESK_LUNAR_MONTH_5);
+    case 6:
+      return tr(STR_DESK_LUNAR_MONTH_6);
+    case 7:
+      return tr(STR_DESK_LUNAR_MONTH_7);
+    case 8:
+      return tr(STR_DESK_LUNAR_MONTH_8);
+    case 9:
+      return tr(STR_DESK_LUNAR_MONTH_9);
+    case 10:
+      return tr(STR_DESK_LUNAR_MONTH_10);
+    case 11:
+      return tr(STR_DESK_LUNAR_MONTH_11);
+    default:
+      return tr(STR_DESK_LUNAR_MONTH_12);
+  }
+}
+
+void eventText(const desk::CalendarEvent& ev, char* out, const size_t size) {
+  using K = desk::EventKind;
+  const char* fixed = nullptr;
+  switch (ev.kind) {
+    case K::Tet:
+      fixed = tr(STR_DESK_EV_TET);
+      break;
+    case K::Lantern:
+      fixed = tr(STR_DESK_EV_LANTERN);
+      break;
+    case K::HungKings:
+      fixed = tr(STR_DESK_EV_HUNG);
+      break;
+    case K::DoanNgo:
+      fixed = tr(STR_DESK_EV_DOAN_NGO);
+      break;
+    case K::VuLan:
+      fixed = tr(STR_DESK_EV_VU_LAN);
+      break;
+    case K::MidAutumn:
+      fixed = tr(STR_DESK_EV_MID_AUTUMN);
+      break;
+    case K::KitchenGods:
+      fixed = tr(STR_DESK_EV_KITCHEN);
+      break;
+    case K::NewYear:
+      fixed = tr(STR_DESK_EV_NEW_YEAR);
+      break;
+    case K::Reunification:
+      fixed = tr(STR_DESK_EV_REUNIFICATION);
+      break;
+    case K::Labour:
+      fixed = tr(STR_DESK_EV_LABOUR);
+      break;
+    case K::National:
+      fixed = tr(STR_DESK_EV_NATIONAL);
+      break;
+    case K::FullMoon:
+    case K::FirstDay:
+      snprintf(out, size, ev.kind == K::FullMoon ? tr(STR_DESK_EV_FULL_MOON) : tr(STR_DESK_EV_FIRST_DAY),
+               lunarMonthText(ev.lunarMonth), ev.leap ? tr(STR_DESK_LEAP) : "");
+      return;
+    case K::None:
+      break;
+  }
+  snprintf(out, size, "%s", fixed != nullptr ? fixed : ev.name);
+}
+
+const char* phaseText(const desk::Pomodoro::Phase p) {
+  switch (p) {
+    case desk::Pomodoro::Phase::Focus:
+      return tr(STR_DESK_FOCUS);
+    case desk::Pomodoro::Phase::ShortBreak:
+      return tr(STR_DESK_SHORT_BREAK);
+    case desk::Pomodoro::Phase::LongBreak:
+      return tr(STR_DESK_LONG_BREAK);
+    case desk::Pomodoro::Phase::Idle:
+      break;
+  }
+  return tr(STR_DESK_READY);
+}
+
+void uptimeText(const uint32_t seconds, char* out, const size_t size) {
+  const unsigned long days = seconds / 86400;
+  const unsigned long hours = (seconds % 86400) / 3600;
+  const unsigned long minutes = (seconds % 3600) / 60;
+  if (days > 0) {
+    snprintf(out, size, tr(STR_DESK_UPTIME_DH), days, hours);
+  } else if (hours > 0) {
+    snprintf(out, size, tr(STR_DESK_UPTIME_HM), hours, minutes);
+  } else {
+    snprintf(out, size, tr(STR_DESK_UPTIME_M), minutes);
+  }
+}
+
+char decimalMark() { return tr(STR_DESK_DECIMAL_MARK)[0]; }
 
 }  // namespace
 
@@ -425,7 +609,7 @@ void DeskActivity::drawStatusBar(const char* title, const char* middle) const {
   char buf[32];
   renderer.drawText(UI_10_FONT_ID, kMargin, 14, title, true, EpdFontFamily::BOLD);
   if (deskpower::externalPower()) {
-    snprintf(buf, sizeof(buf), "Đang sạc");
+    snprintf(buf, sizeof(buf), "%s", tr(STR_DESK_CHARGING));
   } else {
     snprintf(buf, sizeof(buf), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
   }
@@ -521,10 +705,11 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   renderer.drawRoundedRect(left, top, cardW, height, 2, 10, true);
 
   if (!weather.valid) {
-    const char* msg = weatherFetching ? "Đang cập nhật..." : (weatherAttempted ? deskweather::resultText(weatherResult)
-                                                                              : "Chưa có dữ liệu");
-    renderer.drawCenteredText(UI_12_FONT_ID, top + height / 2 - 26, "Thời tiết", true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, top + height / 2 + 6, msg[0] ? msg : "Chưa có dữ liệu");
+    const char* msg = weatherFetching
+                          ? tr(STR_DESK_UPDATING)
+                          : (weatherAttempted ? deskweather::resultText(weatherResult) : tr(STR_DESK_NO_DATA));
+    renderer.drawCenteredText(UI_12_FONT_ID, top + height / 2 - 26, tr(STR_DESK_WEATHER), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, top + height / 2 + 6, msg[0] ? msg : tr(STR_DESK_NO_DATA));
     return;
   }
 
@@ -536,17 +721,17 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   const int tempX = left + pad + 84;
   renderer.drawText(DESK_DIGITS_FONT_ID, tempX, top + pad + 4, buf);
   const int textX = tempX + renderer.getTextWidth(DESK_DIGITS_FONT_ID, buf) + 16;
-  renderer.drawText(UI_12_FONT_ID, textX, top + pad + 6, desk::skyLabel(weather.sky), true, EpdFontFamily::BOLD);
-  snprintf(buf, sizeof(buf), "Thấp %d° · Cao %d°", weather.tempMin, weather.tempMax);
+  renderer.drawText(UI_12_FONT_ID, textX, top + pad + 6, skyText(weather.sky), true, EpdFontFamily::BOLD);
+  snprintf(buf, sizeof(buf), tr(STR_DESK_LOW_HIGH), weather.tempMin, weather.tempMax);
   renderer.drawText(UI_10_FONT_ID, textX, top + pad + 42, buf);
 
   int y = top + pad + 86;
   char hint[64];
-  desk::rainHint(weather, nowUnix, hint, sizeof(hint));
+  rainHintText(weather, nowUnix, hint, sizeof(hint));
   if (weatherFetching) {
-    snprintf(hint, sizeof(hint), "Đang cập nhật...");
+    snprintf(hint, sizeof(hint), "%s", tr(STR_DESK_UPDATING));
   } else if (!fresh) {
-    snprintf(hint, sizeof(hint), "Dữ liệu cũ%s%s", weatherAttempted ? " · " : "",
+    snprintf(hint, sizeof(hint), "%s%s%s", tr(STR_DESK_STALE), weatherAttempted ? " · " : "",
              weatherAttempted ? deskweather::resultText(weatherResult) : "");
   }
   renderer.drawText(UI_10_FONT_ID, left + pad, y, hint, true, EpdFontFamily::BOLD);
@@ -558,9 +743,9 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   for (int i = 0; i < 4; ++i) {
     const int idx = i * 3;  // now, +3 h, +6 h, +9 h
     const int cx = left + pad + slotW * i + slotW / 2;
-    snprintf(buf, sizeof(buf), "%dh", (weather.firstHour + idx) % 24);
+    snprintf(buf, sizeof(buf), tr(STR_DESK_HOUR), (weather.firstHour + idx) % 24);
     renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, y, buf);
-    const char* label = desk::skyLabel(weather.hourly[idx]);
+    const char* label = skyText(weather.hourly[idx]);
     renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD) / 2, y + 28,
                       label, true, EpdFontFamily::BOLD);
     snprintf(buf, sizeof(buf), "%d°", weather.hourlyTemp[idx]);
@@ -584,9 +769,9 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
   if (!shown.valid) {
     renderer.drawCenteredText(DESK_CLOCK_FONT_ID, y, "--:--");
     y += renderer.getLineHeight(DESK_CLOCK_FONT_ID) + 10;
-    renderer.drawCenteredText(UI_12_FONT_ID, y, "Chưa có giờ", true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, y, tr(STR_DESK_NO_CLOCK), true, EpdFontFamily::BOLD);
     y += 34;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, "Settings > Clock > Sync now (cần Wi-Fi)");
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_NO_CLOCK_HINT));
     y += 40;
   } else {
     snprintf(buf, sizeof(buf), "%02d:%02d", shown.hour, shown.minute);
@@ -594,7 +779,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     y += renderer.getLineHeight(DESK_CLOCK_FONT_ID) + 2;
 
     const int32_t jd = desk::julianDay(shown.day, shown.month, shown.year);
-    snprintf(buf, sizeof(buf), "%s, %d/%d/%d", desk::weekdayName(desk::weekdayOf(jd)), shown.day, shown.month,
+    snprintf(buf, sizeof(buf), "%s, %d/%d/%d", weekdayText(desk::weekdayOf(jd)), shown.day, shown.month,
              shown.year);
     renderer.drawCenteredText(UI_12_FONT_ID, y, buf, true, EpdFontFamily::BOLD);
     y += 38;
@@ -602,7 +787,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     const desk::LunarDate lunar = desk::solarToLunar(shown.day, shown.month, shown.year);
     char yearName[32];
     desk::canChiOfYear(lunar.year, yearName, sizeof(yearName));
-    snprintf(buf, sizeof(buf), "Âm lịch %d/%d%s · năm %s", lunar.day, lunar.month, lunar.leap ? " nhuận" : "",
+    snprintf(buf, sizeof(buf), tr(STR_DESK_LUNAR_LINE), lunar.day, lunar.month, lunar.leap ? tr(STR_DESK_LEAP) : "",
              yearName);
     renderer.drawCenteredText(UI_12_FONT_ID, y, buf);
     y += 34;
@@ -611,7 +796,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     char monthName[32];
     desk::canChiOfDay(jd, dayName, sizeof(dayName));
     desk::canChiOfMonth(lunar, monthName, sizeof(monthName));
-    snprintf(buf, sizeof(buf), "Ngày %s · tháng %s", dayName, monthName);
+    snprintf(buf, sizeof(buf), tr(STR_DESK_CANCHI_LINE), dayName, monthName);
     renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
     y += 38;
 
@@ -619,16 +804,20 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     if (ev.found) {
       char pill[32];
       if (ev.daysUntil == 0) {
-        snprintf(pill, sizeof(pill), "Hôm nay");
+        snprintf(pill, sizeof(pill), "%s", tr(STR_DESK_TODAY));
+      } else if (ev.daysUntil == 1) {
+        snprintf(pill, sizeof(pill), "%s", tr(STR_DESK_TOMORROW));
       } else {
-        snprintf(pill, sizeof(pill), "Còn %d ngày", ev.daysUntil);
+        snprintf(pill, sizeof(pill), tr(STR_DESK_DAYS_LEFT), ev.daysUntil);
       }
+      char evName[64];
+      eventText(ev, evName, sizeof(evName));
       const int pillW = renderer.getTextWidth(UI_10_FONT_ID, pill, EpdFontFamily::BOLD) + 20;
-      const int nameW = renderer.getTextWidth(UI_10_FONT_ID, ev.name);
+      const int nameW = renderer.getTextWidth(UI_10_FONT_ID, evName);
       const int x0 = (w - (pillW + 10 + nameW)) / 2;
       renderer.fillRect(x0, y - 4, pillW, 30, true);
       renderer.drawText(UI_10_FONT_ID, x0 + 10, y, pill, false, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, x0 + pillW + 10, y, ev.name);
+      renderer.drawText(UI_10_FONT_ID, x0 + pillW + 10, y, evName);
     }
     y += 44;
   }
@@ -651,9 +840,9 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
       // A drive letter fits the column; a long mount path does not.
       static char diskLabel[16];
       if (strlen(pc.disks[0].name) <= 3) {
-        snprintf(diskLabel, sizeof(diskLabel), "Ổ %s", pc.disks[0].name);
+        snprintf(diskLabel, sizeof(diskLabel), tr(STR_DESK_DISK), pc.disks[0].name);
       } else {
-        snprintf(diskLabel, sizeof(diskLabel), "Ổ đĩa");
+        snprintf(diskLabel, sizeof(diskLabel), "%s", tr(STR_DESK_DISK_ANY));
       }
       items[2] = {diskLabel, desk::percentOf(pc.disks[0].usedGb, pc.disks[0].totalGb)};
     }
@@ -671,10 +860,11 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
 
   if (batteryMode) {
     // The front buttons cannot wake the light sleep: only the power button can.
-    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40, "Tiết kiệm pin · bấm nút nguồn để dùng");
+    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40, tr(STR_DESK_BATTERY_SAVER));
     return;
   }
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Thoát"), "Làm mới", "Trang", "Trang");
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_EXIT)), tr(STR_DESK_REFRESH),
+                                            tr(STR_DESK_PAGE), tr(STR_DESK_PAGE));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -683,16 +873,16 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
   const int h = renderer.getScreenHeight();
   char buf[96];
   char hm[8];
-  drawStatusBar("Máy tính", "");
+  drawStatusBar(tr(STR_DESK_PC), "");
 
   if (!pc.valid || !pcFresh(nowUnix)) {
     int y = h / 2 - 90;
-    renderer.drawCenteredText(UI_12_FONT_ID, y, pcPolling ? "Đang tìm máy tính..." : "Không thấy máy tính", true,
+    renderer.drawCenteredText(UI_12_FONT_ID, y, pcPolling ? tr(STR_DESK_PC_SEARCHING) : tr(STR_DESK_PC_NOT_FOUND), true,
                               EpdFontFamily::BOLD);
     y += 44;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, "Agent chưa chạy hoặc PC đang tắt.");
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_HINT1));
     y += 30;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, "Đồng hồ, lịch và thời tiết vẫn hoạt động.");
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_HINT2));
     y += 44;
     if (pcAttempted && pcResult != deskweather::Result::Ok) {
       renderer.drawCenteredText(UI_10_FONT_ID, y, deskweather::resultText(pcResult));
@@ -700,14 +890,14 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     }
     if (pc.valid) {
       formatLocalHm(pc.receivedAt, hm, sizeof(hm));
-      snprintf(buf, sizeof(buf), "Lần cuối thấy lúc %s", hm);
+      snprintf(buf, sizeof(buf), tr(STR_DESK_LAST_SEEN), hm);
       renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
     }
   } else {
     int y = 62;
     renderer.drawText(UI_12_FONT_ID, kMargin, y, pc.host, true, EpdFontFamily::BOLD);
     formatLocalHm(pc.receivedAt, hm, sizeof(hm));
-    snprintf(buf, sizeof(buf), "cập nhật %s", hm);
+    snprintf(buf, sizeof(buf), tr(STR_DESK_UPDATED), hm);
     renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), y + 6, buf);
     y += 48;
 
@@ -720,12 +910,12 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     };
     snprintf(buf, sizeof(buf), "%d%%", pc.cpuPct);
     row("CPU", buf, pc.cpuPct);
-    desk::formatSize(pc.ramUsedGb, pc.ramTotalGb, buf, sizeof(buf));
+    desk::formatSize(pc.ramUsedGb, pc.ramTotalGb, buf, sizeof(buf), decimalMark());
     row("RAM", buf, desk::percentOf(pc.ramUsedGb, pc.ramTotalGb));
     for (int i = 0; i < pc.diskCount && i < 3; ++i) {
       char label[24];
-      snprintf(label, sizeof(label), "Ổ %s", pc.disks[i].name);
-      desk::formatSize(pc.disks[i].usedGb, pc.disks[i].totalGb, buf, sizeof(buf));
+      snprintf(label, sizeof(label), tr(STR_DESK_DISK), pc.disks[i].name);
+      desk::formatSize(pc.disks[i].usedGb, pc.disks[i].totalGb, buf, sizeof(buf), decimalMark());
       row(label, buf, desk::percentOf(pc.disks[i].usedGb, pc.disks[i].totalGb));
     }
 
@@ -734,13 +924,13 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     char down[24];
     char up[24];
     char uptime[32];
-    desk::formatRate(pc.netDownBps, down, sizeof(down));
-    desk::formatRate(pc.netUpBps, up, sizeof(up));
-    desk::formatUptime(pc.uptimeSec, uptime, sizeof(uptime));
-    snprintf(buf, sizeof(buf), "Mạng ↓ %s   ↑ %s", down, up);
+    desk::formatRate(pc.netDownBps, down, sizeof(down), decimalMark());
+    desk::formatRate(pc.netUpBps, up, sizeof(up), decimalMark());
+    uptimeText(pc.uptimeSec, uptime, sizeof(uptime));
+    snprintf(buf, sizeof(buf), tr(STR_DESK_NETWORK), down, up);
     renderer.drawText(UI_10_FONT_ID, kMargin, y, buf);
     y += 30;
-    snprintf(buf, sizeof(buf), "Đã chạy %s", uptime);
+    snprintf(buf, sizeof(buf), tr(STR_DESK_UP_FOR), uptime);
     renderer.drawText(UI_10_FONT_ID, kMargin, y, buf);
     y += 44;
 
@@ -749,15 +939,15 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     renderer.drawRoundedRect(kMargin, y, w - 2 * kMargin, cardH, 2, 10, true);
     renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 12, "Claude", true, EpdFontFamily::BOLD);
     if (!pc.claude.known) {
-      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 18, "Chưa có nguồn số liệu");
+      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 18, tr(STR_DESK_CLAUDE_NO_SOURCE));
     } else {
       const int colW = (w - 2 * kMargin - 28) / 2;
       const struct {
         const char* label;
         int pct;
         uint32_t reset;
-      } q[2] = {{"Phiên 5 giờ", pc.claude.sessionPct, pc.claude.sessionReset},
-                {"Tuần này", pc.claude.weekPct, pc.claude.weekReset}};
+      } q[2] = {{tr(STR_DESK_CLAUDE_SESSION), pc.claude.sessionPct, pc.claude.sessionReset},
+                {tr(STR_DESK_CLAUDE_WEEK), pc.claude.weekPct, pc.claude.weekReset}};
       for (int i = 0; i < 2; ++i) {
         const int x = kMargin + 14 + i * colW;
         const int cy = y + 52;
@@ -767,14 +957,15 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
         drawBar(x, cy + 62, colW - 16, 12, q[i].pct);
         if (q[i].reset != 0) {
           formatLocalHm(q[i].reset, hm, sizeof(hm));
-          snprintf(buf, sizeof(buf), "Làm mới %s", hm);
+          snprintf(buf, sizeof(buf), tr(STR_DESK_RESETS_AT), hm);
           renderer.drawText(UI_10_FONT_ID, x + 70, cy + 30, buf);
         }
       }
     }
   }
 
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Về"), "Làm mới", "Trang", "Trang");
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), tr(STR_DESK_REFRESH),
+                                            tr(STR_DESK_PAGE), tr(STR_DESK_PAGE));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -786,11 +977,12 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
 
   if (photos.empty()) {
     renderer.clearScreen();
-    drawStatusBar("Khung ảnh", "");
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 60, "Chưa có ảnh", true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, "Chép ảnh .bmp hoặc .png vào");
-    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, "/desk/photos trên thẻ nhớ", true, EpdFontFamily::BOLD);
-    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Về"), "", "Trang", "Trang");
+    drawStatusBar(tr(STR_DESK_PHOTOS), "");
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 60, tr(STR_DESK_NO_PHOTOS), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, tr(STR_DESK_PHOTOS_HINT));
+    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, tr(STR_DESK_PHOTOS_DIR), true, EpdFontFamily::BOLD);
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), "", tr(STR_DESK_PAGE),
+                                                tr(STR_DESK_PAGE));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     return;
@@ -803,19 +995,14 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
     const int32_t jd = desk::julianDay(shown.day, shown.month, shown.year);
     const int wd = desk::weekdayOf(jd);
     const desk::LunarDate lunar = desk::solarToLunar(shown.day, shown.month, shown.year);
-    char wdName[8];
-    if (wd == 0) {
-      snprintf(wdName, sizeof(wdName), "CN");
-    } else {
-      snprintf(wdName, sizeof(wdName), "T%d", wd + 1);
-    }
-    snprintf(line1, sizeof(line1), "%s %d/%d · %d/%d ÂL", wdName, shown.day, shown.month, lunar.day, lunar.month);
+    snprintf(line1, sizeof(line1), tr(STR_DESK_DATE_LUNAR_SHORT), weekdayShortText(wd), shown.day, shown.month,
+             lunar.day, lunar.month);
   }
   if (weather.valid && desk::weatherFresh(weather, nowUnix)) {
-    snprintf(line2, sizeof(line2), "%d° %s · ảnh %d/%d", weather.tempC, desk::skyLabel(weather.sky), photoIndex + 1,
+    snprintf(line2, sizeof(line2), tr(STR_DESK_PHOTO_STRIP), weather.tempC, skyText(weather.sky), photoIndex + 1,
              static_cast<int>(photos.size()));
   } else {
-    snprintf(line2, sizeof(line2), "Ảnh %d/%d", photoIndex + 1, static_cast<int>(photos.size()));
+    snprintf(line2, sizeof(line2), tr(STR_DESK_PHOTO_N), photoIndex + 1, static_cast<int>(photos.size()));
   }
   const int stripH = 76;
   const int stripX = 14;
@@ -836,8 +1023,8 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   const std::string path = std::string(kPhotoDir) + "/" + photos[photoIndex];
   if (photo::render(renderer, path, false, overlay) != photo::Result::Ok) {
     renderer.clearScreen();
-    drawStatusBar("Khung ảnh", "");
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 30, "Không đọc được ảnh", true, EpdFontFamily::BOLD);
+    drawStatusBar(tr(STR_DESK_PHOTOS), "");
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 30, tr(STR_DESK_PHOTO_ERROR), true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 10, photos[photoIndex].c_str());
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
@@ -851,7 +1038,7 @@ void DeskActivity::renderPomodoro() {
 
   const bool idle = pomodoro.phase() == desk::Pomodoro::Phase::Idle;
   int y = 66;
-  renderer.drawCenteredText(UI_12_FONT_ID, y, desk::pomodoroPhaseLabel(pomodoro.phase()), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, y, phaseText(pomodoro.phase()), true, EpdFontFamily::BOLD);
 
   // A ring of one dot per minute of the phase; filled dots are the minutes left.
   const uint32_t minutes = pomodoro.remainingMinutes(t);
@@ -873,11 +1060,11 @@ void DeskActivity::renderPomodoro() {
   }
   snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(minutes));
   renderer.drawCenteredText(DESK_CLOCK_FONT_ID, cy - renderer.getLineHeight(DESK_CLOCK_FONT_ID) / 2 - 14, buf);
-  renderer.drawCenteredText(UI_10_FONT_ID, cy + 58, pomodoro.paused() ? "đã tạm dừng" : "phút còn lại");
+  renderer.drawCenteredText(UI_10_FONT_ID, cy + 58, pomodoro.paused() ? tr(STR_DESK_PAUSED) : tr(STR_DESK_MIN_LEFT));
 
   y = cy + radius + 40;
   // Round dots: done rounds filled.
-  snprintf(buf, sizeof(buf), "Lượt %d / %d", pomodoro.round(), pomodoro.rounds());
+  snprintf(buf, sizeof(buf), tr(STR_DESK_ROUND), pomodoro.round(), pomodoro.rounds());
   const int labelW = renderer.getTextWidth(UI_12_FONT_ID, buf);
   const int dotsW = pomodoro.rounds() * 24;
   int x = (w - (labelW + 16 + dotsW)) / 2;
@@ -895,22 +1082,24 @@ void DeskActivity::renderPomodoro() {
   y += 44;
 
   if (idle) {
-    renderer.drawCenteredText(UI_10_FONT_ID, y, "Bấm Chọn để bắt đầu 25 phút tập trung");
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_POMO_HINT));
   } else if (shown.valid && !pomodoro.paused()) {
     const int endMin = (shown.hour * 60 + shown.minute + static_cast<int>(minutes)) % 1440;
-    snprintf(buf, sizeof(buf), "Kết thúc lúc %02d:%02d", endMin / 60, endMin % 60);
+    snprintf(buf, sizeof(buf), tr(STR_DESK_ENDS_AT), endMin / 60, endMin % 60);
     renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
   }
   y += 40;
   renderer.drawLine(kMargin, y, w - kMargin, y, 1, true);
   y += 12;
-  snprintf(buf, sizeof(buf), "Hôm nay: %d lượt · %lu phút tập trung", pomodoro.focusRoundsToday(),
+  snprintf(buf, sizeof(buf), tr(STR_DESK_POMO_TODAY), pomodoro.focusRoundsToday(),
            static_cast<unsigned long>(pomodoro.focusMinutesToday()));
   renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
 
-  const char* selectLabel = idle ? "Bắt đầu" : (pomodoro.paused() ? "Tiếp tục" : "Tạm dừng");
-  const auto labels = idle ? mappedInput.mapLabels(mappedInput.withBackArrow("Về"), selectLabel, "Trang", "Trang")
-                           : mappedInput.mapLabels(mappedInput.withBackArrow("Về"), selectLabel, "Bỏ qua", "Đặt lại");
+  const char* selectLabel = idle ? tr(STR_DESK_START) : (pomodoro.paused() ? tr(STR_DESK_RESUME) : tr(STR_DESK_PAUSE));
+  const auto labels = idle ? mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), selectLabel,
+                                                   tr(STR_DESK_PAGE), tr(STR_DESK_PAGE))
+                           : mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), selectLabel,
+                                                   tr(STR_DESK_SKIP), tr(STR_DESK_RESET));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

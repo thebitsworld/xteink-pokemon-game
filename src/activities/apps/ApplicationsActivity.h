@@ -426,7 +426,7 @@ class ApplicationsActivity : public Activity {
     {
       AppEntry deskApp;
       deskApp.name = "Desk";
-      deskApp.detail = "Đồng hồ, lịch âm, thời tiết";
+      deskApp.detail = tr(STR_DESK_APP_DETAIL);
       deskApp.icon = UIIcon::Library;
       deskApp.builtIn = true;
       deskApp.desk = true;

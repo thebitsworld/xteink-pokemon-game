@@ -177,31 +177,37 @@ CalendarEvent nextCalendarEvent(const int day, const int month, const int year, 
     gregorianFromJulianDay(start + offset, sd, sm, sy);
 
     const char* fixed = nullptr;
-    if (sd == 1 && sm == 1) fixed = "Tết Dương lịch";
-    else if (sd == 30 && sm == 4) fixed = "Ngày Thống nhất";
-    else if (sd == 1 && sm == 5) fixed = "Quốc tế Lao động";
-    else if (sd == 2 && sm == 9) fixed = "Quốc khánh";
+    EventKind fixedKind = EventKind::None;
+    if (sd == 1 && sm == 1) fixed = "Tết Dương lịch", fixedKind = EventKind::NewYear;
+    else if (sd == 30 && sm == 4) fixed = "Ngày Thống nhất", fixedKind = EventKind::Reunification;
+    else if (sd == 1 && sm == 5) fixed = "Quốc tế Lao động", fixedKind = EventKind::Labour;
+    else if (sd == 2 && sm == 9) fixed = "Quốc khánh", fixedKind = EventKind::National;
 
     const LunarDate l = solarToLunar(sd, sm, sy, timeZone);
     const char* lunarNamed = nullptr;
+    EventKind lunarKind = EventKind::None;
     if (!l.leap) {
-      if (l.month == 1 && l.day == 1) lunarNamed = "Tết Nguyên đán";
-      else if (l.month == 1 && l.day == 15) lunarNamed = "Rằm tháng Giêng";
-      else if (l.month == 3 && l.day == 10) lunarNamed = "Giỗ Tổ Hùng Vương";
-      else if (l.month == 5 && l.day == 5) lunarNamed = "Tết Đoan Ngọ";
-      else if (l.month == 7 && l.day == 15) lunarNamed = "Vu Lan";
-      else if (l.month == 8 && l.day == 15) lunarNamed = "Tết Trung Thu";
-      else if (l.month == 12 && l.day == 23) lunarNamed = "Ông Công ông Táo";
+      if (l.month == 1 && l.day == 1) lunarNamed = "Tết Nguyên đán", lunarKind = EventKind::Tet;
+      else if (l.month == 1 && l.day == 15) lunarNamed = "Rằm tháng Giêng", lunarKind = EventKind::Lantern;
+      else if (l.month == 3 && l.day == 10) lunarNamed = "Giỗ Tổ Hùng Vương", lunarKind = EventKind::HungKings;
+      else if (l.month == 5 && l.day == 5) lunarNamed = "Tết Đoan Ngọ", lunarKind = EventKind::DoanNgo;
+      else if (l.month == 7 && l.day == 15) lunarNamed = "Vu Lan", lunarKind = EventKind::VuLan;
+      else if (l.month == 8 && l.day == 15) lunarNamed = "Tết Trung Thu", lunarKind = EventKind::MidAutumn;
+      else if (l.month == 12 && l.day == 23) lunarNamed = "Ông Công ông Táo", lunarKind = EventKind::KitchenGods;
     }
 
     if (lunarNamed != nullptr) {
       std::snprintf(ev.name, sizeof(ev.name), "%s", lunarNamed);
+      ev.kind = lunarKind;
     } else if (fixed != nullptr) {
       std::snprintf(ev.name, sizeof(ev.name), "%s", fixed);
-    } else if (l.day == 15) {
-      std::snprintf(ev.name, sizeof(ev.name), "Rằm tháng %s%s", lunarMonthName(l.month), l.leap ? " nhuận" : "");
-    } else if (l.day == 1) {
-      std::snprintf(ev.name, sizeof(ev.name), "Mùng 1 tháng %s%s", lunarMonthName(l.month), l.leap ? " nhuận" : "");
+      ev.kind = fixedKind;
+    } else if (l.day == 15 || l.day == 1) {
+      std::snprintf(ev.name, sizeof(ev.name), "%s tháng %s%s", l.day == 15 ? "Rằm" : "Mùng 1", lunarMonthName(l.month),
+                    l.leap ? " nhuận" : "");
+      ev.kind = l.day == 15 ? EventKind::FullMoon : EventKind::FirstDay;
+      ev.lunarMonth = l.month;
+      ev.leap = l.leap;
     } else {
       continue;
     }

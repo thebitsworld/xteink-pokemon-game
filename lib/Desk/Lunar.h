@@ -42,10 +42,29 @@ const char* lunarMonthName(int month);
 // The nearest day from the given date (today included) carrying an event, within
 // horizonDays: lunar festivals (Tết, Rằm tháng Giêng, Giỗ Tổ, Đoan Ngọ, Vu Lan, Trung Thu,
 // ông Công ông Táo), each month's Rằm and Mùng 1, and the Gregorian public holidays.
+enum class EventKind : uint8_t {
+  None,
+  Tet,
+  Lantern,
+  HungKings,
+  DoanNgo,
+  VuLan,
+  MidAutumn,
+  KitchenGods,
+  NewYear,
+  Reunification,
+  Labour,
+  National,
+  FullMoon,  // Rằm of lunarMonth
+  FirstDay,  // Mùng 1 of lunarMonth
+};
 struct CalendarEvent {
   bool found = false;
   int daysUntil = 0;  // 0 = today
-  char name[48] = {};
+  EventKind kind = EventKind::None;
+  int lunarMonth = 0;  // FullMoon / FirstDay
+  bool leap = false;   // FullMoon / FirstDay in a leap month
+  char name[48] = {};  // Vietnamese name, for logs and tests; the UI translates `kind`
 };
 CalendarEvent nextCalendarEvent(int day, int month, int year, int horizonDays = 45, double timeZone = 7.0);
 

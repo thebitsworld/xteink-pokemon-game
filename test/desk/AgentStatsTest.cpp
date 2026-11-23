@@ -51,6 +51,10 @@ TEST(AgentStats, Formatting) {
   EXPECT_STREQ(buf, "19,5 / 32 GB");
   desk::formatSize(1638.0f, 2000.0f, buf, sizeof(buf));
   EXPECT_STREQ(buf, "1,6 / 2 TB");
+  desk::formatSize(19.5f, 32.0f, buf, sizeof(buf), '.');
+  EXPECT_STREQ(buf, "19.5 / 32 GB");
+  desk::formatRate(2400000, buf, sizeof(buf), '.');
+  EXPECT_STREQ(buf, "2.4 MB/s");
   desk::formatRate(2400000, buf, sizeof(buf));
   EXPECT_STREQ(buf, "2,4 MB/s");
   desk::formatRate(310000, buf, sizeof(buf));
