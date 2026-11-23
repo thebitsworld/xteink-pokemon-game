@@ -54,7 +54,8 @@ constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and
 constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo / PC page on battery: back to the clock
 constexpr uint32_t kAddressHoldMs = 800;               // hold Select on the PC page: PC address
 constexpr uint32_t kNetTaskStackBytes = 10240;         // HTTPS + JSON; the loop task has 8192
-constexpr int kPhotoStripH = 104;                      // the info strip under a photo
+constexpr int kPhotoStripH = 128;                      // the info strip under a photo
+constexpr int kBottomSafe = 24;                        // the X3's bezel hides the panel's last rows
 constexpr int kPhotoStripGap = 10;
 
 // ---- text in the reader's language (I18n: English and Vietnamese; others show English) ----
@@ -1056,7 +1057,9 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
 
   if (batteryMode) {
     // The front buttons cannot wake the light sleep: only the power button can.
-    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40, tr(STR_DESK_BATTERY_SAVER));
+    renderer.drawCenteredText(UI_10_FONT_ID,
+                              renderer.getScreenHeight() - kBottomSafe - renderer.getLineHeight(UI_10_FONT_ID),
+                              tr(STR_DESK_BATTERY_SAVER));
     return;
   }
   drawPageHints(tr(STR_DESK_EXIT), tr(STR_DESK_REFRESH));
@@ -1253,12 +1256,13 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   const auto overlay = [&](const bool gray) {
     if (!gray) {
       renderer.drawLine(stripX, stripY + 4, stripX + stripW, stripY + 4, 2, true);
-      int y = stripY + 10;
-      if (clock[0] != '\0') {
-        renderer.drawCenteredText(DESK_DIGITS_FONT_ID, y, clock);
-        y += renderer.getLineHeight(DESK_DIGITS_FONT_ID);
-      }
+      // Laid out from the bottom, clear of the bezel (text ran off the bottom on the X3).
+      int y = h - kBottomSafe - renderer.getLineHeight(UI_10_FONT_ID);
       renderer.drawCenteredText(UI_10_FONT_ID, y, line2);
+      if (clock[0] != '\0') {
+        y -= renderer.getLineHeight(DESK_DIGITS_FONT_ID);
+        renderer.drawCenteredText(DESK_DIGITS_FONT_ID, y, clock);
+      }
       stripMask.assign(static_cast<size_t>(stripRowBytes) * kPhotoStripH, 0);
       for (int y = 0; y < kPhotoStripH; ++y) {
         for (int x = 0; x < stripW; ++x) {
