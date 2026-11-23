@@ -1219,7 +1219,7 @@ inline std::vector<SettingInfo> buildSystemFilesCacheSettingsList(const std::vec
 // The feature switches (FeatureToggles.h): what this build has, each on or off.
 inline std::vector<SettingInfo> buildSystemFeaturesSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
-  settings.reserve(3);
+  settings.reserve(3 + DESK_SETTINGS_COUNT);
 #if defined(CROSSINK_ENABLE_POKEMON)
   addSettingByName(settings, allSettings, StrId::STR_POKEMON);
 #endif
@@ -1227,6 +1227,9 @@ inline std::vector<SettingInfo> buildSystemFeaturesSettingsList(const std::vecto
   addSettingByName(settings, allSettings, StrId::STR_APPS_TITLE);
 #endif
   addSettingByName(settings, allSettings, StrId::STR_SLIDESHOW);
+#if CROSSINK_DESK
+  addSettingByName(settings, allSettings, StrId::STR_DESK_ON_SLEEP);
+#endif
   return settings;
 }
 
