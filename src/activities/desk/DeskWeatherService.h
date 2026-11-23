@@ -35,6 +35,11 @@ bool loadCache(desk::WeatherReport& out);
 Result wifiUp(bool& started);
 void wifiDown();
 
+// Desk is closing: a job in progress gives up at its next step (the Wi-Fi wait, the clock sync,
+// each request) instead of holding the exit until it is done. A cancelled step fails.
+void setCancel(bool on);
+bool cancelled();
+
 // keepWifi: leave Wi-Fi on afterwards (on USB, for the next PC poll) even if this call
 // started it.
 Result refresh(Config& cfg, desk::WeatherReport& out, uint32_t nowUnix, bool keepWifi);

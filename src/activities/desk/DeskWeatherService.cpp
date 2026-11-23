@@ -10,6 +10,7 @@
 #include <Logging.h>
 #include <WiFi.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -39,7 +40,12 @@ bool fetch(const std::string& url, std::string& body) {
   return ok && !body.empty();
 }
 
+std::atomic<bool> cancelFlag{false};
+
 }  // namespace
+
+void setCancel(const bool on) { cancelFlag = on; }
+bool cancelled() { return cancelFlag; }
 
 Result wifiUp(bool& started) {
   started = false;
@@ -54,7 +60,7 @@ Result wifiUp(bool& started) {
   WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
   started = true;
   const uint32_t t0 = millis();
-  while (!hasActiveStationWifiConnection() && millis() - t0 < kWifiTimeoutMs) delay(50);
+  while (!hasActiveStationWifiConnection() && millis() - t0 < kWifiTimeoutMs && !cancelled()) delay(50);
   if (!hasActiveStationWifiConnection()) {
     LOG_ERR(TAG, "Wi-Fi %s did not connect", ssid.c_str());
     return Result::WifiFailed;
@@ -131,11 +137,17 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
     return r;
   }
   if (keepWifi) started = false;  // leave it up for the next round
+  const auto giveUp = [&]() {
+    if (started) wifiDown();
+    return Result::FetchFailed;
+  };
+  if (cancelled()) return giveUp();
 
   // Set the clock while Wi-Fi is up: on entry, then every 6 hours. A Desk is a clock first.
   static uint32_t lastNtpMs = 0;
   static bool ntpDone = false;
   if (!ntpDone || millis() - lastNtpMs > 6UL * 3600UL * 1000UL) {
+    if (cancelled()) return giveUp();
     if (halClock.syncFromNTP()) {
       if (!SETTINGS.clockHasBeenSynced || !SETTINGS.clockDateHasBeenSynced) {
         SETTINGS.clockHasBeenSynced = 1;
@@ -150,6 +162,7 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
 
   std::string body;
   const bool placeStale = !cfg.place.valid || std::strcmp(cfg.city, cfg.resolvedFor) != 0;
+  if (cancelled()) return giveUp();
   if (placeStale) {
     desk::Place place;
     const bool byName = cfg.city[0] != '\0';
@@ -168,11 +181,12 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
     LOG_INF(TAG, "Place %s: %.3f, %.3f", cfg.place.name, cfg.place.lat, cfg.place.lon);
   }
 
+  if (cancelled()) return giveUp();
   const bool fetched = fetch(desk::forecastUrl(cfg.place.lat, cfg.place.lon), body);
   // Air quality (Settings > System > Desk): its own small request; a failure only leaves it out.
   int aqi = -1;
   int pm25 = -1;
-  if (fetched && SETTINGS.deskAirQuality) {
+  if (fetched && SETTINGS.deskAirQuality && !cancelled()) {
     std::string air;
     if (fetch(desk::airQualityUrl(cfg.place.lat, cfg.place.lon), air)) {
       desk::parseAirQuality(air.data(), air.size(), aqi, pm25);

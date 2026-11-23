@@ -93,6 +93,10 @@ deskweather::Result poll(const deskweather::Config& cfg, desk::AgentStats& out, 
     return w;
   }
   if (keepWifi) started = false;
+  if (deskweather::cancelled()) {  // Desk is closing: no mDNS query or request now
+    if (started) deskweather::wifiDown();
+    return deskweather::Result::NoAgent;
+  }
 
   std::string hostPort;
   if (!agentAddress(cfg, hostPort)) {

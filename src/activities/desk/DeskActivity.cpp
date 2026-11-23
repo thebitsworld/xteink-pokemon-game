@@ -435,7 +435,12 @@ void DeskActivity::switchPage(const Page to) {
 }
 
 void DeskActivity::onExit() {
+  // The job runs on its own task and holds this activity: it has to end before Desk does. Told to
+  // give up, it ends within the step in progress (a 20 s Wi-Fi wait once held the exit, X3
+  // owner's report 2026-11-24).
+  deskweather::setCancel(true);
   waitNetJob();
+  deskweather::setCancel(false);
   Activity::onExit();
   open = false;
   batteryNowRequested = false;
@@ -492,11 +497,12 @@ void DeskActivity::runNetJob() {
       return;
     }
   }
+  if (deskweather::cancelled()) return;  // Desk is closing
   if (netWantPc) {
     netPcResult = deskagent::poll(netConfig, netPc, netNow, netKeepWifi);
     netPcRan = true;
   }
-  if (netPhotoIndex >= 0) {
+  if (netPhotoIndex >= 0 && !deskweather::cancelled()) {
     netPhotoResult = deskagent::downloadPhoto(netConfig, netPhotoIndex, kPcPhotoPath, netKeepWifi);
   }
 }
