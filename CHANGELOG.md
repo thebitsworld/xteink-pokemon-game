@@ -1,3 +1,15 @@
+## [2.2.0-beta.3] - 2026-11-23
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use. These fixes were checked in the simulator only, not yet on a reader.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0. Các bản sửa này mới thử trên simulator, chưa thử trên máy thật.
+
+### Fixed
+
+- Desk: the side keys always switch pages. On the calendar the two right-hand front buttons change the month ("< Month" / "Month >"); with a Pomodoro timer set they skip and reset.
+- Desk: finding the PC by mDNS no longer leaves mDNS running after Desk closes, which could leave too little memory for the folder picker ("Memory error").
+- Desk: with no PC answering, the PC is looked for less and less often (2, 4, 8, 16 min, then every 30 min) instead of every 2 minutes for ever. Refresh on the PC page, a new address or reopening Desk starts over.
+
 ## [2.2.0-beta.2-desktest-x4pro] - 2026-11-23
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.1 to try Desk). There is no X3/X4 or X4 Classic file in this release.
