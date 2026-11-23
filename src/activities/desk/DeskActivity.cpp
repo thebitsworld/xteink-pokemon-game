@@ -52,7 +52,7 @@ constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
 constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo frame on battery: back to the clock
 constexpr uint32_t kNetTaskStackBytes = 10240;         // HTTPS + JSON; the loop task has 8192
-constexpr int kPhotoStripH = 76;                       // the info strip under a photo
+constexpr int kPhotoStripH = 104;                      // the info strip under a photo
 constexpr int kPhotoStripGap = 10;
 
 // ---- text in the reader's language (I18n: English and Vietnamese; others show English) ----
@@ -1093,7 +1093,7 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   const int w = renderer.getScreenWidth();
   const int h = renderer.getScreenHeight();
   char line1[64];
-  char line2[64];
+  char line2[96];
 
   if (photos.empty()) {
     renderer.clearScreen();
@@ -1110,21 +1110,25 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
     return;
   }
 
-  // The info strip: date, lunar date, weather and the photo's number. No clock: a photo is
-  // only redrawn when it changes.
+  // The info strip, centred: the clock, then date, lunar date and temperature. The panel has no
+  // partial refresh, so the clock is the time the photo was drawn: it moves on with each photo
+  // (owner's choice, 2026-11-23: no whole-photo redraw every minute).
+  const LocalTime t = readLocalTime();
+  char clock[8] = "";
   line1[0] = '\0';
-  if (shown.valid) {
-    const int32_t jd = desk::julianDay(shown.day, shown.month, shown.year);
+  if (t.valid) {
+    snprintf(clock, sizeof(clock), "%02d:%02d", t.hour, t.minute);
+    const int32_t jd = desk::julianDay(t.day, t.month, t.year);
     const int wd = desk::weekdayOf(jd);
-    const desk::LunarDate lunar = desk::solarToLunar(shown.day, shown.month, shown.year);
-    snprintf(line1, sizeof(line1), tr(STR_DESK_DATE_LUNAR_SHORT), weekdayShortText(wd), shown.day, shown.month,
-             lunar.day, lunar.month);
+    const desk::LunarDate lunar = desk::solarToLunar(t.day, t.month, t.year);
+    snprintf(line1, sizeof(line1), tr(STR_DESK_DATE_LUNAR_SHORT), weekdayShortText(wd), t.day, t.month, lunar.day,
+             lunar.month);
   }
+  line2[0] = '\0';
   if (weather.valid && desk::weatherFresh(weather, nowUnix)) {
-    snprintf(line2, sizeof(line2), tr(STR_DESK_PHOTO_STRIP), weather.tempC, skyText(weather.sky), photoIndex + 1,
-             static_cast<int>(photos.size()));
+    snprintf(line2, sizeof(line2), line1[0] != '\0' ? "%s · %d°" : "%s%d°", line1, weather.tempC);
   } else {
-    snprintf(line2, sizeof(line2), tr(STR_DESK_PHOTO_N), photoIndex + 1, static_cast<int>(photos.size()));
+    snprintf(line2, sizeof(line2), "%s", line1);
   }
   // The photo is fitted above the strip (photo::render's reserveBottom), so the strip sits on
   // blank paper. The B/W pass draws it and keeps a 1-bit copy; the gray passes need it again on
@@ -1139,8 +1143,12 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   const auto overlay = [&](const bool gray) {
     if (!gray) {
       renderer.drawLine(stripX, stripY + 4, stripX + stripW, stripY + 4, 2, true);
-      renderer.drawText(UI_12_FONT_ID, stripX, stripY + 12, line1, true, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, stripX, stripY + 44, line2);
+      int y = stripY + 10;
+      if (clock[0] != '\0') {
+        renderer.drawCenteredText(DESK_DIGITS_FONT_ID, y, clock);
+        y += renderer.getLineHeight(DESK_DIGITS_FONT_ID);
+      }
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line2);
       stripMask.assign(static_cast<size_t>(stripRowBytes) * kPhotoStripH, 0);
       for (int y = 0; y < kPhotoStripH; ++y) {
         for (int x = 0; x < stripW; ++x) {
