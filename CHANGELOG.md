@@ -1,3 +1,21 @@
+## [2.2.0-beta.1] - 2026-11-23
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use. Everything else is the same as 2.1.0. Desk mode was tried on a real X3 (clock, weather, PC page, photo frame, battery loop) and in the simulator; the newest parts (month calendar, air quality, quiet nights, photos from the PC, the settings menu) only in the simulator, and the X4, X4 Pro and X4 Classic not at all. If something goes wrong, go back to v2.1.0: your Pokémon save and books are kept. A reader flashed with the earlier "X3 Lite" test file needs this file flashed by hand once.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0; ngoài Desk, mọi thứ giống 2.1.0. Desk đã chạy trên X3 thật (đồng hồ, thời tiết, trang máy tính, khung ảnh, chế độ tiết kiệm pin); phần mới nhất (lịch tháng, chất lượng không khí, chế độ ban đêm, ảnh từ máy tính, menu cài đặt) mới thử trên simulator, còn X4, X4 Pro và X4 Classic chưa thử. Nếu có lỗi, cài lại v2.1.0: save Pokémon và sách vẫn giữ nguyên. Máy đã nạp bản thử "X3 Lite" trước đây cần nạp tay file này một lần.
+
+### New
+
+- Desk mode (Applications > Desk): a desk clock for a reader that stays on the desk.
+  - Clock with the Gregorian and lunar date, can chi and the next holiday or Rằm/Mùng 1.
+  - Weather from Open-Meteo (place by name or by IP, °C or °F) with the next 9 hours and air quality (US AQI, shown white on black when it is poor).
+  - Month calendar with the lunar day under each date and today's giờ hoàng đạo; the side keys change the month.
+  - PC page: CPU, RAM, disks, network and your Claude usage limits, from a small agent on your PC (`tools/desk-agent`).
+  - Photo frame: Photo Slideshow's folder and settings, or photos straight from the PC agent's folder, with the time and date under the photo.
+  - Pomodoro timer.
+  - On the X3, after 30 s on battery the clock goes into a battery saver that redraws once a minute (every 30 min during quiet nights); the power button brings Desk back.
+- Settings > System > Desk: every Desk setting in one place (also on the web settings page). Hold the middle button on any Desk page to open it. "Sleep opens Desk" moved here from Features.
+
 ## [2.1.0] - 2026-11-06
 
 Everything since 2.0.1, including 2.0.2-beta.1-x4pro.
