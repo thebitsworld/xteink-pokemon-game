@@ -43,6 +43,14 @@ Without mDNS, put the agent's address in `/.crosspoint/desk.json` on the SD card
 
 Percent, GB, bytes per second, seconds.
 
+## Photos for the photo frame
+
+`python desk_agent.py --photos "C:/Users/me/Pictures/Desk"` serves that folder (and its
+subfolders: JPEG, PNG, BMP, WebP, GIF, TIFF) to the reader when Settings > System > Desk >
+"Photos from" is "PC". Each photo goes out as a grayscale PNG sized for the screen (Pillow
+needed); the reader downloads the one it shows and keeps Photo Slideshow's interval, order and
+Fit/Crop.
+
 ## Claude usage limits
 
 `claude` is `{"session": [pct, resets_at], "week": [pct, resets_at]}` or `null`. Claude Code

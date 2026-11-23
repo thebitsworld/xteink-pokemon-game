@@ -11,6 +11,9 @@ Response, under 1 KB:
    "net": [2400000, 310000], "uptime": 274000, "claude": null}
 Units: percent, GB, bytes per second, seconds.
 
+"photos": how many photos --photos DIR holds; photo n is GET /v1/photos/<n>.png, a grayscale
+PNG sized to cover the reader's photo area (528 x 664), from Pillow.
+
 "claude": {"session": [pct, resets_at], "week": [pct, resets_at]} from the Claude Code
 subscription limits that desk_statusline.py saves (Claude Code's status line data), or null
 when there is none. A window whose reset time has passed reads 0 % until Claude Code reports it
@@ -35,6 +38,74 @@ SAMPLE_SECONDS = 2.0
 MAX_DISKS = 4
 GB = 1024**3
 CLAUDE_LIMITS_PATH = Path.home() / ".claude" / "desk-rate-limits.json"  # desk_statusline.py
+PHOTO_W, PHOTO_H = 528, 664  # the X3's screen above Desk's info strip
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
+
+
+class Photos:
+    """The --photos folder: a sorted list (re-read every minute) and the last few PNGs made."""
+
+    def __init__(self, folder: str | None) -> None:
+        self.folder = Path(folder).expanduser() if folder else None
+        self._lock = threading.Lock()
+        self._names: list[Path] = []
+        self._listed_at = 0.0
+        self._cache: dict[tuple[str, float], bytes] = {}
+
+    def names(self) -> list[Path]:
+        if self.folder is None:
+            return []
+        with self._lock:
+            if time.monotonic() - self._listed_at > 60:
+                try:
+                    self._names = sorted(
+                        (f for f in self.folder.rglob("*") if f.is_file() and f.suffix.lower() in PHOTO_EXTENSIONS
+                         and not f.name.startswith(".")),
+                        key=lambda f: str(f).lower())
+                except OSError:
+                    self._names = []
+                self._listed_at = time.monotonic()
+            return list(self._names)
+
+    def count(self) -> int:
+        return len(self.names())
+
+    def png(self, index: int) -> bytes | None:
+        names = self.names()
+        if not 0 <= index < len(names):
+            return None
+        path = names[index]
+        try:
+            key = (str(path), path.stat().st_mtime)
+        except OSError:
+            return None
+        with self._lock:
+            if key in self._cache:
+                return self._cache[key]
+        try:
+            from io import BytesIO
+
+            from PIL import Image, ImageOps
+        except ImportError:
+            return None
+        try:
+            with Image.open(path) as img:
+                img = ImageOps.exif_transpose(img).convert("L")
+                scale = max(PHOTO_W / img.width, PHOTO_H / img.height)
+                if scale < 1:
+                    img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+                                     Image.LANCZOS)
+                out = BytesIO()
+                img.save(out, "PNG", optimize=True)
+        except (OSError, ValueError):
+            return None
+        data = out.getvalue()
+        with self._lock:
+            if len(self._cache) >= 4:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = data
+        return data
+
 
 
 class Sampler:
@@ -119,7 +190,7 @@ def claude_usage(now: float) -> dict | None:
     return out
 
 
-def build_stats(sampler: Sampler, host: str) -> dict:
+def build_stats(sampler: Sampler, host: str, photos: "Photos | None" = None) -> dict:
     cpu, down, up = sampler.snapshot()
     mem = psutil.virtual_memory()
     now = time.time()
@@ -133,6 +204,7 @@ def build_stats(sampler: Sampler, host: str) -> dict:
         "net": [down, up],
         "uptime": int(time.time() - psutil.boot_time()),
         "claude": claude_usage(now),
+        "photos": photos.count() if photos else 0,
     }
 
 
@@ -146,13 +218,30 @@ def lan_address() -> str:
             return "127.0.0.1"
 
 
-def make_handler(sampler: Sampler, host: str):
+def make_handler(sampler: Sampler, host: str, photos: Photos):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 (http.server naming)
-            if self.path.split("?", 1)[0] != "/v1/stats":
+            path = self.path.split("?", 1)[0]
+            if path.startswith("/v1/photos/") and path.endswith(".png"):
+                try:
+                    index = int(path[len("/v1/photos/"):-len(".png")])
+                except ValueError:
+                    self.send_error(404)
+                    return
+                data = photos.png(index)
+                if data is None:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if path != "/v1/stats":
                 self.send_error(404)
                 return
-            body = json.dumps(build_stats(sampler, host), separators=(",", ":")).encode("utf-8")
+            body = json.dumps(build_stats(sampler, host, photos), separators=(",", ":")).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -191,14 +280,17 @@ def main() -> int:
     parser.add_argument("--bind", default="0.0.0.0", help="interface to listen on (default: all)")
     parser.add_argument("--name", default=socket.gethostname(), help="name shown on the reader")
     parser.add_argument("--no-mdns", action="store_true", help="do not advertise _xdesk._tcp")
+    parser.add_argument("--photos", default=None, help="folder of photos for Desk's photo frame (needs Pillow)")
     args = parser.parse_args()
 
     sampler = Sampler()
-    server = ThreadingHTTPServer((args.bind, args.port), make_handler(sampler, args.name))
+    photos = Photos(args.photos)
+    server = ThreadingHTTPServer((args.bind, args.port), make_handler(sampler, args.name, photos))
     address = lan_address()
     mdns = None if args.no_mdns else advertise(args.port, args.name, address)
     print(f"Desk agent '{args.name}' on http://{address}:{args.port}/v1/stats"
-          f"{'' if mdns else ' (no mDNS)'}")
+          f"{'' if mdns else ' (no mDNS)'}"
+          f"{f', {photos.count()} photos in {photos.folder}' if photos.folder else ''}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
