@@ -197,6 +197,12 @@ light sleep guarded by the RTC watchdog (a hung chunk resets the chip and Desk r
 awake at a low CPU clock (est. a few days per charge), or Desk on USB only with a static
 "date only" screen on battery.
 
+v6 (2026-11-23, chosen by the owner): light sleep in 10 s chunks, pins held, from a standalone
+loop with button capture, Wi-Fi and the activity's render task out of the way, and the RTC
+watchdog armed. 25 ticks without a hang or a reset, about -3 mA (est. ~9 days on 650 mAh);
+the watchdog's recovery was not exercised. Likely reading: v4's hangs came from the reader's
+background work around the sleep, not from light sleep itself.
+
 ## Phases
 
 Each phase: its own commits (code and docs apart), `pio run -e pokemon-x3-lite` flash/RAM noted in
@@ -233,6 +239,14 @@ the commit message, host tests green, simulator check where it applies.
 4. **Photo frame + Pomodoro** pages.
 5. **Battery mode**: light-sleep ticks, Wi-Fi schedule, night sleep, full-refresh schedule,
    gauge-based source switching; 48 h battery log with defaults, then tune defaults.
+   *Done (2026-11-23, first cut):* `src/activities/desk/DeskPower` (v6's sleep, pins, watchdog,
+   RTC markers). On battery, 30 s after the last input (no Pomodoro, not on the photo page) the
+   main screen enters a loop: minute ticks aligned to the RTC, weather every 60 min (Wi-Fi up and
+   down), PC off, half refresh every 3 h and on a new day, "power button to use" instead of
+   button hints. The power button or USB power leaves it by a restart straight back into Desk
+   (`consumeOpenDeskRequest()` in setup); a watchdog reset resumes it from setup
+   (`resumeBatteryFromBoot()`, gives up after 50 resets). *Left:* night sleep, the settings
+   page's battery intervals, a long battery run on the reader.
 6. **Claude quota** once open question 1 is settled.
 
 ## Open questions
