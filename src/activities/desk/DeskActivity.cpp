@@ -558,6 +558,12 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 #ifndef SIMULATOR
   gpio.stopButtonCapture();
 #endif
+  // Full CPU speed for the whole run (light sleep stops the clock anyway, so this only costs the
+  // ~0.5 s awake per tick). Desk on battery does not prevent auto-sleep, so the main loop had
+  // dropped the CPU to 10 MHz before the loop began; on the X3 the APB clock follows the CPU below
+  // 80 MHz, which throws off the panel's SPI timing. Runs stopped after one or two ticks that way
+  // (battery log, 2026-11-23), while probe v6 - which kept full speed - ran 25.
+  HalPowerManager::Lock powerLock;
   deskpower::setBatteryRunArmed(true);
   deskpower::watchdogArm(kBatteryWatchdogMs);
   batteryLogNow(fromBoot ? "resume" : "enter");
@@ -597,6 +603,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
     }
 
     drawPage();
+    batteryLogNow("drawn");  // a run that stops after "tick" hangs drawing, after "drawn" sleeping
     if (deskpower::sleepFor(deskpower::msToNextMinute()) == deskpower::Wake::PowerButton) leaveBatteryLoop();
   }
 }
