@@ -1,3 +1,13 @@
+## [2.2.0-beta.5] - 2026-11-24
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use. The touch controls were checked in the X4 Pro simulator only, not yet on a reader.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0. Phần điều khiển cảm ứng mới thử trên simulator X4 Pro, chưa thử trên máy thật.
+
+### Added
+
+- Desk on touch readers (X4 Pro): a bar of four buttons along the bottom (Back, the page's action, previous / next page) and a sideways swipe to turn the page. On the calendar the last two buttons are "< Month" / "Month >"; with a Pomodoro timer set they skip and reset. Readers with buttons keep their usual hints.
+
 ## [2.2.0-beta.4-desktest-x4pro] - 2026-11-23
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.3 to try Desk). There is no X3/X4 or X4 Classic file in this release.
