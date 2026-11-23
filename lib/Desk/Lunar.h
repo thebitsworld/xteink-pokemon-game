@@ -36,6 +36,12 @@ void canChiOfDay(int32_t julianDayNumber, char* out, size_t outSize);
 void canChiOfMonth(const LunarDate& lunar, char* out, size_t outSize);
 void canChiOfYear(int lunarYear, char* out, size_t outSize);
 
+// Giờ hoàng đạo of a day: bit i set for earthly branch i (0 Tý 23-1h, 1 Sửu 1-3h, ... 11 Hợi
+// 21-23h); six bits are set. From the day's branch, as in Ho Ngoc Duc's calendar.
+uint16_t auspiciousHours(int32_t julianDayNumber);
+// The earthly branch's name, UTF-8: "Tý" .. "Hợi" for 0..11.
+const char* branchName(int branch);
+
 // Lunar month name as used in Vietnamese: "Giêng", "Hai", ..., "Mười Một", "Chạp".
 const char* lunarMonthName(int month);
 

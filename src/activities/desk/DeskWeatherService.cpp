@@ -109,8 +109,18 @@ bool loadCache(desk::WeatherReport& out) {
   if (!Storage.readFileToString(TAG, kCachePath, kMaxBody + 32, text)) return false;
   const size_t nl = text.find('\n');
   if (nl == std::string::npos) return false;
-  const uint32_t fetchedAt = static_cast<uint32_t>(std::strtoul(text.c_str(), nullptr, 10));
-  return desk::parseForecast(text.c_str() + nl + 1, text.size() - nl - 1, fetchedAt, out);
+  char* end = nullptr;
+  const uint32_t fetchedAt = static_cast<uint32_t>(std::strtoul(text.c_str(), &end, 10));
+  long aqi = -1;
+  long pm25 = -1;
+  if (end != nullptr && *end == ' ') {
+    aqi = std::strtol(end, &end, 10);
+    if (end != nullptr && *end == ' ') pm25 = std::strtol(end, &end, 10);
+  }
+  if (!desk::parseForecast(text.c_str() + nl + 1, text.size() - nl - 1, fetchedAt, out)) return false;
+  out.aqi = static_cast<int16_t>(aqi);
+  out.pm25 = static_cast<int16_t>(pm25);
+  return true;
 }
 
 Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, const bool keepWifi) {
@@ -159,14 +169,26 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
   }
 
   const bool fetched = fetch(desk::forecastUrl(cfg.place.lat, cfg.place.lon), body);
+  // Air quality (Settings > System > Desk): its own small request; a failure only leaves it out.
+  int aqi = -1;
+  int pm25 = -1;
+  if (fetched && SETTINGS.deskAirQuality) {
+    std::string air;
+    if (fetch(desk::airQualityUrl(cfg.place.lat, cfg.place.lon), air)) {
+      desk::parseAirQuality(air.data(), air.size(), aqi, pm25);
+    }
+  }
   if (started) wifiDown();
   if (!fetched) return Result::FetchFailed;
   desk::WeatherReport report;
   if (!desk::parseForecast(body.data(), body.size(), nowUnix, report)) return Result::ParseFailed;
+  report.aqi = static_cast<int16_t>(aqi);
+  report.pm25 = static_cast<int16_t>(pm25);
   out = report;
 
-  char header[16];
-  std::snprintf(header, sizeof(header), "%lu\n", static_cast<unsigned long>(nowUnix));
+  // First line: fetched-at, AQI, PM2.5; then Open-Meteo's forecast as received.
+  char header[40];
+  std::snprintf(header, sizeof(header), "%lu %d %d\n", static_cast<unsigned long>(nowUnix), aqi, pm25);
   Storage.writeFile(kCachePath, String(header) + String(body.c_str()));
   return Result::Ok;
 }

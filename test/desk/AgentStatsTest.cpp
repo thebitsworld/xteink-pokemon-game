@@ -70,3 +70,13 @@ TEST(AgentStats, Formatting) {
   EXPECT_EQ(desk::percentOf(13.8f, 31.7f), 44);
   EXPECT_EQ(desk::percentOf(1, 0), 0);
 }
+
+TEST(AgentStats, PhotoCount) {
+  const char with[] = R"({"v":1,"host":"PC","cpu":5,"ram":[1,2],"disks":[],"net":[0,0],"uptime":1,"photos":12})";
+  desk::AgentStats s;
+  ASSERT_TRUE(desk::parseAgentStats(with, sizeof(with) - 1, 0, s));
+  EXPECT_EQ(s.photoCount, 12);
+  const char without[] = R"({"v":1,"host":"PC","cpu":5,"ram":[1,2],"disks":[],"net":[0,0],"uptime":1})";
+  ASSERT_TRUE(desk::parseAgentStats(without, sizeof(without) - 1, 0, s));
+  EXPECT_EQ(s.photoCount, 0);
+}

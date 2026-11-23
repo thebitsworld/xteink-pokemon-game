@@ -58,6 +58,25 @@ std::string forecastUrl(const double lat, const double lon) {
   return buf;
 }
 
+std::string airQualityUrl(const double lat, const double lon) {
+  char buf[200];
+  std::snprintf(buf, sizeof(buf),
+                "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%.3f&longitude=%.3f"
+                "&current=us_aqi,pm2_5",
+                lat, lon);
+  return buf;
+}
+
+bool parseAirQuality(const char* json, const size_t length, int& aqi, int& pm25) {
+  JsonDocument doc;
+  if (deserializeJson(doc, json, length)) return false;
+  const JsonObjectConst current = doc["current"];
+  if (current.isNull()) return false;
+  aqi = current["us_aqi"].isNull() ? -1 : static_cast<int>(std::lround(current["us_aqi"].as<double>()));
+  pm25 = current["pm2_5"].isNull() ? -1 : static_cast<int>(std::lround(current["pm2_5"].as<double>()));
+  return aqi >= 0 || pm25 >= 0;
+}
+
 std::string geocodingUrl(const char* city) {
   return "https://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=" + urlEncode(city);
 }

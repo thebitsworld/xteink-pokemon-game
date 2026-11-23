@@ -149,6 +149,20 @@ LunarDate solarToLunar(const int day, const int month, const int year, const dou
   return out;
 }
 
+uint16_t auspiciousHours(const int32_t jdn) {
+  // Rows by the day's branch modulo 6, hours Tý..Hợi left to right.
+  static const char* const kRows[6] = {"110100101100", "001101001011", "110011010010",
+                                       "101100110100", "001011001101", "010010110011"};
+  const char* row = kRows[((jdn + 1) % 12) % 6];
+  uint16_t bits = 0;
+  for (int i = 0; i < 12; ++i) {
+    if (row[i] == '1') bits |= static_cast<uint16_t>(1u << i);
+  }
+  return bits;
+}
+
+const char* branchName(const int branch) { return kChi[((branch % 12) + 12) % 12]; }
+
 void canChiOfDay(const int32_t jdn, char* out, const size_t outSize) {
   copyText(out, outSize, kCan[(jdn + 9) % 10], kChi[(jdn + 1) % 12]);
 }

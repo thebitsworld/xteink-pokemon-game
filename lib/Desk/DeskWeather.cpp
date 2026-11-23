@@ -79,6 +79,16 @@ const char* skyLabel(const Sky sky) {
   return "Chưa rõ";
 }
 
+int aqiLevel(const int usAqi) {
+  if (usAqi < 0) return -1;
+  if (usAqi <= 50) return 0;
+  if (usAqi <= 100) return 1;
+  if (usAqi <= 150) return 2;
+  if (usAqi <= 200) return 3;
+  if (usAqi <= 300) return 4;
+  return 5;
+}
+
 bool weatherFresh(const WeatherReport& w, const uint32_t now) {
   return w.valid && now >= w.fetchedAt && now - w.fetchedAt <= kWeatherStaleSec;
 }

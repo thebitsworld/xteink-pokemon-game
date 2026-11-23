@@ -35,7 +35,13 @@ struct WeatherReport {
   uint8_t firstHour = 0;  // local hour of hourly[0] (the current hour)
   Sky hourly[kForecastHours] = {};
   int8_t hourlyTemp[kForecastHours] = {};
+  int16_t aqi = -1;   // US AQI from Open-Meteo's air quality API, -1 = unknown
+  int16_t pm25 = -1;  // PM2.5, µg/m³ (rounded), -1 = unknown
 };
+
+// US AQI band: 0 good (0-50), 1 moderate, 2 unhealthy for sensitive groups, 3 unhealthy,
+// 4 very unhealthy, 5 hazardous (301+); -1 for an unknown value.
+int aqiLevel(int usAqi);
 
 bool weatherFresh(const WeatherReport& w, uint32_t now);
 // Hours until rain starts: 0 = raining now, 1..kForecastHours-1, -1 = none in the forecast.

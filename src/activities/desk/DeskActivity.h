@@ -11,6 +11,7 @@
 #include "Pomodoro.h"
 #include "DeskWeather.h"
 #include "DeskWeatherService.h"
+#include "CrossPointSettings.h"
 #include "activities/Activity.h"
 
 // Desk mode (docs/development/desk-mode-plan.md).
@@ -48,7 +49,7 @@ class DeskActivity final : public Activity {
   bool needsFullPowerWhilePreventingSleep() override { return false; }
 
  private:
-  enum class Page : uint8_t { Main, Pc, Photo, Pomodoro, Count };
+  enum class Page : uint8_t { Main, Calendar, Pc, Photo, Pomodoro, Count };
 
   struct LocalTime {
     bool valid = false;
@@ -82,6 +83,8 @@ class DeskActivity final : public Activity {
   std::atomic<bool> netDone{false};
   bool netWantWeather = false, netWantPc = false, netUserAsked = false, netKeepWifi = false;
   bool netPcRan = false;
+  int netPhotoIndex = -1;  // a PC photo to download, -1 none
+  deskweather::Result netPhotoResult = deskweather::Result::Ok;
   uint32_t netNow = 0;
   deskweather::Config netConfig;
   desk::WeatherReport netWeather;
@@ -92,6 +95,12 @@ class DeskActivity final : public Activity {
   std::vector<std::string> photos;
   int photoIndex = 0;
   uint32_t lastPhotoChangeMs = 0;
+  int pcPhotoLoaded = -1;   // the PC photo now in kPcPhotoPath, -1 none
+  bool pcPhotoFailed = false;
+  int calendarOffset = 0;   // months from the current one on the calendar page
+  static bool pcPhotos() { return SETTINGS.deskPhotoSource == 1; }
+  static bool isNight(const LocalTime& t);
+  void nextPhoto();
   static const char* pageName(Page p);
   static Page neighbour(Page p, int step);
   void drawPageHints(const char* back, const char* confirm) const;
@@ -112,7 +121,7 @@ class DeskActivity final : public Activity {
 
   // The network job: weather and/or PC in a FreeRTOS task on copies of the state; loop()
   // applies the results once it is done (applyNetJob). userAsked: a failed Wi-Fi opens the picker.
-  void startNetJob(bool wantWeather, bool wantPc, bool userAsked);
+  void startNetJob(bool wantWeather, bool wantPc, bool userAsked, int photoIndex = -1);
   bool applyNetJob();  // true when it opened the Wi-Fi picker
   void waitNetJob();
   static void netTaskEntry(void* arg);
@@ -132,6 +141,7 @@ class DeskActivity final : public Activity {
   // Pushes to the panel itself (photo::render's grayscale passes).
   void renderPhoto(uint32_t nowUnix);
   void renderPomodoro();
+  void renderCalendar();
   void loadPhotos();
   static std::string photoFolder();  // Photo Slideshow's folder, no trailing slash
   void switchPage(Page to);

@@ -34,6 +34,11 @@ constexpr const char* kIpLocateUrl = "http://ip-api.com/json/?fields=status,city
 // Fills `out` from a forecast response; fetchedAt is the Unix time of the fetch. False on a
 // response without the current block.
 bool parseForecast(const char* json, size_t length, uint32_t fetchedAt, WeatherReport& out);
+
+// Open-Meteo air quality: current US AQI and PM2.5.
+std::string airQualityUrl(double lat, double lon);
+// Sets aqi / pm25 (rounded) from "current"; false when the answer has neither.
+bool parseAirQuality(const char* json, size_t length, int& aqi, int& pm25);
 // First geocoding result; false when there is none.
 bool parseGeocoding(const char* json, size_t length, Place& out);
 // ip-api.com answer with status "success".

@@ -101,3 +101,26 @@ TEST(OpenMeteo, Urls) {
   EXPECT_NE(f.find("forecast_hours=12"), std::string::npos);
   EXPECT_NE(f.find("timezone=auto"), std::string::npos);
 }
+
+TEST(OpenMeteo, AirQuality) {
+  int aqi = -2, pm = -2;
+  const char json[] = R"({"current":{"time":"2026-11-23T19:00","us_aqi":152.4,"pm2_5":56.6}})";
+  ASSERT_TRUE(desk::parseAirQuality(json, sizeof(json) - 1, aqi, pm));
+  EXPECT_EQ(aqi, 152);
+  EXPECT_EQ(pm, 57);
+  const char none[] = R"({"current":{"time":"2026-11-23T19:00"}})";
+  EXPECT_FALSE(desk::parseAirQuality(none, sizeof(none) - 1, aqi, pm));
+  EXPECT_NE(desk::airQualityUrl(21.03, 105.841).find("latitude=21.030&longitude=105.841&current=us_aqi,pm2_5"),
+            std::string::npos);
+}
+
+TEST(DeskWeather, AqiLevels) {
+  EXPECT_EQ(desk::aqiLevel(-1), -1);
+  EXPECT_EQ(desk::aqiLevel(0), 0);
+  EXPECT_EQ(desk::aqiLevel(50), 0);
+  EXPECT_EQ(desk::aqiLevel(51), 1);
+  EXPECT_EQ(desk::aqiLevel(150), 2);
+  EXPECT_EQ(desk::aqiLevel(200), 3);
+  EXPECT_EQ(desk::aqiLevel(300), 4);
+  EXPECT_EQ(desk::aqiLevel(301), 5);
+}

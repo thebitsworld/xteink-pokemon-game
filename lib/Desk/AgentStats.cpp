@@ -45,6 +45,8 @@ bool parseAgentStats(const char* json, const size_t length, const uint32_t recei
   s.netDownBps = doc["net"][0].as<uint32_t>();
   s.netUpBps = doc["net"][1].as<uint32_t>();
   s.uptimeSec = doc["uptime"].as<uint32_t>();
+  s.photoCount = doc["photos"].isNull() ? 0 : doc["photos"].as<int>();
+  if (s.photoCount < 0) s.photoCount = 0;
 
   const JsonObjectConst claude = doc["claude"];
   if (!claude.isNull() && !claude["session"].isNull()) {

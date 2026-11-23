@@ -189,3 +189,21 @@ TEST(DeskWeather, Labels) {
   EXPECT_STREQ(desk::skyLabel(desk::Sky::Drizzle), "Mưa nhẹ");
   EXPECT_STREQ(desk::skyLabel(desk::Sky::Unknown), "Chưa rõ");
 }
+
+TEST(Lunar, AuspiciousHours) {
+  // 2026-11-23 is a Tân Sửu day: hoàng đạo Dần, Mão, Tỵ, Thân, Tuất, Hợi.
+  const int32_t jd = desk::julianDay(23, 11, 2026);
+  char canChi[32];
+  desk::canChiOfDay(jd, canChi, sizeof(canChi));
+  EXPECT_STREQ(canChi, "Tân Sửu");
+  const uint16_t bits = desk::auspiciousHours(jd);
+  EXPECT_EQ(bits, (1u << 2) | (1u << 3) | (1u << 5) | (1u << 8) | (1u << 10) | (1u << 11));
+  // A Tý day (and a Ngọ day) share the row: Tý, Sửu, Mão, Ngọ, Thân, Dậu.
+  int32_t ty = jd;
+  while ((ty + 1) % 12 != 0) ++ty;
+  EXPECT_EQ(desk::auspiciousHours(ty), (1u << 0) | (1u << 1) | (1u << 3) | (1u << 6) | (1u << 8) | (1u << 9));
+  EXPECT_EQ(desk::auspiciousHours(ty + 6), desk::auspiciousHours(ty));
+  for (int32_t d = jd; d < jd + 12; ++d) EXPECT_EQ(__builtin_popcount(desk::auspiciousHours(d)), 6);
+  EXPECT_STREQ(desk::branchName(0), "Tý");
+  EXPECT_STREQ(desk::branchName(11), "Hợi");
+}

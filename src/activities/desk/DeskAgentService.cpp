@@ -45,7 +45,41 @@ bool discover(std::string& hostPort) {
 #endif
 }
 
+// The agent's "host:port": the configured one, or the one mDNS found.
+bool agentAddress(const deskweather::Config& cfg, std::string& hostPort) {
+  hostPort = cfg.agent;
+  if (!hostPort.empty()) return true;
+  if (discovered.empty() && !discover(discovered)) return false;
+  hostPort = discovered;
+  return true;
+}
+
 }  // namespace
+
+deskweather::Result downloadPhoto(const deskweather::Config& cfg, const int index, const char* destPath,
+                                  const bool keepWifi) {
+  bool started = false;
+  const deskweather::Result w = deskweather::wifiUp(started);
+  if (w != deskweather::Result::Ok) {
+    if (started) deskweather::wifiDown();
+    return w;
+  }
+  if (keepWifi) started = false;
+  std::string hostPort;
+  if (!agentAddress(cfg, hostPort)) {
+    if (started) deskweather::wifiDown();
+    return deskweather::Result::NoAgent;
+  }
+  char path[40];
+  std::snprintf(path, sizeof(path), "/v1/photos/%d.png", index);
+  const auto err = HttpDownloader::downloadToFile("http://" + hostPort + path, destPath);
+  if (started) deskweather::wifiDown();
+  if (err != HttpDownloader::OK) {
+    LOG_ERR(TAG, "Photo %d: download error %d", index, static_cast<int>(err));
+    return deskweather::Result::FetchFailed;
+  }
+  return deskweather::Result::Ok;
+}
 
 deskweather::Result poll(const deskweather::Config& cfg, desk::AgentStats& out, const uint32_t nowUnix,
                          const bool keepWifi) {
@@ -57,13 +91,10 @@ deskweather::Result poll(const deskweather::Config& cfg, desk::AgentStats& out, 
   }
   if (keepWifi) started = false;
 
-  std::string hostPort = cfg.agent;
-  if (hostPort.empty()) {
-    if (discovered.empty() && !discover(discovered)) {
-      if (started) deskweather::wifiDown();
-      return deskweather::Result::NoAgent;
-    }
-    hostPort = discovered;
+  std::string hostPort;
+  if (!agentAddress(cfg, hostPort)) {
+    if (started) deskweather::wifiDown();
+    return deskweather::Result::NoAgent;
   }
 
   std::string body;

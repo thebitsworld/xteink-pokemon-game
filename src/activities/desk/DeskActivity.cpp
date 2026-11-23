@@ -68,7 +68,9 @@ constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo / PC page on b
 constexpr uint32_t kAddressHoldMs = 800;               // hold Select on the PC page: PC address
 constexpr uint32_t kNetTaskStackBytes = 10240;         // HTTPS + JSON; the loop task has 8192
 constexpr int kPhotoStripH = 128;                      // the info strip under a photo
-constexpr int kBottomSafe = 24;                        // the X3's bezel hides the panel's last rows
+constexpr int kBottomSafe = 24;
+constexpr char kPcPhotoPath[] = "/.crosspoint/desk-pc-photo.png";  // the PC photo on screen
+constexpr int kNightTickMinutes = 30;                  // battery loop at night: a tick per half hour                        // the X3's bezel hides the panel's last rows
 constexpr int kPhotoStripGap = 10;
 
 // ---- text in the reader's language (I18n: English and Vietnamese; others show English) ----
@@ -367,9 +369,33 @@ std::string DeskActivity::photoFolder() {
   return dir;
 }
 
+// The next photo: from the SD card it is drawn at once; from the PC it is drawn once downloaded.
+void DeskActivity::nextPhoto() {
+  if (!photos.empty()) photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
+  lastPhotoChangeMs = millis();
+  if (pcPhotos()) {
+    pcPhotoFailed = false;  // loop() starts the download; the photo is drawn when it is in
+    return;
+  }
+  requestUpdate();
+}
+
 void DeskActivity::loadPhotos() {
   photos.clear();
   photoIndex = 0;
+  if (pcPhotos()) {
+    // The agent's photos by number (its count comes with the PC numbers).
+    for (int i = 0; i < pc.photoCount && i < static_cast<int>(kMaxPhotos); ++i) photos.push_back(std::to_string(i));
+    if (SETTINGS.slideshowRandomOrder && photos.size() > 1) {
+      for (size_t i = photos.size() - 1; i > 0; --i) {
+        const size_t j = static_cast<size_t>(random(static_cast<long>(i + 1)));
+        std::swap(photos[i], photos[j]);
+      }
+    }
+    pcPhotoLoaded = -1;
+    pcPhotoFailed = false;
+    return;
+  }
   const std::string folder = photoFolder();
   if (folder.empty()) return;
   auto dir = Storage.open(folder.c_str());
@@ -417,8 +443,9 @@ bool DeskActivity::preventAutoSleep() {
   return deskpower::externalPower() || netBusy || pomodoro.running() || page == Page::Photo || page == Page::Pc;
 }
 
-void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const bool userAsked) {
-  if (netBusy || (!wantWeather && !wantPc)) return;
+void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const bool userAsked, const int photoIndex) {
+  if (netBusy || (!wantWeather && !wantPc && photoIndex < 0)) return;
+  netPhotoIndex = photoIndex;
   if (wantWeather) weatherFetchPending = false;
   if (wantPc) pcPollPending = false;
   netWantWeather = wantWeather;
@@ -428,7 +455,8 @@ void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const 
   uint32_t now = 0;
   if (!readUtcUnix(now)) now = weather.fetchedAt;
   netNow = now;
-  netKeepWifi = deskpower::externalPower() || page == Page::Pc;  // the PC page polls every minute
+  // The PC page polls every minute and PC photos come one by one: keep Wi-Fi up for them.
+  netKeepWifi = deskpower::externalPower() || page == Page::Pc || (page == Page::Photo && pcPhotos());
   netConfig = config;
   netWeather = weather;
   netPc = pc;
@@ -463,6 +491,9 @@ void DeskActivity::runNetJob() {
     netPcResult = deskagent::poll(netConfig, netPc, netNow, netKeepWifi);
     netPcRan = true;
   }
+  if (netPhotoIndex >= 0) {
+    netPhotoResult = deskagent::downloadPhoto(netConfig, netPhotoIndex, kPcPhotoPath, netKeepWifi);
+  }
 }
 
 void DeskActivity::waitNetJob() {
@@ -494,6 +525,21 @@ bool DeskActivity::applyNetJob() {
       pcAttempted = true;
       lastPcAttemptMs = nowMs;
     }
+  }
+  if (netPhotoIndex >= 0) {
+    const bool sameShown = netPhotoIndex == photoIndex;
+    if (netPhotoResult == deskweather::Result::Ok) {
+      pcPhotoLoaded = netPhotoIndex;
+    } else if (sameShown) {
+      pcPhotoFailed = true;
+    }
+    netPhotoIndex = -1;
+    if (page == Page::Photo && sameShown) requestUpdate();
+  }
+  // The PC's photo count changed: a new list (a PC photo page shows the first one).
+  if (pcPhotos() && netWantPc && netPcRan && static_cast<int>(photos.size()) != pc.photoCount) {
+    loadPhotos();
+    if (page == Page::Photo) requestUpdate();
   }
   if (page != Page::Photo) requestUpdate();  // a photo is not redrawn for new numbers
 
@@ -551,6 +597,8 @@ void DeskActivity::syncConfigFromSettings() {
 
 bool DeskActivity::pageEnabled(const Page p) {
   switch (p) {
+    case Page::Calendar:
+      return SETTINGS.deskShowCalendar;
     case Page::Pc:
       return SETTINGS.deskShowPc;
     case Page::Photo:
@@ -566,6 +614,8 @@ const char* DeskActivity::pageName(const Page p) {
   switch (p) {
     case Page::Main:
       return tr(STR_DESK_TAB_CLOCK);
+    case Page::Calendar:
+      return tr(STR_DESK_TAB_CALENDAR);
     case Page::Pc:
       return tr(STR_DESK_TAB_PC);
     case Page::Photo:
@@ -595,6 +645,15 @@ void DeskActivity::drawPageHints(const char* back, const char* confirm) const {
                                             pageName(neighbour(page, -1)),
                                             pageName(neighbour(page, 1)));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+// Quiet hours (Settings > System > Desk): from deskNightStart to deskNightEnd, local time.
+bool DeskActivity::isNight(const LocalTime& t) {
+  if (!SETTINGS.deskNightMode || !t.valid) return false;
+  const int from = SETTINGS.deskNightStart % 24;
+  const int to = SETTINGS.deskNightEnd % 24;
+  if (from == to) return false;
+  return from < to ? (t.hour >= from && t.hour < to) : (t.hour >= from || t.hour < to);
 }
 
 bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
@@ -680,7 +739,8 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
     const bool haveNow = readUtcUnix(now);
     const bool due = !weather.valid || now < weather.fetchedAt || now - weather.fetchedAt >= batteryWeatherSec();
     const bool backingOff = lastWeatherTry != 0 && now >= lastWeatherTry && now - lastWeatherTry < kBatteryWeatherRetrySec;
-    if (haveNow && due && !backingOff) {
+    const bool night = isNight(t);
+    if (haveNow && due && !backingOff && !night) {
       const uint32_t startMs = millis();
       weatherResult = deskweather::refresh(config, weather, now, false);
       weatherAttempted = true;
@@ -695,7 +755,13 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 
     drawPage();
     batteryLogNow("drawn");  // a run that stops after "tick" hangs drawing, after "drawn" sleeping
-    if (deskpower::sleepFor(deskpower::msToNextMinute()) == deskpower::Wake::PowerButton) leaveBatteryLoop();
+    uint32_t sleepMs = deskpower::msToNextMinute();
+    if (night && t.valid) {
+      // At night the clock moves on the half hour: sleep to the next :00 or :30.
+      const int minutesLeft = kNightTickMinutes - (t.minute % kNightTickMinutes);
+      sleepMs += static_cast<uint32_t>(minutesLeft - 1) * 60000u;
+    }
+    if (deskpower::sleepFor(sleepMs) == deskpower::Wake::PowerButton) leaveBatteryLoop();
   }
 }
 
@@ -751,7 +817,14 @@ void DeskActivity::loop() {
     requestUpdate();
     return;
   }
+  if (page == Page::Calendar && (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+                                 mappedInput.wasPressed(MappedInputManager::Button::Down))) {
+    calendarOffset += mappedInput.wasPressed(MappedInputManager::Button::Down) ? 1 : -1;
+    requestUpdate();
+    return;
+  }
   if (up || down) {
+    calendarOffset = 0;
     switchPage(neighbour(page, down ? 1 : -1));
     return;
   }
@@ -768,10 +841,12 @@ void DeskActivity::loop() {
       case Page::Pc:
         startNetJob(false, true, false);
         break;
-      case Page::Photo:
-        if (!photos.empty()) photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
-        lastPhotoChangeMs = millis();
+      case Page::Calendar:
+        calendarOffset = 0;
         requestUpdate();
+        break;
+      case Page::Photo:
+        nextPhoto();
         break;
       case Page::Pomodoro:
         pomodoro.toggle(nowSec());
@@ -804,16 +879,24 @@ void DeskActivity::loop() {
     deskweather::wifiDown();
     wifiKeptForUsb = false;
   }
-  if (page == Page::Photo && photos.size() > 1 && photoEveryMs > 0 && nowMs - lastPhotoChangeMs >= photoEveryMs) {
-    photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
-    lastPhotoChangeMs = nowMs;
-    requestUpdate();
+  if (page == Page::Photo && photos.size() > 1 && photoEveryMs > 0 && nowMs - lastPhotoChangeMs >= photoEveryMs &&
+      (!pcPhotos() || pcPhotoLoaded == photoIndex || pcPhotoFailed)) {
+    nextPhoto();
     return;
+  }
+  // Photos from the PC: the count comes with the PC numbers, each photo is downloaded when shown.
+  if (page == Page::Photo && pcPhotos() && !netBusy) {
+    if (photos.empty()) {
+      if (!pcPollPending && (!pcAttempted || nowMs - lastPcAttemptMs >= kPcRetryMs)) pcPollPending = true;
+    } else if (pcPhotoLoaded != photoIndex && !pcPhotoFailed) {
+      startNetJob(false, false, false, photoIndex);
+      return;
+    }
   }
   if (!netBusy) {
     bool wantWeather = weatherFetchPending;
     bool wantPc = pcPollPending;
-    if (deskpower::externalPower()) {
+    if (deskpower::externalPower() && !isNight(shown)) {
       const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
       wantWeather = wantWeather || (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait);
     }
@@ -1003,6 +1086,22 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
              weatherAttempted ? deskweather::resultText(weatherResult) : "");
   }
   renderer.drawText(UI_10_FONT_ID, left + pad, y, hint, true, EpdFontFamily::BOLD);
+  const int level = desk::aqiLevel(weather.aqi);
+  if (SETTINGS.deskAirQuality && fresh && level >= 0) {
+    static const StrId kLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
+                                     StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
+    char air[48];
+    snprintf(air, sizeof(air), "AQI %d · %s", weather.aqi, I18N.get(kLevels[level]));
+    const int airW = renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD);
+    const int airX = left + cardW - pad - airW;
+    if (level >= 2) {
+      // Unhealthy for some or worse: white on black so it is seen from across the room.
+      renderer.fillRoundedRect(airX - 8, y - 2, airW + 16, 30, 6, Color::Black);
+      renderer.drawText(UI_10_FONT_ID, airX, y, air, false, EpdFontFamily::BOLD);
+    } else {
+      renderer.drawText(UI_10_FONT_ID, airX, y, air, true, EpdFontFamily::BOLD);
+    }
+  }
   y += 34;
 
   renderer.drawLine(left + pad, y, left + cardW - pad, y, 1, true);
@@ -1134,7 +1233,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     // The front buttons cannot wake the light sleep: only the power button can.
     renderer.drawCenteredText(UI_10_FONT_ID,
                               renderer.getScreenHeight() - kBottomSafe - renderer.getLineHeight(UI_10_FONT_ID),
-                              tr(STR_DESK_BATTERY_SAVER));
+                              isNight(shown) ? tr(STR_DESK_NIGHT_SAVER) : tr(STR_DESK_BATTERY_SAVER));
     return;
   }
   drawPageHints(tr(STR_DESK_EXIT), tr(STR_DESK_REFRESH));
@@ -1283,6 +1382,21 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   char line1[64];
   char line2[96];
 
+  if (pcPhotos() && (photos.empty() || pcPhotoLoaded != photoIndex)) {
+    // From the PC: none yet, still downloading, or the download failed.
+    renderer.clearScreen();
+    drawStatusBar(tr(STR_DESK_PHOTOS), "");
+    const char* head = photos.empty() ? (pcAttempted && pcResult != deskweather::Result::Ok
+                                             ? deskweather::resultText(pcResult)
+                                             : (pc.valid ? tr(STR_DESK_PC_NO_PHOTOS) : tr(STR_DESK_PC_SEARCHING)))
+                                      : (pcPhotoFailed ? tr(STR_DESK_PHOTO_ERROR) : tr(STR_DESK_PC_PHOTO_LOADING));
+    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, head, true, EpdFontFamily::BOLD);
+    if (photos.empty()) renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 4, tr(STR_DESK_PC_PHOTOS_HINT));
+    drawPageHints(tr(STR_DESK_BACK), "");
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return;
+  }
+
   if (photos.empty()) {
     renderer.clearScreen();
     drawStatusBar(tr(STR_DESK_PHOTOS), "");
@@ -1357,7 +1471,7 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
     }
   };
 
-  const std::string path = photoFolder() + "/" + photos[photoIndex];
+  const std::string path = pcPhotos() ? std::string(kPcPhotoPath) : photoFolder() + "/" + photos[photoIndex];
   const bool crop = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
   if (photo::render(renderer, path, crop, overlay, kPhotoStripH + kPhotoStripGap) != photo::Result::Ok) {
     renderer.clearScreen();
@@ -1443,6 +1557,111 @@ void DeskActivity::renderPomodoro() {
   }
 }
 
+// Month calendar (lịch tháng): Monday-first grid, each day with its lunar day ("1/11" on a lunar
+// month's first day; Mùng 1 and Rằm in bold), today inverted; under it today's lunar date, can
+// chi and giờ hoàng đạo. Side keys: previous / next month; Select: back to this month.
+void DeskActivity::renderCalendar() {
+  const int w = renderer.getScreenWidth();
+  char buf[128];
+  const LocalTime t = shown.valid ? shown : readLocalTime();
+  const int baseYear = t.valid ? t.year : 2026;
+  const int baseMonth = t.valid ? t.month : 1;
+  const int index = baseYear * 12 + (baseMonth - 1) + calendarOffset;
+  const int year = index / 12;
+  const int month = index % 12 + 1;
+  snprintf(buf, sizeof(buf), tr(STR_DESK_MONTH_YEAR), month, year);
+  drawStatusBar(tr(STR_DESK_CALENDAR), buf);
+
+  const int32_t jd1 = desk::julianDay(1, month, year);
+  const int days = desk::julianDay(1, month == 12 ? 1 : month + 1, month == 12 ? year + 1 : year) - jd1;
+  const int offset = (desk::weekdayOf(jd1) + 6) % 7;  // Monday first
+  const int rows = (offset + days + 6) / 7;
+  const int gridX = 12;
+  const int cellW = (w - 2 * gridX) / 7;
+  const int cellH = rows == 6 ? 62 : 70;
+  int y = 58;
+  for (int c = 0; c < 7; ++c) {
+    const char* name = weekdayShortText((c + 1) % 7);
+    renderer.drawText(UI_10_FONT_ID,
+                      gridX + c * cellW + (cellW - renderer.getTextWidth(UI_10_FONT_ID, name, EpdFontFamily::BOLD)) / 2,
+                      y, name, true, EpdFontFamily::BOLD);
+  }
+  y += 30;
+  renderer.drawLine(gridX, y, w - gridX, y, 2, true);
+  y += 4;
+  for (int d = 1; d <= days; ++d) {
+    const int cell = offset + d - 1;
+    const int x0 = gridX + (cell % 7) * cellW;
+    const int y0 = y + (cell / 7) * cellH;
+    const desk::LunarDate ld = desk::solarToLunar(d, month, year);
+    const bool today = t.valid && t.year == year && t.month == month && t.day == d;
+    if (today) renderer.fillRoundedRect(x0 + 3, y0 + 2, cellW - 6, cellH - 6, 8, Color::Black);
+    snprintf(buf, sizeof(buf), "%d", d);
+    renderer.drawText(UI_12_FONT_ID, x0 + (cellW - renderer.getTextWidth(UI_12_FONT_ID, buf, EpdFontFamily::BOLD)) / 2,
+                      y0 + 6, buf, !today, EpdFontFamily::BOLD);
+    if (ld.day == 1) {
+      snprintf(buf, sizeof(buf), "%d/%d", ld.day, ld.month);
+    } else {
+      snprintf(buf, sizeof(buf), "%d", ld.day);
+    }
+    const auto style = (ld.day == 1 || ld.day == 15) ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+    renderer.drawText(UI_10_FONT_ID, x0 + (cellW - renderer.getTextWidth(UI_10_FONT_ID, buf, style)) / 2, y0 + 34,
+                      buf, !today, style);
+  }
+  for (int r = 1; r < rows; ++r) renderer.drawLine(gridX, y + r * cellH - 2, w - gridX, y + r * cellH - 2, 1, true);
+  y += rows * cellH + 6;
+  renderer.drawLine(gridX, y, w - gridX, y, 2, true);
+  y += 12;
+
+  if (calendarOffset == 0 && t.valid) {
+    const int32_t jd = desk::julianDay(t.day, t.month, t.year);
+    const desk::LunarDate lunar = desk::solarToLunar(t.day, t.month, t.year);
+    snprintf(buf, sizeof(buf), tr(STR_DESK_DATE_LUNAR_SHORT), weekdayText(desk::weekdayOf(jd)), t.day, t.month,
+             lunar.day, lunar.month);
+    renderer.drawCenteredText(UI_12_FONT_ID, y, buf, true, EpdFontFamily::BOLD);
+    y += 36;
+    char dayName[32];
+    char monthName[32];
+    char yearName[32];
+    desk::canChiOfDay(jd, dayName, sizeof(dayName));
+    desk::canChiOfMonth(lunar, monthName, sizeof(monthName));
+    desk::canChiOfYear(lunar.year, yearName, sizeof(yearName));
+    snprintf(buf, sizeof(buf), tr(STR_DESK_CANCHI_FULL), dayName, monthName, yearName);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    y += 34;
+    // Giờ hoàng đạo, three a line: "Dần 3-5 · Mão 5-7 · Tỵ 9-11".
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_GOOD_HOURS), true, EpdFontFamily::BOLD);
+    y += 28;
+    const uint16_t bits = desk::auspiciousHours(jd);
+    char line[96] = "";
+    int inLine = 0;
+    for (int i = 0; i < 12; ++i) {
+      if (!(bits & (1u << i))) continue;
+      char item[32];
+      snprintf(item, sizeof(item), "%s%s %d-%d", inLine ? " · " : "", desk::branchName(i), (i * 2 + 23) % 24,
+               (i * 2 + 1) % 24);
+      strncat(line, item, sizeof(line) - strlen(line) - 1);
+      if (++inLine == 3) {
+        renderer.drawCenteredText(UI_10_FONT_ID, y, line);
+        y += 28;
+        line[0] = '\0';
+        inLine = 0;
+      }
+    }
+    if (inLine) renderer.drawCenteredText(UI_10_FONT_ID, y, line);
+  } else {
+    const desk::LunarDate first = desk::solarToLunar(1, month, year);
+    const desk::LunarDate last = desk::solarToLunar(days, month, year);
+    char yearName[32];
+    desk::canChiOfYear(last.year, yearName, sizeof(yearName));
+    snprintf(buf, sizeof(buf), tr(STR_DESK_CAL_LUNAR_SPAN), first.day, first.month, last.day, last.month, yearName);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    y += 34;
+  }
+  renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40 - 34, tr(STR_DESK_CAL_HINT));
+  drawPageHints(tr(STR_DESK_BACK), tr(STR_DESK_TODAY));
+}
+
 void DeskActivity::render(RenderLock&&) { drawPage(); }
 
 void DeskActivity::drawPage() {
@@ -1457,6 +1676,8 @@ void DeskActivity::drawPage() {
   renderer.clearScreen();
   if (page == Page::Pc) {
     renderPc(nowUnix);
+  } else if (page == Page::Calendar) {
+    renderCalendar();
   } else if (page == Page::Pomodoro) {
     renderPomodoro();
   } else {

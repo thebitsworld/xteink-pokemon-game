@@ -38,6 +38,7 @@ struct AgentStats {
   uint32_t netUpBps = 0;
   uint32_t uptimeSec = 0;
   ClaudeUsage claude;
+  int photoCount = 0;  // photos the agent serves at /v1/photos/<n>.png (0 = none)
 };
 
 bool parseAgentStats(const char* json, size_t length, uint32_t receivedAt, AgentStats& out);
