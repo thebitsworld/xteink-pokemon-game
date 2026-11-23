@@ -91,10 +91,9 @@ bool loadConfig(Config& out) {
 
 bool saveConfig(const Config& cfg) {
   JsonDocument doc;
-  doc["city"] = cfg.city;
+  // City, PC address and unit are settings now (Settings > System > Desk): desk.json keeps the
+  // resolved place only.
   doc["resolvedFor"] = cfg.resolvedFor;
-  if (cfg.agent[0] != '\0') doc["agent"] = cfg.agent;
-  if (cfg.fahrenheit) doc["unit"] = "F";
   if (cfg.place.valid) {
     doc["lat"] = cfg.place.lat;
     doc["lon"] = cfg.place.lon;

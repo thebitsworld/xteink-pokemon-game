@@ -329,7 +329,7 @@ void SettingsActivity::buildSettingsList(std::vector<SettingInfo>* const target)
         &readerPageLayoutSettings, &readerScreenMarginSettings, &controlsSettings, &controlsPowerSettings,
         &controlsHomeButtonSettings, &controlsFrontButtonSettings, &controlsSideButtonSettings,
         &controlsTapsGesturesSettings, &controlsTwoFingerSwipeSettings, &controlsEdgeGestureSettings, &systemSettings,
-        &systemDeviceSettings, &systemFilesCacheSettings, &systemFeatureSettings, &fileBrowserSettings,
+        &systemDeviceSettings, &systemFilesCacheSettings, &systemFeatureSettings, &systemDeskSettings, &fileBrowserSettings,
         &systemReadingStatsSettings, &systemGlobalStatsSettings}) {
     std::vector<SettingInfo>().swap(*list);
   }
@@ -379,6 +379,9 @@ void SettingsActivity::buildSettingsList(std::vector<SettingInfo>* const target)
   if (target == &systemAdvancedSettings) systemAdvancedSettings = buildSystemAdvancedSettingsList(allSettings);
   if (target == &systemFilesCacheSettings) systemFilesCacheSettings = buildSystemFilesCacheSettingsList(allSettings);
   if (target == &systemFeatureSettings) systemFeatureSettings = buildSystemFeaturesSettingsList(allSettings);
+#if CROSSINK_DESK
+  if (target == &systemDeskSettings) systemDeskSettings = buildSystemDeskSettingsList(allSettings);
+#endif
   if (target == &systemReadingStatsSettings) {
     systemReadingStatsSettings = buildSystemReadingStatsSettingsList(allSettings);
   }
@@ -519,6 +522,9 @@ void SettingsActivity::setCurrentSettingsForCategory() {
           case SettingAction::SystemFeatures:
             target = &systemFeatureSettings;
             break;
+          case SettingAction::SystemDesk:
+            target = &systemDeskSettings;
+            break;
           case SettingAction::SystemReadingStats:
             target = &systemReadingStatsSettings;
             break;
@@ -579,6 +585,8 @@ StrId SettingsActivity::activeSubmenuTitleId() const {
       return StrId::STR_SYSTEM_FILES_CACHE;
     case SettingAction::SystemFeatures:
       return StrId::STR_SYSTEM_FEATURES;
+    case SettingAction::SystemDesk:
+      return StrId::STR_DESK_SETTINGS;
     case SettingAction::SystemReadingStats:
       return StrId::STR_READING_STATS;
     case SettingAction::SystemGlobalStats:
@@ -1090,6 +1098,12 @@ void SettingsActivity::onEnter() {
   app.on(ACTION_TAB, &SettingsActivity::onTabEvent, this);
   app.setScreen(&SettingsActivity::settingsScreen, this);
 
+  if (deskSettingsOnly && !isFileBrowserView()) {
+    // From Desk: straight to System > Desk.
+    enterCategory(categoryCount - 1);
+    openSubmenu(SettingAction::SystemDesk);
+  }
+
   if (openLanguageDownloadsPending && !isFileBrowserView()) {
     // Land on System > Device, then show the Download Languages popup from loop().
     openLanguageDownloadsPending = false;
@@ -1259,7 +1273,8 @@ void SettingsActivity::loop() {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (TouchHeaderBackButton::wasTapped(mappedInput, settingsHeaderRect(renderer))) {
-    if (!isFileBrowserView() && activeSubmenu != SettingAction::None) {
+    if (!isFileBrowserView() && activeSubmenu != SettingAction::None &&
+        !(deskSettingsOnly && activeSubmenu == SettingAction::SystemDesk)) {
       closeSubmenu();
       requestUpdate();
     } else {
@@ -1286,6 +1301,10 @@ void SettingsActivity::loop() {
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     if (isFileBrowserView()) {
+      closeRootSettings();
+      return;
+    }
+    if (deskSettingsOnly && activeSubmenu == SettingAction::SystemDesk) {
       closeRootSettings();
       return;
     }
@@ -1721,6 +1740,7 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::SystemAdvanced:
       case SettingAction::SystemFilesCache:
       case SettingAction::SystemFeatures:
+      case SettingAction::SystemDesk:
       case SettingAction::SystemReadingStats:
       case SettingAction::SystemGlobalStats:
       case SettingAction::DisplaySleepScreen:

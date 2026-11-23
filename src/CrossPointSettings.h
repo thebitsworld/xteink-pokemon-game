@@ -649,6 +649,20 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Desk mode: a sleep (power button, idle timeout) opens Desk instead (its battery loop on
   // battery) - for a reader kept on a desk.
   uint8_t deskOnSleep = 0;
+  // Settings > System > Desk (kept here so they are saved, and shown on the web settings page).
+  uint8_t deskTempUnit = 0;        // 0 °C, 1 °F
+  char deskCity[48] = "";          // weather place by name; empty = locate by IP
+  uint8_t deskAirQuality = 1;      // AQI / PM2.5 on the weather card
+  char deskPcAddress[64] = "";     // PC agent "host:port"; empty = find it by mDNS
+  uint8_t deskPhotoSource = 0;     // 0 SD card (Photo Slideshow's folder), 1 the PC agent
+  uint8_t deskNightMode = 1;       // quiet hours: fewer redraws, no weather
+  uint8_t deskNightStart = 23;     // hour (local)
+  uint8_t deskNightEnd = 6;        // hour (local)
+  uint8_t deskBatteryWeather = 1;  // weather on battery: 0 every 30 min, 1 60 min, 2 120 min
+  uint8_t deskShowCalendar = 1;    // pages after the clock
+  uint8_t deskShowPc = 1;
+  uint8_t deskShowPhoto = 1;
+  uint8_t deskShowPomodoro = 1;
 #endif
   // Settings > System feature switches (see FeatureToggles.h).
   uint8_t slideshowEnabled = 1;

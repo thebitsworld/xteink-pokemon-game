@@ -350,8 +350,37 @@ std::vector<SettingInfo> buildBaseSettingsList() {
     add(SettingInfo::Toggle(StrId::STR_SLIDESHOW, &CrossPointSettings::slideshowEnabled, "slideshowEnabled",
                             StrId::STR_CAT_SYSTEM));
 #if CROSSINK_DESK
+    // Desk mode (Settings > System > Desk). Keep DESK_SETTINGS_COUNT equal to these entries.
     add(SettingInfo::Toggle(StrId::STR_DESK_ON_SLEEP, &CrossPointSettings::deskOnSleep, "deskOnSleep",
-                            StrId::STR_CAT_SYSTEM));
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::Enum(StrId::STR_DESK_TEMP_UNIT, &CrossPointSettings::deskTempUnit,
+                          {StrId::STR_DESK_UNIT_C, StrId::STR_DESK_UNIT_F}, "deskTempUnit", StrId::STR_CAT_DESK));
+    add(SettingInfo::String(StrId::STR_DESK_CITY, SETTINGS.deskCity, sizeof(SETTINGS.deskCity), "deskCity",
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_AIR_QUALITY, &CrossPointSettings::deskAirQuality, "deskAirQuality",
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::String(StrId::STR_DESK_PC_ADDRESS, SETTINGS.deskPcAddress, sizeof(SETTINGS.deskPcAddress),
+                            "deskPcAddress", StrId::STR_CAT_DESK));
+    add(SettingInfo::Enum(StrId::STR_DESK_PHOTO_SOURCE, &CrossPointSettings::deskPhotoSource,
+                          {StrId::STR_DESK_SOURCE_SD, StrId::STR_DESK_SOURCE_PC}, "deskPhotoSource",
+                          StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_NIGHT, &CrossPointSettings::deskNightMode, "deskNightMode",
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::Value(StrId::STR_DESK_NIGHT_FROM, &CrossPointSettings::deskNightStart, {0, 23, 1},
+                           "deskNightStart", StrId::STR_CAT_DESK));
+    add(SettingInfo::Value(StrId::STR_DESK_NIGHT_TO, &CrossPointSettings::deskNightEnd, {0, 23, 1}, "deskNightEnd",
+                           StrId::STR_CAT_DESK));
+    add(SettingInfo::Enum(StrId::STR_DESK_BATTERY_WEATHER, &CrossPointSettings::deskBatteryWeather,
+                          {StrId::STR_DESK_EVERY_30, StrId::STR_DESK_EVERY_60, StrId::STR_DESK_EVERY_120},
+                          "deskBatteryWeather", StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_SHOW_CALENDAR, &CrossPointSettings::deskShowCalendar, "deskShowCalendar",
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_SHOW_PC, &CrossPointSettings::deskShowPc, "deskShowPc",
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_SHOW_PHOTO, &CrossPointSettings::deskShowPhoto, "deskShowPhoto",
+                            StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_SHOW_POMODORO, &CrossPointSettings::deskShowPomodoro, "deskShowPomodoro",
+                            StrId::STR_CAT_DESK));
 #endif
 
     // Frontlight quick-panel state: persisted + web-exposed, category-less so

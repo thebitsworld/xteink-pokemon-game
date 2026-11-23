@@ -637,7 +637,7 @@ inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 1;
 inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 0;
 #endif
 #if CROSSINK_DESK
-inline constexpr size_t DESK_SETTINGS_COUNT = 1;  // Desk mode: "Sleep opens Desk"
+inline constexpr size_t DESK_SETTINGS_COUNT = 14;  // Desk mode (SettingsList.cpp, under CROSSINK_DESK)
 #else
 inline constexpr size_t DESK_SETTINGS_COUNT = 0;
 #endif
@@ -1152,10 +1152,13 @@ inline std::vector<SettingInfo> buildDisplaySleepSettingsList(const std::vector<
 
 inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> systemSettings;
-  systemSettings.reserve(13);
+  systemSettings.reserve(14);
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_DEVICE, SettingAction::SystemDevice));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FILES_CACHE, SettingAction::SystemFilesCache));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FEATURES, SettingAction::SystemFeatures));
+#if CROSSINK_DESK
+  systemSettings.push_back(SettingInfo::Submenu(StrId::STR_DESK_SETTINGS, SettingAction::SystemDesk));
+#endif
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_READING_STATS, SettingAction::SystemReadingStats));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_ADVANCED, SettingAction::SystemAdvanced));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
@@ -1219,7 +1222,7 @@ inline std::vector<SettingInfo> buildSystemFilesCacheSettingsList(const std::vec
 // The feature switches (FeatureToggles.h): what this build has, each on or off.
 inline std::vector<SettingInfo> buildSystemFeaturesSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
-  settings.reserve(3 + DESK_SETTINGS_COUNT);
+  settings.reserve(3);
 #if defined(CROSSINK_ENABLE_POKEMON)
   addSettingByName(settings, allSettings, StrId::STR_POKEMON);
 #endif
@@ -1227,11 +1230,35 @@ inline std::vector<SettingInfo> buildSystemFeaturesSettingsList(const std::vecto
   addSettingByName(settings, allSettings, StrId::STR_APPS_TITLE);
 #endif
   addSettingByName(settings, allSettings, StrId::STR_SLIDESHOW);
-#if CROSSINK_DESK
-  addSettingByName(settings, allSettings, StrId::STR_DESK_ON_SLEEP);
-#endif
   return settings;
 }
+
+#if CROSSINK_DESK
+// Settings > System > Desk; Desk opens it straight away on a held Select.
+inline std::vector<SettingInfo> buildSystemDeskSettingsList(const std::vector<SettingInfo>& allSettings) {
+  std::vector<SettingInfo> settings;
+  settings.reserve(DESK_SETTINGS_COUNT + 5);
+  settings.push_back(SettingInfo::SectionHeader(StrId::STR_DESK_GROUP_DISPLAY));
+  addSettingByName(settings, allSettings, StrId::STR_DESK_TEMP_UNIT);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_SHOW_CALENDAR);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_SHOW_PC);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_SHOW_PHOTO);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_SHOW_POMODORO);
+  settings.push_back(SettingInfo::SectionHeader(StrId::STR_DESK_GROUP_WEATHER));
+  addSettingByName(settings, allSettings, StrId::STR_DESK_CITY);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_AIR_QUALITY);
+  settings.push_back(SettingInfo::SectionHeader(StrId::STR_DESK_GROUP_PHOTOS_PC));
+  addSettingByName(settings, allSettings, StrId::STR_DESK_PHOTO_SOURCE);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_PC_ADDRESS);
+  settings.push_back(SettingInfo::SectionHeader(StrId::STR_DESK_GROUP_POWER));
+  addSettingByName(settings, allSettings, StrId::STR_DESK_ON_SLEEP);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_BATTERY_WEATHER);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_NIGHT);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_NIGHT_FROM);
+  addSettingByName(settings, allSettings, StrId::STR_DESK_NIGHT_TO);
+  return settings;
+}
+#endif
 
 inline std::vector<SettingInfo> buildFileBrowserSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;

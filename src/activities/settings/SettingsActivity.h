@@ -48,6 +48,7 @@ enum class SettingAction {
   SystemAdvanced,
   SystemFilesCache,
   SystemFeatures,
+  SystemDesk,
   SystemReadingStats,
   SystemGlobalStats,
   Network,
@@ -276,6 +277,7 @@ class SettingsActivity final : public Activity {
   std::vector<SettingInfo> systemAdvancedSettings;
   std::vector<SettingInfo> systemFilesCacheSettings;
   std::vector<SettingInfo> systemFeatureSettings;
+  std::vector<SettingInfo> systemDeskSettings;
   std::vector<SettingInfo> fileBrowserSettings;
   std::vector<SettingInfo> systemReadingStatsSettings;
   std::vector<SettingInfo> systemGlobalStatsSettings;
@@ -293,6 +295,7 @@ class SettingsActivity final : public Activity {
   // instance must pop back to the panel instead of replacing the reader with Home.
   bool returnToParentOnClose = false;
   bool touchscreenRecovery = false;
+  bool deskSettingsOnly = false;
   View view = View::Root;
   // Settings can be created over a landscape reader. Its teardown resets the
   // renderer before this activity enters, so retain the requested layout.
@@ -381,6 +384,8 @@ class SettingsActivity final : public Activity {
   // Opens System > Device with the Download Languages popup once the activity enters.
   void openLanguageDownloadsOnEnter() { openLanguageDownloadsPending = true; }
   void enableTouchscreenRecovery() { touchscreenRecovery = true; }
+  // Opens System > Desk on enter; Back there closes Settings (back to Desk).
+  void openDeskSettingsOnEnter() { deskSettingsOnly = true; }
 #ifdef SIMULATOR
   void simulatorOpenFrontButtons();
   int simulatorCategoryIndex() const { return selectedCategoryIndex; }

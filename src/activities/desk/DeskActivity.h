@@ -118,9 +118,9 @@ class DeskActivity final : public Activity {
   static void netTaskEntry(void* arg);
   void runNetJob();
   bool pcFresh(uint32_t nowUnix) const;
-  void editPcAddress();
-  void openDeskSettings();
-  void editWeatherPlace();
+  void openSettings();
+  void syncConfigFromSettings();
+  static bool pageEnabled(Page p);
 
   void drawStatusBar(const char* title, const char* middle) const;
   void drawBar(int x, int y, int w, int h, int pct) const;

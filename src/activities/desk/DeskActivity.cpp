@@ -29,8 +29,7 @@
 #include "Lunar.h"
 #include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
-#include "activities/util/KeyboardEntryActivity.h"
-#include "activities/util/OptionSelectionActivity.h"
+#include "activities/settings/SettingsActivity.h"
 #include "activities/util/PhotoRender.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -51,7 +50,17 @@ constexpr uint32_t kPcRetryMs = 2 * 60 * 1000;
 constexpr uint32_t kPcFreshSec = 5 * 60;  // older PC numbers are hidden from the main screen
 constexpr int kMargin = 16;
 constexpr uint32_t kBatteryIdleMs = 30 * 1000;       // no input this long on battery: battery loop
-constexpr uint32_t kBatteryWeatherSec = 60 * 60;     // battery default of "Weather"
+// "Weather on battery" (SETTINGS.deskBatteryWeather): 30, 60 or 120 minutes.
+uint32_t batteryWeatherSec() {
+  switch (SETTINGS.deskBatteryWeather) {
+    case 0:
+      return 30 * 60;
+    case 2:
+      return 120 * 60;
+    default:
+      return 60 * 60;
+  }
+}
 constexpr uint32_t kBatteryWeatherRetrySec = 15 * 60;  // after a failed try (was: every minute)
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
@@ -309,6 +318,27 @@ void DeskActivity::loadState() {
   enteredMs = lastPollMs;
   lastInputMs = lastPollMs;
   deskweather::loadConfig(config);
+  // Before Settings > System > Desk (2026-11-23) these lived in desk.json: move them over once.
+  bool moved = false;
+  if (config.city[0] != '\0' && SETTINGS.deskCity[0] == '\0') {
+    snprintf(SETTINGS.deskCity, sizeof(SETTINGS.deskCity), "%s", config.city);
+    moved = true;
+  }
+  if (config.agent[0] != '\0' && SETTINGS.deskPcAddress[0] == '\0') {
+    snprintf(SETTINGS.deskPcAddress, sizeof(SETTINGS.deskPcAddress), "%s", config.agent);
+    moved = true;
+  }
+  if (config.fahrenheit && SETTINGS.deskTempUnit == 0) {
+    SETTINGS.deskTempUnit = 1;
+    moved = true;
+  }
+  if (moved) {
+    SETTINGS.saveToFile();
+    syncConfigFromSettings();
+    deskweather::saveConfig(config);  // without those keys from now on
+  }
+  syncConfigFromSettings();
+  if (!pageEnabled(page)) page = Page::Main;
   deskweather::loadCache(weather);
 }
 
@@ -446,7 +476,6 @@ bool DeskActivity::applyNetJob() {
   if (!netBusy || !netDone) return false;
   netBusy = false;
   const uint32_t nowMs = millis();
-  netConfig.fahrenheit = config.fahrenheit;
   config = netConfig;
   wifiKeptForUsb = wifiKeptForUsb || netKeepWifi;
   if (netWantWeather) {
@@ -485,93 +514,52 @@ bool DeskActivity::applyNetJob() {
   return true;
 }
 
-// The PC agent's address in desk.json, typed on the reader ("host:port" or an IP; port 8765 when
-// left out). Empty: find it by mDNS.
-void DeskActivity::editPcAddress() {
+// Settings > System > Desk, opened straight away (hold Select on any page). Desk reads its
+// settings from SETTINGS; the service config takes the place and PC address from there.
+void DeskActivity::openSettings() {
   if (netBusy) return;  // the job holds a copy of the config
-  startActivityForResult(
-      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_DESK_PC_ADDRESS), config.agent,
-                                              sizeof(config.agent) - 1, InputType::Text),
-      [this](const ActivityResult& result) {
-        lastInputMs = millis();
-        forceHalfRefresh = true;
-        if (!result.isCancelled) {
-          std::string text = std::get<KeyboardResult>(result.data).text;
-          text.erase(0, text.find_first_not_of(' '));
-          text.erase(text.find_last_not_of(' ') + 1);
-          if (!text.empty() && text.find(':') == std::string::npos) text += ":8765";
-          snprintf(config.agent, sizeof(config.agent), "%s", text.c_str());
-          deskweather::saveConfig(config);
-          pc = desk::AgentStats{};  // numbers from another PC must not linger
-          pcPollPending = true;
-        }
-        requestUpdate();
-      });
+  const std::string oldCity = SETTINGS.deskCity;
+  const std::string oldPc = SETTINGS.deskPcAddress;
+  const uint8_t oldPhotoSource = SETTINGS.deskPhotoSource;
+  auto settings = std::make_unique<SettingsActivity>(renderer, mappedInput, false, true);
+  settings->openDeskSettingsOnEnter();
+  startActivityForResult(std::move(settings), [this, oldCity, oldPc, oldPhotoSource](const ActivityResult&) {
+    lastInputMs = millis();
+    forceHalfRefresh = true;
+    syncConfigFromSettings();
+    if (oldCity != SETTINGS.deskCity) {
+      config.resolvedFor[0] = '\0';  // resolve the place again on the next fetch
+      config.place.valid = false;
+      weather = desk::WeatherReport{};  // the old place's forecast must not linger
+      weatherFetchPending = true;
+    }
+    if (oldPc != SETTINGS.deskPcAddress) {
+      pc = desk::AgentStats{};  // numbers from another PC must not linger
+      pcPollPending = true;
+    }
+    if (oldPhotoSource != SETTINGS.deskPhotoSource) loadPhotos();
+    if (!pageEnabled(page)) page = Page::Main;
+    requestUpdate();
+  });
 }
 
-// Desk settings (hold Select on the main screen): temperature unit, weather place, PC address.
-// All three live in desk.json.
-void DeskActivity::openDeskSettings() {
-  if (netBusy) return;  // the job holds a copy of the config
-  char unitRow[48];
-  char placeRow[96];
-  char pcRow[96];
-  snprintf(unitRow, sizeof(unitRow), tr(STR_DESK_SET_UNIT), config.fahrenheit ? "°F" : "°C");
-  snprintf(placeRow, sizeof(placeRow), tr(STR_DESK_SET_PLACE),
-           config.city[0] != '\0' ? config.city : tr(STR_DESK_PLACE_BY_IP));
-  snprintf(pcRow, sizeof(pcRow), tr(STR_DESK_SET_PC), config.agent[0] != '\0' ? config.agent : tr(STR_DESK_PC_AUTO));
-  std::vector<std::string> rows = {unitRow, placeRow, pcRow};
-  startActivityForResult(
-      std::make_unique<OptionSelectionActivity>(renderer, mappedInput, "DeskSettings", StrId::STR_DESK_SETTINGS,
-                                                std::move(rows), 0),
-      [this](const ActivityResult& result) {
-        lastInputMs = millis();
-        forceHalfRefresh = true;
-        const auto* choice = std::get_if<OptionSelectionResult>(&result.data);
-        if (result.isCancelled || choice == nullptr) {
-          requestUpdate();
-          return;
-        }
-        switch (choice->index) {
-          case 0:
-            config.fahrenheit = !config.fahrenheit;
-            deskweather::saveConfig(config);
-            openDeskSettings();  // back to the list, showing the new unit
-            return;
-          case 1:
-            editWeatherPlace();
-            return;
-          case 2:
-            editPcAddress();
-            return;
-          default:
-            requestUpdate();
-            return;
-        }
-      });
+// SETTINGS -> the service config (place by name, PC address).
+void DeskActivity::syncConfigFromSettings() {
+  snprintf(config.city, sizeof(config.city), "%s", SETTINGS.deskCity);
+  snprintf(config.agent, sizeof(config.agent), "%s", SETTINGS.deskPcAddress);
 }
 
-// The weather place by name (Open-Meteo geocoding), or empty to locate by IP.
-void DeskActivity::editWeatherPlace() {
-  startActivityForResult(
-      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_DESK_CITY_PROMPT), config.city,
-                                              sizeof(config.city) - 1, InputType::Text),
-      [this](const ActivityResult& result) {
-        lastInputMs = millis();
-        forceHalfRefresh = true;
-        if (!result.isCancelled) {
-          std::string text = std::get<KeyboardResult>(result.data).text;
-          text.erase(0, text.find_first_not_of(' '));
-          text.erase(text.find_last_not_of(' ') + 1);
-          snprintf(config.city, sizeof(config.city), "%s", text.c_str());
-          config.resolvedFor[0] = '\0';  // resolve the place again on the next fetch
-          config.place.valid = false;
-          deskweather::saveConfig(config);
-          weather = desk::WeatherReport{};  // the old place's forecast must not linger
-          weatherFetchPending = true;
-        }
-        requestUpdate();
-      });
+bool DeskActivity::pageEnabled(const Page p) {
+  switch (p) {
+    case Page::Pc:
+      return SETTINGS.deskShowPc;
+    case Page::Photo:
+      return SETTINGS.deskShowPhoto;
+    case Page::Pomodoro:
+      return SETTINGS.deskShowPomodoro;
+    default:
+      return true;
+  }
 }
 
 const char* DeskActivity::pageName(const Page p) {
@@ -590,8 +578,14 @@ const char* DeskActivity::pageName(const Page p) {
 }
 
 DeskActivity::Page DeskActivity::neighbour(const Page p, const int step) {
+  // The next page that is turned on (Settings > System > Desk); the clock always is.
   const int n = static_cast<int>(Page::Count);
-  return static_cast<Page>((static_cast<int>(p) + step + n) % n);
+  int i = static_cast<int>(p);
+  for (int tries = 0; tries < n; ++tries) {
+    i = (i + step + n) % n;
+    if (pageEnabled(static_cast<Page>(i))) return static_cast<Page>(i);
+  }
+  return Page::Main;
 }
 
 // Back, Select, and the two page buttons named after the pages they open (no arrows:
@@ -684,7 +678,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 
     uint32_t now = 0;
     const bool haveNow = readUtcUnix(now);
-    const bool due = !weather.valid || now < weather.fetchedAt || now - weather.fetchedAt >= kBatteryWeatherSec;
+    const bool due = !weather.valid || now < weather.fetchedAt || now - weather.fetchedAt >= batteryWeatherSec();
     const bool backingOff = lastWeatherTry != 0 && now >= lastWeatherTry && now - lastWeatherTry < kBatteryWeatherRetrySec;
     if (haveNow && due && !backingOff) {
       const uint32_t startMs = millis();
@@ -711,21 +705,18 @@ void DeskActivity::loop() {
                   mappedInput.wasPressed(MappedInputManager::Button::Left);
   const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down) ||
                     mappedInput.wasPressed(MappedInputManager::Button::Right);
-  // On the PC page Select acts on release: a short press refreshes, a hold edits the PC address.
-  const bool selectPressed = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
+  // Select acts on release: a short press is the page's action, a hold opens Desk settings. The
+  // hold is measured while the button is down (the held time is gone once it is released) and
+  // acted on at the release, so the release does not reach the screen it opens.
   const bool selectReleased =
       mappedInput.wasReleased(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
-  // On the main screen and the PC page Select acts on release: a hold opens Desk settings / the PC address.
-  // The hold is measured while the button is down (the held time is gone once it is released) and
-  // acted on at the release, so the release does not reach the screen it opens.
-  const bool onRelease = page == Page::Pc || page == Page::Main;
-  if (onRelease && mappedInput.isPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400 &&
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400 &&
       mappedInput.getHeldTime() >= kAddressHoldMs) {
     selectWasHeld = true;
   }
-  const bool selectHeld = onRelease && selectReleased && selectWasHeld;
+  const bool selectHeld = selectReleased && selectWasHeld;
   if (selectReleased) selectWasHeld = false;
-  const bool select = onRelease ? selectReleased : selectPressed;
+  const bool select = selectReleased;
   if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
 
   if (applyNetJob()) return;  // opened the Wi-Fi picker
@@ -764,22 +755,18 @@ void DeskActivity::loop() {
     switchPage(neighbour(page, down ? 1 : -1));
     return;
   }
+  if (selectHeld) {
+    openSettings();
+    return;
+  }
   if (select) {
     switch (page) {
       case Page::Main:
-        if (selectHeld) {
-          openDeskSettings();
-          break;
-        }
         shown = readLocalTime();
         startNetJob(true, true, true);
         break;
       case Page::Pc:
-        if (selectHeld) {
-          editPcAddress();
-        } else {
-          startNetJob(false, true, false);
-        }
+        startNetJob(false, true, false);
         break;
       case Page::Photo:
         if (!photos.empty()) photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
@@ -797,7 +784,7 @@ void DeskActivity::loop() {
   }
 
   // Pomodoro runs on every page; the screen jumps to it when a phase ends.
-  if (pomodoro.update(nowSec()) == desk::Pomodoro::Event::PhaseEnded) {
+  if (pomodoro.update(nowSec()) == desk::Pomodoro::Event::PhaseEnded && pageEnabled(Page::Pomodoro)) {
     switchPage(Page::Pomodoro);
     return;
   }
@@ -993,7 +980,7 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   const int pad = 14;
   drawSkyIcon(left + pad, top + pad, 72, fresh ? weather.sky : desk::Sky::Unknown, weather.isDay);
 
-  const bool f = config.fahrenheit;
+  const bool f = SETTINGS.deskTempUnit == 1;
   snprintf(buf, sizeof(buf), "%d°", shownTemp(weather.tempC, f));
   const int tempX = left + pad + 84;
   renderer.drawText(DESK_DIGITS_FONT_ID, tempX, top + pad + 4, buf);
@@ -1328,7 +1315,7 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   line2[0] = '\0';
   if (weather.valid && desk::weatherFresh(weather, nowUnix)) {
     snprintf(line2, sizeof(line2), line1[0] != '\0' ? "%s · %d°%s" : "%s%d°%s", line1,
-             shownTemp(weather.tempC, config.fahrenheit), config.fahrenheit ? "F" : "C");
+             shownTemp(weather.tempC, SETTINGS.deskTempUnit == 1), SETTINGS.deskTempUnit == 1 ? "F" : "C");
   } else {
     snprintf(line2, sizeof(line2), "%s", line1);
   }
