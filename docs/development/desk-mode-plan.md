@@ -257,6 +257,15 @@ the commit message, host tests green, simulator check where it applies.
    `tools/desk-agent/desk_statusline.py` and served by the agent; the PC page stays up like the
    photo frame and its address can be typed on the reader (hold Select).
 
+7. **Settings, month calendar, air quality, quiet nights, PC photos; every firmware**
+   *Done (2026-11-23):* Settings > System > Desk holds every Desk setting (section headers:
+   display, weather, photos and PC, battery and night), opened from Desk by a held Select; city,
+   PC address and unit moved there from desk.json, which keeps the resolved place only. Month
+   calendar page (lunar day under each date, giờ hoàng đạo); US AQI and PM2.5 from Open-Meteo on
+   the weather card; quiet nights (no weather/PC rounds, battery ticks every 30 min); photos from
+   the agent's `--photos` folder. Desk is in every pokemon firmware; the battery loop only on
+   the X3. *Left:* quiet nights and the other boards on real readers.
+
 ## Open questions
 
 1. **Claude quota source.** Session/weekly percentages and reset times as shown by Claude Code's

@@ -32,14 +32,22 @@ is in git history (before 2026-10-08).
   X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.1; latest release `v1.9.1` (stable). Its
   release also carries `xteink-pokemon-sd-card-assets.zip` and `xteink-pokemon-apps.zip` (every app in
   `apps/` under `.crosspoint/apps/`), uploaded by hand - CI only publishes the firmware.
-- X3 Lite (`pokemon-x3-lite`, branch feat/x3-lite, 2026-11-20, not released yet): pokemon-x3 without
-  Bluetooth (extends `firmware_tuned`, not `firmware_tuned_bt_c3`), to free flash for new features
-  on a spare X3 (desk dashboard ideas: clock + lunar calendar + weather, photo frame, pomodoro, PC
-  stats). Device type `x3-lite`, so OTA looks for `firmware-x3-lite.bin` and never crosses with
-  `firmware-x3-x4`. Measured: flash 89.0% (5,831,915 B) vs pokemon-x3 95.1% (6,232,993 B), -392 KB;
-  static RAM 69.6 KB vs 79.2 KB. CI's release workflow builds it (`build-x3-lite`). README and
-  docs/installation.md do not list it yet: add the download link once a release carries it.
-  Switching between it and pokemon-x3 rebuilds the shared C3 core (BT on/off).
+- Desk mode (`CROSSINK_DESK`, branch feat/x3-lite, 2026-11-23, plan in
+  docs/development/desk-mode-plan.md): clock + lunar calendar + weather/AQI, month calendar, PC
+  page (tools/desk-agent, Claude quota through `desk_statusline.py`), photo frame (SD or the
+  agent's `--photos`), Pomodoro, a light-sleep battery loop. Built into every pokemon firmware
+  (X3/X4, X4 Pro, X4 Classic, simulator X3) since the owner chose it over a separate X3 Lite
+  (`pokemon-x3-lite` and its CI job are gone; readers flashed with it look for
+  `firmware-x3-lite.bin` and must be flashed by hand once). The battery loop (pins held, RTC
+  minute ticks, RWDT recovery, full CPU speed held) runs on the X3 only
+  (`deskpower::batteryLoopSupported()`); elsewhere Desk leaves battery sleep to the reader.
+  Settings live in Settings > System > Desk (`desk*` fields of CrossPointSettings, on the web
+  settings page too); a held Select on any Desk page opens that submenu.
+  CrossInk 2.0.0-rc3 (upstream `uxjulia/CrossInk`, remote `crossink`): 110 commits past our
+  2.0.0-rc merge, a trial merge into this branch had 59 conflicts (30 translation files, the
+  settings code, main.cpp, workflows); left for the final 2.0.0 (its release branch was 14
+  commits past rc3 on 2026-11-23). Our own tags v2.0.0/v2.0.1/v2.1.0 shadow upstream's names:
+  compare by commit, not by tag.
 - Dev machine (2026-11-20): Windows 11 + WSL `Ubuntu-26.04`, clone at `~/xteink-pokemon-game`,
   `~/bin/xenv <cmd>` runs a command there with PlatformIO on PATH. Native Windows builds fail
   (pioarduino "Two environments ... FrameworkArduino/ColorFormat.c.o", cause not found): build in WSL.
