@@ -19,11 +19,18 @@
 // agent in tools/desk-agent (on entry, every minute on USB, on Select). Phase 4: the photo
 // frame (/desk/photos, next photo on Select and every 30 min on USB) and Pomodoro (runs in the
 // background; the screen jumps to it when a phase ends). Up/Down switch pages.
-// Battery ticks (light sleep in <= 10 s chunks, pins held) come in phase 5; for now the screen
-// keeps the reader awake only on USB, where Wi-Fi also stays up between polls.
+// On USB the screen keeps the reader awake and Wi-Fi stays up between polls. Phase 5: on
+// battery, after 30 s without input (no Pomodoro running), the main screen switches to the
+// battery loop (DeskPower.h): minute ticks in light sleep, weather every 60 min, PC off; the
+// power button or plugging USB leaves it (restart back into Desk). A watchdog reset inside the
+// loop comes back to it from setup() via resumeBatteryFromBoot().
 class DeskActivity final : public Activity {
  public:
   DeskActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("Desk", renderer, mappedInput) {}
+
+  // From setup(), when the RTC marker says a battery run was going: loads the config and the
+  // cached weather and goes on with the battery loop. Does not return.
+  [[noreturn]] void resumeBatteryFromBoot();
 
   void onEnter() override;
   void onExit() override;
@@ -70,6 +77,9 @@ class DeskActivity final : public Activity {
   desk::Pomodoro pomodoro;
   uint32_t shownPomodoroMinutes = 0;
 
+  uint32_t lastInputMs = 0;
+  bool batteryMode = false;  // drawn by the battery loop: no button hints
+
   static LocalTime readLocalTime();
   static bool readUtcUnix(uint32_t& out);
   static int utcOffsetMinutes();
@@ -91,6 +101,11 @@ class DeskActivity final : public Activity {
   void loadPhotos();
   void switchPage(Page to);
   static uint32_t nowSec();  // monotonic seconds for Pomodoro
+  // The page as render() draws it, without the render lock (also used by the battery loop).
+  void drawPage();
+  void loadState();
+  [[noreturn]] void runBatteryLoop(bool fromBoot);
+  [[noreturn]] void leaveBatteryLoop();
 };
 
 #endif  // CROSSINK_DESK

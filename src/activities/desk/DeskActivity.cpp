@@ -9,6 +9,7 @@
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
+#include <WiFi.h>
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +20,7 @@
 #include "CrossPointSettings.h"
 #include "DeskAgentService.h"
 #include "DeskFonts.h"
+#include "DeskPower.h"
 #include "Lunar.h"
 #include "MappedInputManager.h"
 #include "activities/util/PhotoRender.h"
@@ -39,6 +41,10 @@ constexpr uint32_t kPcEveryMs = 60 * 1000;            // USB default of "PC + Cl
 constexpr uint32_t kPcRetryMs = 2 * 60 * 1000;
 constexpr uint32_t kPcFreshSec = 5 * 60;  // older PC numbers are hidden from the main screen
 constexpr int kMargin = 16;
+constexpr uint32_t kBatteryIdleMs = 30 * 1000;       // no input this long on battery: battery loop
+constexpr uint32_t kBatteryWeatherSec = 60 * 60;     // battery default of "Weather"
+constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
+constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
 
 }  // namespace
 
@@ -92,17 +98,21 @@ DeskActivity::LocalTime DeskActivity::readLocalTime() {
 
 // ---- lifecycle and scheduling ------------------------------------------------------------------
 
-void DeskActivity::onEnter() {
-  Activity::onEnter();
+void DeskActivity::loadState() {
   page = Page::Main;
   shown = readLocalTime();
   forceHalfRefresh = true;
   minutesSinceFull = 0;
   lastPollMs = millis();
   enteredMs = lastPollMs;
-
+  lastInputMs = lastPollMs;
   deskweather::loadConfig(config);
   deskweather::loadCache(weather);
+}
+
+void DeskActivity::onEnter() {
+  Activity::onEnter();
+  loadState();
   uint32_t now = 0;
   const bool haveNow = readUtcUnix(now);
   // Fetch at once unless the cached forecast is younger than the interval.
@@ -187,10 +197,79 @@ bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
   return pc.valid && nowUnix >= pc.receivedAt && nowUnix - pc.receivedAt <= kPcFreshSec;
 }
 
+// ---- battery loop (phase 5) ------------------------------------------------------------------
+
+void DeskActivity::resumeBatteryFromBoot() {
+  loadState();
+  deskpower::countBatteryReset();
+  runBatteryLoop(true);
+}
+
+void DeskActivity::leaveBatteryLoop() {
+  deskpower::watchdogDisarm();
+  deskpower::setBatteryRunArmed(false);
+  deskpower::requestOpenDeskAfterRestart();
+  ESP.restart();
+  for (;;) {
+    delay(1000);
+  }
+}
+
+void DeskActivity::runBatteryLoop(const bool fromBoot) {
+  page = Page::Main;
+  batteryMode = true;
+  forceHalfRefresh = true;
+  if (!fromBoot) {
+    // Let a render already queued finish before the loop draws without the render task.
+    requestUpdateAndWait();
+  }
+  if (wifiKeptForUsb || WiFi.getMode() != WIFI_MODE_NULL) deskweather::wifiDown();
+  wifiKeptForUsb = false;
+#ifndef SIMULATOR
+  gpio.stopButtonCapture();
+#endif
+  deskpower::setBatteryRunArmed(true);
+  deskpower::watchdogArm(kBatteryWatchdogMs);
+
+  int ticksSinceHalf = 0;
+  for (;;) {
+    deskpower::watchdogFeed();
+    if (gpio.isUsbConnected()) leaveBatteryLoop();  // charging: the full Desk again
+
+    const LocalTime t = readLocalTime();
+    const bool newDay = t.day != shown.day || t.month != shown.month || t.year != shown.year;
+    shown = t;
+    if (newDay) {
+      pomodoro.newDay();
+      forceHalfRefresh = true;
+    }
+    if (++ticksSinceHalf >= kBatteryHalfRefreshEvery) forceHalfRefresh = true;
+    if (forceHalfRefresh) ticksSinceHalf = 0;
+
+    uint32_t now = 0;
+    if (readUtcUnix(now) && (!weather.valid || now < weather.fetchedAt ||
+                             now - weather.fetchedAt >= kBatteryWeatherSec)) {
+      weatherResult = deskweather::refresh(config, weather, now, false);
+      weatherAttempted = true;
+      deskpower::watchdogFeed();
+    }
+
+    drawPage();
+    if (deskpower::sleepFor(deskpower::msToNextMinute()) == deskpower::Wake::PowerButton) leaveBatteryLoop();
+  }
+}
+
 void DeskActivity::loop() {
   const bool up = mappedInput.wasPressed(MappedInputManager::Button::Up);
   const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down);
   const bool select = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
+  if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
+
+  // On battery and left alone: the minute-tick loop in light sleep (does not return).
+  if (!gpio.isUsbConnected() && !pomodoro.running() && !weatherFetchPending && !pcPollPending &&
+      millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo) {
+    runBatteryLoop(false);
+  }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     if (page != Page::Main) {
@@ -543,6 +622,11 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     }
   }
 
+  if (batteryMode) {
+    // The front buttons cannot wake the light sleep: only the power button can.
+    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40, "Tiết kiệm pin · bấm nút nguồn để dùng");
+    return;
+  }
   const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow("Thoát"), "Làm mới", "Trang", "Trang");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
@@ -783,7 +867,9 @@ void DeskActivity::renderPomodoro() {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
-void DeskActivity::render(RenderLock&&) {
+void DeskActivity::render(RenderLock&&) { drawPage(); }
+
+void DeskActivity::drawPage() {
   uint32_t nowUnix = 0;
   readUtcUnix(nowUnix);
   if (page == Page::Photo) {

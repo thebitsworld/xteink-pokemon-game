@@ -256,7 +256,9 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont, nullptr, nullptr, 
 #include <builtinFonts/desk_clock_72.h>
 #include <builtinFonts/desk_digits_28.h>
 
+#include "activities/desk/DeskActivity.h"
 #include "activities/desk/DeskFonts.h"
+#include "activities/desk/DeskPower.h"
 EpdFont deskClockFont(&desk_clock_72);
 EpdFontFamily deskClockFontFamily(&deskClockFont);
 EpdFont deskDigitsFont(&desk_digits_28);
@@ -1564,11 +1566,17 @@ void setup() {
   // A retained page is useful opening feedback even when a fast refresh is unavailable.
   bool quickResumeFrameVisible = false;
 
+  // A boot inside a Desk battery run or a Desk probe run keeps the panel's picture and redraws
+  // over it.
+  bool deskProbeTick = false;
 #if CROSSINK_DESK_PROBE
-  // A boot inside a Desk probe run keeps the panel's picture and redraws over it.
-  const bool deskProbeTick = deskprobe::bootContinuesRun(static_cast<int>(rawWakeupCause));
-#else
-  constexpr bool deskProbeTick = false;
+  deskProbeTick = deskprobe::bootContinuesRun(static_cast<int>(rawWakeupCause));
+#endif
+#if CROSSINK_DESK
+  if (deskpower::batteryRunArmed() && deskpower::batteryResets() >= 50) {
+    deskpower::setBatteryRunArmed(false);  // resetting over and over: give up, boot normally
+  }
+  deskProbeTick = deskProbeTick || deskpower::batteryRunArmed();
 #endif
   setupDisplayAndFonts(
       deskProbeTick || SleepWakePolicy::shouldInitializeSeamlessly(resume, isUc8279X3, hasValidSleepFrame),
@@ -1578,6 +1586,13 @@ void setup() {
   // Runs the tick and deep-sleeps again (no return) on the run's timer wakes; ends the run on
   // any other wake.
   deskprobe::handleBoot(static_cast<int>(rawWakeupCause), renderer);
+#endif
+#if CROSSINK_DESK
+  // Back from a reset inside Desk's battery loop (the RTC watchdog): go on with it.
+  if (deskpower::batteryRunArmed()) {
+    static DeskActivity deskBattery(renderer, mappedInputManager);
+    deskBattery.resumeBatteryFromBoot();
+  }
 #endif
 
   switch (resume) {
@@ -1782,6 +1797,14 @@ void setup() {
     delay(10);
     gpio.update();
   }
+
+#if CROSSINK_DESK
+  // Desk's battery loop restarts the reader to leave (power button, USB plugged): open Desk
+  // again rather than Home.
+  if (deskpower::consumeOpenDeskRequest()) {
+    activityManager.replaceActivity(std::make_unique<DeskActivity>(renderer, mappedInputManager));
+  }
+#endif
 
   // Network boots (file transfer, OTA, sync) keep the radio for WiFi alone.
   // Holding Back at power-on leaves Bluetooth off for this boot (an escape on
