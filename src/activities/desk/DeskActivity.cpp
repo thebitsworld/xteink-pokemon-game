@@ -30,6 +30,7 @@
 #include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/OptionSelectionActivity.h"
 #include "activities/util/PhotoRender.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -37,6 +38,9 @@
 namespace {
 
 constexpr size_t kMaxPhotos = 500;
+
+// Open-Meteo gives °C; the reader shows °C or °F (desk.json "unit").
+int shownTemp(const int c, const bool f) { return f ? static_cast<int>(std::lround(c * 9.0 / 5.0 + 32.0)) : c; }
 
 constexpr uint32_t kPollMs = 1000;
 constexpr int kHalfRefreshEveryMinutes = 60;          // USB default of "Full refresh" (plan)
@@ -442,6 +446,7 @@ bool DeskActivity::applyNetJob() {
   if (!netBusy || !netDone) return false;
   netBusy = false;
   const uint32_t nowMs = millis();
+  netConfig.fahrenheit = config.fahrenheit;
   config = netConfig;
   wifiKeptForUsb = wifiKeptForUsb || netKeepWifi;
   if (netWantWeather) {
@@ -499,6 +504,71 @@ void DeskActivity::editPcAddress() {
           deskweather::saveConfig(config);
           pc = desk::AgentStats{};  // numbers from another PC must not linger
           pcPollPending = true;
+        }
+        requestUpdate();
+      });
+}
+
+// Desk settings (hold Select on the main screen): temperature unit, weather place, PC address.
+// All three live in desk.json.
+void DeskActivity::openDeskSettings() {
+  if (netBusy) return;  // the job holds a copy of the config
+  char unitRow[48];
+  char placeRow[96];
+  char pcRow[96];
+  snprintf(unitRow, sizeof(unitRow), tr(STR_DESK_SET_UNIT), config.fahrenheit ? "°F" : "°C");
+  snprintf(placeRow, sizeof(placeRow), tr(STR_DESK_SET_PLACE),
+           config.city[0] != '\0' ? config.city : tr(STR_DESK_PLACE_BY_IP));
+  snprintf(pcRow, sizeof(pcRow), tr(STR_DESK_SET_PC), config.agent[0] != '\0' ? config.agent : tr(STR_DESK_PC_AUTO));
+  std::vector<std::string> rows = {unitRow, placeRow, pcRow};
+  startActivityForResult(
+      std::make_unique<OptionSelectionActivity>(renderer, mappedInput, "DeskSettings", StrId::STR_DESK_SETTINGS,
+                                                std::move(rows), 0),
+      [this](const ActivityResult& result) {
+        lastInputMs = millis();
+        forceHalfRefresh = true;
+        const auto* choice = std::get_if<OptionSelectionResult>(&result.data);
+        if (result.isCancelled || choice == nullptr) {
+          requestUpdate();
+          return;
+        }
+        switch (choice->index) {
+          case 0:
+            config.fahrenheit = !config.fahrenheit;
+            deskweather::saveConfig(config);
+            openDeskSettings();  // back to the list, showing the new unit
+            return;
+          case 1:
+            editWeatherPlace();
+            return;
+          case 2:
+            editPcAddress();
+            return;
+          default:
+            requestUpdate();
+            return;
+        }
+      });
+}
+
+// The weather place by name (Open-Meteo geocoding), or empty to locate by IP.
+void DeskActivity::editWeatherPlace() {
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_DESK_CITY_PROMPT), config.city,
+                                              sizeof(config.city) - 1, InputType::Text),
+      [this](const ActivityResult& result) {
+        lastInputMs = millis();
+        forceHalfRefresh = true;
+        if (!result.isCancelled) {
+          std::string text = std::get<KeyboardResult>(result.data).text;
+          text.erase(0, text.find_first_not_of(' '));
+          text.erase(text.find_last_not_of(' ') + 1);
+          snprintf(config.city, sizeof(config.city), "%s", text.c_str());
+          config.resolvedFor[0] = '\0';  // resolve the place again on the next fetch
+          config.place.valid = false;
+          deskweather::saveConfig(config);
+          weather = desk::WeatherReport{};  // the old place's forecast must not linger
+          weatherFetchPending = true;
         }
         requestUpdate();
       });
@@ -645,8 +715,17 @@ void DeskActivity::loop() {
   const bool selectPressed = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
   const bool selectReleased =
       mappedInput.wasReleased(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
-  const bool select = page == Page::Pc ? selectReleased : selectPressed;
-  const bool selectHeld = page == Page::Pc && selectReleased && mappedInput.getHeldTime() >= kAddressHoldMs;
+  // On the main screen and the PC page Select acts on release: a hold opens Desk settings / the PC address.
+  // The hold is measured while the button is down (the held time is gone once it is released) and
+  // acted on at the release, so the release does not reach the screen it opens.
+  const bool onRelease = page == Page::Pc || page == Page::Main;
+  if (onRelease && mappedInput.isPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400 &&
+      mappedInput.getHeldTime() >= kAddressHoldMs) {
+    selectWasHeld = true;
+  }
+  const bool selectHeld = onRelease && selectReleased && selectWasHeld;
+  if (selectReleased) selectWasHeld = false;
+  const bool select = onRelease ? selectReleased : selectPressed;
   if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
 
   if (applyNetJob()) return;  // opened the Wi-Fi picker
@@ -688,6 +767,10 @@ void DeskActivity::loop() {
   if (select) {
     switch (page) {
       case Page::Main:
+        if (selectHeld) {
+          openDeskSettings();
+          break;
+        }
         shown = readLocalTime();
         startNetJob(true, true, true);
         break;
@@ -910,12 +993,17 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
   const int pad = 14;
   drawSkyIcon(left + pad, top + pad, 72, fresh ? weather.sky : desk::Sky::Unknown, weather.isDay);
 
-  snprintf(buf, sizeof(buf), "%d°", weather.tempC);
+  const bool f = config.fahrenheit;
+  snprintf(buf, sizeof(buf), "%d°", shownTemp(weather.tempC, f));
   const int tempX = left + pad + 84;
   renderer.drawText(DESK_DIGITS_FONT_ID, tempX, top + pad + 4, buf);
-  const int textX = tempX + renderer.getTextWidth(DESK_DIGITS_FONT_ID, buf) + 16;
+  // The digits font has no letters: the unit in the UI font beside it.
+  const int unitX = tempX + renderer.getTextWidth(DESK_DIGITS_FONT_ID, buf) + 2;
+  const char* unit = f ? "F" : "C";
+  renderer.drawText(UI_12_FONT_ID, unitX, top + pad + 8, unit, true, EpdFontFamily::BOLD);
+  const int textX = unitX + renderer.getTextWidth(UI_12_FONT_ID, unit, EpdFontFamily::BOLD) + 14;
   renderer.drawText(UI_12_FONT_ID, textX, top + pad + 6, skyText(weather.sky), true, EpdFontFamily::BOLD);
-  snprintf(buf, sizeof(buf), tr(STR_DESK_LOW_HIGH), weather.tempMin, weather.tempMax);
+  snprintf(buf, sizeof(buf), tr(STR_DESK_LOW_HIGH), shownTemp(weather.tempMin, f), shownTemp(weather.tempMax, f));
   renderer.drawText(UI_10_FONT_ID, textX, top + pad + 42, buf);
 
   int y = top + pad + 86;
@@ -941,7 +1029,7 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     const char* label = skyText(weather.hourly[idx]);
     renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD) / 2, y + 28,
                       label, true, EpdFontFamily::BOLD);
-    snprintf(buf, sizeof(buf), "%d°", weather.hourlyTemp[idx]);
+    snprintf(buf, sizeof(buf), "%d°", shownTemp(weather.hourlyTemp[idx], f));
     renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, y + 56, buf);
   }
 }
@@ -1239,7 +1327,8 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   }
   line2[0] = '\0';
   if (weather.valid && desk::weatherFresh(weather, nowUnix)) {
-    snprintf(line2, sizeof(line2), line1[0] != '\0' ? "%s · %d°" : "%s%d°", line1, weather.tempC);
+    snprintf(line2, sizeof(line2), line1[0] != '\0' ? "%s · %d°%s" : "%s%d°%s", line1,
+             shownTemp(weather.tempC, config.fahrenheit), config.fahrenheit ? "F" : "C");
   } else {
     snprintf(line2, sizeof(line2), "%s", line1);
   }

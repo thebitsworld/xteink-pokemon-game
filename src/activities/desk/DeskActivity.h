@@ -100,6 +100,7 @@ class DeskActivity final : public Activity {
   uint32_t shownPomodoroMinutes = 0;
 
   uint32_t lastInputMs = 0;
+  bool selectWasHeld = false;  // Select held past kAddressHoldMs, acted on at its release
   bool batteryMode = false;  // drawn by the battery loop: no button hints
   static bool batteryNowRequested;
   static bool open;
@@ -118,6 +119,8 @@ class DeskActivity final : public Activity {
   void runNetJob();
   bool pcFresh(uint32_t nowUnix) const;
   void editPcAddress();
+  void openDeskSettings();
+  void editWeatherPlace();
 
   void drawStatusBar(const char* title, const char* middle) const;
   void drawBar(int x, int y, int w, int h, int pct) const;

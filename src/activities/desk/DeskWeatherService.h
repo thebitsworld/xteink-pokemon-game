@@ -21,6 +21,7 @@ struct Config {
   char resolvedFor[48] = {};  // the city the cached place was resolved from
   desk::Place place;
   char agent[64] = {};  // PC agent "host:port"; empty = find it by mDNS (_xdesk._tcp)
+  bool fahrenheit = false;  // "unit": "F" in desk.json; temperatures are fetched in °C
 };
 
 enum class Result : uint8_t { Ok, NoSavedWifi, WifiFailed, PlaceFailed, FetchFailed, ParseFailed, NoAgent };

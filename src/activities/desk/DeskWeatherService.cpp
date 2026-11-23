@@ -78,6 +78,8 @@ bool loadConfig(Config& out) {
   copyText(out.city, sizeof(out.city), doc["city"].as<const char*>());
   copyText(out.resolvedFor, sizeof(out.resolvedFor), doc["resolvedFor"].as<const char*>());
   copyText(out.agent, sizeof(out.agent), doc["agent"].as<const char*>());
+  const char* unit = doc["unit"].as<const char*>();
+  out.fahrenheit = unit != nullptr && (unit[0] == 'F' || unit[0] == 'f');
   if (!doc["lat"].isNull() && !doc["lon"].isNull()) {
     out.place.valid = true;
     out.place.lat = doc["lat"].as<double>();
@@ -92,6 +94,7 @@ bool saveConfig(const Config& cfg) {
   doc["city"] = cfg.city;
   doc["resolvedFor"] = cfg.resolvedFor;
   if (cfg.agent[0] != '\0') doc["agent"] = cfg.agent;
+  if (cfg.fahrenheit) doc["unit"] = "F";
   if (cfg.place.valid) {
     doc["lat"] = cfg.place.lat;
     doc["lon"] = cfg.place.lon;
