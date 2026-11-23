@@ -47,6 +47,11 @@ def main() -> int:
             window = limits.get(key)
             if isinstance(window, dict) and window.get("used_percentage") is not None:
                 parts.append(f"{label} {round(float(window['used_percentage']))}%")
+    # Claude Code reads the line as UTF-8; Windows Python would write the console code page.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
     sys.stdout.write(" · ".join(parts))
     return 0
 
