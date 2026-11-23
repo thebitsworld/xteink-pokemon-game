@@ -1,3 +1,15 @@
+## [2.2.0-beta.4-desktest-x4pro] - 2026-11-23
+
+> ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.3 to try Desk). There is no X3/X4 or X4 Classic file in this release.
+>
+> ⚠️ **KHÔNG CÀI ĐẶT - bản thử cho một máy X4 Pro.** File này chỉ để thử chế độ tiết kiệm pin của Desk trên X4 Pro; có thể làm đứng màn hình hoặc hao pin. Mọi người khác hãy giữ v2.1.0 (hoặc v2.2.0-beta.3 nếu muốn thử Desk). Bản này không có file cho X3/X4 hay X4 Classic.
+
+### Changed
+
+- Everything in 2.2.0-beta.3, plus for the X4 Pro's battery saver (test only):
+  - The frontlight is turned off while the battery saver runs: it used to blink with every minute's redraw.
+  - A touch on the screen brings Desk back, like the power button.
+
 ## [2.2.0-beta.3] - 2026-11-23
 
 > **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use. These fixes were checked in the simulator only, not yet on a reader.
