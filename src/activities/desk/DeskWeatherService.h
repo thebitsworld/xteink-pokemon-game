@@ -40,6 +40,15 @@ void wifiDown();
 void setCancel(bool on);
 bool cancelled();
 
+// The last weather request: its HTTP status (0: none, the connection or TLS failed) and the
+// heap as it started, for the battery log.
+struct FetchInfo {
+  int status = 0;
+  int freeKb = -1;
+  int maxBlockKb = -1;
+};
+FetchInfo lastFetchInfo();
+
 // keepWifi: leave Wi-Fi on afterwards (on USB, for the next PC poll) even if this call
 // started it.
 Result refresh(Config& cfg, desk::WeatherReport& out, uint32_t nowUnix, bool keepWifi);

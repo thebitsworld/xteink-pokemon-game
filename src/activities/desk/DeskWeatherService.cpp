@@ -32,17 +32,40 @@ void copyText(char* dst, const size_t size, const char* src) {
   std::snprintf(dst, size, "%s", src == nullptr ? "" : src);
 }
 
+std::atomic<bool> cancelFlag{false};
+FetchInfo lastInfo;
+
 bool fetch(const std::string& url, std::string& body) {
   body.clear();
-  const bool ok = HttpDownloader::fetchUrl(url, body);
-  if (!ok) LOG_ERR(TAG, "Fetch failed: %s", url.c_str());
+  // The heap as the request starts: an HTTPS handshake needs a large free block, and on the X3
+  // forecasts failed in ~2 s for hours while the ones right after a restart worked (battery log,
+  // 2026-11-23).
+#ifndef SIMULATOR
+  lastInfo.freeKb = static_cast<int>(ESP.getFreeHeap() / 1024);
+  lastInfo.maxBlockKb = static_cast<int>(ESP.getMaxAllocHeap() / 1024);
+#endif
+  HttpRequestDiagnostics diag;
+  HttpDownloader::DownloadOptions options(false, false, [] { return cancelFlag.load(); });
+  const auto err = HttpDownloader::streamUrl(
+      url,
+      [&body](const uint8_t* data, const size_t len) {
+        body.append(reinterpret_cast<const char*>(data), len);
+        return true;
+      },
+      nullptr, "", "", std::move(options), &diag);
+  lastInfo.status = diag.status;
+  const bool ok = err == HttpDownloader::OK;
+  if (!ok) {
+    LOG_ERR(TAG, "Fetch failed (error %d, HTTP %d, heap %d KB, block %d KB): %s", static_cast<int>(err), diag.status,
+            lastInfo.freeKb, lastInfo.maxBlockKb, url.c_str());
+  }
   if (body.size() > kMaxBody) body.resize(kMaxBody);
   return ok && !body.empty();
 }
 
-std::atomic<bool> cancelFlag{false};
-
 }  // namespace
+
+FetchInfo lastFetchInfo() { return lastInfo; }
 
 void setCancel(const bool on) { cancelFlag = on; }
 bool cancelled() { return cancelFlag; }

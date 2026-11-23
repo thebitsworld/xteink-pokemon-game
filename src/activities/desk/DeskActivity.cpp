@@ -514,6 +514,10 @@ void DeskActivity::waitNetJob() {
   applyNetJob();
 }
 
+namespace {
+void batteryLogNow(const char* event);
+}  // namespace
+
 bool DeskActivity::applyNetJob() {
   if (!netBusy || !netDone) return false;
   netBusy = false;
@@ -524,6 +528,15 @@ bool DeskActivity::applyNetJob() {
     weather = netWeather;
     weatherResult = netWeatherResult;
     weatherFetching = false;
+    // Failed fetches outside the battery loop go to the same log ("net-weather-...").
+    if (!deskweather::cancelled() && (weatherResult == deskweather::Result::FetchFailed ||
+                                      weatherResult == deskweather::Result::PlaceFailed)) {
+      const deskweather::FetchInfo info = deskweather::lastFetchInfo();
+      char event[48];
+      snprintf(event, sizeof(event), "net-weather-%d-s%d-h%d-m%d", static_cast<int>(weatherResult), info.status,
+               info.freeKb, info.maxBlockKb);
+      batteryLogNow(event);
+    }
     weatherAttempted = true;
     lastWeatherAttemptMs = nowMs;
     if (page == Page::Main) forceHalfRefresh = true;
@@ -822,9 +835,16 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
       lastWeatherTry = weatherResult == deskweather::Result::Ok ? 0 : now;
       deskpower::watchdogFeed();
       // In the battery log: why a forecast went missing, and how long Wi-Fi was up.
-      char event[32];
-      snprintf(event, sizeof(event), "weather-%d-%lums", static_cast<int>(weatherResult),
-               static_cast<unsigned long>(millis() - startMs));
+      // A failed fetch adds its HTTP status and the heap (free / largest block, KB) as it began.
+      char event[64];
+      const deskweather::FetchInfo info = deskweather::lastFetchInfo();
+      if (weatherResult == deskweather::Result::FetchFailed || weatherResult == deskweather::Result::PlaceFailed) {
+        snprintf(event, sizeof(event), "weather-%d-%lums-s%d-h%d-m%d", static_cast<int>(weatherResult),
+                 static_cast<unsigned long>(millis() - startMs), info.status, info.freeKb, info.maxBlockKb);
+      } else {
+        snprintf(event, sizeof(event), "weather-%d-%lums", static_cast<int>(weatherResult),
+                 static_cast<unsigned long>(millis() - startMs));
+      }
       batteryLogNow(event);
     }
 
