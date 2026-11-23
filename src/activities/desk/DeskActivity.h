@@ -2,6 +2,7 @@
 
 #if CROSSINK_DESK
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -18,8 +19,9 @@
 // every 10 min on USB, on Select). Phase 3: the PC page and the main screen's PC strip from the
 // agent in tools/desk-agent (on entry, every minute on USB, on Select). Phase 4: the photo
 // frame (Photo Slideshow's folder and settings - Fit/Crop, random order, interval on USB - next
-// photo on Select, with a date/lunar/weather strip) and Pomodoro (runs in the
-// background; the screen jumps to it when a phase ends). Up/Down switch pages.
+// photo on Select or after the slideshow interval, with a date/lunar/weather strip) and
+// Pomodoro (runs in the background; the screen jumps to it when a phase ends). Up/Down switch
+// pages; the weather and PC fetches run in a background task so the buttons stay responsive.
 // On USB the screen keeps the reader awake and Wi-Fi stays up between polls. Phase 5: on
 // battery, after 30 s without input (no Pomodoro running), the main screen switches to the
 // battery loop (DeskPower.h): minute ticks in light sleep, weather every 60 min, PC off; the
@@ -76,9 +78,23 @@ class DeskActivity final : public Activity {
   uint32_t lastPcAttemptMs = 0;
   bool wifiKeptForUsb = false;
 
+  bool netBusy = false;  // a job was started and not applied yet
+  std::atomic<bool> netDone{false};
+  bool netWantWeather = false, netWantPc = false, netUserAsked = false, netKeepWifi = false;
+  bool netPcRan = false;
+  uint32_t netNow = 0;
+  deskweather::Config netConfig;
+  desk::WeatherReport netWeather;
+  desk::AgentStats netPc;
+  deskweather::Result netWeatherResult = deskweather::Result::Ok;
+  deskweather::Result netPcResult = deskweather::Result::Ok;
+
   std::vector<std::string> photos;
   int photoIndex = 0;
   uint32_t lastPhotoChangeMs = 0;
+  static const char* pageName(Page p);
+  static Page neighbour(Page p, int step);
+  void drawPageHints(const char* back, const char* confirm) const;
 
   desk::Pomodoro pomodoro;
   uint32_t shownPomodoroMinutes = 0;
@@ -93,8 +109,13 @@ class DeskActivity final : public Activity {
   static int utcOffsetMinutes();
   static void formatLocalHm(uint32_t unixSec, char* out, size_t size);
 
-  void runWeatherFetch();
-  void runPcPoll();
+  // The network job: weather and/or PC in a FreeRTOS task on copies of the state; loop()
+  // applies the results once it is done (applyNetJob). userAsked: a failed Wi-Fi opens the picker.
+  void startNetJob(bool wantWeather, bool wantPc, bool userAsked);
+  bool applyNetJob();  // true when it opened the Wi-Fi picker
+  void waitNetJob();
+  static void netTaskEntry(void* arg);
+  void runNetJob();
   bool pcFresh(uint32_t nowUnix) const;
 
   void drawStatusBar(const char* title, const char* middle) const;

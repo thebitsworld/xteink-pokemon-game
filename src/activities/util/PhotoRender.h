@@ -17,9 +17,10 @@ enum class Result {
   RenderFailed,  // decoding failed part-way (BMP)
 };
 
-// overlay, when given, runs after the image in every pass: gray == false on the B/W base (draw
-// the overlay), true on a gray plane (clear the overlay's area so no gray shows through).
+// overlay, when given, runs after the image in every pass: gray == false on the B/W base, true
+// on a gray plane. reserveBottom keeps that many rows at the bottom free of the image (it is
+// fitted or cropped to the area above), e.g. for an overlay that must not cover the photo.
 Result render(GfxRenderer& renderer, const std::string& path, bool cropMode,
-              const std::function<void(bool gray)>& overlay = nullptr);
+              const std::function<void(bool gray)>& overlay = nullptr, int reserveBottom = 0);
 
 }  // namespace photo

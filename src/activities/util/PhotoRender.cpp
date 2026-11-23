@@ -23,9 +23,9 @@ void runOverlay(GfxRenderer& renderer, const std::function<void(bool)>& overlay)
 }
 
 Result renderPng(GfxRenderer& renderer, const std::string& filePath, const bool cropMode,
-                 const std::function<void(bool)>& overlay) {
+                 const std::function<void(bool)>& overlay, const int reserveBottom) {
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  const auto pageHeight = renderer.getScreenHeight() - reserveBottom;
   ImageDimensions dims;
   if (!PngToFramebufferConverter::getDimensionsStatic(filePath, dims)) {
     renderer.setRenderMode(GfxRenderer::BW);
@@ -100,9 +100,9 @@ Result renderPng(GfxRenderer& renderer, const std::string& filePath, const bool 
 }
 
 Result renderBmp(GfxRenderer& renderer, const std::string& filePath, const bool cropMode,
-                 const std::function<void(bool)>& overlay) {
+                 const std::function<void(bool)>& overlay, const int reserveBottom) {
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  const auto pageHeight = renderer.getScreenHeight() - reserveBottom;
   HalFile file;
   if (!Storage.openFileForRead("SLDSHW", filePath, file)) return Result::ImageError;
 
@@ -197,13 +197,14 @@ Result renderBmp(GfxRenderer& renderer, const std::string& filePath, const bool 
 }  // namespace
 
 Result render(GfxRenderer& renderer, const std::string& path, const bool cropMode,
-              const std::function<void(bool gray)>& overlay) {
+              const std::function<void(bool gray)>& overlay, int reserveBottom) {
+  reserveBottom = std::max(0, std::min(reserveBottom, renderer.getScreenHeight() / 2));
   // The decode + multi-pass grayscale SPI writes must not run at the reduced idle CPU
   // frequency (on the X3 the APB clock tracks the CPU below 80 MHz, which throws off the
   // panel's SPI timing; see the slideshow's history).
   HalPowerManager::Lock powerLock;
-  if (FsHelpers::hasPngExtension(path)) return renderPng(renderer, path, cropMode, overlay);
-  return renderBmp(renderer, path, cropMode, overlay);
+  if (FsHelpers::hasPngExtension(path)) return renderPng(renderer, path, cropMode, overlay, reserveBottom);
+  return renderBmp(renderer, path, cropMode, overlay, reserveBottom);
 }
 
 }  // namespace photo

@@ -10,7 +10,10 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Logging.h>
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +49,10 @@ constexpr uint32_t kBatteryIdleMs = 30 * 1000;       // no input this long on ba
 constexpr uint32_t kBatteryWeatherSec = 60 * 60;     // battery default of "Weather"
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
+constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo frame on battery: back to the clock
+constexpr uint32_t kNetTaskStackBytes = 10240;         // HTTPS + JSON; the loop task has 8192
+constexpr int kPhotoStripH = 76;                       // the info strip under a photo
+constexpr int kPhotoStripGap = 10;
 
 // ---- text in the reader's language (I18n: English and Vietnamese; others show English) ----
 
@@ -359,6 +366,7 @@ void DeskActivity::switchPage(const Page to) {
 }
 
 void DeskActivity::onExit() {
+  waitNetJob();
   Activity::onExit();
   open = false;
   batteryNowRequested = false;
@@ -367,37 +375,134 @@ void DeskActivity::onExit() {
 }
 
 bool DeskActivity::preventAutoSleep() {
-  return deskpower::externalPower() || weatherFetching || pcPolling || pomodoro.running();
+  // The photo frame stays up on battery too (it goes back to the clock after an hour alone).
+  return deskpower::externalPower() || netBusy || pomodoro.running() || page == Page::Photo;
 }
 
-void DeskActivity::runWeatherFetch() {
-  weatherFetchPending = false;
-  weatherFetching = true;
-  if (page == Page::Main) requestUpdateAndWait();  // shows "Đang cập nhật..." before blocking
+void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const bool userAsked) {
+  if (netBusy || (!wantWeather && !wantPc)) return;
+  if (wantWeather) weatherFetchPending = false;
+  if (wantPc) pcPollPending = false;
+  netWantWeather = wantWeather;
+  netWantPc = wantPc;
+  netUserAsked = userAsked;
+  netPcRan = false;
   uint32_t now = 0;
   if (!readUtcUnix(now)) now = weather.fetchedAt;
-  const bool usb = deskpower::externalPower();
-  weatherResult = deskweather::refresh(config, weather, now, usb);
-  wifiKeptForUsb = wifiKeptForUsb || usb;
-  weatherFetching = false;
-  weatherAttempted = true;
-  lastWeatherAttemptMs = millis();
-  if (page == Page::Main) forceHalfRefresh = true;
-  requestUpdate();
+  netNow = now;
+  netKeepWifi = deskpower::externalPower();
+  netConfig = config;
+  netWeather = weather;
+  netPc = pc;
+  weatherFetching = wantWeather;  // "Updating..." on the weather card
+  pcPolling = wantPc;
+  netDone = false;
+  netBusy = true;
+  if (xTaskCreate(&DeskActivity::netTaskEntry, "DeskNet", kNetTaskStackBytes, this, 1, nullptr) != pdPASS) {
+    LOG_ERR("DESK", "net task not started: running inline");
+    runNetJob();
+    netDone = true;
+  }
+  if (page == Page::Main && wantWeather) requestUpdate();
 }
 
-void DeskActivity::runPcPoll() {
-  pcPollPending = false;
-  pcPolling = true;
-  uint32_t now = 0;
-  readUtcUnix(now);
-  const bool usb = deskpower::externalPower();
-  pcResult = deskagent::poll(config, pc, now, usb);
-  wifiKeptForUsb = wifiKeptForUsb || usb;
-  pcPolling = false;
-  pcAttempted = true;
-  lastPcAttemptMs = millis();
-  requestUpdate();
+void DeskActivity::netTaskEntry(void* arg) {
+  auto* self = static_cast<DeskActivity*>(arg);
+  self->runNetJob();
+  self->netDone = true;
+  vTaskDelete(nullptr);
+}
+
+void DeskActivity::runNetJob() {
+  if (netWantWeather) {
+    netWeatherResult = deskweather::refresh(netConfig, netWeather, netNow, netKeepWifi);
+    // No network at all: the PC poll would only fail the same way.
+    if (netWeatherResult == deskweather::Result::NoSavedWifi || netWeatherResult == deskweather::Result::WifiFailed) {
+      return;
+    }
+  }
+  if (netWantPc) {
+    netPcResult = deskagent::poll(netConfig, netPc, netNow, netKeepWifi);
+    netPcRan = true;
+  }
+}
+
+void DeskActivity::waitNetJob() {
+  if (!netBusy) return;
+  while (!netDone) delay(20);
+  netUserAsked = false;  // leaving or going to the battery loop: no Wi-Fi picker
+  applyNetJob();
+}
+
+bool DeskActivity::applyNetJob() {
+  if (!netBusy || !netDone) return false;
+  netBusy = false;
+  const uint32_t nowMs = millis();
+  config = netConfig;
+  wifiKeptForUsb = wifiKeptForUsb || netKeepWifi;
+  if (netWantWeather) {
+    weather = netWeather;
+    weatherResult = netWeatherResult;
+    weatherFetching = false;
+    weatherAttempted = true;
+    lastWeatherAttemptMs = nowMs;
+    if (page == Page::Main) forceHalfRefresh = true;
+  }
+  if (netWantPc) {
+    pcPolling = false;
+    if (netPcRan) {
+      pc = netPc;
+      pcResult = netPcResult;
+      pcAttempted = true;
+      lastPcAttemptMs = nowMs;
+    }
+  }
+  if (page != Page::Photo) requestUpdate();  // a photo is not redrawn for new numbers
+
+  const bool noNetwork = netWantWeather && (weatherResult == deskweather::Result::NoSavedWifi ||
+                                            weatherResult == deskweather::Result::WifiFailed);
+  if (!netUserAsked || !noNetwork || !open) return false;
+  // No network to use: pick or join one (the picker saves it), then fetch again.
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             weatherFetchPending = true;
+                             pcPollPending = true;
+                           }
+                           lastInputMs = millis();
+                           forceHalfRefresh = true;
+                           requestUpdate();
+                         });
+  return true;
+}
+
+const char* DeskActivity::pageName(const Page p) {
+  switch (p) {
+    case Page::Main:
+      return tr(STR_DESK_TAB_CLOCK);
+    case Page::Pc:
+      return tr(STR_DESK_TAB_PC);
+    case Page::Photo:
+      return tr(STR_DESK_TAB_PHOTO);
+    case Page::Pomodoro:
+    case Page::Count:
+      break;
+  }
+  return tr(STR_DESK_TAB_POMO);  // "Pomodoro" does not fit a button
+}
+
+DeskActivity::Page DeskActivity::neighbour(const Page p, const int step) {
+  const int n = static_cast<int>(Page::Count);
+  return static_cast<Page>((static_cast<int>(p) + step + n) % n);
+}
+
+// Back, Select, and the two page buttons named after the pages they open (no arrows:
+// "« Pomodoro" does not fit a button).
+void DeskActivity::drawPageHints(const char* back, const char* confirm) const {
+  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(back), confirm,
+                                            pageName(neighbour(page, -1)),
+                                            pageName(neighbour(page, 1)));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
@@ -443,6 +548,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
   batteryMode = true;
   forceHalfRefresh = true;
   if (!fromBoot) {
+    waitNetJob();  // the loop owns Wi-Fi from here on
     // Let a render already queued finish before the loop draws without the render task.
     requestUpdateAndWait();
   }
@@ -493,13 +599,15 @@ void DeskActivity::loop() {
   const bool select = mappedInput.wasPressed(MappedInputManager::Button::Confirm) && millis() - enteredMs > 400;
   if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
 
+  if (applyNetJob()) return;  // opened the Wi-Fi picker
+
   // A sleep asked for (power button, idle timeout) with "Sleep opens Desk" on: battery loop now.
   if (batteryNowRequested) {
     batteryNowRequested = false;
     if (!deskpower::externalPower()) runBatteryLoop(false);
   }
   // On battery and left alone: the minute-tick loop in light sleep (does not return).
-  if (!deskpower::externalPower() && !pomodoro.running() && !weatherFetchPending && !pcPollPending &&
+  if (!deskpower::externalPower() && !pomodoro.running() && !weatherFetchPending && !pcPollPending && !netBusy &&
       millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo) {
     runBatteryLoop(false);
   }
@@ -524,34 +632,17 @@ void DeskActivity::loop() {
     return;
   }
   if (up || down) {
-    const int n = static_cast<int>(Page::Count);
-    const int step = down ? 1 : n - 1;
-    switchPage(static_cast<Page>((static_cast<int>(page) + step) % n));
+    switchPage(neighbour(page, down ? 1 : -1));
     return;
   }
   if (select) {
     switch (page) {
       case Page::Main:
         shown = readLocalTime();
-        runWeatherFetch();
-        if (weatherResult == deskweather::Result::NoSavedWifi || weatherResult == deskweather::Result::WifiFailed) {
-          // No network to use: pick or join one (the picker saves it), then fetch again.
-          startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult& result) {
-                                   if (!result.isCancelled) {
-                                     weatherFetchPending = true;
-                                     pcPollPending = true;
-                                   }
-                                   lastInputMs = millis();
-                                   forceHalfRefresh = true;
-                                   requestUpdate();
-                                 });
-          return;
-        }
-        runPcPoll();
+        startNetJob(true, true, true);
         break;
       case Page::Pc:
-        runPcPoll();
+        startNetJob(false, true, false);
         break;
       case Page::Photo:
         if (!photos.empty()) photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
@@ -579,32 +670,26 @@ void DeskActivity::loop() {
 
   const uint32_t nowMs = millis();
   const uint32_t photoEveryMs = static_cast<uint32_t>(SETTINGS.slideshowIntervalSeconds) * 1000u;
-  if (page == Page::Photo && deskpower::externalPower() && photos.size() > 1 && photoEveryMs > 0 &&
-      nowMs - lastPhotoChangeMs >= photoEveryMs) {
+  if (page == Page::Photo && !deskpower::externalPower() && nowMs - lastInputMs >= kPhotoUnattendedMs) {
+    switchPage(Page::Main);  // on battery: the clock (and its battery loop) after an hour alone
+    return;
+  }
+  if (page == Page::Photo && photos.size() > 1 && photoEveryMs > 0 && nowMs - lastPhotoChangeMs >= photoEveryMs) {
     photoIndex = (photoIndex + 1) % static_cast<int>(photos.size());
     lastPhotoChangeMs = nowMs;
     requestUpdate();
     return;
   }
-  if (weatherFetchPending) {
-    runWeatherFetch();
-    return;
-  }
-  if (pcPollPending) {
-    runPcPoll();
-    return;
-  }
-  if (deskpower::externalPower()) {
-    const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
-    if (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait) {
-      runWeatherFetch();
-      return;
+  if (!netBusy) {
+    bool wantWeather = weatherFetchPending;
+    bool wantPc = pcPollPending;
+    if (deskpower::externalPower()) {
+      const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
+      wantWeather = wantWeather || (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait);
+      const uint32_t pcWait = pcResult == deskweather::Result::Ok ? kPcEveryMs : kPcRetryMs;
+      wantPc = wantPc || (pcAttempted && nowMs - lastPcAttemptMs >= pcWait);
     }
-    const uint32_t pcWait = pcResult == deskweather::Result::Ok ? kPcEveryMs : kPcRetryMs;
-    if (pcAttempted && nowMs - lastPcAttemptMs >= pcWait) {
-      runPcPoll();
-      return;
-    }
+    if (wantWeather || wantPc) startNetJob(wantWeather, wantPc, false);
   }
 
   if (nowMs - lastPollMs < kPollMs) return;
@@ -880,9 +965,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40, tr(STR_DESK_BATTERY_SAVER));
     return;
   }
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_EXIT)), tr(STR_DESK_REFRESH),
-                                            tr(STR_DESK_PAGE), tr(STR_DESK_PAGE));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  drawPageHints(tr(STR_DESK_EXIT), tr(STR_DESK_REFRESH));
 }
 
 void DeskActivity::renderPc(const uint32_t nowUnix) {
@@ -981,9 +1064,7 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     }
   }
 
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), tr(STR_DESK_REFRESH),
-                                            tr(STR_DESK_PAGE), tr(STR_DESK_PAGE));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  drawPageHints(tr(STR_DESK_BACK), tr(STR_DESK_REFRESH));
 }
 
 void DeskActivity::renderPhoto(const uint32_t nowUnix) {
@@ -1002,9 +1083,7 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
       renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, line1);
     }
     renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, tr(STR_DESK_PHOTOS_HINT), true, EpdFontFamily::BOLD);
-    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), "", tr(STR_DESK_PAGE),
-                                                tr(STR_DESK_PAGE));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    drawPageHints(tr(STR_DESK_BACK), "");
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     return;
   }
@@ -1025,25 +1104,22 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   } else {
     snprintf(line2, sizeof(line2), tr(STR_DESK_PHOTO_N), photoIndex + 1, static_cast<int>(photos.size()));
   }
-  const int stripH = 76;
-  const int stripX = 14;
-  const int stripY = h - 14 - stripH;
-  const int stripW = w - 28;
+  // The photo is fitted above the strip (photo::render's reserveBottom), so the strip sits on
+  // blank paper: it is drawn on the B/W pass only, and the gray planes stay empty there.
+  // (Drawing white over it on the gray passes wiped the text on the X3.)
+  const int stripX = kMargin;
+  const int stripY = h - kPhotoStripH;
+  const int stripW = w - 2 * kMargin;
   const auto overlay = [&](const bool gray) {
-    if (gray) {
-      // No gray under the strip: the B/W pass draws it alone.
-      renderer.fillRect(stripX, stripY, stripW, stripH, false);
-      return;
-    }
-    renderer.fillRoundedRect(stripX, stripY, stripW, stripH, 10, Color::White);
-    renderer.drawRoundedRect(stripX, stripY, stripW, stripH, 2, 10, true);
-    renderer.drawText(UI_12_FONT_ID, stripX + 16, stripY + 8, line1, true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, stripX + 16, stripY + 44, line2);
+    if (gray) return;
+    renderer.drawLine(stripX, stripY + 4, stripX + stripW, stripY + 4, 2, true);
+    renderer.drawText(UI_12_FONT_ID, stripX, stripY + 12, line1, true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, stripX, stripY + 44, line2);
   };
 
   const std::string path = photoFolder() + "/" + photos[photoIndex];
   const bool crop = SETTINGS.slideshowScaleMode == CrossPointSettings::SLIDESHOW_CROP;
-  if (photo::render(renderer, path, crop, overlay) != photo::Result::Ok) {
+  if (photo::render(renderer, path, crop, overlay, kPhotoStripH + kPhotoStripGap) != photo::Result::Ok) {
     renderer.clearScreen();
     drawStatusBar(tr(STR_DESK_PHOTOS), "");
     renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 30, tr(STR_DESK_PHOTO_ERROR), true, EpdFontFamily::BOLD);
@@ -1118,11 +1194,13 @@ void DeskActivity::renderPomodoro() {
   renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
 
   const char* selectLabel = idle ? tr(STR_DESK_START) : (pomodoro.paused() ? tr(STR_DESK_RESUME) : tr(STR_DESK_PAUSE));
-  const auto labels = idle ? mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), selectLabel,
-                                                   tr(STR_DESK_PAGE), tr(STR_DESK_PAGE))
-                           : mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), selectLabel,
-                                                   tr(STR_DESK_SKIP), tr(STR_DESK_RESET));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (idle) {
+    drawPageHints(tr(STR_DESK_BACK), selectLabel);
+  } else {
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), selectLabel,
+                                              tr(STR_DESK_SKIP), tr(STR_DESK_RESET));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 }
 
 void DeskActivity::render(RenderLock&&) { drawPage(); }
