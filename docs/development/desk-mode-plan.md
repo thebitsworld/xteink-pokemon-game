@@ -37,8 +37,10 @@ Mockups are the reference; text here only lists content and button roles.
 2. **PC + Claude**: host name; bars for CPU, RAM, each disk; network down/up; uptime; Claude card
    with session (5 h) and weekly usage + reset times. Agent unreachable: "Không thấy máy tính" +
    last seen time.
-3. **Photo frame**: one image from `/desk/photos` (fit to 528x792, 4-grey dither, the existing
-   slideshow decoder); optional bottom strip with time, lunar date, weather, index n/N.
+3. **Photo frame**: one image from Photo Slideshow's folder with Photo Slideshow's settings
+   (Fit/Crop, random order, interval; owner's choice 2026-11-23, instead of a fixed
+   `/desk/photos`), drawn by the slideshow's own code (`PhotoRender`); a bottom strip with the
+   date, lunar date, weather and index n/N.
 4. **Pomodoro**: ring with minutes left, phase (Tập trung / Nghỉ), round n/4, end time, today's
    total. Running Pomodoro blocks deep power saving (see Power).
 5. **Desk settings**: two-column list (USB / battery), rows below.
