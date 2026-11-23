@@ -12,13 +12,18 @@
 #include <WiFi.h>
 #include <Wire.h>
 
+#include <HalDisplay.h>
+#include <HalPowerManager.h>
+
 #ifndef SIMULATOR
 #include <BoardConfig.h>
 #include <driver/gpio.h>
+#include <esp_rtc_time.h>
 #include <esp_sleep.h>
 #endif
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "CrossPointSettings.h"
@@ -108,6 +113,8 @@ const char* DeskProbeActivity::modeName() const {
       return "light-keep";
     case SleepMode::LightSleep:
       return "light";
+    case SleepMode::DeepSleep:
+      return "deep";
     case SleepMode::Delay:
       break;
   }
@@ -358,6 +365,9 @@ void DeskProbeActivity::loop() {
     finish();
     return;
   }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && sleepMode == SleepMode::DeepSleep) {
+    deskprobe::startDeepRun(renderer);  // does not return
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     running = true;
     stoppedByButton = false;
@@ -371,9 +381,10 @@ void DeskProbeActivity::loop() {
     requestUpdate();
   }
   if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-    sleepMode = sleepMode == SleepMode::LightSleepKeepPins ? SleepMode::LightSleep
-                : sleepMode == SleepMode::LightSleep       ? SleepMode::Delay
-                                                           : SleepMode::LightSleepKeepPins;
+    sleepMode = sleepMode == SleepMode::DeepSleep          ? SleepMode::LightSleepKeepPins
+                : sleepMode == SleepMode::LightSleepKeepPins ? SleepMode::LightSleep
+                : sleepMode == SleepMode::LightSleep         ? SleepMode::Delay
+                                                             : SleepMode::DeepSleep;
     requestUpdate();
   }
 }
@@ -410,9 +421,10 @@ void DeskProbeActivity::render(RenderLock&&) {
   renderer.drawText(UI_10_FONT_ID, left, y, buf);
   y += 32;
   snprintf(buf, sizeof(buf), "Between ticks: %s",
-           sleepMode == SleepMode::LightSleepKeepPins ? "LIGHT SLEEP, KEEP PINS"
-           : sleepMode == SleepMode::LightSleep       ? "LIGHT SLEEP (plain)"
-                                                      : "DELAY (control, no sleep)");
+           sleepMode == SleepMode::DeepSleep            ? "DEEP SLEEP (reboot each tick)"
+           : sleepMode == SleepMode::LightSleepKeepPins ? "LIGHT SLEEP, KEEP PINS"
+           : sleepMode == SleepMode::LightSleep         ? "LIGHT SLEEP (plain)"
+                                                        : "DELAY (control, no sleep)");
   renderer.drawText(UI_10_FONT_ID, left, y, buf, true, EpdFontFamily::BOLD);
   y += 32;
   if (lastRunNote[0] != '\0') renderer.drawText(UI_10_FONT_ID, left, y, lastRunNote);
@@ -438,5 +450,140 @@ void DeskProbeActivity::render(RenderLock&&) {
   renderer.displayBuffer(halfThisTick ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
   lastRefreshMs = millis() - t0;
 }
+
+// ---- deep-sleep ticks (probe v5) ---------------------------------------------------------------
+
+namespace deskprobe {
+
+namespace {
+
+constexpr char kDeepLogPath[] = "/.crosspoint/desk-probe-deep.csv";
+constexpr uint32_t kDeepMagic = 0xDE5C0D05;
+
+#ifndef SIMULATOR
+// RTC slow memory keeps these through deep sleep; garbage after a power cut (magic check).
+RTC_NOINIT_ATTR uint32_t deepMagic;
+RTC_NOINIT_ATTR uint32_t deepTick;
+RTC_NOINIT_ATTR uint32_t deepSleepMs;
+RTC_NOINIT_ATTR uint64_t deepSleptAtUs;  // esp_rtc_get_time_us() when the last sleep began
+#endif
+
+void appendLine(const char* path, const char* header, const char* line) {
+  HalFile file = Storage.open(path, O_WRONLY | O_CREAT | O_APPEND);
+  if (!file) return;
+  if (file.size() == 0 && header != nullptr) file.write(header, strlen(header));
+  if (file.size() < kMaxLogBytes) file.write(line, strlen(line));
+  file.close();
+}
+
+[[noreturn]] void runDeepTick(GfxRenderer& renderer, const bool first) {
+#ifndef SIMULATOR
+  // millis() counts from this boot's app start; the RTC time also covers the sleep and the
+  // bootloader, so "late" is how long after the timer fired this code ran.
+  const uint32_t hookMs = millis();
+  const uint64_t nowUs = esp_rtc_get_time_us();
+  long lateMs = 0;
+  if (!first) {
+    const uint64_t dueUs = deepSleptAtUs + static_cast<uint64_t>(deepSleepMs) * 1000ULL;
+    lateMs = nowUs > dueUs ? static_cast<long>((nowUs - dueUs) / 1000ULL) : -1;
+  }
+  if (first) deepTick = 0;
+  ++deepTick;
+  gpio.stopButtonCapture();
+
+  char timeText[16];
+  if (!halClock.formatTime(timeText, sizeof(timeText), SETTINGS.clockUtcOffsetQ, false)) {
+    snprintf(timeText, sizeof(timeText), "--:--");
+  }
+  const DeskProbeActivity::Gauge g = DeskProbeActivity::readGauge();
+  const bool half = deepTick % kHalfRefreshEvery == 1;
+
+  char buf[96];
+  renderer.clearScreen();
+  int y = 40;
+  renderer.drawCenteredText(UI_12_FONT_ID, y, "Desk probe · deep sleep", true, EpdFontFamily::BOLD);
+  y += 60;
+  renderer.drawCenteredText(UI_12_FONT_ID, y, timeText, true, EpdFontFamily::BOLD);
+  y += 50;
+  snprintf(buf, sizeof(buf), "Tick %lu", static_cast<unsigned long>(deepTick));
+  renderer.drawText(UI_10_FONT_ID, 24, y, buf);
+  y += 32;
+  snprintf(buf, sizeof(buf), "Boot to tick %lu ms   late %ld ms", static_cast<unsigned long>(hookMs), lateMs);
+  renderer.drawText(UI_10_FONT_ID, 24, y, buf);
+  y += 32;
+  snprintf(buf, sizeof(buf), "Battery %d%%   %d mV   %d / %d mA", g.soc, g.mv, g.curMa, g.avgMa);
+  renderer.drawText(UI_10_FONT_ID, 24, y, buf);
+  y += 56;
+  renderer.drawText(UI_10_FONT_ID, 24, y, "Unplug USB and leave it.", true, EpdFontFamily::BOLD);
+  y += 32;
+  renderer.drawText(UI_10_FONT_ID, 24, y, "Power button stops the run.");
+  y += 32;
+  renderer.drawText(UI_10_FONT_ID, 24, y, "Log: /.crosspoint/desk-probe-deep.csv");
+  const uint32_t refreshStart = millis();
+  renderer.displayBuffer(half ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  const uint32_t refreshMs = millis() - refreshStart;
+
+  const uint32_t awakeMs = millis();
+  char line[200];
+  snprintf(line, sizeof(line), "%s,%lu,%s,%lu,%ld,%lu,%lu,%s,%d,%d,%d,%d,%d,%d\n", AppVersion::version(),
+           static_cast<unsigned long>(deepTick), timeText, static_cast<unsigned long>(hookMs), lateMs,
+           static_cast<unsigned long>(refreshMs), static_cast<unsigned long>(awakeMs), half ? "half" : "fast", g.soc,
+           g.mv, g.curMa, g.avgMa, g.remMah, gpio.isUsbConnected() ? 1 : 0);
+  appendLine(kDeepLogPath,
+             "# version,tick,clock,boot_ms,late_ms,refresh_ms,awake_ms,refresh,soc,mv,cur_ma,avg_ma,rem_mah,usb\n",
+             line);
+
+  // Sleep for the rest of the minute: this boot's app time plus last tick's pre-app time.
+  const long preApp = lateMs > 0 ? lateMs : 0;
+  const long used = static_cast<long>(millis()) + preApp;
+  deepSleepMs = used < 59000 ? static_cast<uint32_t>(kTickMs - used) : 1000;
+  deepMagic = kDeepMagic;
+  if (WiFi.getMode() != WIFI_MODE_NULL) WiFi.mode(WIFI_OFF);
+  Storage.shutdown();
+  display.deepSleep();
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(deepSleepMs) * 1000ULL);
+  deepSleptAtUs = esp_rtc_get_time_us();
+  powerManager.startDeepSleep(gpio);  // also arms the power-button wake
+#else
+  (void)renderer;
+  (void)first;
+#endif
+  for (;;) {
+    delay(1000);
+  }
+}
+
+}  // namespace
+
+bool deepRunArmed() {
+#ifndef SIMULATOR
+  return deepMagic == kDeepMagic;
+#else
+  return false;
+#endif
+}
+
+bool handleBoot(const int wakeupCause, GfxRenderer& renderer) {
+#ifndef SIMULATOR
+  if (deepMagic != kDeepMagic) return false;
+  if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER) {
+    deepMagic = 0;  // any other wake ends the run
+    char line[96];
+    snprintf(line, sizeof(line), "# stopped after tick %lu (wake cause %d)\n", static_cast<unsigned long>(deepTick),
+             wakeupCause);
+    appendLine(kDeepLogPath, nullptr, line);
+    return false;
+  }
+  runDeepTick(renderer, false);
+#else
+  (void)wakeupCause;
+  (void)renderer;
+  return false;
+#endif
+}
+
+void startDeepRun(GfxRenderer& renderer) { runDeepTick(renderer, true); }
+
+}  // namespace deskprobe
 
 #endif  // CROSSINK_DESK_PROBE

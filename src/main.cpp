@@ -249,6 +249,9 @@ EpdFont ui12RegularFont(&inter_12_regular);
 EpdFont ui12BoldFont(&inter_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont, nullptr, nullptr, &uiSymbols10Font);
 
+#if CROSSINK_DESK_PROBE
+#include "activities/desk/DeskProbeActivity.h"
+#endif
 #if CROSSINK_DESK
 #include <builtinFonts/desk_clock_72.h>
 #include <builtinFonts/desk_digits_28.h>
@@ -1561,9 +1564,21 @@ void setup() {
   // A retained page is useful opening feedback even when a fast refresh is unavailable.
   bool quickResumeFrameVisible = false;
 
-  setupDisplayAndFonts(SleepWakePolicy::shouldInitializeSeamlessly(resume, isUc8279X3, hasValidSleepFrame),
-                       resume != BootResume::Network, useReaderRenderStack);
+#if CROSSINK_DESK_PROBE
+  // A Desk probe deep-sleep tick keeps the panel's picture and redraws over it.
+  const bool deskProbeTick = deskprobe::deepRunArmed() && rawWakeupCause == ESP_SLEEP_WAKEUP_TIMER;
+#else
+  constexpr bool deskProbeTick = false;
+#endif
+  setupDisplayAndFonts(
+      deskProbeTick || SleepWakePolicy::shouldInitializeSeamlessly(resume, isUc8279X3, hasValidSleepFrame),
+      resume != BootResume::Network, useReaderRenderStack);
   logBootHeap("display and font resolver ready");
+#if CROSSINK_DESK_PROBE
+  // Runs the tick and deep-sleeps again (no return) on the run's timer wakes; ends the run on
+  // any other wake.
+  deskprobe::handleBoot(static_cast<int>(rawWakeupCause), renderer);
+#endif
 
   switch (resume) {
     case BootResume::Silent:

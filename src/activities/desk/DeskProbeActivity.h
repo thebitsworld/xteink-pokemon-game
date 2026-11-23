@@ -29,7 +29,6 @@ class DeskProbeActivity final : public Activity {
   bool preventAutoSleep() override { return running; }
   bool needsFullPowerWhilePreventingSleep() override { return false; }
 
- private:
   struct Gauge {
     int soc = -1;     // percent
     int mv = -1;      // cell voltage
@@ -38,16 +37,20 @@ class DeskProbeActivity final : public Activity {
     int remMah = -1;  // 0x10 remaining capacity
     bool ok = false;
   };
+  static Gauge readGauge();
 
+ private:
   // LightSleep: the real test. Delay: same tick loop with delay() instead of light sleep, as
   // a control (probe v1 never got past its first light sleep on an X3, 2026-11-20).
   // LightSleepKeepPins (v3): GPIO sleep switching off and the display / SD pins held, in case
   // the pins' sleep state (SD power off, display lines floating) is what hangs the wake.
-  enum class SleepMode : uint8_t { LightSleepKeepPins, LightSleep, Delay };
+  // DeepSleep (v5): every tick is a deep sleep with a timer wake; the boot goes straight to
+  // deskprobe::handleBoot() (light sleep hung at random after 3-11 ticks, 2026-11-23).
+  enum class SleepMode : uint8_t { LightSleepKeepPins, LightSleep, Delay, DeepSleep };
 
   bool running = false;
   bool wifiRounds = true;
-  SleepMode sleepMode = SleepMode::LightSleepKeepPins;
+  SleepMode sleepMode = SleepMode::DeepSleep;
   char lastRunNote[96] = "";  // what the RTC breadcrumbs say about the previous run
   bool stoppedByButton = false;
   bool halfThisTick = true;
@@ -69,7 +72,20 @@ class DeskProbeActivity final : public Activity {
   void trace(const char* step, long value = -1) const;
   const char* modeName() const;
   void readBreadcrumbs();
-  static Gauge readGauge();
 };
+
+// Deep-sleep ticks (probe v5). Each tick: draw, log to /.crosspoint/desk-probe-deep.csv,
+// deep sleep with a timer wake for the rest of the minute. The next boot calls handleBoot()
+// right after the display and fonts are up and never returns while the run lasts. Any other
+// wake (the power button) ends the run and boots normally.
+namespace deskprobe {
+// True while a deep-sleep run is armed (pick a seamless display start for its timer wakes).
+bool deepRunArmed();
+// From setup(): runs the tick when this is the run's timer wake (does not return then).
+// Returns false for every other boot.
+bool handleBoot(int wakeupCause, GfxRenderer& renderer);
+// From the probe screen: arms the run and does its first tick (does not return).
+[[noreturn]] void startDeepRun(GfxRenderer& renderer);
+}  // namespace deskprobe
 
 #endif  // CROSSINK_DESK_PROBE
