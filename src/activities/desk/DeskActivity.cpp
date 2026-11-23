@@ -649,10 +649,44 @@ DeskActivity::Page DeskActivity::neighbour(const Page p, const int step) {
 // Back, Select, and the two page buttons named after the pages they open (no arrows:
 // "« Pomodoro" does not fit a button).
 void DeskActivity::drawPageHints(const char* back, const char* confirm) const {
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(back), confirm,
-                                            pageName(neighbour(page, -1)),
-                                            pageName(neighbour(page, 1)));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  drawHints(back, confirm, pageName(neighbour(page, -1)), pageName(neighbour(page, 1)));
+}
+
+namespace {
+constexpr int kTouchBarH = 44;
+constexpr int kTouchBarBottom = 6;
+constexpr int kTouchBarGap = 6;
+}  // namespace
+
+void DeskActivity::drawHints(const char* back, const char* confirm, const char* prev, const char* next) const {
+  if (!mappedInput.hasTouch()) {
+    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(back), confirm, prev, next);
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
+  const int w = renderer.getScreenWidth();
+  const int y = renderer.getScreenHeight() - kTouchBarBottom - kTouchBarH;
+  const int cellW = (w - 2 * kMargin - 3 * kTouchBarGap) / 4;
+  const char* labels[] = {back, confirm, prev, next};
+  const int textY = y + (kTouchBarH - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+  for (int i = 0; i < 4; ++i) {
+    if (labels[i] == nullptr || labels[i][0] == '\0') continue;
+    touchBarMask |= 1u << i;
+    const int x = kMargin + i * (cellW + kTouchBarGap);
+    renderer.fillRect(x, y, cellW, kTouchBarH, false);
+    renderer.drawRect(x, y, cellW, kTouchBarH);
+    const std::string text = renderer.truncatedText(UI_10_FONT_ID, labels[i], cellW - 8);
+    renderer.drawText(UI_10_FONT_ID, x + (cellW - renderer.getTextWidth(UI_10_FONT_ID, text.c_str())) / 2, textY,
+                      text.c_str());
+  }
+}
+
+int DeskActivity::touchHintAt(const int x, const int y) const {
+  const int top = renderer.getScreenHeight() - kTouchBarBottom - kTouchBarH;
+  if (y < top - 8 || x < kMargin) return -1;  // a little slack above the bar
+  const int cellW = (renderer.getScreenWidth() - 2 * kMargin - 3 * kTouchBarGap) / 4;
+  const int i = std::min((x - kMargin) / (cellW + kTouchBarGap), 3);
+  return touchBarMask & (1u << i) ? i : -1;
 }
 
 // Quiet hours (Settings > System > Desk): from deskNightStart to deskNightEnd, local time.
@@ -788,11 +822,23 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
 }
 
 void DeskActivity::loop() {
+  // Touch (X4 Pro, which has no front buttons to spare): the touch bar's buttons act as the keys
+  // they stand for, and a sideways swipe across the screen turns the page (left: next). A swipe
+  // in from the left edge is the system's Back, taken below before any page turn.
+  int tapX = 0;
+  int tapY = 0;
+  const bool touch = mappedInput.hasTouch();
+  const bool tappedAnywhere = touch && mappedInput.wasScreenTapped(tapX, tapY);
+  const int tapped = tappedAnywhere ? touchHintAt(tapX, tapY) : -1;
+  const auto swipe = touch ? mappedInput.wasSwipe() : MappedInputManager::SwipeDir::None;
+  const bool swipePrev = swipe == MappedInputManager::SwipeDir::Right;
+  const bool swipeNext = swipe == MappedInputManager::SwipeDir::Left;
   // On the X3 the two right-hand front buttons report Left/Right; Up/Down are the side keys.
   const bool up = mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-                  mappedInput.wasPressed(MappedInputManager::Button::Left);
+                  mappedInput.wasPressed(MappedInputManager::Button::Left) || swipePrev || tapped == 2;
   const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-                    mappedInput.wasPressed(MappedInputManager::Button::Right);
+                    mappedInput.wasPressed(MappedInputManager::Button::Right) || swipeNext || tapped == 3;
+  const bool back = mappedInput.wasPressed(MappedInputManager::Button::Back) || tapped == 0;
   // Select acts on release: a short press is the page's action, a hold opens Desk settings. The
   // hold is measured while the button is down (the held time is gone once it is released) and
   // acted on at the release, so the release does not reach the screen it opens.
@@ -804,8 +850,10 @@ void DeskActivity::loop() {
   }
   const bool selectHeld = selectReleased && selectWasHeld;
   if (selectReleased) selectWasHeld = false;
-  const bool select = selectReleased;
-  if (up || down || select || mappedInput.wasPressed(MappedInputManager::Button::Back)) lastInputMs = millis();
+  const bool select = selectReleased || tapped == 1;
+  if (up || down || select || back || tappedAnywhere || swipe != MappedInputManager::SwipeDir::None) {
+    lastInputMs = millis();
+  }
 
   if (applyNetJob()) return;  // opened the Wi-Fi picker
 
@@ -821,7 +869,7 @@ void DeskActivity::loop() {
     runBatteryLoop(false);
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+  if (back) {
     if (page != Page::Main) {
       switchPage(Page::Main);
       return;
@@ -833,8 +881,10 @@ void DeskActivity::loop() {
   // switch pages too, except where their labels say otherwise: on the calendar they change the
   // month, and with a Pomodoro timer set they skip the phase and reset. The side keys changed
   // the month once, which left them no way off the calendar (owner's report, 2026-11-23).
-  const bool frontPrev = mappedInput.wasPressed(MappedInputManager::Button::Left);
-  const bool frontNext = mappedInput.wasPressed(MappedInputManager::Button::Right);
+  // The touch bar's last two buttons carry the same labels as the front buttons; a swipe always
+  // turns the page.
+  const bool frontPrev = mappedInput.wasPressed(MappedInputManager::Button::Left) || tapped == 2;
+  const bool frontNext = mappedInput.wasPressed(MappedInputManager::Button::Right) || tapped == 3;
   if (page == Page::Pomodoro && pomodoro.phase() != desk::Pomodoro::Phase::Idle && (frontPrev || frontNext)) {
     if (frontPrev) {
       pomodoro.skip(nowSec());
@@ -1578,9 +1628,7 @@ void DeskActivity::renderPomodoro() {
   if (idle) {
     drawPageHints(tr(STR_DESK_BACK), selectLabel);
   } else {
-    const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), selectLabel,
-                                              tr(STR_DESK_SKIP), tr(STR_DESK_RESET));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    drawHints(tr(STR_DESK_BACK), selectLabel, tr(STR_DESK_SKIP), tr(STR_DESK_RESET));
   }
 }
 
@@ -1686,10 +1734,15 @@ void DeskActivity::renderCalendar() {
     renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
     y += 34;
   }
-  renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40 - 34, tr(STR_DESK_CAL_HINT));
-  const auto labels = mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_DESK_BACK)), tr(STR_DESK_TODAY),
-                                            tr(STR_DESK_PREV_MONTH), tr(STR_DESK_NEXT_MONTH));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (mappedInput.hasTouch()) {
+    renderer.drawCenteredText(UI_10_FONT_ID,
+                              renderer.getScreenHeight() - kTouchBarBottom - kTouchBarH - 8 -
+                                  renderer.getLineHeight(UI_10_FONT_ID),
+                              tr(STR_DESK_CAL_HINT_TOUCH));
+  } else {
+    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40 - 34, tr(STR_DESK_CAL_HINT));
+  }
+  drawHints(tr(STR_DESK_BACK), tr(STR_DESK_TODAY), tr(STR_DESK_PREV_MONTH), tr(STR_DESK_NEXT_MONTH));
 }
 
 void DeskActivity::render(RenderLock&&) { drawPage(); }
@@ -1697,6 +1750,7 @@ void DeskActivity::render(RenderLock&&) { drawPage(); }
 void DeskActivity::drawPage() {
   uint32_t nowUnix = 0;
   readUtcUnix(nowUnix);
+  touchBarMask = 0;  // drawHints sets the buttons this screen shows
   if (page == Page::Photo) {
     forceHalfRefresh = false;
     minutesSinceFull = 0;

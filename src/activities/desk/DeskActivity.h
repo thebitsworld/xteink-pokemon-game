@@ -106,6 +106,12 @@ class DeskActivity final : public Activity {
   static const char* pageName(Page p);
   static Page neighbour(Page p, int step);
   void drawPageHints(const char* back, const char* confirm) const;
+  // Button hints in the order Back, Select, front previous, front next. A touch reader (X4 Pro)
+  // draws no hints of its own, so Desk draws them there as a bar of buttons to tap.
+  void drawHints(const char* back, const char* confirm, const char* prev, const char* next) const;
+  // The touch bar's button under (x, y), in the order above; -1 for none.
+  int touchHintAt(int x, int y) const;
+  mutable uint8_t touchBarMask = 0;  // bit i: the touch bar shows button i (none on a photo)
 
   desk::Pomodoro pomodoro;
   uint32_t shownPomodoroMinutes = 0;
