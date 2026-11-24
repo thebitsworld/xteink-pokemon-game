@@ -95,7 +95,7 @@ TEST(OpenMeteo, Urls) {
   EXPECT_EQ(desk::urlEncode("Hà Nội"), "H%C3%A0%20N%E1%BB%99i");
   EXPECT_EQ(desk::urlEncode("Da-Nang_1.~"), "Da-Nang_1.~");
   EXPECT_EQ(desk::geocodingUrl("Huế"),
-            "https://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=Hu%E1%BA%BF");
+            "http://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=Hu%E1%BA%BF");
   const std::string f = desk::forecastUrl(21.0245, 105.84117);
   EXPECT_NE(f.find("latitude=21.024&longitude=105.841"), std::string::npos) << f;  // 21.0245 is 21.02449.. in binary
   EXPECT_NE(f.find("forecast_hours=12"), std::string::npos);

@@ -51,7 +51,7 @@ std::string urlEncode(const char* text) {
 std::string forecastUrl(const double lat, const double lon) {
   char buf[400];
   std::snprintf(buf, sizeof(buf),
-                "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f"
+                "http://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f"
                 "&current=temperature_2m,weather_code,is_day&hourly=weather_code,temperature_2m&forecast_hours=%d"
                 "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto",
                 lat, lon, kForecastHours);
@@ -61,7 +61,7 @@ std::string forecastUrl(const double lat, const double lon) {
 std::string airQualityUrl(const double lat, const double lon) {
   char buf[200];
   std::snprintf(buf, sizeof(buf),
-                "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%.3f&longitude=%.3f"
+                "http://air-quality-api.open-meteo.com/v1/air-quality?latitude=%.3f&longitude=%.3f"
                 "&current=us_aqi,pm2_5",
                 lat, lon);
   return buf;
@@ -78,7 +78,7 @@ bool parseAirQuality(const char* json, const size_t length, int& aqi, int& pm25)
 }
 
 std::string geocodingUrl(const char* city) {
-  return "https://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=" + urlEncode(city);
+  return "http://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=" + urlEncode(city);
 }
 
 bool parseForecast(const char* json, const size_t length, const uint32_t fetchedAt, WeatherReport& out) {

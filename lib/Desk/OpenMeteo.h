@@ -22,11 +22,14 @@ struct Place {
 // Percent-encodes a UTF-8 string for a URL query value (RFC 3986 unreserved kept).
 std::string urlEncode(const char* text);
 
-// https://api.open-meteo.com/v1/forecast?... for the card: current temperature, WMO code and
+// Open-Meteo over plain HTTP: its HTTPS chain moved to Let's Encrypt's new YR1 / Root YR
+// (2026-11), and since then every X3 fetch failed in ~2 s with no HTTP response (battery log,
+// "-s0", with RAM to spare). Forecasts are public and need no key; HTTP also spares the RAM.
+// http://api.open-meteo.com/v1/forecast?... for the card: current temperature, WMO code and
 // day/night, 12 hourly codes and temperatures from the current hour, today's min/max, local
 // time zone.
 std::string forecastUrl(double lat, double lon);
-// https://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=<city>
+// http://geocoding-api.open-meteo.com/v1/search?count=1&language=vi&format=json&name=<city>
 std::string geocodingUrl(const char* city);
 // ip-api.com only answers plain HTTP on its free tier; it sees the reader's public IP only.
 constexpr const char* kIpLocateUrl = "http://ip-api.com/json/?fields=status,city,lat,lon";
