@@ -1,3 +1,23 @@
+## [2.2.0-beta.7] - 2026-11-24
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use. These changes were checked in the simulator only, not yet on a reader.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0. Các thay đổi này mới thử trên simulator, chưa thử trên máy thật.
+
+### Changed
+
+- With "Sleep opens Desk" (now "Sleep opens Desk (hold: off)") on, Desk owns the power button: a short press opens Desk, a long press powers the reader off. Both power-button actions are set to Sleep and their entries are hidden in Settings > Controls > Power button while it is on. Before, every sleep went to Desk, so the reader never powered off.
+- In Desk's battery saver, holding the power button powers the reader off (a short press still opens the full Desk). A long run splits up the RAM; powering off and on gives it back whole.
+- Leaving Desk no longer waits for a weather or PC update to finish: the update stops, including a download under way.
+
+### Fixed
+
+- After a reset inside Desk's battery saver, the reader could neither write to the SD card nor draw, and looked frozen: the lines the saver holds during sleep are now released at boot.
+
+### Added
+
+- Desk's battery log (`/.crosspoint/desk-battery.csv`) records why a weather update failed: the HTTP status and free RAM (`weather-4-...-s<status>-h<free KB>-m<largest block KB>`), also on USB power (`net-weather-...`). Its "enter" / "resume" lines tell where the last run stopped (`-c1` asleep ... `-c6` drawn), and a long press shows as `exit-off`.
+
 ## [2.2.0-beta.6-desktest-x4pro] - 2026-11-24
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.5 to try Desk). There is no X3/X4 or X4 Classic file in this release.
