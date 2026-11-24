@@ -1,3 +1,13 @@
+## [2.2.0-beta.9] - 2026-11-24
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0.
+
+### Fixed
+
+- Desk's weather stopped updating on the X3 (every fetch ended with no HTTP response, `-s0` in the battery log, with plenty of free RAM). Open-Meteo moved to a new Let's Encrypt certificate chain around 2026-11-23; Desk now fetches the forecast, air quality and city search over plain HTTP, which Open-Meteo serves the same way. The data is public and needs no key.
+
 ## [2.2.0-beta.8-desktest-x4pro] - 2026-11-24
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.7 to try Desk). There is no X3/X4 or X4 Classic file in this release.
