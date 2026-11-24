@@ -1398,7 +1398,14 @@ void setup() {
   const auto wakeupReason = usbSleepWake ? HalGPIO::WakeupReason::PowerButton : gpio.getWakeupReason();
 #ifndef SIMULATOR
   const bool shortPressWakes = readWakeShortPressFromNvs();
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !usbSleepWake &&
+  // A press that wakes a Desk deep-sleep tick (X4 Pro) is Desk's to judge (short: Desk, long:
+  // off); failing this check would sleep without the tick's timer.
+#if CROSSINK_DESK
+  const bool deskTickWake = deskpower::batteryRunArmed();
+#else
+  const bool deskTickWake = false;
+#endif
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !usbSleepWake && !deskTickWake &&
       !(FREEINK_DEVICE_PICCO && gpio.isUsbConnected()) &&
       !gpio.verifyPowerButtonWakeup(shortPressWakes, CrossPointSettings::POWER_BUTTON_LONG_PRESS_MS)) {
     LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");

@@ -737,6 +737,16 @@ bool DeskActivity::pcFresh(const uint32_t nowUnix) const {
 
 void DeskActivity::resumeBatteryFromBoot() {
   loadState();
+  const deskpower::BootWake wake = deskpower::bootWake();
+  deskpower::TickState tick{};
+  const bool haveTick = deskpower::loadTickState(tick);
+  deskpower::clearTickState();
+  if (wake == deskpower::BootWake::PowerButton) {
+    // The press that woke a deep-sleep tick: millis() is about how long it has been down.
+    batteryMode = true;
+    leaveBatteryLoop(false, millis());
+  }
+  if (wake == deskpower::BootWake::Timer && haveTick) runBatteryLoop(true, &tick);
   deskpower::countBatteryReset();
   runBatteryLoop(true);
 }
@@ -753,10 +763,13 @@ void batteryLogNow(const char* event) {
 }
 }  // namespace
 
-void DeskActivity::leaveBatteryLoop(const bool touch) {
+void DeskActivity::leaveBatteryLoop(const bool touch, const uint32_t heldBeforeMs) {
+  deskpower::clearTickState();
   // The press that woke the sleep is still held: restarting now would hand its release to the
   // new boot as a short press, i.e. a sleep (owner's report, 2026-11-23).
-  const uint32_t heldMs = deskpower::waitPowerButtonRelease();
+  // A press let go before now counts as short (a wake's boot takes longer than a tap).
+  const uint32_t waitedMs = deskpower::waitPowerButtonRelease();
+  const uint32_t heldMs = waitedMs > 0 ? heldBeforeMs + waitedMs : 0;
   // A long press powers off (a real sleep from a fresh boot, so the RAM a long run has split
   // up starts whole again); a short one opens the full Desk (owner's request, 2026-11-24).
   const bool powerOff =
@@ -778,10 +791,10 @@ void DeskActivity::leaveBatteryLoop(const bool touch) {
   }
 }
 
-void DeskActivity::runBatteryLoop(const bool fromBoot) {
+void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickState* tick) {
   page = Page::Main;
   batteryMode = true;
-  forceHalfRefresh = true;
+  forceHalfRefresh = tick == nullptr;  // a deep-sleep tick goes on with the run's own count
   if (!fromBoot) {
     waitNetJob();  // the loop owns Wi-Fi from here on
     // Let a render already queued finish before the loop draws without the render task.
@@ -804,7 +817,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
   HalPowerManager::Lock powerLock;
   deskpower::setBatteryRunArmed(true);
   deskpower::watchdogArm(kBatteryWatchdogMs);
-  {
+  if (tick == nullptr) {
     // With the last reset's cause (esp_reset_reason_t: 1 power-on, 3 software restart, 6/7 task
     // watchdog, 9 RTC watchdog...), so a freeze cleared by hand shows up as the next run's cause.
     char event[24];
@@ -820,8 +833,13 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
     deskpower::setCrumb(0);
   }
 
-  int ticksSinceHalf = 0;
-  uint32_t lastWeatherTry = 0;  // RTC seconds of the last failed try in this run
+  int ticksSinceHalf = tick ? tick->ticksSinceHalf : 0;
+  uint32_t lastWeatherTry = tick ? tick->lastWeatherTry : 0;  // RTC seconds of the last failed try in this run
+  if (tick) {
+    shown.year = tick->year;  // the day the last tick showed, for the new-day check
+    shown.month = tick->month;
+    shown.day = tick->day;
+  }
   for (;;) {
     deskpower::watchdogFeed();
     if (deskpower::externalPower()) leaveBatteryLoop();  // charging: the full Desk again
@@ -872,6 +890,15 @@ void DeskActivity::runBatteryLoop(const bool fromBoot) {
       // At night the clock moves on the half hour: sleep to the next :00 or :30.
       const int minutesLeft = kNightTickMinutes - (t.minute % kNightTickMinutes);
       sleepMs += static_cast<uint32_t>(minutesLeft - 1) * 60000u;
+    }
+    if (deskpower::deepSleepTicks()) {
+      deskpower::TickState next{};
+      next.ticksSinceHalf = ticksSinceHalf;
+      next.lastWeatherTry = lastWeatherTry;
+      next.year = static_cast<uint16_t>(t.year);
+      next.month = static_cast<uint8_t>(t.month);
+      next.day = static_cast<uint8_t>(t.day);
+      deskpower::deepSleepFor(next, sleepMs);  // the next tick is a fresh boot
     }
     const deskpower::Wake wake = deskpower::sleepFor(sleepMs);
     deskpower::setCrumb(3);

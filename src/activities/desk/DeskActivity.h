@@ -11,6 +11,7 @@
 #include "Pomodoro.h"
 #include "DeskWeather.h"
 #include "DeskWeatherService.h"
+#include "DeskPower.h"
 #include "CrossPointSettings.h"
 #include "activities/Activity.h"
 
@@ -157,8 +158,10 @@ class DeskActivity final : public Activity {
   // The page as render() draws it, without the render lock (also used by the battery loop).
   void drawPage();
   void loadState();
-  [[noreturn]] void runBatteryLoop(bool fromBoot);
-  [[noreturn]] void leaveBatteryLoop(bool touch = false);
+  // fromBoot: after a reset inside a run; tick: a deep-sleep tick's boot (deskpower::deepSleepTicks).
+  [[noreturn]] void runBatteryLoop(bool fromBoot, const deskpower::TickState* tick = nullptr);
+  // heldBeforeMs: how long the power button was already down (a press that woke a deep sleep).
+  [[noreturn]] void leaveBatteryLoop(bool touch = false, uint32_t heldBeforeMs = 0);
 };
 
 #endif  // CROSSINK_DESK

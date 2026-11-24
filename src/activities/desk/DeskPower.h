@@ -69,6 +69,30 @@ bool consumeSleepRequest();
 void setCrumb(uint8_t stage);
 uint8_t lastCrumb();
 
+// The X4 Pro (ESP32-S3) froze inside light sleep after a few ticks, and the RTC watchdog did
+// not bring it back (battery logs, 2026-11-23/24). It keeps its power latch through deep sleep,
+// which the X3 cannot, so there each tick is a deep sleep with a timer wake: the minute's tick
+// runs in a fresh boot (with whole RAM), and the loop's state waits in RTC memory.
+bool deepSleepTicks();
+
+enum class BootWake : uint8_t { Reset, Timer, PowerButton };
+// Why a boot inside a battery run began: a deep-sleep tick, the power button during one, or a
+// reset (the watchdog...).
+BootWake bootWake();
+
+struct TickState {
+  int32_t ticksSinceHalf;
+  uint32_t lastWeatherTry;
+  uint16_t year;
+  uint8_t month;
+  uint8_t day;
+};
+bool loadTickState(TickState& out);
+void clearTickState();
+// Saves the state, powers Wi-Fi, the card and the panel down, and deep-sleeps for ms (or until
+// the power button). Does not return.
+[[noreturn]] void deepSleepFor(const TickState& state, uint32_t ms);
+
 // The battery loop holds the SD and panel lines through light sleep, and a hold outlives a
 // watchdog reset: setup() lets them go before it touches the card.
 void releasePinHolds();

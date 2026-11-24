@@ -11,6 +11,9 @@
 
 #ifndef SIMULATOR
 #include <BoardConfig.h>
+#include <HalDisplay.h>
+#include <HalPowerManager.h>
+#include <WiFi.h>
 #include <Wire.h>
 #include <Rtc.h>
 #include <driver/gpio.h>
@@ -35,6 +38,10 @@ RTC_NOINIT_ATTR uint32_t runResets;
 RTC_NOINIT_ATTR uint32_t openDeskMagic;
 RTC_NOINIT_ATTR uint32_t crumbWord;  // 0xC2B70000 | stage
 constexpr uint32_t kCrumbMagic = 0xC2B70000;
+// The battery loop's own state between deep-sleep ticks (see deepSleepTicks()).
+constexpr uint32_t kTickMagic = 0xDE5C0B04;
+RTC_NOINIT_ATTR uint32_t tickMagic;
+RTC_NOINIT_ATTR TickState tickState;
 
 wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
 
@@ -323,6 +330,68 @@ bool consumeOpenDeskRequest() {
 #else
   return false;
 #endif
+}
+
+bool deepSleepTicks() {
+#if !defined(SIMULATOR) && CONFIG_IDF_TARGET_ESP32S3
+  return true;
+#else
+  return false;
+#endif
+}
+
+BootWake bootWake() {
+#ifndef SIMULATOR
+  switch (esp_sleep_get_wakeup_cause()) {
+    case ESP_SLEEP_WAKEUP_TIMER:
+      return tickMagic == kTickMagic ? BootWake::Timer : BootWake::Reset;
+    case ESP_SLEEP_WAKEUP_EXT0:
+    case ESP_SLEEP_WAKEUP_EXT1:
+    case ESP_SLEEP_WAKEUP_GPIO:
+      return BootWake::PowerButton;
+    default:
+      return BootWake::Reset;
+  }
+#else
+  return BootWake::Reset;
+#endif
+}
+
+bool loadTickState(TickState& out) {
+#ifndef SIMULATOR
+  if (tickMagic != kTickMagic) return false;
+  out = tickState;
+  return true;
+#else
+  (void)out;
+  return false;
+#endif
+}
+
+void clearTickState() {
+#ifndef SIMULATOR
+  tickMagic = 0;
+#endif
+}
+
+void deepSleepFor(const TickState& state, const uint32_t ms) {
+#ifndef SIMULATOR
+  tickState = state;
+  tickMagic = kTickMagic;
+  watchdogDisarm();  // it would keep counting through the sleep
+  setCrumb(7);
+  if (WiFi.getMode() != WIFI_MODE_NULL) WiFi.mode(WIFI_OFF);
+  Storage.shutdown();
+  display.deepSleep();
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(ms) * 1000ULL);
+  powerManager.startDeepSleep(gpio);  // also arms the power-button wake
+#else
+  (void)state;
+  (void)ms;
+#endif
+  for (;;) {
+    delay(1000);
+  }
 }
 
 void requestSleepAfterRestart() {
