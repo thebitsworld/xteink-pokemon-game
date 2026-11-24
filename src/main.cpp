@@ -1908,6 +1908,9 @@ void loop() {
   // the originating button, so its one-shot release guard must still expire.
   mappedInputManager.update();
 #if CROSSINK_DESK
+  // Turning "Sleep opens Desk" on in Settings takes the power button over at once (the
+  // settings file follows on its next save, and on load).
+  SETTINGS.applyDeskPowerButton();
   if (deskSleepAfterBoot) {
     deskSleepAfterBoot = false;
     enterDeepSleep();

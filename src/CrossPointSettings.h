@@ -820,6 +820,27 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
   bool shortPowerPressWakes() const { return shortPwrBtn == SLEEP || shortPwrBtn == WAKE_ONLY; }
 
+  // "Sleep opens Desk" owns the power button: a short press sleeps (Desk takes that sleep), a
+  // long one sleeps for real. Its own actions are hidden in Settings while it is on. Returns
+  // true when it changed a setting.
+  bool applyDeskPowerButton() {
+#if CROSSINK_DESK
+    if (!deskOnSleep || (shortPwrBtn == SLEEP && longPwrBtn == SLEEP)) return false;
+    shortPwrBtn = SLEEP;
+    longPwrBtn = SLEEP;
+    return true;
+#else
+    return false;
+#endif
+  }
+  bool deskOwnsPowerButton() const {
+#if CROSSINK_DESK
+    return deskOnSleep != 0;
+#else
+    return false;
+#endif
+  }
+
   bool shouldTrackReadingStats() const { return trackReadingStats != 0; }
   static const char* getDefaultDeviceName();
   const char* getEffectiveDeviceName() const;

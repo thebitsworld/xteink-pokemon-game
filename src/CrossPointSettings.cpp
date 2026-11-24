@@ -812,6 +812,8 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
     }
   }
 
+  if (applyDeskPowerButton()) needsResave = true;
+
   // The web API shares the base catalog so it can receive raw value 26 even
   // on boards without a Home key. Never retain that reader-only action there.
   if (!gpio.hasHomeKey()) {

@@ -1037,8 +1037,11 @@ inline std::vector<SettingInfo> buildControlsHomeButtonSettingsList(const std::v
 inline std::vector<SettingInfo> buildControlsPowerSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
   settings.reserve(4);
-  addSettingByKey(settings, allSettings, "shortPwrBtn");
-  addSettingByKey(settings, allSettings, "longPwrBtn");
+  // "Sleep opens Desk" sets both power-button actions itself (applyDeskPowerButton).
+  if (!SETTINGS.deskOwnsPowerButton()) {
+    addSettingByKey(settings, allSettings, "shortPwrBtn");
+    addSettingByKey(settings, allSettings, "longPwrBtn");
+  }
   if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::FOOTNOTES ||
       SETTINGS.longPwrBtn == CrossPointSettings::SHORT_PWRBTN::FOOTNOTES ||
       SETTINGS.longPressMenuAction == CrossPointSettings::LONG_PRESS_MENU_ACTION::LONG_MENU_FOOTNOTES ||
