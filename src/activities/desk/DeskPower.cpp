@@ -27,6 +27,7 @@ namespace {
 constexpr uint32_t kChunkMs = 10000;
 constexpr uint32_t kRunMagic = 0xDE5C0B01;
 constexpr uint32_t kOpenDeskMagic = 0xDE5C0B02;
+constexpr uint32_t kSleepMagic = 0xDE5C0B03;  // in openDeskMagic: power off after the restart
 
 #ifndef SIMULATOR
 RTC_NOINIT_ATTR uint32_t runMagic;
@@ -229,14 +230,18 @@ Wake sleepFor(const uint32_t ms) {
 #endif
 }
 
-void waitPowerButtonRelease() {
+uint32_t waitPowerButtonRelease() {
 #ifndef SIMULATOR
   const int8_t pin = BoardConfig::ACTIVE.input.power;
-  if (pin < 0) return;
+  if (pin < 0) return 0;
   const int pressed = BoardConfig::ACTIVE.input.powerActiveHigh ? HIGH : LOW;
   const uint32_t t0 = millis();
   while (digitalRead(pin) == pressed && millis() - t0 < 5000) delay(10);
+  const uint32_t held = millis() - t0;
   delay(50);  // let the contact settle
+  return held;
+#else
+  return 0;
 #endif
 }
 
@@ -313,7 +318,23 @@ void requestOpenDeskAfterRestart() {
 bool consumeOpenDeskRequest() {
 #ifndef SIMULATOR
   const bool requested = openDeskMagic == kOpenDeskMagic;
-  openDeskMagic = 0;
+  if (requested) openDeskMagic = 0;
+  return requested;
+#else
+  return false;
+#endif
+}
+
+void requestSleepAfterRestart() {
+#ifndef SIMULATOR
+  openDeskMagic = kSleepMagic;
+#endif
+}
+
+bool consumeSleepRequest() {
+#ifndef SIMULATOR
+  const bool requested = openDeskMagic == kSleepMagic;
+  if (requested) openDeskMagic = 0;
   return requested;
 #else
   return false;

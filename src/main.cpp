@@ -404,6 +404,10 @@ using BootResume = SleepWakePolicy::Resume;
 // device back up against the user's sleep gesture. Never cleared:
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
 static bool deepSleepInProgress = false;
+#if CROSSINK_DESK
+// Desk's battery loop left on a long press: sleep for real once the fresh boot is up.
+static bool deskSleepAfterBoot = false;
+#endif
 
 static void restartWithSilentToken() {
   // Capture the live state for every destination without changing wake preferences.
@@ -662,7 +666,10 @@ bool handleGlobalPowerButtonAction(const CrossPointSettings::SHORT_PWRBTN action
   switch (action) {
     case CrossPointSettings::SHORT_PWRBTN::SLEEP:
     case CrossPointSettings::SHORT_PWRBTN::SLEEP_ONLY:
-      if (deskTakesSleep()) return true;
+      // A long press acts while the button is still down (a short one on its release, the idle
+      // timeout with it up): with "Sleep opens Desk", the short press opens Desk and the long
+      // one still sleeps for real, which also gives back the RAM a long Desk run has split up.
+      if (!mappedInputManager.isPressed(MappedInputManager::Button::Power) && deskTakesSleep()) return true;
       enterDeepSleep();
       return true;
     case CrossPointSettings::SHORT_PWRBTN::WAKE_ONLY:
@@ -1830,6 +1837,8 @@ void setup() {
   if (deskpower::consumeOpenDeskRequest()) {
     activityManager.replaceActivity(std::make_unique<DeskActivity>(renderer, mappedInputManager));
   }
+  // Or, after a long press, to power off: the first loop() sleeps.
+  deskSleepAfterBoot = deskpower::consumeSleepRequest();
 #endif
 
   // Network boots (file transfer, OTA, sync) keep the radio for WiFi alone.
@@ -1898,6 +1907,13 @@ void loop() {
   // hardware input frame. A shortcut may open an activity that never queries
   // the originating button, so its one-shot release guard must still expire.
   mappedInputManager.update();
+#if CROSSINK_DESK
+  if (deskSleepAfterBoot) {
+    deskSleepAfterBoot = false;
+    enterDeepSleep();
+    return;
+  }
+#endif
   // X3/X4: the radio runs in the reader only, and not while a page renders
   // (the stack's start takes RAM the render may be using).
   // A menu over the book still counts as the reader (stopping and starting the

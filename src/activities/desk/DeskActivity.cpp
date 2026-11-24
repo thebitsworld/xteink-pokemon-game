@@ -754,13 +754,24 @@ void batteryLogNow(const char* event) {
 }  // namespace
 
 void DeskActivity::leaveBatteryLoop(const bool touch) {
-  batteryLogNow(deskpower::externalPower() ? "exit-usb" : touch ? "exit-touch" : "exit-button");
   // The press that woke the sleep is still held: restarting now would hand its release to the
   // new boot as a short press, i.e. a sleep (owner's report, 2026-11-23).
-  deskpower::waitPowerButtonRelease();
+  const uint32_t heldMs = deskpower::waitPowerButtonRelease();
+  // A long press powers off (a real sleep from a fresh boot, so the RAM a long run has split
+  // up starts whole again); a short one opens the full Desk (owner's request, 2026-11-24).
+  const bool powerOff =
+      !touch && !deskpower::externalPower() && heldMs >= SETTINGS.getPowerButtonLongPressDuration();
+  batteryLogNow(deskpower::externalPower() ? "exit-usb"
+                : touch                    ? "exit-touch"
+                : powerOff                 ? "exit-off"
+                                           : "exit-button");
   deskpower::watchdogDisarm();
   deskpower::setBatteryRunArmed(false);
-  deskpower::requestOpenDeskAfterRestart();
+  if (powerOff) {
+    deskpower::requestSleepAfterRestart();
+  } else {
+    deskpower::requestOpenDeskAfterRestart();
+  }
   ESP.restart();
   for (;;) {
     delay(1000);

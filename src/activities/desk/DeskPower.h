@@ -48,8 +48,8 @@ Wake sleepFor(uint32_t ms);
 // Milliseconds until the next minute starts by the RTC (falls back to 60 s).
 uint32_t msToNextMinute();
 
-// Waits (up to 5 s) until the power button is up.
-void waitPowerButtonRelease();
+// Waits (up to 5 s) until the power button is up; returns how long it was still held.
+uint32_t waitPowerButtonRelease();
 
 // RTC-memory markers (kept through the watchdog's system reset, lost on a power cut).
 bool batteryRunArmed();
@@ -58,6 +58,10 @@ uint32_t batteryResets();  // resets the current battery run came back from
 void countBatteryReset();
 void requestOpenDeskAfterRestart();
 bool consumeOpenDeskRequest();
+// A long press leaves the battery loop for a real sleep (power off): the loop restarts the
+// reader, and the fresh boot goes to sleep with the RAM it starts with.
+void requestSleepAfterRestart();
+bool consumeSleepRequest();
 
 // Where the battery loop last was (kept through a reset, so the next run's first log line can
 // tell where a freeze stopped it): 1 light sleep entered, 2 woke from it, 3 back in the loop,
