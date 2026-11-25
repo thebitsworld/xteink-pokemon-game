@@ -85,6 +85,9 @@ class HalDisplay {
 
   // Power management
   void deepSleep();
+  // The framebuffer into the controller's previous-frame plane, no refresh (after a deep sleep
+  // that wiped it, with the panel's picture redrawn into the framebuffer).
+  void seedPreviousFrame();
 
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;

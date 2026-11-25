@@ -834,6 +834,18 @@ void FreeInkDisplay::finishDisplayAsync() { syncPendingAsync(); }
 
 void FreeInkDisplay::completeDisplay() { syncPendingAsync(); }
 
+void FreeInkDisplay::seedPreviousFrame() {
+  if (_panelSel == PanelSel::X3 || !_driver) return;  // X3 keeps its baseline in DTM1
+  DisplayPmLock pmLock;
+  syncPendingAsync();
+  uint8_t* onScreen = getFrameBuffer();  // the frame just drawn, in either buffer mode
+  if (!onScreen) return;
+  if (_inverted) invertBytes(onScreen, bufferSize);
+  _driver->seedPreviousFrame(_bus, onScreen);
+  if (_inverted) invertBytes(onScreen, bufferSize);
+  _redRamSynced = true;
+}
+
 void FreeInkDisplay::syncRedRamFromFrameBuffer() {
   // X3 has no host-managed previous-frame plane (its baseline lives in DTM1); the
   // advisory flag is meaningless there.

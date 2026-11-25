@@ -6,6 +6,7 @@
 #include <CrossInkHalFrontlight.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -847,6 +848,20 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     shown.year = tick->year;  // the day the last tick showed, for the new-day check
     shown.month = tick->month;
     shown.day = tick->day;
+#ifndef SIMULATOR
+    // Deep sleep wipes the panel controller's previous-frame plane, and a fast refresh diffs
+    // against it: over that garbage parts of the screen came out faded (X4 Pro, owner's photo
+    // 2026-11-25). Draw the frame the panel shows (the last tick's) and load it into the plane
+    // without a refresh, so this tick's fast refresh diffs against the real picture.
+    if (tick->shownValid) {
+      shown.valid = true;
+      shown.hour = tick->hour;
+      shown.minute = tick->minute;
+      renderer.clearScreen();
+      renderMain(tick->shownUnix);
+      display.seedPreviousFrame();
+    }
+#endif
   }
   for (;;) {
     deskpower::watchdogFeed();
@@ -890,6 +905,8 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     }
 
     deskpower::setCrumb(5);
+    uint32_t drawnUnix = 0;
+    readUtcUnix(drawnUnix);  // as drawPage() reads it
     drawPage();
     deskpower::setCrumb(6);
     batteryLogNow("drawn");  // a run that stops after "tick" hangs drawing, after "drawn" sleeping
@@ -906,6 +923,10 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
       next.year = static_cast<uint16_t>(t.year);
       next.month = static_cast<uint8_t>(t.month);
       next.day = static_cast<uint8_t>(t.day);
+      next.hour = static_cast<uint8_t>(t.hour);
+      next.minute = static_cast<uint8_t>(t.minute);
+      next.shownValid = t.valid ? 1 : 0;
+      next.shownUnix = drawnUnix;
       deskpower::deepSleepFor(next, sleepMs);  // the next tick is a fresh boot
     }
     const deskpower::Wake wake = deskpower::sleepFor(sleepMs);

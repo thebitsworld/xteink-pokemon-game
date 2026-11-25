@@ -198,6 +198,11 @@ void HalDisplay::deepSleep() {
   einkDisplay.deepSleep();
 }
 
+void HalDisplay::seedPreviousFrame() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.seedPreviousFrame();
+}
+
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
 uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) { return einkDisplay.lendBuildStorage(sizeOut); }

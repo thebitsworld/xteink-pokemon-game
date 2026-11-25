@@ -279,6 +279,10 @@ class FreeInkDisplay {
   // On FreeInk the SSD1677 driver already re-seeds RED after each single-buffer
   // refresh, so this only refreshes the advisory flag; kept for API parity.
   void syncRedRamFromFrameBuffer();
+  // Load the framebuffer into the controller's previous-frame (RED) plane with no refresh, in
+  // either buffer mode: for a panel that shows a known frame its controller has lost (deep sleep
+  // mode 2 wipes controller RAM), so the next fast refresh diffs against the real picture.
+  void seedPreviousFrame();
 
   // Opt in to X4 fast differential against the controller's retained RED-RAM baseline
   // while the secondary buffer is released. When set, a FAST refresh with no secondary

@@ -86,6 +86,12 @@ struct TickState {
   uint16_t year;
   uint8_t month;
   uint8_t day;
+  // The frame the panel shows (the last tick's minute and its UTC time), drawn again at the next
+  // tick into the controller's previous-frame plane, which deep sleep wipes.
+  uint8_t hour;
+  uint8_t minute;
+  uint8_t shownValid;
+  uint32_t shownUnix;
 };
 bool loadTickState(TickState& out);
 void clearTickState();
