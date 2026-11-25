@@ -1,3 +1,27 @@
+## [2.2.0-beta.15] - 2026-11-25
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0.
+
+### Changed
+
+- Desk text that does not fit its room steps down a font size before it is cut: on the X4 Pro (480 pixels across to the X3's 528) labels ran into their values, "Claude 5h" into its percentage, and the rain hint was cut to make room for the air quality. Centred lines no longer run past the screen edges.
+- The PC page's Claude card shows when the PC last reported the limits: they only move while a Claude Code session runs (the `claude` command line updates them after every reply; the Claude desktop app rarely does).
+
+### Fixed
+
+- On the X3 a short press of the power button now wakes Desk's battery saver even when the reader cannot enter light sleep.
+- The X3 no longer flashes its screen when it restarts inside the battery saver: it goes on with a fast refresh.
+
+### Added
+
+- Desk's battery log records each draw's time and panel controller (`drawn-<ms>`), how the light sleeps went between ticks (`tick-s<ok>-j<rejected>-e<error>-w<pending wake source>-z<seconds asleep>`) and the task behind a software restart (`resume-...-t<task>`).
+
+### Desk agent (PC)
+
+- The agent sends when Claude Code last reported the limits (`claude.saved`).
+
 ## [2.2.0-beta.14-desktest-x4pro] - 2026-11-25
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.13 to try Desk). There is no X3/X4 or X4 Classic file in this release.
