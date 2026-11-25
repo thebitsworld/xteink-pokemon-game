@@ -912,12 +912,25 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     uint32_t drawnUnix = 0;
     readUtcUnix(drawnUnix);  // as drawPage() reads it
     const bool drewHalf = forceHalfRefresh;
+    const uint32_t drawStartMs = millis();
     drawPage();
+    const uint32_t drawMs = millis() - drawStartMs;
     // The X4 Pro's first frame in the saver (a half refresh, then deep sleep at once) came out
     // partly faded (owner's report 2026-11-25): let the panel settle before the deep sleep.
     if (drewHalf && deskpower::deepSleepTicks()) delay(600);
     deskpower::setCrumb(6);
-    batteryLogNow("drawn");  // a run that stops after "tick" hangs drawing, after "drawn" sleeping
+    // A run that stops after "tick" hangs drawing, after "drawn" sleeping. With how long the draw
+    // took ("h": a half refresh was asked for) and the panel controller ("u": UC8279), so a tick
+    // that flashes the whole screen (owner's report on the X3, 2026-11-25) shows up as a slow one.
+    char drawnEvent[40];
+    bool uc8279 = false;
+#ifndef SIMULATOR
+    uc8279 = BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
+             BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279;
+#endif
+    snprintf(drawnEvent, sizeof(drawnEvent), "drawn-%lums%s%s", static_cast<unsigned long>(drawMs), drewHalf ? "-h" : "",
+             uc8279 ? "-u" : "");
+    batteryLogNow(drawnEvent);
     uint32_t sleepMs = deskpower::msToNextMinute();
     if (night && t.valid) {
       // At night the clock moves on the half hour: sleep to the next :00 or :30.
