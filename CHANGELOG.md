@@ -1,3 +1,17 @@
+## [2.2.0-beta.11] - 2026-11-25
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0.
+
+### Added
+
+- "Light on keeps Desk awake" (Settings > System > Desk, readers with a frontlight only, off by default). The light goes out whenever the reader sleeps, so with this on and the light on, Desk stays awake on battery instead of using its battery saver: the light stays as set, and the weather updates at the "Weather on battery" pace. Turning the light off, or a battery below 10 %, lets the battery saver take over again. Staying awake uses much more battery.
+
+### Fixed
+
+- The frontlight no longer flashes once a minute during Desk's battery saver on readers that restart for each minute's update.
+
 ## [2.2.0-beta.10-desktest-x4pro] - 2026-11-24
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.9 to try Desk). There is no X3/X4 or X4 Classic file in this release.
