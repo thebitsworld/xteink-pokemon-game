@@ -51,7 +51,15 @@ bool discover(std::string& hostPort) {
 // The agent's "host:port": the configured one, or the one mDNS found.
 bool agentAddress(const deskweather::Config& cfg, std::string& hostPort) {
   hostPort = cfg.agent;
-  if (!hostPort.empty()) return true;
+  if (!hostPort.empty()) {
+    // An address typed on the reader: "192.168.1.20" means the agent's default port, and a
+    // pasted "http://.../" works too (owner's question, 2026-11-25).
+    if (hostPort.rfind("http://", 0) == 0) hostPort.erase(0, 7);
+    while (!hostPort.empty() && (hostPort.back() == '/' || hostPort.back() == ' ')) hostPort.pop_back();
+    while (!hostPort.empty() && hostPort.front() == ' ') hostPort.erase(0, 1);
+    if (!hostPort.empty() && hostPort.find(':') == std::string::npos) hostPort += ":8765";  // desk_agent.py's port
+    if (!hostPort.empty()) return true;
+  }
   if (discovered.empty() && !discover(discovered)) return false;
   hostPort = discovered;
   return true;

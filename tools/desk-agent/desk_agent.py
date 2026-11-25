@@ -185,8 +185,10 @@ def claude_usage(now: float) -> dict | None:
         out[name] = [max(0, min(100, pct)), reset]
     if "session" not in out and "week" not in out:
         return None
-    out.setdefault("session", [0, 0])
-    out.setdefault("week", [0, 0])
+    # A window Claude Code has not reported is null, so the reader shows "–" rather than 0 %
+    # (the five-hour window went missing while it stood at 25 %, 2026-11-25).
+    out.setdefault("session", None)
+    out.setdefault("week", None)
     return out
 
 

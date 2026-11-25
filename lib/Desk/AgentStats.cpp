@@ -49,12 +49,19 @@ bool parseAgentStats(const char* json, const size_t length, const uint32_t recei
   if (s.photoCount < 0) s.photoCount = 0;
 
   const JsonObjectConst claude = doc["claude"];
-  if (!claude.isNull() && !claude["session"].isNull()) {
-    s.claude.known = true;
-    s.claude.sessionPct = clampPct(claude["session"][0].as<int>());
-    s.claude.sessionReset = claude["session"][1].as<uint32_t>();
-    s.claude.weekPct = clampPct(claude["week"][0].as<int>());
-    s.claude.weekReset = claude["week"][1].as<uint32_t>();
+  if (!claude.isNull()) {
+    // Each window is [pct, reset] or null (agents before 2026-11-25 sent [0, 0] for a missing one).
+    s.claude.sessionKnown = !claude["session"].isNull();
+    s.claude.weekKnown = !claude["week"].isNull();
+    s.claude.known = s.claude.sessionKnown || s.claude.weekKnown;
+    if (s.claude.sessionKnown) {
+      s.claude.sessionPct = clampPct(claude["session"][0].as<int>());
+      s.claude.sessionReset = claude["session"][1].as<uint32_t>();
+    }
+    if (s.claude.weekKnown) {
+      s.claude.weekPct = clampPct(claude["week"][0].as<int>());
+      s.claude.weekReset = claude["week"][1].as<uint32_t>();
+    }
   }
   out = s;
   return true;

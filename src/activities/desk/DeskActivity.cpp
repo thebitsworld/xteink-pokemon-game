@@ -1308,11 +1308,13 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     const int cx = left + pad + slotW * i + slotW / 2;
     snprintf(buf, sizeof(buf), tr(STR_DESK_HOUR), (weather.firstHour + idx) % 24);
     renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, y, buf);
-    const char* label = skyText(weather.hourly[idx]);
-    renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD) / 2, y + 28,
-                      label, true, EpdFontFamily::BOLD);
+    // An icon, not the sky's name: "Partly cloudy" ran into the next slot (X4 Pro, owner's photo
+    // 2026-11-25), and other languages' names are longer still. Day by the slot's local hour.
+    const int hour = (weather.firstHour + idx) % 24;
+    constexpr int kSlotIcon = 32;
+    drawSkyIcon(cx - kSlotIcon / 2, y + 26, kSlotIcon, weather.hourly[idx], hour >= 6 && hour < 18);
     snprintf(buf, sizeof(buf), "%d°", shownTemp(weather.hourlyTemp[idx], f));
-    renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, y + 56, buf);
+    renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, buf) / 2, y + 60, buf);
   }
 }
 
@@ -1399,10 +1401,12 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     struct Item {
       const char* label;
       int pct;
+      bool known;  // false: "–" and an empty bar
     };
-    Item items[3] = {{"CPU", pc.cpuPct}, {"RAM", desk::percentOf(pc.ramUsedGb, pc.ramTotalGb)}, {"", 0}};
+    Item items[3] = {
+        {"CPU", pc.cpuPct, true}, {"RAM", desk::percentOf(pc.ramUsedGb, pc.ramTotalGb), true}, {"", 0, true}};
     if (pc.claude.known) {
-      items[2] = {"Claude 5h", pc.claude.sessionPct};
+      items[2] = {"Claude 5h", pc.claude.sessionPct, pc.claude.sessionKnown};
     } else if (pc.diskCount > 0) {
       // A drive letter fits the column; a long mount path does not.
       static char diskLabel[16];
@@ -1411,17 +1415,21 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
       } else {
         snprintf(diskLabel, sizeof(diskLabel), "%s", tr(STR_DESK_DISK_ANY));
       }
-      items[2] = {diskLabel, desk::percentOf(pc.disks[0].usedGb, pc.disks[0].totalGb)};
+      items[2] = {diskLabel, desk::percentOf(pc.disks[0].usedGb, pc.disks[0].totalGb), true};
     }
     const int colW = (w - 2 * kMargin) / 3;
     for (int i = 0; i < 3; ++i) {
       if (items[i].label[0] == '\0') continue;
       const int x = kMargin + i * colW;
       renderer.drawText(UI_10_FONT_ID, x, y, items[i].label);
-      snprintf(buf, sizeof(buf), "%d%%", items[i].pct);
+      if (items[i].known) {
+        snprintf(buf, sizeof(buf), "%d%%", items[i].pct);
+      } else {
+        snprintf(buf, sizeof(buf), "%s", "–");
+      }
       renderer.drawText(UI_10_FONT_ID, x + colW - 14 - renderer.getTextWidth(UI_10_FONT_ID, buf, EpdFontFamily::BOLD),
                         y, buf, true, EpdFontFamily::BOLD);
-      drawBar(x, y + 28, colW - 14, 12, items[i].pct);
+      drawBar(x, y + 28, colW - 14, 12, items[i].known ? items[i].pct : 0);
     }
   }
 
@@ -1540,13 +1548,18 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
         const char* label;
         int pct;
         uint32_t reset;
-      } q[2] = {{tr(STR_DESK_CLAUDE_SESSION), pc.claude.sessionPct, pc.claude.sessionReset},
-                {tr(STR_DESK_CLAUDE_WEEK), pc.claude.weekPct, pc.claude.weekReset}};
+        bool known;
+      } q[2] = {{tr(STR_DESK_CLAUDE_SESSION), pc.claude.sessionPct, pc.claude.sessionReset, pc.claude.sessionKnown},
+                {tr(STR_DESK_CLAUDE_WEEK), pc.claude.weekPct, pc.claude.weekReset, pc.claude.weekKnown}};
       const int qcy = y + 110;
       for (int i = 0; i < 2; ++i) {
         const int cx = kMargin + cardW / 4 + i * cardW / 2;
-        drawGauge(cx, qcy, qr, q[i].pct, 16);
-        snprintf(buf, sizeof(buf), "%d%%", q[i].pct);
+        drawGauge(cx, qcy, qr, q[i].known ? q[i].pct : 0, 16);
+        if (q[i].known) {
+          snprintf(buf, sizeof(buf), "%d%%", q[i].pct);
+        } else {
+          snprintf(buf, sizeof(buf), "%s", "–");  // Claude Code has not reported this window
+        }
         renderer.drawText(UI_12_FONT_ID, cx - renderer.getTextWidth(UI_12_FONT_ID, buf, EpdFontFamily::BOLD) / 2,
                           qcy - 16, buf, true, EpdFontFamily::BOLD);
         renderer.drawText(UI_10_FONT_ID, cx - renderer.getTextWidth(UI_10_FONT_ID, q[i].label, EpdFontFamily::BOLD) / 2,

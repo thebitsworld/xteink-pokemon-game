@@ -18,7 +18,11 @@ struct AgentDisk {
 };
 
 struct ClaudeUsage {
-  bool known = false;
+  bool known = false;  // the agent sent either window
+  // Claude Code reports each window on its own and may leave one out (the five-hour one went
+  // missing for hours, 2026-11-25): an unknown window shows "–", not 0 %.
+  bool sessionKnown = false;
+  bool weekKnown = false;
   int sessionPct = 0;
   uint32_t sessionReset = 0;  // Unix seconds, 0 = unknown
   int weekPct = 0;

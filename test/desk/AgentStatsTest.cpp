@@ -35,6 +35,21 @@ TEST(AgentStats, ClaudeBlockAndLimits) {
   ASSERT_TRUE(s.claude.known);
   EXPECT_EQ(s.claude.sessionPct, 42);
   EXPECT_EQ(s.claude.weekReset, 1795417200u);
+  EXPECT_TRUE(s.claude.sessionKnown);
+  EXPECT_TRUE(s.claude.weekKnown);
+}
+
+TEST(AgentStats, ClaudeWindowLeftOut) {
+  // Claude Code reported the week only: the session is unknown, not 0 %.
+  const char* json =
+      R"({"v":1,"host":"H","cpu":1,"ram":[1,2],"disks":[],"net":[0,0],"uptime":0,)"
+      R"("claude":{"session":null,"week":[35,1795658400]}})";
+  desk::AgentStats s;
+  ASSERT_TRUE(desk::parseAgentStats(json, std::strlen(json), 1, s));
+  ASSERT_TRUE(s.claude.known);
+  EXPECT_FALSE(s.claude.sessionKnown);
+  EXPECT_TRUE(s.claude.weekKnown);
+  EXPECT_EQ(s.claude.weekPct, 35);
 }
 
 TEST(AgentStats, RejectsOtherVersionsAndJunk) {

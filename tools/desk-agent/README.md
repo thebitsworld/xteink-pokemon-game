@@ -53,7 +53,8 @@ Fit/Crop.
 
 ## Claude usage limits
 
-`claude` is `{"session": [pct, resets_at], "week": [pct, resets_at]}` or `null`. Claude Code
+`claude` is `{"session": [pct, resets_at], "week": [pct, resets_at]}` or `null`; a window
+Claude Code has not reported is `null`, which the reader shows as "–". Claude Code
 gives its status line command the subscription limits (Pro, Max and Ultra; `rate_limits` in
 the [status line data](https://code.claude.com/docs/en/statusline.md)). `desk_statusline.py`
 is such a command: it saves them to `~/.claude/desk-rate-limits.json`, which the agent reads.
