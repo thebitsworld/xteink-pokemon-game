@@ -2,6 +2,7 @@
 
 #if CROSSINK_DESK
 
+#include <cstddef>
 #include <cstdint>
 
 // Desk mode on battery (docs/development/desk-mode-plan.md, phase 5), from the Desk probe's
