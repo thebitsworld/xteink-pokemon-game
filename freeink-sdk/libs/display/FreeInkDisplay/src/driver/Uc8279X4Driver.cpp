@@ -906,6 +906,14 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
+void Uc8279X4Driver::seedPreviousFrame(EpdBus& bus, const uint8_t* buf) {
+  if (!buf) return;
+  pulseFinish(bus);  // xteink-pokemon: a pulse scan may still run
+  _diffRefValid = false;  // _grayBase does not hold this frame
+  streamPlane(bus, CMD_DTM1, buf);  // OLD plane = the B/W frame on the glass, as displayFinish syncs it
+  _oldPlaneValid = true;
+}
+
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
   _diffRefValid = false;  // xteink-pokemon: the planes stop matching _grayBase
   _directGrayOnPanel = false;

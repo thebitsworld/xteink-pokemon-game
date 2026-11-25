@@ -911,7 +911,11 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     deskpower::setCrumb(5);
     uint32_t drawnUnix = 0;
     readUtcUnix(drawnUnix);  // as drawPage() reads it
+    const bool drewHalf = forceHalfRefresh;
     drawPage();
+    // The X4 Pro's first frame in the saver (a half refresh, then deep sleep at once) came out
+    // partly faded (owner's report 2026-11-25): let the panel settle before the deep sleep.
+    if (drewHalf && deskpower::deepSleepTicks()) delay(600);
     deskpower::setCrumb(6);
     batteryLogNow("drawn");  // a run that stops after "tick" hangs drawing, after "drawn" sleeping
     uint32_t sleepMs = deskpower::msToNextMinute();

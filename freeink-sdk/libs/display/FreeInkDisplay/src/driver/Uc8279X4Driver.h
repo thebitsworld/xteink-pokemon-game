@@ -72,6 +72,11 @@ class Uc8279X4Driver : public PanelDriver {
 
   void begin(EpdBus& bus) override;
   void deepSleep(EpdBus& bus) override;
+  // xteink-pokemon: the panel's on-screen frame back into the OLD plane after a deep sleep
+  // (Desk's X4 Pro minute ticks), so the next Fast stays a differential partial instead of a
+  // full GC flash each minute (owner's report, 2026-11-25).
+  void seedPreviousFrame(EpdBus& bus, const uint8_t* buf) override;
+  void baselineRestored() override { _needFullClear = false; }
 
   void display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) override;
   bool displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) override;
