@@ -548,7 +548,9 @@ bool DeskActivity::applyNetJob() {
     }
     weatherAttempted = true;
     lastWeatherAttemptMs = nowMs;
-    if (page == Page::Main) forceHalfRefresh = true;
+    // A new forecast is drawn with the fast refresh like the minute: a forced half refresh here
+    // flashed the screen black at every update (every 10 min on USB; owner's report on the X3,
+    // 2026-11-25). The hourly half refresh (kHalfRefreshEveryMinutes) still cleans the panel.
   }
   if (netWantPc) {
     pcPolling = false;
