@@ -41,6 +41,11 @@ class DeskActivity final : public Activity {
   // opens it, goes to the battery loop at once when on battery.
   static void requestBatteryNow() { batteryNowRequested = true; }
   static bool isOpen() { return open; }
+  // Desk opened in the last few seconds. Leaving the battery saver restarts the reader, which
+  // takes a while on the X3; a second short press made meanwhile ("it did not wake") sent Desk
+  // straight back to the saver (battery log: exit-button then enter in the same minute,
+  // 2026-11-23/24). Such a press is ignored.
+  static bool justOpened() { return open && millis() - openedAtMs < 8000; }
   // "Light keeps Desk awake" (SETTINGS.deskLightAwake) with the frontlight on and the battery
   // not low: Desk stays awake on battery instead of its battery saver or the reader's sleep.
   static bool lightKeepsAwake();
@@ -125,6 +130,7 @@ class DeskActivity final : public Activity {
   bool batteryMode = false;  // drawn by the battery loop: no button hints
   static bool batteryNowRequested;
   static bool open;
+  static uint32_t openedAtMs;
 
   static LocalTime readLocalTime();
   static bool readUtcUnix(uint32_t& out);

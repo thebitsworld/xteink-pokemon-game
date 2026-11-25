@@ -265,6 +265,7 @@ char decimalMark() { return tr(STR_DESK_DECIMAL_MARK)[0]; }
 
 bool DeskActivity::batteryNowRequested = false;
 bool DeskActivity::open = false;
+uint32_t DeskActivity::openedAtMs = 0;
 
 // ---- time ------------------------------------------------------------------------------------
 
@@ -352,6 +353,7 @@ void DeskActivity::loadState() {
 void DeskActivity::onEnter() {
   Activity::onEnter();
   open = true;
+  openedAtMs = millis();
   loadState();
   uint32_t now = 0;
   const bool haveNow = readUtcUnix(now);

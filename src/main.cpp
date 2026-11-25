@@ -648,6 +648,8 @@ void notifyQuickLockChanged() {
 bool deskTakesSleep() {
 #if CROSSINK_DESK
   if (!SETTINGS.deskOnSleep) return false;
+  // A press right after Desk opened is the impatient repeat of the one that woke it: keep Desk.
+  if (DeskActivity::justOpened()) return true;
   if (!deskpower::externalPower() && powerManager.getBatteryPercentage() < 10) return false;
   // On battery Desk takes the sleep only where its battery loop runs (the X3).
   // With "Light keeps Desk awake" and the light on, Desk takes it on any reader and stays awake.
