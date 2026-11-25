@@ -650,7 +650,10 @@ bool deskTakesSleep() {
   if (!SETTINGS.deskOnSleep) return false;
   if (!deskpower::externalPower() && powerManager.getBatteryPercentage() < 10) return false;
   // On battery Desk takes the sleep only where its battery loop runs (the X3).
-  if (!deskpower::externalPower() && !deskpower::batteryLoopSupported()) return false;
+  // With "Light keeps Desk awake" and the light on, Desk takes it on any reader and stays awake.
+  if (!deskpower::externalPower() && !deskpower::batteryLoopSupported() && !DeskActivity::lightKeepsAwake()) {
+    return false;
+  }
   DeskActivity::requestBatteryNow();
   if (!DeskActivity::isOpen()) {
     activityManager.replaceActivity(std::make_unique<DeskActivity>(renderer, mappedInputManager));

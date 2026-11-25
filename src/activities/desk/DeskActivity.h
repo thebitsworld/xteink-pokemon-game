@@ -41,6 +41,9 @@ class DeskActivity final : public Activity {
   // opens it, goes to the battery loop at once when on battery.
   static void requestBatteryNow() { batteryNowRequested = true; }
   static bool isOpen() { return open; }
+  // "Light keeps Desk awake" (SETTINGS.deskLightAwake) with the frontlight on and the battery
+  // not low: Desk stays awake on battery instead of its battery saver or the reader's sleep.
+  static bool lightKeepsAwake();
 
   void onEnter() override;
   void onExit() override;

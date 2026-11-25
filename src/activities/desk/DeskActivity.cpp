@@ -450,7 +450,15 @@ void DeskActivity::onExit() {
 
 bool DeskActivity::preventAutoSleep() {
   // The photo frame and the PC page stay up on battery too (back to the clock after an hour alone).
-  return deskpower::externalPower() || netBusy || pomodoro.running() || page == Page::Photo || page == Page::Pc;
+  return deskpower::externalPower() || netBusy || pomodoro.running() || page == Page::Photo || page == Page::Pc ||
+         lightKeepsAwake();
+}
+
+bool DeskActivity::lightKeepsAwake() {
+  // The light's PWM stops in light and deep sleep, so a lit Desk can only stay awake. Below 10 %
+  // the battery saver (light off) or the reader's sleep takes over again.
+  return SETTINGS.deskLightAwake && Frontlight.present() && Frontlight.isOn() &&
+         (deskpower::externalPower() || powerManager.getBatteryPercentage() >= 10);
 }
 
 void DeskActivity::startNetJob(const bool wantWeather, const bool wantPc, const bool userAsked, const int photoIndex) {
@@ -945,10 +953,10 @@ void DeskActivity::loop() {
   // A sleep asked for (power button, idle timeout) with "Sleep opens Desk" on: battery loop now.
   if (batteryNowRequested) {
     batteryNowRequested = false;
-    if (!deskpower::externalPower() && deskpower::batteryLoopSupported()) runBatteryLoop(false);
+    if (!deskpower::externalPower() && deskpower::batteryLoopSupported() && !lightKeepsAwake()) runBatteryLoop(false);
   }
   // On battery and left alone: the minute-tick loop in light sleep (does not return).
-  if (deskpower::batteryLoopSupported() && !deskpower::externalPower() && !pomodoro.running() &&
+  if (deskpower::batteryLoopSupported() && !deskpower::externalPower() && !pomodoro.running() && !lightKeepsAwake() &&
       !weatherFetchPending && !pcPollPending && !netBusy &&
       millis() - lastInputMs > kBatteryIdleMs && page != Page::Photo && page != Page::Pc) {
     runBatteryLoop(false);
@@ -1060,6 +1068,11 @@ void DeskActivity::loop() {
     bool wantPc = pcPollPending;
     if (deskpower::externalPower() && !isNight(shown)) {
       const uint32_t weatherWait = weatherResult == deskweather::Result::Ok ? kWeatherEveryMs : kWeatherRetryMs;
+      wantWeather = wantWeather || (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait);
+    } else if (lightKeepsAwake() && !isNight(shown)) {
+      // Awake on battery for the light: weather at the battery saver's pace.
+      const uint32_t weatherWait =
+          (weatherResult == deskweather::Result::Ok ? batteryWeatherSec() : kBatteryWeatherRetrySec) * 1000u;
       wantWeather = wantWeather || (weatherAttempted && nowMs - lastWeatherAttemptMs >= weatherWait);
     }
     if (deskpower::externalPower() || page == Page::Pc) {

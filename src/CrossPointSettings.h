@@ -659,6 +659,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t deskNightStart = 23;     // hour (local)
   uint8_t deskNightEnd = 6;        // hour (local)
   uint8_t deskBatteryWeather = 1;  // weather on battery: 0 every 30 min, 1 60 min, 2 120 min
+  // Readers with a frontlight: while the light is on, Desk stays awake on battery (no battery
+  // saver), since the light's PWM stops in sleep.
+  uint8_t deskLightAwake = 0;
   uint8_t deskShowCalendar = 1;    // pages after the clock
   uint8_t deskShowPc = 1;
   uint8_t deskShowPhoto = 1;

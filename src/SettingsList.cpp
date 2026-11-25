@@ -373,6 +373,8 @@ std::vector<SettingInfo> buildBaseSettingsList() {
     add(SettingInfo::Enum(StrId::STR_DESK_BATTERY_WEATHER, &CrossPointSettings::deskBatteryWeather,
                           {StrId::STR_DESK_EVERY_30, StrId::STR_DESK_EVERY_60, StrId::STR_DESK_EVERY_120},
                           "deskBatteryWeather", StrId::STR_CAT_DESK));
+    add(SettingInfo::Toggle(StrId::STR_DESK_LIGHT_AWAKE, &CrossPointSettings::deskLightAwake, "deskLightAwake",
+                            StrId::STR_CAT_DESK));
     add(SettingInfo::Toggle(StrId::STR_DESK_SHOW_CALENDAR, &CrossPointSettings::deskShowCalendar, "deskShowCalendar",
                             StrId::STR_CAT_DESK));
     add(SettingInfo::Toggle(StrId::STR_DESK_SHOW_PC, &CrossPointSettings::deskShowPc, "deskShowPc",

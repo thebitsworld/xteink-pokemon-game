@@ -637,7 +637,7 @@ inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 1;
 inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 0;
 #endif
 #if CROSSINK_DESK
-inline constexpr size_t DESK_SETTINGS_COUNT = 14;  // Desk mode (SettingsList.cpp, under CROSSINK_DESK)
+inline constexpr size_t DESK_SETTINGS_COUNT = 15;  // Desk mode (SettingsList.cpp, under CROSSINK_DESK)
 #else
 inline constexpr size_t DESK_SETTINGS_COUNT = 0;
 #endif
@@ -1256,6 +1256,8 @@ inline std::vector<SettingInfo> buildSystemDeskSettingsList(const std::vector<Se
   settings.push_back(SettingInfo::SectionHeader(StrId::STR_DESK_GROUP_POWER));
   addSettingByName(settings, allSettings, StrId::STR_DESK_ON_SLEEP);
   addSettingByName(settings, allSettings, StrId::STR_DESK_BATTERY_WEATHER);
+  // The light's PWM stops in sleep: with it on, Desk can only stay awake (frontlight readers).
+  if (Frontlight.present()) addSettingByName(settings, allSettings, StrId::STR_DESK_LIGHT_AWAKE);
   addSettingByName(settings, allSettings, StrId::STR_DESK_NIGHT);
   addSettingByName(settings, allSettings, StrId::STR_DESK_NIGHT_FROM);
   addSettingByName(settings, allSettings, StrId::STR_DESK_NIGHT_TO);
