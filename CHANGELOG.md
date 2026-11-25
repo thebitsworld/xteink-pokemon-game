@@ -1,3 +1,26 @@
+## [2.2.0-beta.13] - 2026-11-25
+
+> **Test build - install it only if you want to try Desk mode.** Stay on v2.1.0 for everyday use.
+>
+> 🇻🇳 **Bản thử nghiệm - chỉ cài nếu bạn muốn thử chế độ Desk.** Dùng hằng ngày hãy giữ v2.1.0.
+
+### Changed
+
+- The hourly forecast on Desk's weather card shows each slot's sky as an icon instead of its name, which ran into the next slot ("Partly cloudy").
+- A new forecast is drawn with the fast refresh instead of flashing the screen black at each weather update (every 10 minutes on USB). The hourly clean refresh stays.
+- A PC address typed in Settings > System > Desk without a port uses the agent's default 8765.
+- A Claude limit the PC has not reported shows "–" instead of 0 %.
+- With "Sleep opens Desk", a short press of the power button in the first seconds after Desk opens is ignored: Desk is still starting after leaving the battery saver, and a repeated press sent it straight back.
+
+### Fixed
+
+- Desk tries a weather update up to three times, a few seconds apart, before waiting for the next one; every failed update goes to the battery log.
+- Settings lists with section headers (Settings > System > Desk) could not scroll to their last row.
+
+### Desk agent (PC)
+
+- `desk_statusline.py` keeps each Claude limit it has seen: a status line call without the five-hour limit no longer erases it. The Claude desktop app rarely runs the status line; the `claude` command line does after every reply.
+
 ## [2.2.0-beta.12-desktest-x4pro] - 2026-11-25
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.11 to try Desk). There is no X3/X4 or X4 Classic file in this release.
