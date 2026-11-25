@@ -54,6 +54,7 @@ uint32_t sleepOk = 0;
 uint32_t sleepRejected = 0;
 int sleepLastErr = 0;
 uint32_t sleptMs = 0;  // time spent in the OK sleeps
+int sleepRejectCause = -1;  // esp_sleep_get_wakeup_cause() after the last rejected sleep
 
 // Which task called esp_restart() during a battery run: the X3 restarted every 10-20 s inside
 // its light sleep with a software-restart cause (battery log, 2026-11-25), and nothing in the
@@ -248,6 +249,9 @@ Wake sleepFor(const uint32_t ms) {
     } else {
       ++sleepRejected;
       sleepLastErr = static_cast<int>(err);
+      // Which source was already pending: the X3 rejected every sleep (0x103) without it being
+      // the power button (2026-11-25).
+      sleepRejectCause = static_cast<int>(esp_sleep_get_wakeup_cause());
     }
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
       const bool powerDown = pin >= 0 && digitalRead(pin) == (activeHigh ? HIGH : LOW);
@@ -326,17 +330,20 @@ void setBatteryRunArmed(const bool armed) {
 #endif
 }
 
-void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& slept) {
+void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& slept, int& rejectCause) {
 #ifndef SIMULATOR
   ok = sleepOk;
   rejected = sleepRejected;
   lastErr = sleepLastErr;
   slept = sleptMs;
+  rejectCause = sleepRejectCause;
   sleepOk = sleepRejected = sleptMs = 0;
   sleepLastErr = 0;
+  sleepRejectCause = -1;
 #else
   ok = rejected = slept = 0;
   lastErr = 0;
+  rejectCause = -1;
 #endif
 }
 

@@ -882,11 +882,13 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
       // "-e" the error), "-z" seconds actually asleep. The X3 drew ~22 mA between ticks instead
       // of ~3 (2026-11-25), as if it barely slept.
       uint32_t ok = 0, rejected = 0, slept = 0;
-      int lastErr = 0;
-      deskpower::takeSleepStats(ok, rejected, lastErr, slept);
-      char tickEvent[48];
-      snprintf(tickEvent, sizeof(tickEvent), "tick-s%lu-j%lu-e%x-z%lu", static_cast<unsigned long>(ok),
-               static_cast<unsigned long>(rejected), static_cast<unsigned>(lastErr),
+      int lastErr = 0, rejectCause = -1;
+      deskpower::takeSleepStats(ok, rejected, lastErr, slept, rejectCause);
+      // "-w": the wakeup cause pending at the last rejection (esp_sleep_wakeup_cause_t: 4 timer,
+      // 5 touch, 7 GPIO, 8 UART, 9 Wi-Fi, 10 COCPU, 12 BT...).
+      char tickEvent[56];
+      snprintf(tickEvent, sizeof(tickEvent), "tick-s%lu-j%lu-e%x-w%d-z%lu", static_cast<unsigned long>(ok),
+               static_cast<unsigned long>(rejected), static_cast<unsigned>(lastErr), rejectCause,
                static_cast<unsigned long>(slept / 1000));
       batteryLogNow(tickEvent);
     }
@@ -1356,25 +1358,28 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     snprintf(hint, sizeof(hint), "%s%s%s", tr(STR_DESK_STALE), weatherAttempted ? " · " : "",
              weatherAttempted ? deskweather::resultText(weatherResult) : "");
   }
-  // The rain hint gets the room the air quality leaves (wider fonts on the X4 Pro).
-  int hintMax = cardW - 2 * pad;
+  // The rain hint and the air quality share the line. When both do not fit (the X4 Pro's wider
+  // font: "No rain in the next 12 h" was cut, owner's report 2026-11-25), the air quality drops
+  // its level word first ("AQI 60"), and only then is the hint cut.
+  const int lineW = cardW - 2 * pad;
+  const int hintW = renderer.getTextWidth(UI_10_FONT_ID, hint, EpdFontFamily::BOLD);
   const int level = desk::aqiLevel(weather.aqi);
-  if (SETTINGS.deskAirQuality && fresh && level >= 0) {
-    static const StrId kAirLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
-                                        StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
-    char airText[48];
-    snprintf(airText, sizeof(airText), "AQI %d · %s", weather.aqi, I18N.get(kAirLevels[level]));
-    hintMax -= renderer.getTextWidth(UI_10_FONT_ID, airText, EpdFontFamily::BOLD) + 20;
+  const bool showAir = SETTINGS.deskAirQuality && fresh && level >= 0;
+  char air[48] = "";
+  if (showAir) {
+    static const StrId kLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
+                                     StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
+    snprintf(air, sizeof(air), "AQI %d · %s", weather.aqi, I18N.get(kLevels[level]));
+    if (hintW + renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD) + 20 > lineW) {
+      snprintf(air, sizeof(air), "AQI %d", weather.aqi);
+    }
   }
+  const int hintMax = showAir ? lineW - renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD) - 20 : lineW;
   if (hintMax > 0) {
     const std::string hintFit = renderer.truncatedText(UI_10_FONT_ID, hint, hintMax, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, left + pad, y, hintFit.c_str(), true, EpdFontFamily::BOLD);
   }
-  if (SETTINGS.deskAirQuality && fresh && level >= 0) {
-    static const StrId kLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
-                                     StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
-    char air[48];
-    snprintf(air, sizeof(air), "AQI %d · %s", weather.aqi, I18N.get(kLevels[level]));
+  if (showAir) {
     const int airW = renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD);
     const int airX = left + cardW - pad - airW;
     if (level >= 2) {
