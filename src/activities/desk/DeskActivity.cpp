@@ -1166,9 +1166,44 @@ void DeskActivity::drawStatusBar(const char* title, const char* middle) const {
   } else {
     snprintf(buf, sizeof(buf), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
   }
-  renderer.drawText(UI_10_FONT_ID, w - kMargin - renderer.getTextWidth(UI_10_FONT_ID, buf), 14, buf);
-  if (middle != nullptr && middle[0] != '\0') renderer.drawCenteredText(UI_10_FONT_ID, 14, middle);
+  const int rightW = renderer.getTextWidth(UI_10_FONT_ID, buf);
+  renderer.drawText(UI_10_FONT_ID, w - kMargin - rightW, 14, buf);
+  if (middle != nullptr && middle[0] != '\0') {
+    // Centred, but never into the title or the battery: the X4 Pro's wider font ran a long city
+    // into them. Cut with "…" when it does not fit between them.
+    const int titleW = renderer.getTextWidth(UI_10_FONT_ID, title, EpdFontFamily::BOLD);
+    const int sideW = std::max(titleW, rightW) + kMargin + 12;
+    const int maxW = w - 2 * sideW;
+    if (maxW > 0) {
+      const std::string fit = renderer.truncatedText(UI_10_FONT_ID, middle, maxW);
+      renderer.drawCenteredText(UI_10_FONT_ID, 14, fit.c_str());
+    }
+  }
   renderer.fillRect(0, 44, w, 2, true);
+}
+
+void DeskActivity::drawCentered(const int font, const int y, const char* text, const bool black,
+                                const EpdFontFamily::Style style) const {
+  // Kept inside the margins: the X4 Pro's wider font ran some lines past the screen edges.
+  const int maxW = renderer.getScreenWidth() - 2 * kMargin;
+  if (renderer.getTextWidth(font, text, style) <= maxW) {
+    renderer.drawCenteredText(font, y, text, black, style);
+    return;
+  }
+  const std::string fit = renderer.truncatedText(font, text, maxW, style);
+  renderer.drawCenteredText(font, y, fit.c_str(), black, style);
+}
+
+int DeskActivity::drawCenteredWrapped(const int font, const int y, const char* text, const bool black,
+                                      const EpdFontFamily::Style style) const {
+  const int maxW = renderer.getScreenWidth() - 2 * kMargin;
+  const auto lines = renderer.wrappedText(font, text, maxW, 2, style);
+  int at = y;
+  for (const auto& line : lines) {
+    renderer.drawCenteredText(font, at, line.c_str(), black, style);
+    at += renderer.getLineHeight(font);
+  }
+  return at;
 }
 
 void DeskActivity::drawBar(const int x, const int y, const int w, const int h, const int pct) const {
@@ -1290,8 +1325,8 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     const char* msg = weatherFetching
                           ? tr(STR_DESK_UPDATING)
                           : (weatherAttempted ? deskweather::resultText(weatherResult) : tr(STR_DESK_NO_DATA));
-    renderer.drawCenteredText(UI_12_FONT_ID, top + height / 2 - 26, tr(STR_DESK_WEATHER), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, top + height / 2 + 6, msg[0] ? msg : tr(STR_DESK_NO_DATA));
+    drawCentered(UI_12_FONT_ID, top + height / 2 - 26, tr(STR_DESK_WEATHER), true, EpdFontFamily::BOLD);
+    drawCentered(UI_10_FONT_ID, top + height / 2 + 6, msg[0] ? msg : tr(STR_DESK_NO_DATA));
     return;
   }
 
@@ -1321,8 +1356,20 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     snprintf(hint, sizeof(hint), "%s%s%s", tr(STR_DESK_STALE), weatherAttempted ? " · " : "",
              weatherAttempted ? deskweather::resultText(weatherResult) : "");
   }
-  renderer.drawText(UI_10_FONT_ID, left + pad, y, hint, true, EpdFontFamily::BOLD);
+  // The rain hint gets the room the air quality leaves (wider fonts on the X4 Pro).
+  int hintMax = cardW - 2 * pad;
   const int level = desk::aqiLevel(weather.aqi);
+  if (SETTINGS.deskAirQuality && fresh && level >= 0) {
+    static const StrId kAirLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
+                                        StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
+    char airText[48];
+    snprintf(airText, sizeof(airText), "AQI %d · %s", weather.aqi, I18N.get(kAirLevels[level]));
+    hintMax -= renderer.getTextWidth(UI_10_FONT_ID, airText, EpdFontFamily::BOLD) + 20;
+  }
+  if (hintMax > 0) {
+    const std::string hintFit = renderer.truncatedText(UI_10_FONT_ID, hint, hintMax, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, left + pad, y, hintFit.c_str(), true, EpdFontFamily::BOLD);
+  }
   if (SETTINGS.deskAirQuality && fresh && level >= 0) {
     static const StrId kLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
                                      StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
@@ -1376,21 +1423,21 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
 
   int y = 62;
   if (!shown.valid) {
-    renderer.drawCenteredText(DESK_CLOCK_FONT_ID, y, "--:--");
+    drawCentered(DESK_CLOCK_FONT_ID, y, "--:--");
     y += renderer.getLineHeight(DESK_CLOCK_FONT_ID) + 10;
-    renderer.drawCenteredText(UI_12_FONT_ID, y, tr(STR_DESK_NO_CLOCK), true, EpdFontFamily::BOLD);
+    drawCentered(UI_12_FONT_ID, y, tr(STR_DESK_NO_CLOCK), true, EpdFontFamily::BOLD);
     y += 34;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_NO_CLOCK_HINT));
+    drawCentered(UI_10_FONT_ID, y, tr(STR_DESK_NO_CLOCK_HINT));
     y += 40;
   } else {
     snprintf(buf, sizeof(buf), "%02d:%02d", shown.hour, shown.minute);
-    renderer.drawCenteredText(DESK_CLOCK_FONT_ID, y, buf);
+    drawCentered(DESK_CLOCK_FONT_ID, y, buf);
     y += renderer.getLineHeight(DESK_CLOCK_FONT_ID) + 2;
 
     const int32_t jd = desk::julianDay(shown.day, shown.month, shown.year);
     snprintf(buf, sizeof(buf), "%s, %d/%d/%d", weekdayText(desk::weekdayOf(jd)), shown.day, shown.month,
              shown.year);
-    renderer.drawCenteredText(UI_12_FONT_ID, y, buf, true, EpdFontFamily::BOLD);
+    drawCentered(UI_12_FONT_ID, y, buf, true, EpdFontFamily::BOLD);
     y += 38;
 
     const desk::LunarDate lunar = desk::solarToLunar(shown.day, shown.month, shown.year);
@@ -1398,7 +1445,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     desk::canChiOfYear(lunar.year, yearName, sizeof(yearName));
     snprintf(buf, sizeof(buf), tr(STR_DESK_LUNAR_LINE), lunar.day, lunar.month, lunar.leap ? tr(STR_DESK_LEAP) : "",
              yearName);
-    renderer.drawCenteredText(UI_12_FONT_ID, y, buf);
+    drawCentered(UI_12_FONT_ID, y, buf);
     y += 34;
 
     char dayName[32];
@@ -1406,7 +1453,7 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     desk::canChiOfDay(jd, dayName, sizeof(dayName));
     desk::canChiOfMonth(lunar, monthName, sizeof(monthName));
     snprintf(buf, sizeof(buf), tr(STR_DESK_CANCHI_LINE), dayName, monthName);
-    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    drawCentered(UI_10_FONT_ID, y, buf);
     y += 38;
 
     const desk::CalendarEvent ev = desk::nextCalendarEvent(shown.day, shown.month, shown.year);
@@ -1461,21 +1508,33 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
     for (int i = 0; i < 3; ++i) {
       if (items[i].label[0] == '\0') continue;
       const int x = kMargin + i * colW;
-      renderer.drawText(UI_10_FONT_ID, x, y, items[i].label);
       if (items[i].known) {
         snprintf(buf, sizeof(buf), "%d%%", items[i].pct);
       } else {
         snprintf(buf, sizeof(buf), "%s", "–");
       }
-      renderer.drawText(UI_10_FONT_ID, x + colW - 14 - renderer.getTextWidth(UI_10_FONT_ID, buf, EpdFontFamily::BOLD),
-                        y, buf, true, EpdFontFamily::BOLD);
+      const int valueW = renderer.getTextWidth(UI_10_FONT_ID, buf, EpdFontFamily::BOLD);
+      // The label gets what the value leaves: "Claude 5h" ran into "26%" on the X4 Pro, whose
+      // font is wider (owner's report, 2026-11-25). It drops to "Claude", then is cut with "…".
+      const int labelMax = colW - 14 - valueW - 8;
+      const char* label = items[i].label;
+      std::string fit;
+      if (renderer.getTextWidth(UI_10_FONT_ID, label) > labelMax) {
+        if (i == 2 && pc.claude.known) label = "Claude";
+        if (renderer.getTextWidth(UI_10_FONT_ID, label) > labelMax) {
+          fit = renderer.truncatedText(UI_10_FONT_ID, label, labelMax);
+          label = fit.c_str();
+        }
+      }
+      renderer.drawText(UI_10_FONT_ID, x, y, label);
+      renderer.drawText(UI_10_FONT_ID, x + colW - 14 - valueW, y, buf, true, EpdFontFamily::BOLD);
       drawBar(x, y + 28, colW - 14, 12, items[i].known ? items[i].pct : 0);
     }
   }
 
   if (batteryMode) {
     // The front buttons cannot wake the light sleep: only the power button can.
-    renderer.drawCenteredText(UI_10_FONT_ID,
+    drawCentered(UI_10_FONT_ID,
                               renderer.getScreenHeight() - kBottomSafe - renderer.getLineHeight(UI_10_FONT_ID),
                               isNight(shown) ? tr(STR_DESK_NIGHT_SAVER) : tr(STR_DESK_BATTERY_SAVER));
     return;
@@ -1492,25 +1551,25 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
 
   if (!pc.valid || !pcFresh(nowUnix)) {
     int y = h / 2 - 90;
-    renderer.drawCenteredText(UI_12_FONT_ID, y, pcPolling ? tr(STR_DESK_PC_SEARCHING) : tr(STR_DESK_PC_NOT_FOUND), true,
+    drawCentered(UI_12_FONT_ID, y, pcPolling ? tr(STR_DESK_PC_SEARCHING) : tr(STR_DESK_PC_NOT_FOUND), true,
                               EpdFontFamily::BOLD);
     y += 44;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_HINT1));
+    drawCentered(UI_10_FONT_ID, y, tr(STR_DESK_PC_HINT1));
     y += 30;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_HINT2));
+    drawCentered(UI_10_FONT_ID, y, tr(STR_DESK_PC_HINT2));
     y += 44;
     if (pcAttempted && pcResult != deskweather::Result::Ok) {
-      renderer.drawCenteredText(UI_10_FONT_ID, y, deskweather::resultText(pcResult));
+      drawCentered(UI_10_FONT_ID, y, deskweather::resultText(pcResult));
       y += 30;
     }
     if (pc.valid) {
       formatLocalHm(pc.receivedAt, hm, sizeof(hm));
       snprintf(buf, sizeof(buf), tr(STR_DESK_LAST_SEEN), hm);
-      renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+      drawCentered(UI_10_FONT_ID, y, buf);
       y += 30;
     }
     y += 14;
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_PC_ADDRESS_HINT), true, EpdFontFamily::BOLD);
+    drawCentered(UI_10_FONT_ID, y, tr(STR_DESK_PC_ADDRESS_HINT), true, EpdFontFamily::BOLD);
   } else {
     int y = 58;
     renderer.drawText(UI_12_FONT_ID, kMargin, y, pc.host, true, EpdFontFamily::BOLD);
@@ -1570,7 +1629,7 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     uptimeText(pc.uptimeSec, uptime, sizeof(uptime));
     snprintf(upFor, sizeof(upFor), tr(STR_DESK_UP_FOR), uptime);
     snprintf(buf, sizeof(buf), "↓ %s  ↑ %s  ·  %s", down, up, upFor);
-    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    drawCentered(UI_10_FONT_ID, y, buf);
     y += 40;
 
     // Claude: two smaller three-quarter rings (5-hour session, week) with their reset times.
@@ -1578,12 +1637,31 @@ void DeskActivity::renderPc(const uint32_t nowUnix) {
     if (!pc.claude.known) {
       renderer.drawRoundedRect(kMargin, y, cardW, 64, 2, 10, true);
       renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 14, "Claude", true, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 20, tr(STR_DESK_CLAUDE_NO_SOURCE));
+      const std::string noSource =
+          renderer.truncatedText(UI_10_FONT_ID, tr(STR_DESK_CLAUDE_NO_SOURCE), cardW - 120 - 14);
+      renderer.drawText(UI_10_FONT_ID, kMargin + 120, y + 20, noSource.c_str());
     } else {
       const int qr = 58;
       const int cardH = 236;
       renderer.drawRoundedRect(kMargin, y, cardW, cardH, 2, 10, true);
       renderer.drawText(UI_12_FONT_ID, kMargin + 14, y + 10, "Claude", true, EpdFontFamily::BOLD);
+      if (pc.claude.savedAt != 0) {
+        // When Claude Code last reported them: the numbers only move while a Claude Code session
+        // runs on the PC, so an old time says they may be behind.
+        formatLocalHm(pc.claude.savedAt, hm, sizeof(hm));
+        char when[32];
+        if (nowUnix > pc.claude.savedAt + 20 * 3600) {
+          const int64_t localSec = static_cast<int64_t>(pc.claude.savedAt) + utcOffsetMinutes() * 60;
+          const int wd = desk::weekdayOf(static_cast<int32_t>(2440588 + localSec / 86400));
+          char dayHm[24];
+          snprintf(dayHm, sizeof(dayHm), "%s %s", weekdayShortText(wd), hm);
+          snprintf(when, sizeof(when), tr(STR_DESK_UPDATED), dayHm);
+        } else {
+          snprintf(when, sizeof(when), tr(STR_DESK_UPDATED), hm);
+        }
+        renderer.drawText(UI_10_FONT_ID, kMargin + cardW - 14 - renderer.getTextWidth(UI_10_FONT_ID, when), y + 16,
+                          when);
+      }
       const struct {
         const char* label;
         int pct;
@@ -1639,8 +1717,8 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
                                              ? deskweather::resultText(pcResult)
                                              : (pc.valid ? tr(STR_DESK_PC_NO_PHOTOS) : tr(STR_DESK_PC_SEARCHING)))
                                       : (pcPhotoFailed ? tr(STR_DESK_PHOTO_ERROR) : tr(STR_DESK_PC_PHOTO_LOADING));
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 40, head, true, EpdFontFamily::BOLD);
-    if (photos.empty()) renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 4, tr(STR_DESK_PC_PHOTOS_HINT));
+    drawCentered(UI_12_FONT_ID, h / 2 - 40, head, true, EpdFontFamily::BOLD);
+    if (photos.empty()) drawCenteredWrapped(UI_10_FONT_ID, h / 2 + 4, tr(STR_DESK_PC_PHOTOS_HINT));
     drawPageHints(tr(STR_DESK_BACK), "");
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     return;
@@ -1649,13 +1727,13 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   if (photos.empty()) {
     renderer.clearScreen();
     drawStatusBar(tr(STR_DESK_PHOTOS), "");
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 60, tr(STR_DESK_NO_PHOTOS), true, EpdFontFamily::BOLD);
+    drawCentered(UI_12_FONT_ID, h / 2 - 60, tr(STR_DESK_NO_PHOTOS), true, EpdFontFamily::BOLD);
     const std::string folder = photoFolder();
     if (!folder.empty()) {
       snprintf(line1, sizeof(line1), tr(STR_DESK_PHOTOS_FOLDER), folder.c_str());
-      renderer.drawCenteredText(UI_10_FONT_ID, h / 2 - 16, line1);
+      drawCentered(UI_10_FONT_ID, h / 2 - 16, line1);
     }
-    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 14, tr(STR_DESK_PHOTOS_HINT), true, EpdFontFamily::BOLD);
+    drawCenteredWrapped(UI_10_FONT_ID, h / 2 + 14, tr(STR_DESK_PHOTOS_HINT), true, EpdFontFamily::BOLD);
     drawPageHints(tr(STR_DESK_BACK), "");
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     return;
@@ -1697,10 +1775,10 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
       renderer.drawLine(stripX, stripY + 4, stripX + stripW, stripY + 4, 2, true);
       // Laid out from the bottom, clear of the bezel (text ran off the bottom on the X3).
       int y = h - kBottomSafe - renderer.getLineHeight(UI_10_FONT_ID);
-      renderer.drawCenteredText(UI_10_FONT_ID, y, line2);
+      drawCentered(UI_10_FONT_ID, y, line2);
       if (clock[0] != '\0') {
         y -= renderer.getLineHeight(DESK_DIGITS_FONT_ID);
-        renderer.drawCenteredText(DESK_DIGITS_FONT_ID, y, clock);
+        drawCentered(DESK_DIGITS_FONT_ID, y, clock);
       }
       stripMask.assign(static_cast<size_t>(stripRowBytes) * kPhotoStripH, 0);
       for (int y = 0; y < kPhotoStripH; ++y) {
@@ -1725,8 +1803,8 @@ void DeskActivity::renderPhoto(const uint32_t nowUnix) {
   if (photo::render(renderer, path, crop, overlay, kPhotoStripH + kPhotoStripGap) != photo::Result::Ok) {
     renderer.clearScreen();
     drawStatusBar(tr(STR_DESK_PHOTOS), "");
-    renderer.drawCenteredText(UI_12_FONT_ID, h / 2 - 30, tr(STR_DESK_PHOTO_ERROR), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, h / 2 + 10, photos[photoIndex].c_str());
+    drawCentered(UI_12_FONT_ID, h / 2 - 30, tr(STR_DESK_PHOTO_ERROR), true, EpdFontFamily::BOLD);
+    drawCentered(UI_10_FONT_ID, h / 2 + 10, photos[photoIndex].c_str());
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
 }
@@ -1739,7 +1817,7 @@ void DeskActivity::renderPomodoro() {
 
   const bool idle = pomodoro.phase() == desk::Pomodoro::Phase::Idle;
   int y = 66;
-  renderer.drawCenteredText(UI_12_FONT_ID, y, phaseText(pomodoro.phase()), true, EpdFontFamily::BOLD);
+  drawCentered(UI_12_FONT_ID, y, phaseText(pomodoro.phase()), true, EpdFontFamily::BOLD);
 
   // A ring of one dot per minute of the phase; filled dots are the minutes left.
   const uint32_t minutes = pomodoro.remainingMinutes(t);
@@ -1760,8 +1838,8 @@ void DeskActivity::renderPomodoro() {
     }
   }
   snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(minutes));
-  renderer.drawCenteredText(DESK_CLOCK_FONT_ID, cy - renderer.getLineHeight(DESK_CLOCK_FONT_ID) / 2 - 14, buf);
-  renderer.drawCenteredText(UI_10_FONT_ID, cy + 58, pomodoro.paused() ? tr(STR_DESK_PAUSED) : tr(STR_DESK_MIN_LEFT));
+  drawCentered(DESK_CLOCK_FONT_ID, cy - renderer.getLineHeight(DESK_CLOCK_FONT_ID) / 2 - 14, buf);
+  drawCentered(UI_10_FONT_ID, cy + 58, pomodoro.paused() ? tr(STR_DESK_PAUSED) : tr(STR_DESK_MIN_LEFT));
 
   y = cy + radius + 40;
   // Round dots: done rounds filled.
@@ -1783,18 +1861,18 @@ void DeskActivity::renderPomodoro() {
   y += 44;
 
   if (idle) {
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_POMO_HINT));
+    drawCentered(UI_10_FONT_ID, y, tr(STR_DESK_POMO_HINT));
   } else if (shown.valid && !pomodoro.paused()) {
     const int endMin = (shown.hour * 60 + shown.minute + static_cast<int>(minutes)) % 1440;
     snprintf(buf, sizeof(buf), tr(STR_DESK_ENDS_AT), endMin / 60, endMin % 60);
-    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    drawCentered(UI_10_FONT_ID, y, buf);
   }
   y += 40;
   renderer.drawLine(kMargin, y, w - kMargin, y, 1, true);
   y += 12;
   snprintf(buf, sizeof(buf), tr(STR_DESK_POMO_TODAY), pomodoro.focusRoundsToday(),
            static_cast<unsigned long>(pomodoro.focusMinutesToday()));
-  renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+  drawCentered(UI_10_FONT_ID, y, buf);
 
   const char* selectLabel = idle ? tr(STR_DESK_START) : (pomodoro.paused() ? tr(STR_DESK_RESUME) : tr(STR_DESK_PAUSE));
   if (idle) {
@@ -1866,7 +1944,7 @@ void DeskActivity::renderCalendar() {
     const desk::LunarDate lunar = desk::solarToLunar(t.day, t.month, t.year);
     snprintf(buf, sizeof(buf), tr(STR_DESK_DATE_LUNAR_SHORT), weekdayText(desk::weekdayOf(jd)), t.day, t.month,
              lunar.day, lunar.month);
-    renderer.drawCenteredText(UI_12_FONT_ID, y, buf, true, EpdFontFamily::BOLD);
+    drawCentered(UI_12_FONT_ID, y, buf, true, EpdFontFamily::BOLD);
     y += 36;
     char dayName[32];
     char monthName[32];
@@ -1875,10 +1953,10 @@ void DeskActivity::renderCalendar() {
     desk::canChiOfMonth(lunar, monthName, sizeof(monthName));
     desk::canChiOfYear(lunar.year, yearName, sizeof(yearName));
     snprintf(buf, sizeof(buf), tr(STR_DESK_CANCHI_FULL), dayName, monthName, yearName);
-    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    drawCentered(UI_10_FONT_ID, y, buf);
     y += 34;
     // Giờ hoàng đạo, three a line: "Dần 3-5 · Mão 5-7 · Tỵ 9-11".
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DESK_GOOD_HOURS), true, EpdFontFamily::BOLD);
+    drawCentered(UI_10_FONT_ID, y, tr(STR_DESK_GOOD_HOURS), true, EpdFontFamily::BOLD);
     y += 28;
     const uint16_t bits = desk::auspiciousHours(jd);
     char line[96] = "";
@@ -1890,29 +1968,29 @@ void DeskActivity::renderCalendar() {
                (i * 2 + 1) % 24);
       strncat(line, item, sizeof(line) - strlen(line) - 1);
       if (++inLine == 3) {
-        renderer.drawCenteredText(UI_10_FONT_ID, y, line);
+        drawCentered(UI_10_FONT_ID, y, line);
         y += 28;
         line[0] = '\0';
         inLine = 0;
       }
     }
-    if (inLine) renderer.drawCenteredText(UI_10_FONT_ID, y, line);
+    if (inLine) drawCentered(UI_10_FONT_ID, y, line);
   } else {
     const desk::LunarDate first = desk::solarToLunar(1, month, year);
     const desk::LunarDate last = desk::solarToLunar(days, month, year);
     char yearName[32];
     desk::canChiOfYear(last.year, yearName, sizeof(yearName));
     snprintf(buf, sizeof(buf), tr(STR_DESK_CAL_LUNAR_SPAN), first.day, first.month, last.day, last.month, yearName);
-    renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+    drawCentered(UI_10_FONT_ID, y, buf);
     y += 34;
   }
   if (mappedInput.hasTouch()) {
-    renderer.drawCenteredText(UI_10_FONT_ID,
+    drawCentered(UI_10_FONT_ID,
                               renderer.getScreenHeight() - kTouchBarBottom - kTouchBarH - 8 -
                                   renderer.getLineHeight(UI_10_FONT_ID),
                               tr(STR_DESK_CAL_HINT_TOUCH));
   } else {
-    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() - 40 - 34, tr(STR_DESK_CAL_HINT));
+    drawCentered(UI_10_FONT_ID, renderer.getScreenHeight() - 40 - 34, tr(STR_DESK_CAL_HINT));
   }
   drawHints(tr(STR_DESK_BACK), tr(STR_DESK_TODAY), tr(STR_DESK_PREV_MONTH), tr(STR_DESK_NEXT_MONTH));
 }

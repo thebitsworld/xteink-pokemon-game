@@ -150,6 +150,12 @@ class DeskActivity final : public Activity {
   static bool pageEnabled(Page p);
 
   void drawStatusBar(const char* title, const char* middle) const;
+  // Centred text kept inside the side margins: cut with "…", or wrapped to two lines (returns the
+  // y below the last line).
+  void drawCentered(int font, int y, const char* text, bool black = true,
+                    EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  int drawCenteredWrapped(int font, int y, const char* text, bool black = true,
+                          EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawBar(int x, int y, int w, int h, int pct) const;
   void drawGauge(int cx, int cy, int r, int pct, int thickness) const;
   void drawWeatherCard(int top, int height, uint32_t nowUnix) const;

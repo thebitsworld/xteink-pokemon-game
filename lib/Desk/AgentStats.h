@@ -23,6 +23,9 @@ struct ClaudeUsage {
   // missing for hours, 2026-11-25): an unknown window shows "–", not 0 %.
   bool sessionKnown = false;
   bool weekKnown = false;
+  // When Claude Code last reported them (Unix seconds, 0 unknown): they only move while a Claude
+  // Code session runs, so the reader shows how old they are.
+  uint32_t savedAt = 0;
   int sessionPct = 0;
   uint32_t sessionReset = 0;  // Unix seconds, 0 = unknown
   int weekPct = 0;

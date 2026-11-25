@@ -189,6 +189,11 @@ def claude_usage(now: float) -> dict | None:
     # (the five-hour window went missing while it stood at 25 %, 2026-11-25).
     out.setdefault("session", None)
     out.setdefault("week", None)
+    # When Claude Code last reported the limits: they only move while a Claude Code session runs.
+    try:
+        out["saved"] = int(saved.get("saved") or 0)
+    except (TypeError, ValueError):
+        out["saved"] = 0
     return out
 
 

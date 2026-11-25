@@ -54,6 +54,7 @@ bool parseAgentStats(const char* json, const size_t length, const uint32_t recei
     s.claude.sessionKnown = !claude["session"].isNull();
     s.claude.weekKnown = !claude["week"].isNull();
     s.claude.known = s.claude.sessionKnown || s.claude.weekKnown;
+    s.claude.savedAt = claude["saved"].isNull() ? 0 : claude["saved"].as<uint32_t>();
     if (s.claude.sessionKnown) {
       s.claude.sessionPct = clampPct(claude["session"][0].as<int>());
       s.claude.sessionReset = claude["session"][1].as<uint32_t>();
