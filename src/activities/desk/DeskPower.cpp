@@ -20,6 +20,9 @@
 #include <driver/usb_serial_jtag.h>
 #include <esp_private/esp_clk.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <hal/wdt_hal.h>
 #endif
 
@@ -45,6 +48,21 @@ RTC_NOINIT_ATTR TickState tickState;
 
 wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
 bool rwdtArmed = false;
+
+// Which task called esp_restart() during a battery run: the X3 restarted every 10-20 s inside
+// its light sleep with a software-restart cause (battery log, 2026-11-25), and nothing in the
+// loop restarts. Saved by a shutdown handler, logged by the next run's "resume" line.
+constexpr uint32_t kRestartTaskMagic = 0xDE5C0B05;
+RTC_NOINIT_ATTR uint32_t restartTaskMagic;
+RTC_NOINIT_ATTR char restartTask[12];
+bool shutdownHookAdded = false;
+
+void onShutdown() {
+  if (runMagic != kRunMagic) return;
+  const char* name = pcTaskGetName(nullptr);
+  std::snprintf(restartTask, sizeof(restartTask), "%s", name ? name : "?");
+  restartTaskMagic = kRestartTaskMagic;
+}
 
 uint32_t msToSlowTicks(const uint32_t ms) {
   // esp_clk_slowclk_cal_get(): microseconds per slow clock cycle, Q13.19.
@@ -279,8 +297,23 @@ void setBatteryRunArmed(const bool armed) {
 #ifndef SIMULATOR
   if (armed && runMagic != kRunMagic) runResets = 0;
   runMagic = armed ? kRunMagic : 0;
+  if (armed && !shutdownHookAdded) shutdownHookAdded = esp_register_shutdown_handler(&onShutdown) == ESP_OK;
 #else
   (void)armed;
+#endif
+}
+
+bool takeRestartTask(char* out, const size_t size) {
+#ifndef SIMULATOR
+  if (restartTaskMagic != kRestartTaskMagic) return false;
+  restartTaskMagic = 0;
+  restartTask[sizeof(restartTask) - 1] = '\0';
+  std::snprintf(out, size, "%s", restartTask);
+  return true;
+#else
+  (void)out;
+  (void)size;
+  return false;
 #endif
 }
 

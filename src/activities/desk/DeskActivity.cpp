@@ -807,7 +807,11 @@ void DeskActivity::leaveBatteryLoop(const bool touch, const uint32_t heldBeforeM
 void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickState* tick) {
   page = Page::Main;
   batteryMode = true;
-  forceHalfRefresh = tick == nullptr;  // a deep-sleep tick goes on with the run's own count
+  // A deep-sleep tick goes on with the run's own count. A reset inside a light-sleep run (the X3)
+  // leaves the panel and its controller RAM as they were, so it goes on with a fast refresh too:
+  // the half refresh flashed the screen at each of the X3's restarts, several a minute
+  // (owner's report, 2026-11-25).
+  forceHalfRefresh = tick == nullptr && (!fromBoot || deskpower::deepSleepTicks());
   if (!fromBoot) {
     waitNetJob();  // the loop owns Wi-Fi from here on
     // Let a render already queued finish before the loop draws without the render task.
@@ -833,15 +837,18 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
   if (tick == nullptr) {
     // With the last reset's cause (esp_reset_reason_t: 1 power-on, 3 software restart, 6/7 task
     // watchdog, 9 RTC watchdog...), so a freeze cleared by hand shows up as the next run's cause.
-    char event[24];
+    char event[48];
 #ifndef SIMULATOR
     const int reason = static_cast<int>(esp_reset_reason());
 #else
     const int reason = 0;
 #endif
-    // And where the last run was when it stopped ("-c1": in light sleep, see setCrumb).
-    snprintf(event, sizeof(event), "%s-r%d-c%u", fromBoot ? "resume" : "enter", reason,
-             static_cast<unsigned>(deskpower::lastCrumb()));
+    // And where the last run was when it stopped ("-c1": in light sleep, see setCrumb), and the
+    // task that restarted it ("-t<name>") when that was a software restart.
+    char task[12] = "";
+    const bool haveTask = deskpower::takeRestartTask(task, sizeof(task));
+    snprintf(event, sizeof(event), "%s-r%d-c%u%s%s", fromBoot ? "resume" : "enter", reason,
+             static_cast<unsigned>(deskpower::lastCrumb()), haveTask ? "-t" : "", haveTask ? task : "");
     batteryLogNow(event);
     deskpower::setCrumb(0);
   }

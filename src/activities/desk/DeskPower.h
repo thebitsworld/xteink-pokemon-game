@@ -54,6 +54,8 @@ uint32_t waitPowerButtonRelease();
 // RTC-memory markers (kept through the watchdog's system reset, lost on a power cut).
 bool batteryRunArmed();
 void setBatteryRunArmed(bool armed);
+// The task that called esp_restart() during the last battery run, once (false: none recorded).
+bool takeRestartTask(char* out, size_t size);
 uint32_t batteryResets();  // resets the current battery run came back from
 void countBatteryReset();
 void requestOpenDeskAfterRestart();
