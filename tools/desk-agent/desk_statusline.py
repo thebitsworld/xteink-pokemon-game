@@ -30,10 +30,22 @@ def main() -> int:
         data = {}
     limits = data.get("rate_limits") if isinstance(data, dict) else None
     if isinstance(limits, dict) and limits:
+        # Merge per window: a status line call that carries only one window (another session,
+        # or one without a five-hour window yet) must not drop the other one, which showed the
+        # session limit as 0 % while it was 25 % (2026-11-25). The agent zeroes a window whose
+        # reset time has passed.
+        merged = {}
+        try:
+            saved = json.loads(LIMITS_PATH.read_text(encoding="utf-8")).get("rate_limits")
+            if isinstance(saved, dict):
+                merged.update(saved)
+        except (OSError, ValueError, AttributeError):
+            pass
+        merged.update({k: v for k, v in limits.items() if isinstance(v, dict)})
         try:
             LIMITS_PATH.parent.mkdir(parents=True, exist_ok=True)
             tmp = LIMITS_PATH.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"saved": int(time.time()), "rate_limits": limits}), encoding="utf-8")
+            tmp.write_text(json.dumps({"saved": int(time.time()), "rate_limits": merged}), encoding="utf-8")
             os.replace(tmp, LIMITS_PATH)
         except OSError:
             pass
