@@ -44,6 +44,7 @@ RTC_NOINIT_ATTR uint32_t tickMagic;
 RTC_NOINIT_ATTR TickState tickState;
 
 wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
+bool rwdtArmed = false;
 
 uint32_t msToSlowTicks(const uint32_t ms) {
   // esp_clk_slowclk_cal_get(): microseconds per slow clock cycle, Q13.19.
@@ -158,6 +159,7 @@ void watchdogArm(const uint32_t timeoutMs) {
   wdt_hal_config_stage(&rwdt, WDT_STAGE1, msToSlowTicks(10000), WDT_STAGE_ACTION_RESET_RTC);
   wdt_hal_enable(&rwdt);
   wdt_hal_write_protect_enable(&rwdt);
+  rwdtArmed = true;
 #else
   (void)timeoutMs;
 #endif
@@ -165,6 +167,7 @@ void watchdogArm(const uint32_t timeoutMs) {
 
 void watchdogFeed() {
 #ifndef SIMULATOR
+  if (!rwdtArmed) return;  // also called from the weather retries, armed or not
   wdt_hal_write_protect_disable(&rwdt);
   wdt_hal_feed(&rwdt);
   wdt_hal_write_protect_enable(&rwdt);
@@ -176,6 +179,7 @@ void watchdogDisarm() {
   wdt_hal_write_protect_disable(&rwdt);
   wdt_hal_disable(&rwdt);
   wdt_hal_write_protect_enable(&rwdt);
+  rwdtArmed = false;
 #endif
 }
 

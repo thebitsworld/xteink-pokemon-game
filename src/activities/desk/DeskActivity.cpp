@@ -536,9 +536,9 @@ bool DeskActivity::applyNetJob() {
     weather = netWeather;
     weatherResult = netWeatherResult;
     weatherFetching = false;
-    // Failed fetches outside the battery loop go to the same log ("net-weather-...").
-    if (!deskweather::cancelled() && (weatherResult == deskweather::Result::FetchFailed ||
-                                      weatherResult == deskweather::Result::PlaceFailed)) {
+    // Failed updates outside the battery loop go to the same log ("net-weather-..."), whatever
+    // failed (Wi-Fi, the place, the request, the reply), so a slow one can be traced.
+    if (!deskweather::cancelled() && weatherResult != deskweather::Result::Ok) {
       const deskweather::FetchInfo info = deskweather::lastFetchInfo();
       char event[48];
       snprintf(event, sizeof(event), "net-weather-%d-s%d-h%d-m%d", static_cast<int>(weatherResult), info.status,

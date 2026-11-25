@@ -16,6 +16,7 @@
 #include <string>
 
 #include "CrossPointSettings.h"
+#include "DeskPower.h"
 #include "WifiCredentialStore.h"
 #include "network/HttpDownloader.h"
 #include "network/WifiUtils.h"
@@ -27,6 +28,8 @@ namespace {
 constexpr char TAG[] = "DESKWX";
 constexpr uint32_t kWifiTimeoutMs = 20000;
 constexpr size_t kMaxBody = 8 * 1024;
+constexpr int kFetchAttempts = 3;       // forecast tries per update
+constexpr uint32_t kRetryGapMs = 3000;  // between them
 
 void copyText(char* dst, const size_t size, const char* src) {
   std::snprintf(dst, size, "%s", src == nullptr ? "" : src);
@@ -205,11 +208,27 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
   }
 
   if (cancelled()) return giveUp();
-  const bool fetched = fetch(desk::forecastUrl(cfg.place.lat, cfg.place.lon), body);
+  // The X3 took 3-4 tries for a forecast over plain HTTP (owner's report, 2026-11-25), and each
+  // failed try on battery waits 15 minutes: try again at once, a few seconds apart.
+  bool fetched = false;
+  desk::WeatherReport report;
+  bool parsed = false;
+  for (int attempt = 0; attempt < kFetchAttempts && !cancelled(); ++attempt) {
+    // Each try can take up to a request timeout: keep the battery loop's watchdog (60 s) fed.
+    deskpower::watchdogFeed();
+    if (attempt > 0) {
+      LOG_INF(TAG, "Forecast try %d failed, again", attempt);
+      const uint32_t t0 = millis();
+      while (millis() - t0 < kRetryGapMs && !cancelled()) delay(50);
+    }
+    fetched = fetch(desk::forecastUrl(cfg.place.lat, cfg.place.lon), body);
+    parsed = fetched && desk::parseForecast(body.data(), body.size(), nowUnix, report);
+    if (parsed) break;
+  }
   // Air quality (Settings > System > Desk): its own small request; a failure only leaves it out.
   int aqi = -1;
   int pm25 = -1;
-  if (fetched && SETTINGS.deskAirQuality && !cancelled()) {
+  if (parsed && SETTINGS.deskAirQuality && !cancelled()) {
     std::string air;
     if (fetch(desk::airQualityUrl(cfg.place.lat, cfg.place.lon), air)) {
       desk::parseAirQuality(air.data(), air.size(), aqi, pm25);
@@ -217,8 +236,7 @@ Result refresh(Config& cfg, desk::WeatherReport& out, const uint32_t nowUnix, co
   }
   if (started) wifiDown();
   if (!fetched) return Result::FetchFailed;
-  desk::WeatherReport report;
-  if (!desk::parseForecast(body.data(), body.size(), nowUnix, report)) return Result::ParseFailed;
+  if (!parsed) return Result::ParseFailed;
   report.aqi = static_cast<int16_t>(aqi);
   report.pm25 = static_cast<int16_t>(pm25);
   out = report;
