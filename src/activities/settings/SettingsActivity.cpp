@@ -2115,7 +2115,24 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
   }
   const auto rows = configureUiList(props, screen.theme(), screen.body());
   visibleRows = rows > 0 ? rows : 1;
+  // The estimate takes every row at one height, but section headers with their gaps and labels
+  // wrapped to two lines are not: at the end of Settings > System > Desk one row too many was
+  // counted, so its last row was never drawn (X3, owner's report 2026-11-25). Count the rows that
+  // really fit above the bottom, and keep the selected row among the drawn ones.
+  const fui::ListProps measured = screen.resolveListProps(props);
+  const fui::Rect listRect = screen.body();
+  const auto fits = [&](const int first, const int last) {
+    fui::ListProps window = measured;
+    window.items = items.data() + first;
+    window.count = static_cast<uint16_t>(last - first + 1);
+    return fui::listContentHeight(screen.target(), screen.frame().assets(), listRect, window) <= listRect.height;
+  };
+  int fitAtEnd = 0;
+  while (fitAtEnd < settingsCount && fits(settingsCount - fitAtEnd - 1, settingsCount - 1)) ++fitAtEnd;
+  if (fitAtEnd > 0 && fitAtEnd < visibleRows) visibleRows = fitAtEnd;
   topIndex = scrollListBy(topIndex, 0, visibleRows, settingsCount);  // clamp to range
+  const int selectedRow = selectedSettingIndex - 1;
+  while (selectedRow >= 0 && topIndex < selectedRow && !fits(topIndex, selectedRow)) ++topIndex;
   props.topIndex = static_cast<uint16_t>(topIndex);
   screen.list(props);
 }
