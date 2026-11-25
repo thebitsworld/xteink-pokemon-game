@@ -208,6 +208,10 @@ class PanelDriver {
   // --- optional, controller-specific hooks (no-op by default) ---
   virtual void requestResync(uint8_t settlePasses) { (void)settlePasses; }
   virtual void skipInitialResync() {}
+  // The host has just loaded the panel's exact on-screen frame as the previous-frame baseline
+  // (FreeInkDisplay::seedPreviousFrame): the first paint after boot/wake may then stay a
+  // differential FAST instead of the forced clean one.
+  virtual void baselineRestored() {}
   // Content-polarity hint: true while the facade is rendering inverted (dark
   // background) frames. Differential drivers idle unchanged pixels, so on a
   // dark background the residue of every white->black transition parks in the

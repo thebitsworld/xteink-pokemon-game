@@ -843,6 +843,7 @@ void FreeInkDisplay::seedPreviousFrame() {
   if (_inverted) invertBytes(onScreen, bufferSize);
   _driver->seedPreviousFrame(_bus, onScreen);
   if (_inverted) invertBytes(onScreen, bufferSize);
+  _driver->baselineRestored();
   _redRamSynced = true;
 }
 

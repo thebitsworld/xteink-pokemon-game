@@ -106,6 +106,9 @@ class Ssd1677Driver : public PanelDriver {
   void beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback, bool turnOff) override;
 
   void seedPreviousFrame(EpdBus& bus, const uint8_t* buf) override;
+  // RED holds the panel's real picture again: no forced clean first paint (Desk's deep-sleep
+  // ticks on the X4 Pro flashed black once a minute without this, 2026-11-25).
+  void baselineRestored() override { _needsInitialFull = false; }
 
   GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const override {
     if (mode == GrayscaleMode::Absolute && _cfg.absoluteGrayscale)
