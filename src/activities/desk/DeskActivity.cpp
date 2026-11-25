@@ -1177,8 +1177,11 @@ void DeskActivity::drawStatusBar(const char* title, const char* middle) const {
     const int sideW = std::max(titleW, rightW) + kMargin + 12;
     const int maxW = w - 2 * sideW;
     if (maxW > 0) {
-      const std::string fit = renderer.truncatedText(UI_10_FONT_ID, middle, maxW);
-      renderer.drawCenteredText(UI_10_FONT_ID, 14, fit.c_str());
+      // The small font first, then "…".
+      const int font = renderer.getTextWidth(UI_10_FONT_ID, middle) <= maxW ? UI_10_FONT_ID : SMALL_FONT_ID;
+      const std::string fit = renderer.truncatedText(font, middle, maxW);
+      renderer.drawCenteredText(font, 14 + (renderer.getLineHeight(UI_10_FONT_ID) - renderer.getLineHeight(font)) / 2,
+                                fit.c_str());
     }
   }
   renderer.fillRect(0, 44, w, 2, true);
@@ -1186,14 +1189,21 @@ void DeskActivity::drawStatusBar(const char* title, const char* middle) const {
 
 void DeskActivity::drawCentered(const int font, const int y, const char* text, const bool black,
                                 const EpdFontFamily::Style style) const {
-  // Kept inside the margins: the X4 Pro's wider font ran some lines past the screen edges.
+  // Kept inside the margins: on the X4 Pro (480 pixels across) some lines ran past the screen
+  // edges. A line that does not fit goes one font size down (12 -> 10 -> small), centred on the
+  // same row, and is cut with "…" only when the small font is still too wide.
   const int maxW = renderer.getScreenWidth() - 2 * kMargin;
-  if (renderer.getTextWidth(font, text, style) <= maxW) {
-    renderer.drawCenteredText(font, y, text, black, style);
+  int use = font;
+  while (renderer.getTextWidth(use, text, style) > maxW && (use == UI_12_FONT_ID || use == UI_10_FONT_ID)) {
+    use = use == UI_12_FONT_ID ? UI_10_FONT_ID : SMALL_FONT_ID;
+  }
+  const int at = y + (renderer.getLineHeight(font) - renderer.getLineHeight(use)) / 2;
+  if (renderer.getTextWidth(use, text, style) <= maxW) {
+    renderer.drawCenteredText(use, at, text, black, style);
     return;
   }
-  const std::string fit = renderer.truncatedText(font, text, maxW, style);
-  renderer.drawCenteredText(font, y, fit.c_str(), black, style);
+  const std::string fit = renderer.truncatedText(use, text, maxW, style);
+  renderer.drawCenteredText(use, at, fit.c_str(), black, style);
 }
 
 int DeskActivity::drawCenteredWrapped(const int font, const int y, const char* text, const bool black,
@@ -1358,11 +1368,11 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     snprintf(hint, sizeof(hint), "%s%s%s", tr(STR_DESK_STALE), weatherAttempted ? " · " : "",
              weatherAttempted ? deskweather::resultText(weatherResult) : "");
   }
-  // The rain hint and the air quality share the line. When both do not fit (the X4 Pro's wider
-  // font: "No rain in the next 12 h" was cut, owner's report 2026-11-25), the air quality drops
-  // its level word first ("AQI 60"), and only then is the hint cut.
+  // The rain hint and the air quality share the line. When both do not fit (the X4 Pro has 480
+  // pixels across to the X3's 528: "No rain in the next 12 h" was cut, owner's report
+  // 2026-11-25), the line goes to the small font; only if that is still too wide does the air
+  // quality drop its level word ("AQI 60"), and then the hint is cut.
   const int lineW = cardW - 2 * pad;
-  const int hintW = renderer.getTextWidth(UI_10_FONT_ID, hint, EpdFontFamily::BOLD);
   const int level = desk::aqiLevel(weather.aqi);
   const bool showAir = SETTINGS.deskAirQuality && fresh && level >= 0;
   char air[48] = "";
@@ -1370,24 +1380,32 @@ void DeskActivity::drawWeatherCard(const int top, const int height, const uint32
     static const StrId kLevels[6] = {StrId::STR_DESK_AQI_0, StrId::STR_DESK_AQI_1, StrId::STR_DESK_AQI_2,
                                      StrId::STR_DESK_AQI_3, StrId::STR_DESK_AQI_4, StrId::STR_DESK_AQI_5};
     snprintf(air, sizeof(air), "AQI %d · %s", weather.aqi, I18N.get(kLevels[level]));
-    if (hintW + renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD) + 20 > lineW) {
-      snprintf(air, sizeof(air), "AQI %d", weather.aqi);
-    }
   }
-  const int hintMax = showAir ? lineW - renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD) - 20 : lineW;
+  auto lineFits = [&](const int font) {
+    const int airW = showAir ? renderer.getTextWidth(font, air, EpdFontFamily::BOLD) + 20 : 0;
+    return renderer.getTextWidth(font, hint, EpdFontFamily::BOLD) + airW <= lineW;
+  };
+  int font = UI_10_FONT_ID;
+  if (!lineFits(font)) {
+    font = SMALL_FONT_ID;
+    if (showAir && !lineFits(font)) snprintf(air, sizeof(air), "AQI %d", weather.aqi);
+  }
+  // Keep a smaller font's line centred on the same row.
+  const int textY = y + (renderer.getLineHeight(UI_10_FONT_ID) - renderer.getLineHeight(font)) / 2;
+  const int hintMax = showAir ? lineW - renderer.getTextWidth(font, air, EpdFontFamily::BOLD) - 20 : lineW;
   if (hintMax > 0) {
-    const std::string hintFit = renderer.truncatedText(UI_10_FONT_ID, hint, hintMax, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, left + pad, y, hintFit.c_str(), true, EpdFontFamily::BOLD);
+    const std::string hintFit = renderer.truncatedText(font, hint, hintMax, EpdFontFamily::BOLD);
+    renderer.drawText(font, left + pad, textY, hintFit.c_str(), true, EpdFontFamily::BOLD);
   }
   if (showAir) {
-    const int airW = renderer.getTextWidth(UI_10_FONT_ID, air, EpdFontFamily::BOLD);
+    const int airW = renderer.getTextWidth(font, air, EpdFontFamily::BOLD);
     const int airX = left + cardW - pad - airW;
     if (level >= 2) {
       // Unhealthy for some or worse: white on black so it is seen from across the room.
       renderer.fillRoundedRect(airX - 8, y - 2, airW + 16, 30, 6, Color::Black);
-      renderer.drawText(UI_10_FONT_ID, airX, y, air, false, EpdFontFamily::BOLD);
+      renderer.drawText(font, airX, textY, air, false, EpdFontFamily::BOLD);
     } else {
-      renderer.drawText(UI_10_FONT_ID, airX, y, air, true, EpdFontFamily::BOLD);
+      renderer.drawText(font, airX, textY, air, true, EpdFontFamily::BOLD);
     }
   }
   y += 34;
@@ -1520,18 +1538,24 @@ void DeskActivity::renderMain(const uint32_t nowUnix) {
       }
       const int valueW = renderer.getTextWidth(UI_10_FONT_ID, buf, EpdFontFamily::BOLD);
       // The label gets what the value leaves: "Claude 5h" ran into "26%" on the X4 Pro, whose
-      // font is wider (owner's report, 2026-11-25). It drops to "Claude", then is cut with "…".
+      // screen is 480 pixels across (owner's report, 2026-11-25). It goes to the small font
+      // first, then drops to "Claude", then is cut with "…".
       const int labelMax = colW - 14 - valueW - 8;
       const char* label = items[i].label;
       std::string fit;
-      if (renderer.getTextWidth(UI_10_FONT_ID, label) > labelMax) {
-        if (i == 2 && pc.claude.known) label = "Claude";
-        if (renderer.getTextWidth(UI_10_FONT_ID, label) > labelMax) {
-          fit = renderer.truncatedText(UI_10_FONT_ID, label, labelMax);
-          label = fit.c_str();
+      int labelFont = UI_10_FONT_ID;
+      if (renderer.getTextWidth(labelFont, label) > labelMax) {
+        labelFont = SMALL_FONT_ID;
+        if (renderer.getTextWidth(labelFont, label) > labelMax) {
+          if (i == 2 && pc.claude.known) label = "Claude";
+          if (renderer.getTextWidth(labelFont, label) > labelMax) {
+            fit = renderer.truncatedText(labelFont, label, labelMax);
+            label = fit.c_str();
+          }
         }
       }
-      renderer.drawText(UI_10_FONT_ID, x, y, label);
+      renderer.drawText(labelFont, x, y + (renderer.getLineHeight(UI_10_FONT_ID) - renderer.getLineHeight(labelFont)) / 2,
+                        label);
       renderer.drawText(UI_10_FONT_ID, x + colW - 14 - valueW, y, buf, true, EpdFontFamily::BOLD);
       drawBar(x, y + 28, colW - 14, 12, items[i].known ? items[i].pct : 0);
     }
