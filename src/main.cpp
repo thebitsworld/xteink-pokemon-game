@@ -1553,6 +1553,12 @@ void setup() {
       restoreLightOn = false;
     }
   }
+#if CROSSINK_DESK
+  // Desk's battery run keeps the light off (DeskActivity::runBatteryLoop); a boot inside it (an
+  // X4 Pro deep-sleep tick, a watchdog reset) must not light it until the tick sleeps again,
+  // which blinked the light once a minute (owner's report 2026-11-25).
+  if (deskpower::batteryRunArmed()) restoreLightOn = false;
+#endif
   LOG_DBG("LIGHT", "Frontlight boot state: %s (silent=%d)", restoreLightOn ? "on" : "off", isSilentReboot ? 1 : 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
 
