@@ -57,6 +57,9 @@ bool batteryRunArmed();
 void setBatteryRunArmed(bool armed);
 // The task that called esp_restart() during the last battery run, once (false: none recorded).
 bool takeRestartTask(char* out, size_t size);
+// Light sleeps since the last call: returned OK, rejected, the last rejection's error, and the
+// milliseconds the OK ones lasted.
+void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& sleptMs);
 uint32_t batteryResets();  // resets the current battery run came back from
 void countBatteryReset();
 void requestOpenDeskAfterRestart();

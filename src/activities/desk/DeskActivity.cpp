@@ -877,7 +877,19 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
   for (;;) {
     deskpower::watchdogFeed();
     if (deskpower::externalPower()) leaveBatteryLoop();  // charging: the full Desk again
-    batteryLogNow("tick");
+    {
+      // How the light sleeps since the last tick went: "-s" returned OK, "-j" rejected (with
+      // "-e" the error), "-z" seconds actually asleep. The X3 drew ~22 mA between ticks instead
+      // of ~3 (2026-11-25), as if it barely slept.
+      uint32_t ok = 0, rejected = 0, slept = 0;
+      int lastErr = 0;
+      deskpower::takeSleepStats(ok, rejected, lastErr, slept);
+      char tickEvent[48];
+      snprintf(tickEvent, sizeof(tickEvent), "tick-s%lu-j%lu-e%x-z%lu", static_cast<unsigned long>(ok),
+               static_cast<unsigned long>(rejected), static_cast<unsigned>(lastErr),
+               static_cast<unsigned long>(slept / 1000));
+      batteryLogNow(tickEvent);
+    }
     deskpower::setCrumb(4);
 
     const LocalTime t = readLocalTime();

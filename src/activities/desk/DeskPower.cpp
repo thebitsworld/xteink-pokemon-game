@@ -49,6 +49,12 @@ RTC_NOINIT_ATTR TickState tickState;
 wdt_hal_context_t rwdt = RWDT_HAL_CONTEXT_DEFAULT();
 bool rwdtArmed = false;
 
+// Light sleeps since the last takeSleepStats(): entered and returned OK, rejected, last error.
+uint32_t sleepOk = 0;
+uint32_t sleepRejected = 0;
+int sleepLastErr = 0;
+uint32_t sleptMs = 0;  // time spent in the OK sleeps
+
 // Which task called esp_restart() during a battery run: the X3 restarted every 10-20 s inside
 // its light sleep with a software-restart cause (battery log, 2026-11-25), and nothing in the
 // loop restarts. Saved by a shutdown handler, logged by the next run's "resume" line.
@@ -233,14 +239,31 @@ Wake sleepFor(const uint32_t ms) {
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < kChunkMs ? left : kChunkMs) * 1000ULL);
     watchdogFeed();
     setCrumb(1);
+    const uint32_t sleepStartMs = millis();
     const esp_err_t err = esp_light_sleep_start();
     setCrumb(2);
+    if (err == ESP_OK) {
+      ++sleepOk;
+      sleptMs += millis() - sleepStartMs;  // a "sleep" that returns at once adds next to nothing
+    } else {
+      ++sleepRejected;
+      sleepLastErr = static_cast<int>(err);
+    }
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
       const bool powerDown = pin >= 0 && digitalRead(pin) == (activeHigh ? HIGH : LOW);
       result = touchWake && !powerDown ? Wake::Touch : Wake::PowerButton;
       break;
     }
-    if (err != ESP_OK) delay(50);  // rejected: a wake source was pending; try again
+    if (err != ESP_OK) {
+      // Rejected: a wake source was pending; try again. The X3's battery runs drew about 22 mA
+      // between ticks instead of 3 and short presses went unseen (2026-11-25), as if it kept
+      // landing here: a press now counts here too.
+      delay(50);
+      if (pin >= 0 && digitalRead(pin) == (activeHigh ? HIGH : LOW)) {
+        result = Wake::PowerButton;
+        break;
+      }
+    }
   }
   holdPins(false);
   esp_sleep_enable_gpio_switch(true);
@@ -300,6 +323,20 @@ void setBatteryRunArmed(const bool armed) {
   if (armed && !shutdownHookAdded) shutdownHookAdded = esp_register_shutdown_handler(&onShutdown) == ESP_OK;
 #else
   (void)armed;
+#endif
+}
+
+void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& slept) {
+#ifndef SIMULATOR
+  ok = sleepOk;
+  rejected = sleepRejected;
+  lastErr = sleepLastErr;
+  slept = sleptMs;
+  sleepOk = sleepRejected = sleptMs = 0;
+  sleepLastErr = 0;
+#else
+  ok = rejected = slept = 0;
+  lastErr = 0;
 #endif
 }
 
