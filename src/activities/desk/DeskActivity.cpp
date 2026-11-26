@@ -953,17 +953,12 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     const uint32_t drawMs = millis() - drawStartMs;
     // The X4 Pro's first frame in the saver (a half refresh, then deep sleep at once) came out
     // partly faded (owner's report 2026-11-25): let the panel settle before the deep sleep.
-    // 600 ms was not enough (the first frame still came out faded, 2026-11-26), nor was 3 s; the
-    // fade cleared over the next few refreshes, so the first frame of a run gets a second clean
-    // refresh right away. Later clean refreshes keep one, with the settle time.
-    if (drewHalf && deskpower::deepSleepTicks()) {
-      if (firstFrame) {
-        forceHalfRefresh = true;
-        drawPage();
-      }
-      delay(1000);
-    }
-    firstFrame = false;
+    // Neither 600 ms nor 3 s helped: the owner's video (2026-11-26) showed the clean refresh still
+    // running when the deep sleep powered the panel down. The wait is now on the panel's BUSY line
+    // being idle for good (deepSleepFor), and its length goes to the log ("-b<ms>").
+    uint32_t busyMs = 0;
+    if (deskpower::deepSleepTicks()) busyMs = deskpower::waitPanelIdle(300, 10000);
+    (void)firstFrame;
     deskpower::setCrumb(6);
     // A run that stops after "tick" hangs drawing, after "drawn" sleeping. With how long the draw
     // took ("h": a half refresh was asked for) and the panel controller ("u": UC8279), so a tick
@@ -974,8 +969,8 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     uc8279 = BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
              BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279;
 #endif
-    snprintf(drawnEvent, sizeof(drawnEvent), "drawn-%lums%s%s", static_cast<unsigned long>(drawMs), drewHalf ? "-h" : "",
-             uc8279 ? "-u" : "");
+    snprintf(drawnEvent, sizeof(drawnEvent), "drawn-%lums%s%s-b%lu", static_cast<unsigned long>(drawMs),
+             drewHalf ? "-h" : "", uc8279 ? "-u" : "", static_cast<unsigned long>(busyMs));
     batteryLogNow(drawnEvent);
     uint32_t sleepMs = deskpower::msToNextMinute();
     if (night && t.valid) {

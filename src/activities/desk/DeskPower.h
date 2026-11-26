@@ -101,6 +101,9 @@ struct TickState {
   uint8_t weatherFailStreak;  // failed weather tries in a row (the retry wait grows)
 };
 bool loadTickState(TickState& out);
+// Waits until the panel's BUSY line has been idle for stableMs (at most maxMs); returns the
+// milliseconds waited.
+uint32_t waitPanelIdle(uint32_t stableMs, uint32_t maxMs);
 void clearTickState();
 // Saves the state, powers Wi-Fi, the card and the panel down, and deep-sleeps for ms (or until
 // the power button). Does not return.

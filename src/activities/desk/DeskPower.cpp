@@ -455,8 +455,36 @@ void clearTickState() {
 #endif
 }
 
+uint32_t waitPanelIdle(const uint32_t stableMs, const uint32_t maxMs) {
+#ifndef SIMULATOR
+  const int8_t busy = BoardConfig::ACTIVE.display.busy;
+  if (busy < 0) return 0;
+  // UC-family controllers hold BUSY low while driving (idle high); the SSD1677 holds it high.
+  const bool idleHigh = BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+  const uint32_t t0 = millis();
+  uint32_t idleSince = t0;
+  bool wasIdle = false;
+  while (millis() - t0 < maxMs) {
+    const bool idle = (digitalRead(busy) == HIGH) == idleHigh;
+    if (idle && !wasIdle) idleSince = millis();
+    wasIdle = idle;
+    if (idle && millis() - idleSince >= stableMs) break;
+    delay(5);
+  }
+  return millis() - t0;
+#else
+  (void)stableMs;
+  (void)maxMs;
+  return 0;
+#endif
+}
+
 void deepSleepFor(const TickState& state, const uint32_t ms) {
 #ifndef SIMULATOR
+  // The panel must have finished its waveform: powering it down mid-refresh left a third of the
+  // X4 Pro's screen washed out (owner's video, 2026-11-26), BUSY having gone idle for a moment
+  // between the phases of a clean refresh.
+  waitPanelIdle(300, 10000);
   tickState = state;
   tickMagic = kTickMagic;
   watchdogDisarm();  // it would keep counting through the sleep
