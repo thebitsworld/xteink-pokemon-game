@@ -67,6 +67,13 @@ uint32_t batteryWeatherSec() {
   }
 }
 constexpr uint32_t kBatteryWeatherRetrySec = 15 * 60;  // after a failed try (was: every minute)
+// Failed tries in a row stretch the wait: 15, 30, then 60 minutes. Out of Wi-Fi range overnight
+// the X3 tried every 15 min for 9 hours, 20 s at ~87 mA each time (battery log, 2026-11-25/26).
+uint32_t batteryWeatherRetrySec(const int failStreak) {
+  if (failStreak >= 3) return 60 * 60;
+  if (failStreak == 2) return 30 * 60;
+  return kBatteryWeatherRetrySec;
+}
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
 constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo / PC page on battery: back to the clock
@@ -855,6 +862,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
 
   int ticksSinceHalf = tick ? tick->ticksSinceHalf : 0;
   uint32_t lastWeatherTry = tick ? tick->lastWeatherTry : 0;  // RTC seconds of the last failed try in this run
+  int weatherFailStreak = tick ? tick->weatherFailStreak : 0;  // failed tries in a row
   if (tick) {
     shown.year = tick->year;  // the day the last tick showed, for the new-day check
     shown.month = tick->month;
@@ -907,13 +915,15 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     uint32_t now = 0;
     const bool haveNow = readUtcUnix(now);
     const bool due = !weather.valid || now < weather.fetchedAt || now - weather.fetchedAt >= batteryWeatherSec();
-    const bool backingOff = lastWeatherTry != 0 && now >= lastWeatherTry && now - lastWeatherTry < kBatteryWeatherRetrySec;
+    const bool backingOff = lastWeatherTry != 0 && now >= lastWeatherTry &&
+                            now - lastWeatherTry < batteryWeatherRetrySec(weatherFailStreak);
     const bool night = isNight(t);
     if (haveNow && due && !backingOff && !night) {
       const uint32_t startMs = millis();
       weatherResult = deskweather::refresh(config, weather, now, false);
       weatherAttempted = true;
       lastWeatherTry = weatherResult == deskweather::Result::Ok ? 0 : now;
+      weatherFailStreak = weatherResult == deskweather::Result::Ok ? 0 : std::min(weatherFailStreak + 1, 100);
       deskpower::watchdogFeed();
       // In the battery log: why a forecast went missing, and how long Wi-Fi was up.
       // A failed fetch adds its HTTP status and the heap (free / largest block, KB) as it began.
@@ -962,6 +972,7 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
       deskpower::TickState next{};
       next.ticksSinceHalf = ticksSinceHalf;
       next.lastWeatherTry = lastWeatherTry;
+      next.weatherFailStreak = static_cast<uint8_t>(weatherFailStreak);
       next.year = static_cast<uint16_t>(t.year);
       next.month = static_cast<uint8_t>(t.month);
       next.day = static_cast<uint8_t>(t.day);

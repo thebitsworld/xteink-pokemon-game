@@ -98,6 +98,7 @@ struct TickState {
   uint8_t minute;
   uint8_t shownValid;
   uint32_t shownUnix;
+  uint8_t weatherFailStreak;  // failed weather tries in a row (the retry wait grows)
 };
 bool loadTickState(TickState& out);
 void clearTickState();
