@@ -22,6 +22,7 @@ Only active reading counts — leaving a book open without turning pages does no
 
 ## More on the reader
 
+- **Desk mode:** turn a reader on your desk into a clock and dashboard: the time, the Gregorian and Vietnamese lunar calendar, the weather (Open-Meteo, no key), your PC's CPU, RAM and Claude usage limits from a small agent on the PC, a photo frame and a Pomodoro timer. On battery, the X3 and X4 Pro keep the clock running in a battery saver; the power button brings Desk back. Open it from Applications → Desk. See [Desk mode](docs/desk.md).
 - **Applications:** 52 small games and tools (Chess, Go, Xiangqi, Tien Len, Caro, Hearts, Sudoku, Logic Puzzles, a calculator, a desk clock and more, many with a How to play guide), installed from the on-device App Store over Wi-Fi or from the `xteink-pokemon-apps.zip` attached to each release. See [Applications](docs/applications.md).
 - **Game Boy (X4 Pro only):** open a `.gb` ROM you own from the game library or the file browser and play it. See [Game Boy](docs/gameboy.md).
 - **Bluetooth controllers and page turners:** pair a Bluetooth LE gamepad, keyboard or page turner in Settings → System → Bluetooth. On the X4 Pro and X4 Classic it works everywhere (menus, the Pokémon game, apps, the Game Boy); on the X3/X4, which have little memory, it turns pages while you read.
@@ -51,6 +52,10 @@ These are current X3 simulator captures using the artwork from `xteink-pokemon-s
 | Trainer Card |
 | --- |
 | ![Trainer Card with badges](docs/screenshots/trainer-card.png) |
+
+| Desk | Desk: PC and Claude |
+| --- | --- |
+| ![Desk main screen with clock, lunar date and weather](docs/screenshots/desk-main.png) | ![Desk PC page with CPU, RAM and Claude limits](docs/screenshots/desk-pc.png) |
 
 ## How to play
 
@@ -98,7 +103,8 @@ Building from source? See [Getting Started](docs/development/getting-started.md)
 ## Credits
 
 - [padge01](https://github.com/padge01/xteink-pokemon-game): the original idea for a reading-powered Pokémon companion on the Xteink X3, which this project builds on
-- [CrossInk](https://github.com/uxjulia/CrossInk): the reader firmware, reading-session tracking, dashboards, and foundation for this project
+- [CrossInk](https://github.com/uxjulia/CrossInk): the reader firmware, reading-session tracking, dashboards, and foundation for this project (this release is based on CrossInk 2.0.0)
+- [Open-Meteo](https://open-meteo.com): the weather and air-quality forecasts on Desk
 - [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader): the original firmware and upstream 1.5 improvements brought into this CrossInk build
 - [Joshua Miller's CrossPoint Reader Companion](https://github.com/JoshuaMillerCode/crosspoint-reader-companion): the reading companion concept and verified-reading behavior
 - [PokeAPI Sprites](https://github.com/PokeAPI/sprites): the source for the adapted Pokémon sprites

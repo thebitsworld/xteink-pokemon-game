@@ -12,6 +12,7 @@ A lightweight, reading-powered Pokémon companion for the Xteink X3, built on Cr
 - [Sync with Nearby Reader](./nearby-sync.md)
 - [Applications (Lua apps)](./applications.md)
 - [Game Boy (X4 Pro)](./gameboy.md)
+- [Desk mode (clock, weather, PC, battery saver)](./desk.md)
 - [Installation details](./installation.md)
 - [Project scope](./development/project-scope.md)
 - [Rights and attribution](../RIGHTS_AND_ATTRIBUTION.md)

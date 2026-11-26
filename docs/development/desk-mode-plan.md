@@ -6,8 +6,9 @@ nav_order: 30
 
 # Desk mode plan (X3 Lite)
 
-Status: **design, not started** (2026-11-20, branch `feat/x3-lite`). Screen mockups (portrait
-528x792): <https://claude.ai/artifact/BnmoCtXQh1Anxk455VjPkX> (private to the owner).
+Status: **shipped in v2.2.0** (2026-11-26) in every firmware; the battery saver runs on the X3
+(light sleep) and X4 Pro (deep sleep). User guide: [Desk mode](../desk.md). This page keeps the
+design and the probe results it was built from (planned 2026-11-20, branch `feat/x3-lite`).
 
 Desk mode turns a spare Xteink X3 into a desk clock / dashboard: clock, Gregorian + Vietnamese
 lunar calendar, weather, PC stats + Claude quota, photo frame and Pomodoro. It ships only in the
