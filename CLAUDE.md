@@ -12,8 +12,9 @@ is in git history (before 2026-10-08).
   Vietnamese built in, other languages from `.crossink/languages/*.yaml` on the SD card, installed one at a time into a
   64 KB slot in `spiffs`; hyphenation packs from `.crossink/hyphenation`. `scripts/package_languages.py` runs
   `fit_device_cache` (`generate_language_template.py`): translations that overflow the slot, Pokemon strings first, stay
-  out of the packaged file and show in English (the raw files in `lib/I18n/translations` for AR, BE, KK, RU, UK do not
-  install as they are). No download server for this fork (`CROSSINK_ASSET_BASE_URL` unset): `xteink-pokemon-languages.zip`
+  out of the packaged file and show in English (the raw files in `lib/I18n/translations` for AR, BE, BG, HE, KK, RU, UK
+  and VI do not install as they are). The bundle carries 24 hyphenation packs: the nine checked-in ones and CrossInk
+  2.0.0's SD-only ones (`assets/hyphenation-extra`, `package_hyphenation_sd.py`). No download server for this fork (`CROSSINK_ASSET_BASE_URL` unset): `xteink-pokemon-languages.zip`
   (`package_languages.py --bundle-output`, with `.sha256`) on each release holds every file; `src/LanguageBundle.*`
   unpacks it at boot from the SD root or `/.crosspoint/language-bundle.zip` by `.crossink/bundle-manifest.txt` and
   re-installs the saved language; `LanguageBundleDownloadActivity` is what every `NetworkBootTarget::DOWNLOAD_ASSETS`
@@ -26,7 +27,8 @@ is in git history (before 2026-10-08).
   verified client, and logs to `/.crosspoint/language-bundle-log.txt` (the X3 has no serial console).
   `pokemon-*` envs do not set `CROSSINK_SCALABLE_FONTS`: upstream's EPUB embedded fonts and UI fallback font are compiled
   out. Unit tests not passing: PokemonEffectArtTest (needs PIL), ui_font_errors and OpdsServerStoreTest (do not link:
-  `CrossPointSettings::defaultIndexingMethod`).
+  `CrossPointSettings::defaultIndexingMethod`), EegoFrontlightVariantRegression and EegoUidRegression (upstream code
+  under `-Werror` with this gcc: `powf`/`logf` without `<cmath>`, a format-truncation warning; we build no EEGO).
 - Fork of CrossInk (ESP32-C3/S3 firmware for Xteink X3/X4/X4 Pro e-ink readers) with a Pokémon game that
   levels from real reading time, Lua apps installed from an App Store, and a Game Boy emulator on the
   X4 Pro. `[crossink] version` 1.6.1, `[pokemon] version` 1.9.1; latest release `v1.9.1` (stable). Its
@@ -43,10 +45,15 @@ is in git history (before 2026-10-08).
   (`deskpower::batteryLoopSupported()`); elsewhere Desk leaves battery sleep to the reader.
   Settings live in Settings > System > Desk (`desk*` fields of CrossPointSettings, on the web
   settings page too); a held Select on any Desk page opens that submenu.
-  CrossInk 2.0.0-rc3 (upstream `uxjulia/CrossInk`, remote `crossink`): 110 commits past our
-  2.0.0-rc merge, a trial merge into this branch had 59 conflicts (30 translation files, the
-  settings code, main.cpp, workflows); left for the final 2.0.0 (its release branch was 14
-  commits past rc3 on 2026-11-23). Our own tags v2.0.0/v2.0.1/v2.1.0 shadow upstream's names:
+  The owner's X4 Pro runs `pokemon-x4-pro-desk-test` (`CROSSINK_DESK_BATTERY_TEST`: the battery
+  loop on the X4 Pro); with plain `pokemon-x4-pro` a power press on battery sleeps to the cover.
+- CrossInk 2.0.0 merged on branch `merge/crossink-2.0.0` (2026-11-26, from feat/x3-lite b9a8ac4c4,
+  not pushed): upstream 0837746e2 (crossink/development, same tree as tag v2.0.0; the tag commit
+  2cdd61175 is a squash on main - never merge it), freeink-sdk subtree at f7fa9b6. The merge
+  commit's message lists the decisions: section cache 160 / partial 0xA1 (values no CrossInk
+  build wrote), settings in upstream's `forEachBaseSetting()` (BaseSettingsListHold is gone),
+  Bitter stays out of `all_faces.h`, translations take both sides' keys. Upstream tags are fetched
+  under `refs/tags/crossink/*` only: our own tags v2.0.0/v2.0.1/v2.1.0 shadow upstream's names, so
   compare by commit, not by tag.
 - Dev machine (2026-11-20): Windows 11 + WSL `Ubuntu-26.04`, clone at `~/xteink-pokemon-game`,
   `~/bin/xenv <cmd>` runs a command there with PlatformIO on PATH. Native Windows builds fail
@@ -285,7 +292,8 @@ python3 scripts/run_simulator_smoke_test.py --no-build --env pokemon-x4-pro-simu
 - `~/.platformio/platforms/espressif32/platform.json`: replace the `tool-scons` package with
   `{"type": "tool", "optional": true, "owner": "platformio", "version": "~4.41101.0"}` and delete that
   folder's `__pycache__` (the pinned scons 4.8.1 mirror lacks `SCons/Tool/FortranCommon.py`, so linking
-  `firmware.elf` fails).
+  `firmware.elf` fails). Each new platform version needs it again: done for 55.03.311 (CrossInk 2.0.0) on 2026-11-26;
+  the older platform then moves to `espressif32@src-*`.
 - If `pio run` fails with `KeyError: 'cwd'`: the env's `.pio/libdeps/<env>/*.pio-link` files lack it; add
   `"cwd": "<repo path>"` to each and run again (seen 2026-11-05 on a fresh clone, cause not found).
 - **Do not build `-e x4-pro`.** It fails on `BITTER_*_FONT_ID` in `lib/ScalableFont/ScalableBuiltins.cpp` anyway, and
@@ -293,7 +301,8 @@ python3 scripts/run_simulator_smoke_test.py --no-build --env pokemon-x4-pro-simu
   `framework-arduinoespressif32-libs/esp32s3/pioarduino-build.py` and removes the `bt` includes, so every later S3
   build fails on `esp_bt.h`. Repair: copy `pioarduino-build.py.esp32s3` over it. CI builds only the `pokemon-*` envs.
 - The simulator also needs `pkg-config` and `libwolfssl-dev` (since CrossInk 2.0.0). `crossink-simulator` is unpinned:
-  upstream's pinned commit is not fetchable.
+  upstream's pinned commit is not fetchable. pio never updates the copy in `.pio/libdeps/<env>/simulator`: after an
+  upstream merge delete it so the next build fetches main (CrossInk 2.0.0 needs df519ac or later).
 - If `pokemon-x3` fails linking with "gap between .eh_frame and .flash.tdata": add
   `.rodata.__func__.0`, `.rodata.control_construct.str1.4` and `.rodata.tlsf_realloc.str1.4` to the
   `*libheap.a:tlsf.*(...)` rule in

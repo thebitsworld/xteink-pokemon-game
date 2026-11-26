@@ -11655,8 +11655,8 @@ class SimulatorSmokeTest {
 
 #if defined(CROSSINK_ENABLE_LUA_APPS)
   // The runner copies test/lua_apps/smoke into the SD sandbox, so the list
-  // is: the built-in Pokemon row, Game Boy row (Game Boy builds) and Photo Slideshow, Lua
-  // Smoke Test, then the built-in App Store and App Settings. Opens and closes
+  // is: the built-in Pokemon row, Game Boy row (Game Boy builds), Photo Slideshow and Desk
+  // (Desk builds), Lua Smoke Test, then the built-in App Store and App Settings. Opens and closes
   // the Game Boy ROM picker and the slideshow, launches the app, presses
   // Confirm inside it, exits with Back (the app calls smudge.exit()), then
   // opens App Settings. The runner checks the app's "LUA_SMOKE ..." log
@@ -11689,6 +11689,11 @@ class SimulatorSmokeTest {
     inputScript.push_back(assertActivity("Applications"));
     addTap(MappedInputManager::Button::Down);
     ++builtInsAbove;
+#if CROSSINK_DESK
+    // Desk has its own host tests; the route steps over its row.
+    addTap(MappedInputManager::Button::Down);
+    ++builtInsAbove;
+#endif
     inputScript.push_back(render("Lua Smoke Test selected", 3));
     addTap(MappedInputManager::Button::Confirm);
     inputScript.push_back(render("Lua Smoke Test app", 8));
@@ -11715,9 +11720,9 @@ class SimulatorSmokeTest {
     scriptIndex = 0;
     inputScript.push_back(assertActivity("Home"));
 
-    // Standard themes render Browse, Recent Books, File Transfer,
-    // Applications (with Lua apps), then Settings; the Pokemon band above the
-    // menu replaces the menu's Pokemon entry. Minimal and Dashboard map their
+    // Standard themes end their menu with Settings (then Photo Slideshow when it
+    // stays on Home); the entries above it vary with plugins, reading stats and
+    // saved items, so Up wraps to the end instead of counting from the top. Minimal and Dashboard map their
     // four front buttons to Menu, Browse, Settings and Read: Left is Settings.
     // The Cover Grid keeps its icons in a bar, Settings last.
 #if defined(CROSSINK_ENABLE_LUA_APPS)
@@ -11743,7 +11748,8 @@ class SimulatorSmokeTest {
         if (features::slideshowOnHome()) addTap(MappedInputManager::Button::Up);
       }
     } else {
-      for (int index = 0; index < 3 + applicationsEntries; ++index) addTap(MappedInputManager::Button::Down);
+      addTap(MappedInputManager::Button::Up);
+      if (features::slideshowOnHome()) addTap(MappedInputManager::Button::Up);
     }
     inputScript.push_back(render("Home Settings selected", 3));
     if (!homeNavigationUsesMinimalInteraction()) addTap(MappedInputManager::Button::Confirm);
