@@ -59,6 +59,18 @@ const char* InputManager::BUTTON_NAMES[] = {"Back", "Confirm", "Left", "Right", 
 namespace {
 int absInt(const int value) { return value < 0 ? -value : value; }
 
+#if FREEINK_DEVICE_ONEPAGE
+uint8_t readOnePageFrontButtons(const int8_t pin) {
+  if (pin < 0) return 0;
+  const int mv = analogReadMilliVolts(pin);
+  if (mv >= 2400 && mv <= 2800) return 1 << InputManager::BTN_BACK;
+  if (mv >= 1780 && mv <= 2140) return 1 << InputManager::BTN_LEFT;
+  if (mv >= 1140 && mv <= 1500) return 1 << InputManager::BTN_RIGHT;
+  if (mv >= 0 && mv <= 250) return 1 << InputManager::BTN_CONFIRM;
+  return 0;
+}
+#endif
+
 #if defined(TOUCH_PROBE_DEBUG)
 void touchDebugPrintf(const char* format, ...) {
   char buf[192];
@@ -188,17 +200,25 @@ void InputManager::readButtonAdc(ButtonAdcSample& group1, ButtonAdcSample& group
   group2.button = b2 >= 0 ? b2 + 4 : -1;  // map group-2 local 0/1 to BTN_UP / BTN_DOWN
 }
 
+bool InputManager::isAdcLadderPhysicallyPressed() {
+#if FREEINK_DEVICE_ONEPAGE
+  if (BoardConfig::ACTIVE.inputStyle == BoardConfig::InputStyle::OnePageAdcLadder) {
+    return readOnePageFrontButtons(BoardConfig::ACTIVE.input.adcLadderPin) != 0;
+  }
+#endif
+  ButtonAdcSample group1{}, group2{};
+  readButtonAdc(group1, group2);
+  // The Xteink ladder idles near 4095. Every button band sits below 3900.
+  constexpr int kIdleRailMin = 4000;
+  return (group1.raw >= 0 && group1.raw < kIdleRailMin) || (group2.raw >= 0 && group2.raw < kIdleRailMin);
+}
+
 uint8_t InputManager::getState() {
   uint8_t state = 0;
 
+#if FREEINK_DEVICE_ONEPAGE
   if (BoardConfig::ACTIVE.inputStyle == BoardConfig::InputStyle::OnePageAdcLadder) {
-    if (BoardConfig::ACTIVE.input.adcLadderPin >= 0) {
-      const int mv = analogReadMilliVolts(BoardConfig::ACTIVE.input.adcLadderPin);
-      if (mv >= 2400 && mv <= 2800)      state |= (1 << BTN_BACK);    // ~2592 mV
-      else if (mv >= 1780 && mv <= 2140) state |= (1 << BTN_LEFT);    // ~1956 mV
-      else if (mv >= 1140 && mv <= 1500) state |= (1 << BTN_RIGHT);   // ~1316 mV
-      else if (mv >= 0 && mv <= 250)     state |= (1 << BTN_CONFIRM); // ~0 mV (ENTER)
-    }
+    state = readOnePageFrontButtons(BoardConfig::ACTIVE.input.adcLadderPin);
     if (BoardConfig::ACTIVE.input.up >= 0 && digitalRead(BoardConfig::ACTIVE.input.up) == LOW) {
       state |= (1 << BTN_UP);
     }
@@ -215,6 +235,7 @@ uint8_t InputManager::getState() {
     if (s_buttonHook) state |= s_buttonHook();
     return state;
   }
+#endif
 
   if (BoardConfig::ACTIVE.inputStyle != BoardConfig::InputStyle::XteinkAdcLadder) {
     state = getDigitalState();
@@ -237,7 +258,7 @@ uint8_t InputManager::getState() {
     state |= (1 << (button2 + 4));
   }
 
-  // Read power button (polarity per board; X4 active-LOW, de-link active-HIGH)
+  // Read power button (polarity per board; X4 active-LOW, Silkscreen active-HIGH)
   const int powerActiveLevel = BoardConfig::ACTIVE.input.powerActiveHigh ? HIGH : LOW;
   if (digitalRead(BoardConfig::ACTIVE.input.power) == powerActiveLevel) {
     state |= (1 << BTN_POWER);
@@ -250,7 +271,7 @@ uint8_t InputManager::getState() {
 
 InputManager::ButtonHook InputManager::s_buttonHook = nullptr;
 
-#if FREEINK_DEVICE_PICCO
+#if FREEINK_DEVICE_PICCO && FREEINK_TOUCH_TMA525C
 namespace {
 uint16_t piccoReadReport(uint8_t addr, uint8_t* buf, uint16_t cap);
 bool piccoWaitInt(int8_t irq, unsigned long timeoutMs);
@@ -258,12 +279,16 @@ bool piccoWaitInt(int8_t irq, unsigned long timeoutMs);
 #endif
 
 bool InputManager::prepareForDeepSleep() {
-#if FREEINK_DEVICE_EEGO_A4
+#if FREEINK_DEVICE_EEGO_A4 && FREEINK_TOUCH_GSLX680
   if (const auto& t = BoardConfig::ACTIVE.touch; t.controller == BoardConfig::TouchController::Gslx680) {
+    waitForTouchInit();  // a charger-only boot can sleep while the controller still boots
     const uint8_t halt = 0x88;
     const bool ok = gslWrite(0xE0, &halt, 1);
     delay(5);
-    Wire.end();
+    {
+      const freeink::I2cBusLock busLock;
+      Wire.end();
+    }
     if (t.sda >= 0) pinMode(t.sda, INPUT);
     if (t.scl >= 0) pinMode(t.scl, INPUT);
     if (t.reset >= 0) {
@@ -277,7 +302,7 @@ bool InputManager::prepareForDeepSleep() {
     return ok;
   }
 #endif
-#if FREEINK_DEVICE_PICCO
+#if FREEINK_DEVICE_PICCO && FREEINK_TOUCH_TMA525C
   if (const auto& t = BoardConfig::ACTIVE.touch;
       t.controller == BoardConfig::TouchController::Tma525c && t.i2cAddress != 0) {
     // Stock FUN_4200c730: SET_POWER(SLEEP) to command register 0x0005, wait
@@ -566,14 +591,18 @@ void InputManager::updateDigitalTwoButton(const unsigned long currentTime) {
   // press this update and the release on the next. Never write the event
   // masks directly — applyStateChange() assigns them from the state diff,
   // clobbering direct writes the same tick.
-  if (freeink::papermono::pollPowerButtonClicked(currentTime)) {
+  const bool pmicClicked = freeink::papermono::pollPowerButtonClicked(currentTime);
+  if (pmicClicked) {
     auxiliaryState |= static_cast<uint8_t>(1u << BTN_POWER);
   }
+  if ((auxiliaryState & (1u << BTN_POWER)) && !isPressed(BTN_POWER)) powerButtonClick = pmicClicked;
 #endif
 
   if (physical != twoButtonPhysicalState) {
     const uint8_t releasedPhysical = twoButtonPhysicalState;
-    const bool emitShort = physical == 0 && !twoButtonLongPressActive;
+    if (physical == 3) twoButtonChordSeen = true;
+    const bool emitShort = physical == 0 && !twoButtonLongPressActive && !twoButtonChordSeen;
+    if (physical == 0) twoButtonChordSeen = false;
 
     applyStateChange(auxiliaryState, currentTime);
     if (emitShort && (releasedPhysical == 1 || releasedPhysical == 2)) {
@@ -602,7 +631,13 @@ void InputManager::updateDigitalTwoButton(const unsigned long currentTime) {
     nextState |= static_cast<uint8_t>(1u << logical);
   }
   applyStateChange(nextState, currentTime);
-  if (pressedEvents & (1u << BTN_POWER)) powerButtonPressStart = twoButtonPressStart;
+  if (physical == 3 && twoButtonLongPressActive) {
+    powerButtonPressStart = twoButtonPressStart;
+#if FREEINK_DEVICE_PAPERMONO
+    // A chord can take over a PMIC pulse without a new logical press edge.
+    powerButtonClick = false;
+#endif
+  }
 }
 
 void InputManager::update() {
@@ -689,6 +724,9 @@ unsigned long InputManager::getHeldTime() const {
 }
 
 unsigned long InputManager::getPowerButtonHeldTime() const {
+#if FREEINK_DEVICE_PAPERMONO
+  if (powerButtonClick) return 0;
+#endif
   if (isPressed(BTN_POWER)) {
     return millis() - powerButtonPressStart;
   }
@@ -723,7 +761,10 @@ bool InputManager::isPowerButtonPressed() const { return isPressed(BTN_POWER); }
 
 bool InputManager::hasTouch() const {
 #if FREEINK_CAP_TOUCH
-  return touchDataEnabled;
+  // The EEGO A4's controller boots in a background task. The board still has
+  // touch while that runs, so a screen laid out during boot must not be told
+  // otherwise; points only start arriving once the boot finishes.
+  return touchDataEnabled || __atomic_load_n(&gslInitRunning, __ATOMIC_ACQUIRE);
 #else
   return false;  // touch code not compiled in (FREEINK_CAP_TOUCH=0)
 #endif
@@ -757,7 +798,8 @@ bool InputManager::supportsMultiTouch() const {
 #if FREEINK_TOUCH_TMA525C
   if (BoardConfig::ACTIVE.touch.controller == BoardConfig::TouchController::Tma525c) return piccoMaxContacts >= 2;
 #endif
-  return BoardConfig::ACTIVE.touch.controller == BoardConfig::TouchController::Gt911;
+  const auto controller = BoardConfig::ACTIVE.touch.controller;
+  return controller == BoardConfig::TouchController::Gt911 || controller == BoardConfig::TouchController::Gslx680;
 #else
   return false;
 #endif
@@ -1506,10 +1548,11 @@ void InputManager::updateTouchFromIrq(const unsigned long now, const int irqRaw)
   // release deadline; once reads stop coming, the touch releases after a short
   // hold-over.
   (void)irqRaw;
-  if (now >= touchReadAt) {
+  if (static_cast<int32_t>(now - touchReadAt) >= 0) {
     touchReadAt = now + TOUCH_SAMPLE_DELAY_MS;
     TouchPoint point = {false, 0, 0, 0};
     if (readChsc6xPoint(point)) {
+      point.timestamp = now;  // the sample the long-press check subtracts from
       touchPoint = point;
       if (!touchPressed) {
         touchPressed = true;
@@ -1533,7 +1576,7 @@ void InputManager::updateTouchFromIrq(const unsigned long now, const int irqRaw)
     }
   }
 
-  if (touchPressed && now >= touchReleaseAt) {
+  if (touchPressed && static_cast<int32_t>(now - touchReleaseAt) >= 0) {
     touchPressed = false;
     touchReleasedEvent = true;
     lastTouchHeldDurationMs = now - touchDownPoint.timestamp;
@@ -1722,7 +1765,7 @@ void InputManager::beginCst816s() {
 
 void InputManager::pollCst816s(const unsigned long now) {
   const auto& t = BoardConfig::ACTIVE.touch;
-  if (now < touchReadAt) return;
+  if (static_cast<int32_t>(now - touchReadAt) < 0) return;
   touchReadAt = now + TOUCH_SAMPLE_DELAY_MS;
   const bool active = touchPressed || touchHomeKeyDown || cstVirtualButtons;
   const bool fresh = cstInterrupt || t.irq < 0 || digitalRead(t.irq) == LOW;
@@ -1805,7 +1848,7 @@ void InputManager::pollCst816s(const unsigned long now) {
 #if FREEINK_TOUCH_FT5X06
 void InputManager::pollFt5x06(const unsigned long now) {
   const auto& t = BoardConfig::ACTIVE.touch;
-  if (now < touchReadAt) return;
+  if (static_cast<int32_t>(now - touchReadAt) < 0) return;
   touchReadAt = now + TOUCH_SAMPLE_DELAY_MS;
 
   // The controller runs in interrupt-polling mode (G_MODE=0, set in begin),
@@ -1897,6 +1940,7 @@ void InputManager::pollFt5x06(const unsigned long now) {
 
 #if FREEINK_TOUCH_GSLX680
 bool InputManager::gslWrite(const uint8_t reg, const uint8_t* data, const uint8_t len) {
+  const freeink::I2cBusLock busLock;
   const uint8_t addr = BoardConfig::ACTIVE.touch.i2cAddress;
   Wire.beginTransmission(addr);
   Wire.write(reg);
@@ -1905,6 +1949,7 @@ bool InputManager::gslWrite(const uint8_t reg, const uint8_t* data, const uint8_
 }
 
 bool InputManager::gslRead(const uint8_t reg, uint8_t* buf, const uint8_t len) {
+  const freeink::I2cBusLock busLock;
   const uint8_t addr = BoardConfig::ACTIVE.touch.i2cAddress;
   Wire.beginTransmission(addr);
   Wire.write(reg);
@@ -1947,11 +1992,45 @@ bool InputManager::gslUploadFirmware() {
 #endif
 }
 
+// The upload and the stock settle delays take ~0.85 s, which used to hold up
+// every boot and wake before anything reached the panel. The bus and its lock
+// come up here; the controller boots in a background task while setup carries
+// on, and touch reports nothing until it finishes. Every Wire user on this
+// shared bus takes freeink::I2cBusLock per transfer.
 void InputManager::beginGslx680() {
 #if FREEINK_DEVICE_EEGO_A4
   touchDataEnabled = false;
   const auto& t = BoardConfig::ACTIVE.touch;
   if (t.sda < 0 || t.scl < 0 || t.i2cAddress == 0) return;
+  freeink::enableI2cBusLock();
+  {
+    const freeink::I2cBusLock busLock;
+    Wire.begin(t.sda, t.scl, 400000);
+    Wire.setTimeOut(10);
+  }
+  gslInitRunning = true;
+  if (xTaskCreatePinnedToCore(&InputManager::gslInitTask, "gsl_init", 4096, this, 1, nullptr, 0) != pdPASS) {
+    gslInitBody();  // no task: boot it inline as before
+    gslInitRunning = false;
+  }
+#endif
+}
+
+void InputManager::gslInitTask(void* arg) {
+  auto* self = static_cast<InputManager*>(arg);
+  self->gslInitBody();
+  __atomic_store_n(&self->gslInitRunning, false, __ATOMIC_RELEASE);
+  vTaskDelete(nullptr);
+}
+
+void InputManager::waitForTouchInit() const {
+  // Bounded: the full sequence takes under a second.
+  for (int waited = 0; waited < 3000 && __atomic_load_n(&gslInitRunning, __ATOMIC_ACQUIRE); waited += 5) delay(5);
+}
+
+void InputManager::gslInitBody() {
+#if FREEINK_DEVICE_EEGO_A4
+  const auto& t = BoardConfig::ACTIVE.touch;
 
   // The GSLX680 has no reset self-timing: pulse RST low then high before I2C.
   if (t.reset >= 0) {
@@ -1963,8 +2042,6 @@ void InputManager::beginGslx680() {
     delay(50);
   }
 
-  Wire.begin(t.sda, t.scl, 400000);
-  Wire.setTimeOut(10);
 
   const uint8_t z4[4] = {0, 0, 0, 0};
   auto wr1 = [&](uint8_t reg, uint8_t v) { gslWrite(reg, &v, 1); };
@@ -2025,7 +2102,7 @@ void InputManager::beginGslx680() {
     startup();
     loaded = gslRead(0xB0, chk, 4) && chk[0] == 0x5A && chk[1] == 0x5A && chk[2] == 0x5A && chk[3] == 0x5A;
   }
-  touchDataEnabled = loaded;
+  __atomic_store_n(&touchDataEnabled, loaded, __ATOMIC_RELEASE);
   if (!loaded) LOG_ERR("INPUT", "GSLX680 firmware status check failed");
 #ifdef TOUCH_PROBE_DEBUG
   touchDebugPrintf("[touch] GSLX680 probe present=%d loaded=%d chk=%02X%02X%02X%02X\n", present, loaded, chk[0], chk[1],
@@ -2034,60 +2111,18 @@ void InputManager::beginGslx680() {
 #endif
 }
 
-// EEGO A4 stock factory touch calibration: four corner points fanned around a
-// centre point, each mapping a raw GSLX680 sample to a portrait screen pixel.
-// A sample is interpolated barycentrically inside the centre/corner/corner
-// triangle that contains it, then clamped to the 552x768 portrait screen.
-namespace {
-struct GslCalPoint {
-  int32_t rawX, rawY, screenX, screenY;
-};
-constexpr GslCalPoint GSL_CAL_CENTRE = {549, 337, 276, 306};
-constexpr GslCalPoint GSL_CAL_CORNERS[4] = {
-    {720, 94, 80, 168}, {694, 560, 472, 168}, {392, 558, 472, 444}, {374, 97, 80, 444}};
-
-int32_t roundedDiv(int64_t num, int64_t den) {
-  if (den < 0) {
-    num = -num;
-    den = -den;
-  }
-  return static_cast<int32_t>(num >= 0 ? (num + den / 2) / den : -((-num + den / 2) / den));
-}
-}  // namespace
-
+// EEGO A4 touch mapping: the digitizer is portrait (raw ~0..920 x 0..680) and
+// maps linearly onto the 552x768 portrait screen. The profile's raw range then
+// trims and rescales the result (fitted from hardware taps on known targets).
 void InputManager::gslCalibrate(const uint16_t rawX, const uint16_t rawY, int16_t& screenX, int16_t& screenY) {
-  const auto& c = GSL_CAL_CENTRE;
-  const int64_t dx = static_cast<int32_t>(rawX) - c.rawX;
-  const int64_t dy = static_cast<int32_t>(rawY) - c.rawY;
-  // The triangle whose two corners bracket the sample; the last one otherwise.
-  int a = 3;
-  int b = 0;
-  for (int i = 0; i < 4; ++i) {
-    const auto& p = GSL_CAL_CORNERS[i];
-    const auto& q = GSL_CAL_CORNERS[(i + 1) % 4];
-    const int64_t px = p.rawX - c.rawX, py = p.rawY - c.rawY;
-    const int64_t qx = q.rawX - c.rawX, qy = q.rawY - c.rawY;
-    if (px * dy - py * dx >= 0 && qy * dx - qx * dy >= 0) {
-      a = i;
-      b = (i + 1) % 4;
-      break;
-    }
-  }
-  const auto& p = GSL_CAL_CORNERS[a];
-  const auto& q = GSL_CAL_CORNERS[b];
-  const int64_t px = p.rawX - c.rawX, py = p.rawY - c.rawY;
-  const int64_t qx = q.rawX - c.rawX, qy = q.rawY - c.rawY;
-  const int64_t den = px * qy - qx * py;
-  const int64_t wp = dx * qy - qx * dy;  // weight of p, times den
-  const int64_t wq = px * dy - dx * py;  // weight of q, times den
-  const int32_t x = c.screenX + roundedDiv(wp * (p.screenX - c.screenX) + wq * (q.screenX - c.screenX), den);
-  const int32_t y = c.screenY + roundedDiv(wp * (p.screenY - c.screenY) + wq * (q.screenY - c.screenY), den);
-  screenX = static_cast<int16_t>(x < 0 ? 0 : (x > 551 ? 551 : x));
-  screenY = static_cast<int16_t>(y < 0 ? 0 : (y > 767 ? 767 : y));
+  const uint32_t limitedX = rawX > 920 ? 920 : rawX;
+  const uint32_t limitedY = rawY > 680 ? 680 : rawY;
+  screenX = static_cast<int16_t>(limitedY * 551 / 680);
+  screenY = static_cast<int16_t>((920 - limitedX) * 767 / 920);
 }
 
 void InputManager::pollGslx680(const unsigned long now) {
-  if (now < touchReadAt) return;
+  if (static_cast<int32_t>(now - touchReadAt) < 0) return;
   touchReadAt = now + TOUCH_SAMPLE_DELAY_MS;
 
   // Data register 0x80: byte 0 = finger count, then 4 bytes per finger.
@@ -2111,22 +2146,78 @@ void InputManager::pollGslx680(const unsigned long now) {
       touchReleasedEvent = true;
       lastTouchHeldDurationMs = now - touchDownPoint.timestamp;
     }
+    // Multi-touch release mirrors the GT911 contract: the authoritative
+    // zero-contact frame clears the snapshot and ends any gesture; a failed
+    // read above keeps the last complete frame instead.
+    touchSnapshot.count = 0;
+    touchSnapshot.reportedCount = 0;
+    touchSnapshot.idsStable = false;  // coordinate-only records (see below)
+    updateMultiTouchGesture(touchSnapshot, now);
     return;
   }
 
-  const uint16_t rawYWord = static_cast<uint16_t>(frame[5]) << 8 | frame[4];
-  const uint16_t rawXWord = static_cast<uint16_t>(frame[7]) << 8 | frame[6];
-
-  // Classified as the stock firmware does (the words' top nibble is the
-  // contact's track id, so only the 12-bit coordinates count):
+  // Classify every contact the way the stock firmware classifies its single
+  // contact (the words' top nibble is the contact's track id, so only the
+  // 12-bit coordinates count):
   //  - (0x3a0, 0x20) is the capacitive home key, ignored while a screen touch
   //    is in progress;
-  //  - any other sample at X >= 920 is past the glass and dropped, leaving all
-  //    touch and key state alone (clamped, it would land on the top edge);
+  //  - any other sample at X >= 920 is past the glass and dropped;
+  //  - an all-zero record is an absent contact: the fixed 24-byte read pads a
+  //    controller reporting fewer contacts;
   //  - an on-glass touch cancels a pending key press without firing it.
-  const uint16_t sampleX = rawXWord & 0x0fff;
-  if (sampleX == 0x03a0 && (rawYWord & 0x0fff) == 0x0020) {
-    if (touchPressed) return;
+  const auto& t = BoardConfig::ACTIVE.touch;
+  bool anyKey = false;
+  bool anyOnGlass = false;
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint16_t x = (static_cast<uint16_t>(frame[7 + 4 * i]) << 8 | frame[6 + 4 * i]) & 0x0fff;
+    const uint16_t y = (static_cast<uint16_t>(frame[5 + 4 * i]) << 8 | frame[4 + 4 * i]) & 0x0fff;
+    if (x == 0x03a0 && y == 0x0020) anyKey = true;
+  }
+  uint8_t stored = 0;
+  uint8_t survived = 0;  // on-glass contacts past the storage cap still count
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint16_t rawYWord = static_cast<uint16_t>(frame[5 + 4 * i]) << 8 | frame[4 + 4 * i];
+    const uint16_t rawXWord = static_cast<uint16_t>(frame[7 + 4 * i]) << 8 | frame[6 + 4 * i];
+    const uint16_t sampleX = rawXWord & 0x0fff;
+    const uint16_t sampleY = rawYWord & 0x0fff;
+    if (sampleX == 0x03a0 && sampleY == 0x0020) {
+      anyKey = true;
+      continue;
+    }
+    if (sampleX >= 920) continue;
+    if (sampleX == 0 && sampleY == 0) continue;
+    // A Home-pad report can carry a low-X phantom contact. Filter it only
+    // alongside the key sentinel: ordinary bottom-edge glass samples also
+    // have X < 64 (for example X=51 near the bottom of the screen).
+    if (anyKey && sampleX < 64) continue;
+    ++survived;
+    if (stored < MAX_TOUCH_CONTACTS) {
+      // Portrait screen pixels, then into the panel-native frame (x =
+      // portrait y, y = 551 - portrait x). The profile's raw range trims
+      // and rescales the result onto the drawn image.
+      int16_t screenX = 0;
+      int16_t screenY = 0;
+      gslCalibrate(sampleX, sampleY, screenX, screenY);
+      TouchPoint& point = touchSnapshot.points[stored].point;
+      point.valid = true;
+      point.x = mapTouchAxis(static_cast<uint16_t>(screenY), t.rawMinX, t.rawMaxX, t.rawMaxX - t.rawMinX);
+      point.y = mapTouchAxis(static_cast<uint16_t>(551 - screenX), t.rawMinY, t.rawMaxY, t.rawMaxY - t.rawMinY);
+      point.timestamp = now;
+      // Hardware-validated on the A4 LITE (2026-10-29): the record top nibble
+      // is always 0 on real glass — records are coordinate-only (no track
+      // ids). Ids are frame-local record slots; consumers must not retain
+      // them across frames (idsStable = false), mirroring GT911's
+      // coordinate-only contract.
+      touchSnapshot.points[stored].id = stored;
+      ++stored;
+    }
+    anyOnGlass = true;
+  }
+
+  if (anyOnGlass) {
+    touchHomeKeyDown = false;
+    touchHomeKeyLongFired = false;
+  } else if (anyKey && !touchPressed) {
     if (!touchHomeKeyDown) {
       touchHomeKeyEvent = true;
       touchHomeKeyDown = true;
@@ -2136,24 +2227,25 @@ void InputManager::pollGslx680(const unsigned long now) {
       touchHomeKeyLongEvent = true;
       touchHomeKeyLongFired = true;
     }
-    return;
+    return;  // key-only frame: touch and snapshot state stay as they are
+  } else {
+    return;  // only dropped contacts: keep the last complete frame
   }
-  if (sampleX >= 920) return;
-  touchHomeKeyDown = false;
-  touchHomeKeyLongFired = false;
 
-  // Stock factory calibration to portrait screen pixels, then into the
-  // panel-native frame (x = portrait y, y = 551 - portrait x). The profile's
-  // raw range can still trim the result.
-  int16_t screenX = 0;
-  int16_t screenY = 0;
-  gslCalibrate(sampleX, rawYWord & 0x0fff, screenX, screenY);
-  const auto& t = BoardConfig::ACTIVE.touch;
-  touchPoint.valid = true;
-  touchPoint.x = mapTouchAxis(static_cast<uint16_t>(screenY), t.rawMinX, t.rawMaxX, t.rawMaxX - t.rawMinX);
-  touchPoint.y = mapTouchAxis(static_cast<uint16_t>(551 - screenX), t.rawMinY, t.rawMaxY, t.rawMaxY - t.rawMinY);
-  touchPoint.timestamp = now;
+  // On-glass contacts: publish the snapshot, run the gesture state machine,
+  // and keep the single-touch API on the first contact — mirroring the GT911
+  // path, including that a multi-contact gesture must not become a
+  // primary-contact tap. reportedCount is the frame's surviving on-glass
+  // contact count (the raw controller count also carries key, past-glass and
+  // padding records), so dropped records neither block the gesture state
+  // machine nor suppress the single-touch tap; contacts past the storage cap
+  // still count, keeping truncation detectable.
+  touchSnapshot.reportedCount = survived;
+  touchSnapshot.idsStable = false;  // A4 records are coordinate-only (no track ids)
+  touchSnapshot.count = stored;
+  updateMultiTouchGesture(touchSnapshot, now);
 
+  touchPoint = touchSnapshot.points[0].point;
   if (!touchPressed) {
     touchPressed = true;
     touchPressedEvent = true;
@@ -2168,6 +2260,10 @@ void InputManager::pollGslx680(const unsigned long now) {
     if (absInt(dx) > TOUCH_TAP_SLOP_PX || absInt(dy) > TOUCH_TAP_SLOP_PX) touchMovedBeyondTapSlop = true;
     if (absInt(dx) > TOUCH_TAP_RELEASE_SLOP_PX || absInt(dy) > TOUCH_TAP_RELEASE_SLOP_PX)
       touchMovedBeyondTapReleaseSlop = true;
+  }
+  if (touchSnapshot.reportedCount > 1) {
+    touchMovedBeyondTapSlop = true;
+    touchMovedBeyondTapReleaseSlop = true;
   }
 }
 #endif  // FREEINK_TOUCH_GSLX680
@@ -2276,6 +2372,31 @@ void InputManager::beginTma525c() {
   }
   touchDataEnabled = (mode == PICCO_MODE_APP);
   if (touchDataEnabled) {
+    // Explicitly leave HID sleep mode even when the controller already runs its app.
+    // Reuse the report buffer: touch/command reports may precede the power reply.
+    static constexpr uint8_t wakeCommand[] = {0x05, 0x00, 0x00, 0x08};
+    Wire.beginTransmission(t.i2cAddress);
+    Wire.write(wakeCommand, sizeof(wakeCommand));
+    const auto wakeStatus = Wire.endTransmission();
+    bool wakeAcknowledged = false;
+    const unsigned long wakeStartedAt = millis();
+    while (wakeStatus == 0 && millis() - wakeStartedAt < 500) {
+      const unsigned long elapsed = millis() - wakeStartedAt;
+      if (elapsed >= 500 || !piccoWaitInt(t.irq, 500 - elapsed)) break;
+      const uint16_t len = piccoReadReport(t.i2cAddress, buf, sizeof(buf));
+      if (len >= 5 && buf[2] == 0xF0 && (buf[3] & 0x03) == 0 && (buf[4] & 0x0F) == 0x08) {
+        wakeAcknowledged = true;
+        break;
+      }
+      delay(1);  // A stuck-low IRQ must not spin while waiting for the reply.
+    }
+    if (wakeStatus != 0)
+      LOG_ERR("INPUT", "Picco touch power-on write failed: %u", wakeStatus);
+    else if (!wakeAcknowledged)
+      LOG_ERR("INPUT", "Picco touch power-on acknowledgment missing; continuing touch probe");
+    else
+      LOG_INF("INPUT", "Picco touch power-on acknowledged");
+
     // PIP GET_SYSINFO (as documented by Linux cyttsp5): sensing data starts at
     // byte 33; byte 50 is max_num_of_tch_per_refresh_cycle. Query the panel's
     // configuration rather than assuming the controller family's finger limit.
@@ -2861,7 +2982,7 @@ void InputManager::pollFt6336u(const unsigned long now) {
   if (irq >= 0 && digitalRead(irq) != LOW && !touchPressed) return;
 #endif
 
-  if (now < touchReadAt) return;
+  if (static_cast<int32_t>(now - touchReadAt) < 0) return;
   touchReadAt = now + TOUCH_SAMPLE_DELAY_MS;
 
   uint8_t data[16] = {};
@@ -2948,12 +3069,16 @@ void InputManager::pollFt6336u(const unsigned long now) {
       touchPressedEvent = true;
       touchDownPoint = touchPoint;
       touchMovedBeyondTapSlop = false;
+      touchMovedBeyondTapReleaseSlop = false;
     }
     touchUpPoint = touchPoint;
     const int dx = static_cast<int>(touchUpPoint.x) - static_cast<int>(touchDownPoint.x);
     const int dy = static_cast<int>(touchUpPoint.y) - static_cast<int>(touchDownPoint.y);
     if (absInt(dx) > TOUCH_TAP_SLOP_PX || absInt(dy) > TOUCH_TAP_SLOP_PX) {
       touchMovedBeyondTapSlop = true;
+    }
+    if (absInt(dx) > TOUCH_TAP_RELEASE_SLOP_PX || absInt(dy) > TOUCH_TAP_RELEASE_SLOP_PX) {
+      touchMovedBeyondTapReleaseSlop = true;
     }
     touchPressed = true;
   } else {

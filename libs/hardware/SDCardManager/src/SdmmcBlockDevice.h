@@ -3,14 +3,14 @@
 // FreeInk SDK — native ESP-IDF SDMMC block device for SdFat.
 //
 // SdFat has no ESP32 SDIO/SDMMC driver, so boards wired for 4-bit SDMMC (e.g.
-// de-link) can't use its SPI card path. This adapter implements SdFat's
+// Silkscreen) can't use its SPI card path. This adapter implements SdFat's
 // FsBlockDeviceInterface on top of the ESP-IDF `sdmmc` host + `sdmmc_cmd` sector
 // API, so a plain FsVolume mounts on it and hands back ordinary FsFile objects —
 // the public SDCardManager API (and CrossPoint's HalFile, which stores FsFile by
 // value) keeps working unchanged. Only compiled when FREEINK_SD_SDMMC is set.
 //
 // Hardware-validated in 1-bit mode on the Xteink X4 Pro (ESP32-S3, SSD1677 build);
-// also matches the de-link board's 4-bit native-SDMMC FsFile path. The X4 Pro mount
+// also matches the Silkscreen board's 4-bit native-SDMMC FsFile path. The X4 Pro mount
 // needs an active-LOW power-enable power-cycle per attempt (see SdmmcBlockDevice.cpp).
 
 #include <BoardConfig.h>
@@ -18,17 +18,22 @@
 #if FREEINK_SD_SDMMC
 
 // Needs SdFat built with -DUSE_BLOCK_DEVICE_INTERFACE=1 so FsBlockDevice resolves
-// to the generic FsBlockDeviceInterface (set in the de-link build env).
+// to the generic FsBlockDeviceInterface (set in the Silkscreen build env).
 #include <SdFat.h>  // FsBlockDeviceInterface, Sector_t
 
 namespace freeink {
 
 class SdmmcBlockDevice : public FsBlockDeviceInterface {
  public:
+  enum class BeginError : uint8_t { None, CardNotDetected, CardCommunicationFailure, Unknown };
+
   // Bring up the SDMMC host + slot from the board's pin map and initialise the
   // card. Returns false (and leaves the device unusable) on any failure.
   bool begin(const BoardConfig::SdmmcPins& pins);
+  BeginError beginError() const { return _beginError; }
   void end() override;
+  bool hadReadError() const { return _readError; }
+  void clearReadError() { _readError = false; }
 
   bool isBusy() override { return false; }
   bool readSector(Sector_t sector, uint8_t* dst) override { return readSectors(sector, dst, 1); }
@@ -47,6 +52,8 @@ class SdmmcBlockDevice : public FsBlockDeviceInterface {
   // type). Hold it opaquely and cast in the .cpp, where the esp-idf header is included.
   void* _card = nullptr;
   uint8_t* _dmaBuffer = nullptr;
+  bool _readError = false;
+  BeginError _beginError = BeginError::Unknown;
 };
 
 }  // namespace freeink
