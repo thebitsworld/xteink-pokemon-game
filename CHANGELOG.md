@@ -1,3 +1,37 @@
+## [2.2.0] - 2026-11-26
+
+Everything since 2.1.0, including the 2.2.0 betas.
+
+> **Update notes:** your Pokémon save, books and settings are kept. Desk mode is new in every firmware: open it from Applications → Desk. To see your PC's numbers on it, run the small agent in `tools/desk-agent` on the PC (see [Desk mode](https://github.com/thebitsworld/xteink-pokemon-game/blob/main/docs/desk.md)).
+>
+> **Tried on real readers for this release:** X3 and X4 Pro. The X4 and X4 Classic files are built from the same code but were not tried on those readers; keep the 2.1.0 firmware at hand if you install them.
+>
+> 🇻🇳 **Lưu ý khi cập nhật:** save Pokémon, sách và cài đặt được giữ nguyên. Chế độ Desk mới có trong mọi firmware: mở từ Applications → Desk. Muốn Desk hiện số liệu máy tính, chạy agent nhỏ trong `tools/desk-agent` trên PC (xem [Desk mode](https://github.com/thebitsworld/xteink-pokemon-game/blob/main/docs/desk.md)).
+>
+> **Đã thử trên máy thật cho bản này:** X3 và X4 Pro. File cho X4 và X4 Classic build từ cùng mã nguồn nhưng chưa thử trên các máy đó; nếu cài, hãy giữ sẵn firmware 2.1.0.
+
+### New
+
+- **Desk mode** turns a reader on your desk into a clock and dashboard (Applications → Desk, settings in Settings → System → Desk):
+  - a large clock with the Gregorian and Vietnamese lunar calendar, the lunar day and month names and the next lunar milestone, and a month calendar page with lunar dates and the day's good hours;
+  - the weather from Open-Meteo (no account or key; by place name or by IP): now, low and high, rain in the next 12 hours, air quality, and the next 12 hours as icons;
+  - a PC page fed by a small agent on your computer (`tools/desk-agent`, found on the network by itself, or typed in as an IP address): CPU, RAM, disks, network, uptime, and your Claude subscription's 5-hour and weekly limits with their reset times and when they were last reported;
+  - a photo frame (Photo Slideshow's folder, or photos sent from the PC) and a Pomodoro timer that keeps running on the other pages;
+  - on the X4 Pro, a bar of buttons to tap and swipes to turn the page.
+- **Desk battery saver** on the X3 and X4 Pro: on battery, after 30 seconds alone on the main page, the clock keeps moving every minute while the reader sleeps between minutes (light sleep on the X3, deep sleep on the X4 Pro), with the weather every 30 minutes, hour or 2 hours. Press the power button for the full Desk, hold it to power off, or plug in USB. Quiet nights slow the clock to every 30 minutes and stop the weather.
+- **Sleep opens Desk (hold: off)**: a short press of the power button, or the idle sleep, opens Desk instead of sleeping; a long press still powers off.
+- **Light on keeps Desk awake** (readers with a frontlight): with the light on, Desk stays awake on battery so the light stays on.
+- The desk agent can keep the Claude limits current by itself with `--claude-ping MINUTES` (one tiny `claude -p` turn when they are older than MINUTES).
+- Built on **CrossInk 2.0.0** (from 2.0.0-rc): faster EPUB indexing and page turns, faster reopening of books with many chapters, word long-press actions that search the other installed dictionaries, easier touch highlights, EPUB clipping and heading fixes, smaller C3 and S3 firmware, the frontlight turned off when sleep starts, and many other fixes.
+
+### Changed
+
+- Settings lists with section headers scroll to their last row (the last row of Settings → System → Desk could not be reached).
+
+### Fixed
+
+- See the 2.2.0 betas below for the fixes made while Desk was tried on the X3 and X4 Pro: weather over plain HTTP after Open-Meteo's new certificate chain, the X3's light sleep (it reset every 10 seconds once GPIO sleep switching was turned off), the X4 Pro's frozen light sleep (now deep sleep), screen flashes and washed-out areas in the battery saver, text overlapping on the X4 Pro's narrower screen, and hard-to-wake power presses.
+
 ## [2.2.0-beta.16-desktest-x4pro] - 2026-11-25
 
 > ⚠️ **DO NOT INSTALL - test build for one X4 Pro.** This file only exists to try Desk's battery saver on the X4 Pro. It may freeze the screen or drain the battery. Everyone else: stay on v2.1.0 (or v2.2.0-beta.15 to try Desk). There is no X3/X4 or X4 Classic file in this release.
