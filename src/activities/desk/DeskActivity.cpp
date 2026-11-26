@@ -818,12 +818,17 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
   // A deep-sleep tick goes on with the run's own count. A reset inside a run draws a half
   // refresh: the X3's resets can be power-on resets that wipe the panel controller's RAM too, and
   // a fast refresh over that turned almost the whole screen white (owner's report, 2026-11-26).
-  forceHalfRefresh = tick == nullptr;
   if (!fromBoot) {
     waitNetJob();  // the loop owns Wi-Fi from here on
     // Let a render already queued finish before the loop draws without the render task.
     requestUpdateAndWait();
+    // And let the panel finish it: the loop's clean refresh started on top of it, and on the X4
+    // Pro a third of the screen came out washed out (owner's video and log, 2026-11-26).
+    deskpower::waitPanelIdle(300, 10000);
   }
+  // Set after that render, which used to take the run's half refresh for itself (the loop's
+  // first frame then went out as a fast refresh right over it).
+  forceHalfRefresh = tick == nullptr;
   if (wifiKeptForUsb || WiFi.getMode() != WIFI_MODE_NULL) deskweather::wifiDown();
   wifiKeptForUsb = false;
   // The frontlight's PWM stops in light sleep, so a light left on blinked on and off with every
