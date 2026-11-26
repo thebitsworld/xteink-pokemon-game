@@ -22,6 +22,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert all((n.startswith(".crossink/languages/") and n.endswith(".yaml") and n.count("/") == 2)
                or (n.startswith(".crossink/hyphenation/") and n.endswith(".cphyph") and n.count("/") == 2)
                for n in manifest)
-    assert sum(n.endswith(".cphyph") for n in manifest) == 9
+    # The nine checked-in packs plus CrossInk 2.0.0's SD-only ones (assets/hyphenation-extra).
+    assert sum(n.endswith(".cphyph") for n in manifest) == 9 + 15
     assert ".crossink/languages/english.yaml" not in names
 print("language bundle ok")

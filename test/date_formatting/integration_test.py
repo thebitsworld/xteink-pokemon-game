@@ -16,8 +16,11 @@ with tempfile.TemporaryDirectory(prefix="crossink-dates-") as tmp:
     subprocess.run([program, "EN"], env=env, check=True)
     for source in sorted((root / "lib/I18n/translations").glob("*.yaml")):
         # These sources exceed the device's language slot; only their packaged form installs.
+        # Vietnamese (built in) passed it with the Desk strings, Hebrew and Bulgarian with CrossInk
+        # 2.0.0's (2026-11-26).
         if source.name in ("english.yaml", "arabic.yaml", "belarusian.yaml", "kazakh.yaml", "russian.yaml",
-                           "ukrainian.yaml"):
+                           "ukrainian.yaml", "hebrew.yaml", "bulgarian.yaml",
+                           "vietnamese.yaml"):
             continue
         shutil.copy2(source, sources / source.name)
         code = next(line.split('"')[1] for line in source.read_text().splitlines()

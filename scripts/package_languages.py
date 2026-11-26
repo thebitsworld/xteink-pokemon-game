@@ -8,7 +8,7 @@ import zipfile
 
 from gen_i18n import parse_yaml_file
 from generate_language_template import fit_device_cache, generate, write_artifacts
-from package_hyphenation import artifacts as hyphenation_artifacts
+from package_hyphenation_sd import release_artifacts as hyphenation_artifacts
 
 ROOT = Path(__file__).resolve().parents[1]
 
