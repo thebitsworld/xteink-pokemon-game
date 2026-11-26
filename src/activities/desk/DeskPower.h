@@ -19,8 +19,8 @@
 // build).
 namespace deskpower {
 
-// The light-sleep battery loop (pins held, RTC minute ticks, RWDT recovery) was proven on the
-// X3 only. Elsewhere Desk leaves sleeping on battery to the reader's own sleep.
+// The battery loop runs on the X3 (light-sleep ticks) and the X4 Pro (deep-sleep ticks).
+// Elsewhere (X4, X4 Classic) Desk leaves sleeping on battery to the reader's own sleep.
 bool batteryLoopSupported();
 
 // USB power: the X3 has no USB-detect pin and HalGPIO infers USB from a charging current, which

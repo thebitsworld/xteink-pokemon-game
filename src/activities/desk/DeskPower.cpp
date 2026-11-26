@@ -121,7 +121,9 @@ bool batteryLoopSupported() {
 #if defined(CROSSINK_DESK_BATTERY_TEST)
   return true;  // a test build for a reader the loop is being tried on
 #elif !defined(SIMULATOR)
-  return gpio.deviceIsX3();
+  // The X3 (light-sleep ticks) and, since v2.2.0, the X4 Pro (deep-sleep ticks, tried through
+  // the -desktest-x4pro builds). The X4 Classic has not been tried.
+  return gpio.deviceIsX3() || BoardConfig::isX4Pro();
 #else
   return false;
 #endif
