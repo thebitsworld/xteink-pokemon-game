@@ -232,14 +232,13 @@ Wake sleepFor(const uint32_t ms) {
   const bool touchWake = touchPin >= 0 && gpio_intr_disable(touchGpio) == ESP_OK;
   if (touchWake) gpio_wakeup_enable(touchGpio, touchActiveLow ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
   if (gpioWake || touchWake) esp_sleep_enable_gpio_wakeup();
-  // Diagnostic (X3, 2026-11-26): the X3 resets about every 10 s inside light sleep, at any
-  // battery level and with the 23/11 build that once slept for hours. Each reset of a run moves
-  // to the next way of sleeping, and the log says which one a run is on (-v): 0 as before,
-  // 1 no pin holds, 2 GPIO sleep switching left on, 3 two-second sleeps.
-  const int variant = sleepVariant();
-  if (variant != 2) esp_sleep_enable_gpio_switch(false);
-  if (variant != 1) holdPins(true);
-  const uint32_t chunkMs = variant == 3 ? 2000 : kChunkMs;
+  // GPIO sleep switching stays at its default (on). Turning it off was what made the X3's light
+  // sleep wake reliably in the 23/11 probes, but by 2026-11-26 it reset the chip about every
+  // 10 s inside the sleep (at any battery level, also with the 23/11 build). A diagnostic build
+  // tried four ways of sleeping on the reader: only leaving the switching on slept, 59 s a
+  // minute with no reset for 15 minutes, and woke on the power button.
+  holdPins(true);
+  const uint32_t chunkMs = kChunkMs;
   Wake result = Wake::Timer;
   const uint32_t start = millis();
   while (millis() - start + 20 < ms) {
@@ -351,14 +350,6 @@ void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& sl
   ok = rejected = slept = 0;
   lastErr = 0;
   rejectCause = -1;
-#endif
-}
-
-int sleepVariant() {
-#ifndef SIMULATOR
-  return runMagic == kRunMagic ? static_cast<int>(runResets % 4) : 0;
-#else
-  return 0;
 #endif
 }
 
