@@ -75,6 +75,7 @@ uint32_t batteryWeatherRetrySec(const int failStreak) {
   return kBatteryWeatherRetrySec;
 }
 constexpr int kBatteryHalfRefreshEvery = 180;        // battery default of "Full refresh": 3 h
+constexpr int kDeepTickHalfRefreshEvery = 15;        // X4 Pro deep-sleep ticks: 15 min
 constexpr uint32_t kBatteryWatchdogMs = 60 * 1000;   // > a 10 s sleep chunk and a weather fetch
 constexpr uint32_t kPhotoUnattendedMs = 60 * 60 * 1000;  // photo / PC page on battery: back to the clock
 constexpr uint32_t kAddressHoldMs = 800;               // hold Select on the PC page: PC address
@@ -814,11 +815,10 @@ void DeskActivity::leaveBatteryLoop(const bool touch, const uint32_t heldBeforeM
 void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickState* tick) {
   page = Page::Main;
   batteryMode = true;
-  // A deep-sleep tick goes on with the run's own count. A reset inside a light-sleep run (the X3)
-  // leaves the panel and its controller RAM as they were, so it goes on with a fast refresh too:
-  // the half refresh flashed the screen at each of the X3's restarts, several a minute
-  // (owner's report, 2026-11-25).
-  forceHalfRefresh = tick == nullptr && (!fromBoot || deskpower::deepSleepTicks());
+  // A deep-sleep tick goes on with the run's own count. A reset inside a run draws a half
+  // refresh: the X3's resets can be power-on resets that wipe the panel controller's RAM too, and
+  // a fast refresh over that turned almost the whole screen white (owner's report, 2026-11-26).
+  forceHalfRefresh = tick == nullptr;
   if (!fromBoot) {
     waitNetJob();  // the loop owns Wi-Fi from here on
     // Let a render already queued finish before the loop draws without the render task.
@@ -909,7 +909,11 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
       pomodoro.newDay();
       forceHalfRefresh = true;
     }
-    if (++ticksSinceHalf >= kBatteryHalfRefreshEvery) forceHalfRefresh = true;
+    // The X4 Pro's deep-sleep ticks redraw with a partial refresh over a restored baseline, and
+    // parts of the screen faded after a while (owner's report, 2026-11-26): a clean refresh every
+    // 15 minutes there, every 3 hours elsewhere.
+    const int halfEvery = deskpower::deepSleepTicks() ? kDeepTickHalfRefreshEvery : kBatteryHalfRefreshEvery;
+    if (++ticksSinceHalf >= halfEvery) forceHalfRefresh = true;
     if (forceHalfRefresh) ticksSinceHalf = 0;
 
     uint32_t now = 0;
