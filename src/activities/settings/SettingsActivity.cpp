@@ -109,7 +109,9 @@ void formatFrontlightScheduleTime(const uint16_t timeOfDay, char* const buf, con
            I18N.get(time.isPm ? StrId::STR_PM : StrId::STR_AM));
 }
 
-Rect settingsHeaderRect(const GfxRenderer& renderer) { return TouchHeaderBackButton::compactHeaderRect(renderer); }
+const char* settingsHeaderTitle(const bool fileBrowser) {
+  return fileBrowser ? tr(STR_FILE_BROWSER_SETTINGS) : tr(STR_SETTINGS_TITLE);
+}
 
 bool useLandscapeTouchLayout(const GfxRenderer& renderer) {
   // Layout is an app capability decision, not a live GT911 probe or SDK board
@@ -175,12 +177,8 @@ std::string formatCompactDuration(const uint32_t seconds) {
   return buf;
 }
 
-// Room for two lines: a long development version wraps.
-int systemVersionFooterHeight(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
-  return 2 * renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing + systemVersionFooterBottomInset;
-}
-
-void drawSystemVersionFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
+// Return the top of the footer so the list can reserve exactly the space drawn.
+int drawSystemVersionFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
   const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   const std::string label = AppVersion::versionLabel();
   const int maxWidth = safe.width - systemVersionFooterSideMargin * 2;
@@ -188,7 +186,7 @@ void drawSystemVersionFooter(const GfxRenderer& renderer, const ThemeMetrics& me
 
   if (renderer.getTextWidth(SMALL_FONT_ID, label.c_str()) <= maxWidth) {
     drawCenteredTextLine(renderer, safe, bottomLineY, label);
-    return;
+    return bottomLineY;
   }
 
   size_t fallbackBreak = std::string::npos;
@@ -216,6 +214,7 @@ void drawSystemVersionFooter(const GfxRenderer& renderer, const ThemeMetrics& me
   const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   drawCenteredTextLine(renderer, safe, bottomLineY - lineHeight, firstLine);
   drawCenteredTextLine(renderer, safe, bottomLineY, secondLine);
+  return bottomLineY - lineHeight;
 }
 
 std::string formatSettingValue(const SettingInfo& setting) {
@@ -337,7 +336,7 @@ void SettingsActivity::buildSettingsList(std::vector<SettingInfo>* const target)
   settingsListStale = false;
 
   if (target == &fileBrowserSettings) {
-    fileBrowserSettings = buildFileBrowserSettingsList(BaseSettingsListHold().list());
+    fileBrowserSettings = buildFileBrowserSettingsList(getBaseSettingsList());
     return;
   }
 
@@ -350,7 +349,7 @@ void SettingsActivity::buildSettingsList(std::vector<SettingInfo>* const target)
   const auto allSettings = getSettingsList(needsFonts ? &sdFontSystem.registry() : nullptr, &dictionaryRegistry);
   if (target == &displaySettings) displaySettings = buildGroupedDisplaySettingsList(allSettings);
 #ifndef SIMULATOR
-  if (BoardConfig::isX4Pro() || CROSSINK_APP_DEVICE_X4CLASSIC) {
+  if (!CrossPointSettings::fadingFixSupported()) {
     displaySettings.erase(
         std::remove_if(displaySettings.begin(), displaySettings.end(),
                        [](const SettingInfo& setting) { return setting.valuePtr == &CrossPointSettings::fadingFix; }),
@@ -417,6 +416,7 @@ void SettingsActivity::buildSettingsList(std::vector<SettingInfo>* const target)
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_TILT_NEXT_PAGE_ONLY) ? 1u : 0u) +
+                                       (hasSettingByName(allSettings, StrId::STR_TILT_SENSITIVITY) ? 1u : 0u) +
                                        (hasSettingByName(allSettings, StrId::STR_NEXT_PAGE) ? 1u : 0u);
   const size_t expectedFrontButtonCount = deviceHasFrontButtons() ? controlsFrontButtonCount : 0u;
 #else
@@ -1272,7 +1272,7 @@ void SettingsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  if (TouchHeaderBackButton::wasTapped(mappedInput, settingsHeaderRect(renderer))) {
+  if (TouchHeaderBackButton::wasTapped(mappedInput, renderer, settingsHeaderTitle(isFileBrowserView()))) {
     if (!isFileBrowserView() && activeSubmenu != SettingAction::None &&
         !(deskSettingsOnly && activeSubmenu == SettingAction::SystemDesk)) {
       closeSubmenu();
@@ -1906,10 +1906,10 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
   const bool landscapeTouch = useLandscapeTouchLayout(renderer);
 #endif
   const fui::Rect safe = screen.frame().safeRect();
-  // setContentMargin() is relative to the bezel-safe rectangle, while the
-  // compact header geometry is in absolute screen coordinates. Overlap the
-  // tab's top rule with the header's final underline pixel.
-  const int tabTop = std::max<int>(safe.y, CompactHeader::headerBottomY(renderer) - 1);
+  // Draw and lay out against the same header. The tab's top rule shares the
+  // header's final underline pixel rather than leaving a second divider above it.
+  const Rect header = TouchHeaderBackButton::compactHeaderRect(renderer);
+  const int tabTop = std::max<int>(safe.y, header.y + header.height - 1);
   setUiContentMargin(
       screen, renderer,
       fui::Insets{static_cast<int16_t>(tabTop), 0, static_cast<int16_t>(UITheme::getButtonHintsReserve(renderer)), 0});
@@ -1944,6 +1944,12 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
       }
     }
     return;
+  }
+
+  if (selectedCategoryIndex == 3) {
+    const int footerTop = drawSystemVersionFooter(renderer, metrics);
+    const int footerReserve = std::max(0, screen.body().bottom() - footerTop + metrics.verticalSpacing);
+    screen.insetContent(fui::Insets{0, 0, static_cast<int16_t>(footerReserve), 0});
   }
 
   // Category tabs. The selected pill dims to a dither when the selection is
@@ -2109,10 +2115,6 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
     props.headerText.bold = true;
   }
   configureUiListSectionHeaders(props, screen.theme());
-  // The System tab's version footer (drawSystemVersionFooter) gets its own space below the rows.
-  if (!isFileBrowserView() && selectedCategoryIndex == 3) {
-    screen.takeBottom(static_cast<int16_t>(systemVersionFooterHeight(renderer, UITheme::getInstance().getMetrics())));
-  }
   const auto rows = configureUiList(props, screen.theme(), screen.body());
   visibleRows = rows > 0 ? rows : 1;
   // The estimate takes every row at one height, but section headers with their gaps and labels
@@ -2144,10 +2146,10 @@ void SettingsActivity::render(RenderLock&&) {
 
   const auto pageWidth = renderer.getScreenWidth();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const char* title = isFileBrowserView() ? tr(STR_FILE_BROWSER_SETTINGS) : tr(STR_SETTINGS_TITLE);
+  const char* title = settingsHeaderTitle(isFileBrowserView());
 
   if (mappedInput.hasTouchHardware()) {
-    TouchHeaderBackButton::drawCompact(renderer, title, false, false);
+    TouchHeaderBackButton::drawCompact(renderer, title);
   } else {
     CompactHeader::drawTitle(renderer, title);
   }
@@ -2155,11 +2157,6 @@ void SettingsActivity::render(RenderLock&&) {
   uiReady = false;
   renderUiApp(app, uiTarget);
   uiReady = true;
-
-  // Keep build information discoverable without crowding the common header.
-  if (!isFileBrowserView() && selectedCategoryIndex == 3) {
-    drawSystemVersionFooter(renderer, metrics);
-  }
 
   const auto confirmLabel =
       (!isFileBrowserView() && selectedSettingIndex == 0)

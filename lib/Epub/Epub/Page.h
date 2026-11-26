@@ -57,7 +57,7 @@ class PageImage final : public PageElement {
   PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos, const bool inlineImage = false)
       : PageElement(xPos, yPos), imageBlock(std::move(block)), inlineImage(inlineImage) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true) override;
-  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack, bool imageGrayscale);
+  bool render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack, bool imageGrayscale);
   void renderPlaceholder(GfxRenderer& renderer, int xOffset, int yOffset, bool foregroundBlack) const;
   bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
@@ -97,6 +97,7 @@ class PageDropCap final : public PageElement {
   PageDropCap(uint8_t fontSize, uint16_t scale256, EpdFontFamily::Style style, const char* utf8, int16_t xPos,
               int16_t yPos, uint32_t fontFamily = 0);
   const char* getText() const { return text; }
+  uint8_t getFontSize() const { return fontSize; }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true) override;
   bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageDropCap; }
@@ -243,14 +244,16 @@ class Page {
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true,
               bool imageGrayscale = true) const;
-  void renderText(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true) const;
-  void renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true,
+  // Optional cancellation is checked between elements; used only by idle font scans.
+  bool renderText(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true,
+                  bool (*shouldStop)(void*) = nullptr, void* context = nullptr) const;
+  bool renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool foregroundBlack = true,
                     bool imageGrayscale = true) const;
   // When renderCachedImages is false, draw placeholders without checking or
   // reading image caches. This keeps transient queued pages free of image I/O.
-  void renderWithImagePlaceholders(GfxRenderer& renderer, int fontId, int xOffset, int yOffset,
-                                   bool foregroundBlack = true, bool renderCachedImages = true,
-                                   bool imageGrayscale = true) const;
+  void renderImagesWithPlaceholders(GfxRenderer& renderer, int fontId, int xOffset, int yOffset,
+                                    bool foregroundBlack = true, bool renderCachedImages = true,
+                                    bool imageGrayscale = true) const;
   bool forEachTextLine(PageTextLineVisitor visitor, void* context) const;
   bool serialize(Print& file) const;
   static std::unique_ptr<Page> deserialize(FsFile& file);
@@ -272,12 +275,12 @@ class Page {
     });
   }
 
-  void prepareImageCaches() const;
+  void prepareImageCaches(bool grayscale) const;
 
-  bool hasImagesNeedingDecode() const {
-    return std::any_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& element) {
+  bool hasImagesNeedingDecode(const bool grayscale) const {
+    return std::any_of(elements.begin(), elements.end(), [grayscale](const std::unique_ptr<PageElement>& element) {
       return element->getTag() == TAG_PageImage &&
-             static_cast<const PageImage&>(*element).getImageBlock().needsDecode();
+             static_cast<const PageImage&>(*element).getImageBlock().needsDecode(grayscale);
     });
   }
 

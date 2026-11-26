@@ -12,6 +12,7 @@
 #include "Epub.h"
 #include "HalStorage.h"
 #include "KOReaderDocumentId.h"
+#include "Txt.h"
 
 // Stub only the content hash and completion peek; persistence and sync tracking
 // use the production implementations below.
@@ -89,6 +90,19 @@ TEST_F(BookCacheUtilsTest, ClearsDerivedFilesWhileKeepingReadingState) {
   EXPECT_EQ(fake::directoryEntriesByPath[cachePath], 0u);
 }
 
+TEST_F(BookCacheUtilsTest, ReplacementPreservesParkedReaderCheckpointAndHistory) {
+  const auto txtCache = Txt("/a.txt", "/.crosspoint").getCachePath();
+  fake::add("/a.txt", "updated text");
+  fake::add(txtCache + "/progress.bin.bak", "old position");
+  fake::add(cachePath + "/dictionary_history.txt.bak", "prior history");
+  ASSERT_TRUE(clearBookCachePreservingUserState("/a.txt"));
+  ASSERT_TRUE(clearBookCachePreservingUserState("/a.epub"));
+  const auto& position = fake::files.at(txtCache + "/progress.bin.bak")->bytes;
+  const auto& history = fake::files.at(cachePath + "/dictionary_history.txt.bak")->bytes;
+  EXPECT_EQ(std::string(position.begin(), position.end()), "old position");
+  EXPECT_EQ(std::string(history.begin(), history.end()), "prior history");
+}
+
 TEST_F(BookCacheUtilsTest, RetryRecoversStatsAfterFailedRestore) {
   fake::failRenameToPath = cachePath + "/stats_v6.bin";
   ASSERT_FALSE(clearBookCachePreservingUserState("/a.epub"));
@@ -128,15 +142,14 @@ TEST_F(BookCacheUtilsTest, RetryRecoversSoleValidStatsBackupAfterFailedRestore) 
   EXPECT_FALSE(Storage.exists((cachePath + ".clear_preserve_stats_pending").c_str()));
 }
 
-TEST_F(BookCacheUtilsTest, CapacityKeepsAllSlotsForTheNewestEightStatsVersions) {
+TEST_F(BookCacheUtilsTest, CapacityRefusesCleanupInsteadOfDroppingDeviceHistory) {
   for (int version = 1; version <= 9; ++version)
     for (const char* suffix : {"", ".bak", ".tmp"})
       fake::add(cachePath + "/stats_v" + std::to_string(version) + ".bin" + suffix, "checkpoint");
-  ASSERT_TRUE(clearBookCachePreservingUserState("/a.epub"));
-  for (int version = 2; version <= 9; ++version)
+  EXPECT_FALSE(clearBookCachePreservingUserState("/a.epub"));
+  for (int version = 1; version <= 9; ++version)
     for (const char* suffix : {"", ".bak", ".tmp"})
       EXPECT_TRUE(Storage.exists((cachePath + "/stats_v" + std::to_string(version) + ".bin" + suffix).c_str()));
-  EXPECT_FALSE(Storage.exists((cachePath + "/stats_v1.bin.bak").c_str()));
 }
 
 TEST_F(BookCacheUtilsTest, SourceReplacementKeepsNewestStatsSlot) {
@@ -407,4 +420,16 @@ TEST_F(BookCacheUtilsTest, ExternalSameSizeReplacementUpdatesTheMappedId) {
       },
       &count));
   EXPECT_EQ(count, 1u);
+}
+
+TEST_F(BookCacheUtilsTest, CacheCleanupKeepsEveryDeviceStatsFileAndLegacyOrigin) {
+  for (const char* name : {"stats_v6_crossink-000102030405.bin", "stats_v6_crossink-000102030405.bin.bak",
+                           "stats_v6_crossink-000102030406.bin", "stats_origin.bin"}) {
+    fake::add(cachePath + "/" + name, "history");
+  }
+  ASSERT_TRUE(clearBookCachePreservingUserState("/a.epub"));
+  for (const char* name : {"stats_v6_crossink-000102030405.bin", "stats_v6_crossink-000102030405.bin.bak",
+                           "stats_v6_crossink-000102030406.bin", "stats_origin.bin"}) {
+    EXPECT_TRUE(Storage.exists((cachePath + "/" + name).c_str()));
+  }
 }

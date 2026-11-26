@@ -856,10 +856,17 @@ void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool igno
             return;
           case FileBrowserAction::ToggleBookStatsTracking: {
             bool enabled = false;
-            if (!BookActions::toggleBookStatsTracking(fullPath, enabled)) {
-              const std::string error = std::string(tr(STR_TRACK_READING_STATS)) + " " + tr(STR_FAILED_LOWER);
-              BookActions::drawToast(renderer, error.c_str());
+            {
+              RenderLock lock(*this);
+              if (!BookActions::toggleBookStatsTracking(fullPath, enabled)) {
+                const std::string error = std::string(tr(STR_TRACK_READING_STATS)) + " " + tr(STR_FAILED_LOWER);
+                BookActions::drawToast(renderer, error.c_str());
+              } else {
+                BookActions::drawToast(renderer, tr(STR_TRACK_READING_STATS),
+                                       enabled ? tr(STR_ENABLED) : tr(STR_DISABLED));
+              }
             }
+            delay(1000);
             requestUpdate();
             return;
           }
@@ -1237,7 +1244,17 @@ void FileBrowserActivity::activateSelected() {
 }
 
 void FileBrowserActivity::loop() {
-  if (TouchHeaderBackButton::wasTapped(mappedInput, renderer)) {
+  // Edge Back takes priority over the row-delete handler, which consumes horizontal swipes.
+  if (mappedInput.wasLeftEdgeGesture() || TouchHeaderBackButton::wasTapped(mappedInput, renderer)) {
+    {
+      RenderLock lock(*this);
+      // The parent reuses this app; release the row touched before the swipe.
+      fui::InputSnapshot cancel{};
+      cancel.touchReleased = true;
+      cancel.touchX = cancel.touchY = -1;
+      app.route(cancel);
+      app.clearTapFlash();
+    }
     navigateBack();
     return;
   }

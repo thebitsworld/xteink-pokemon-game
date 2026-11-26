@@ -1,6 +1,7 @@
 #include "AssetDownloadService.h"
 
 #include <Arduino.h>
+#include <FilePublication.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <LanguageCache.h>
@@ -15,7 +16,6 @@
 #include <optional>
 
 #include "AssetCompanionStore.h"
-#include "DownloadFileSwap.h"
 #include "HttpDownloader.h"
 #include "HyphenationPackStore.h"
 
@@ -41,7 +41,7 @@ struct Workspace {
   Source original;
   language_cache::Metadata metadata;
   std::optional<language_cache::Inspector> inspector;
-  const AssetCatalog::Catalog* catalog = nullptr;
+  const AssetCatalog::Metadata* catalog = nullptr;
   const AssetCatalog::Entry* entry = nullptr;
   Callbacks callbacks;
   Result validationResult = Result::Invalid;
@@ -309,8 +309,11 @@ Result scan(AssetCatalog::Kind kind, const AssetCatalog::Entry& entry, Source& s
   // Derive this from the selected logical path, including manual filenames.
   // Discovery remains read-only even when the published bytes are current.
   std::snprintf(work.candidate, sizeof(work.candidate), "%s.old", path);
-  source.recoveryPending = Storage.exists(work.candidate);
   const bool recoveryNeeded = !Storage.exists(path);
+  std::string pending;
+  source.recoveryPending =
+      recoveryNeeded || (Storage.exists(FilePublication::BACKUP) &&
+                         Storage.readFileToString("ASSET", FilePublication::JOURNAL, 4096, pending) && pending == path);
   if (recoveryNeeded) {
     path = work.candidate;
   }
@@ -437,7 +440,7 @@ Result discover(AssetCatalog::Kind kind, const AssetCatalog::Entry& entry, Sourc
   work->callbacks = callbacks;
   return scan(kind, entry, source, *work);
 }
-Result download(const AssetCatalog::Catalog& catalog, const AssetCatalog::Entry& entry, const Endpoints& endpoints,
+Result download(const AssetCatalog::Metadata& catalog, const AssetCatalog::Entry& entry, const Endpoints& endpoints,
                 bool overwriteApproved, const Callbacks& callbacks) {
   if (transferring.test_and_set()) return failure(Result::Unavailable);
   TransferGuard guard;
@@ -452,24 +455,38 @@ Result download(const AssetCatalog::Catalog& catalog, const AssetCatalog::Entry&
     return failure(Result::Unavailable);
   auto result = scan(catalog.kind, entry, work->source, *work);
   if (result != Result::Ok) return result;
-  if (!DownloadFileSwap::recover(work->source.path)) return failure(Result::Io);
+  if (!FilePublication::recover()) return failure(Result::Io);
   result = scan(catalog.kind, entry, work->source, *work);
   if (result != Result::Ok) return result;
   result = sourceCountCapacity(*work);
   if (result != Result::Ok) return result;
   if (work->source.status == Status::Different && !overwriteApproved) return Result::OverwriteRequired;
-  work->original = work->source;
   const char* directory =
       catalog.kind == AssetCatalog::Kind::Translation ? language_cache::DIRECTORY : HyphenationPackStore::DIRECTORY;
   if (!Storage.ensureDirectoryExists(directory)) return failure(Result::Io);
-  // Recipient sources/notices must be completely verified on SD before the
-  // installable source can be published. Release the discovery parser before
-  // the companion workspace is allocated; no whole archive is held in memory.
-  work->inspector.reset();
+  // Only this bounded identity snapshot (<256 bytes) must survive licenses.
+  // Release the ~3 KiB payload scratch and its parser before companion TLS.
+  const Source original = work->source;
+  static_assert(sizeof(Source) <= 256, "Asset identity snapshot exceeds stack budget");
+  work.reset();
+  LOG_DBG("ASSET", "Released %u-byte payload workspace for licenses", unsigned(sizeof(Workspace)));
   result = AssetCompanionStore::prepare(catalog, entry, endpoints, callbacks);
   if (result != Result::Ok) return failure(result);
+  // Recreate cold-operation scratch off the task stack only after companions
+  // release their workspace. Keep the original identity for publication checks.
+  work = makeUniqueNoThrow<Workspace>();
+  if (!work) return failure(Result::Memory);
+  work->callbacks = callbacks;
+  work->catalog = &catalog;
+  work->entry = &entry;
+  work->source = original;
+  work->original = original;
+  if (!AssetCatalog::immutableAssetPath(catalog, entry, work->relative, sizeof(work->relative)) ||
+      !buildUrl(endpoints, work->relative, work->url, sizeof(work->url)))
+    return failure(Result::Unavailable);
   if (callbacks.payloadStarted) callbacks.payloadStarted(callbacks.context);
   HttpDownloader::DownloadOptions options(false, false, [&] { return cancelled(callbacks); }, 1024);
+  options.httpReceiveBufferSize = 1024;
   options.stageAsPart = true;
   options.requireBackupCleanup = true;
   options.checkFreeSpace = true;
@@ -487,6 +504,8 @@ Result download(const AssetCatalog::Catalog& catalog, const AssetCatalog::Entry&
         if (callbacks.progress) callbacks.progress(callbacks.context, done, total);
       },
       nullptr, "", "", options);
+  // The downloader calls validate() through options.validationContext before publishing the file.
+  // cppcheck-suppress knownConditionTrueFalse
   if (work->validationResult != Result::Ok) return work->validationResult;
   if (downloaded == HttpDownloader::OK) return Result::Ok;
   return failure(downloaded == HttpDownloader::ABORTED      ? Result::Cancelled

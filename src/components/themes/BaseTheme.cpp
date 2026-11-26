@@ -1,10 +1,15 @@
 #include "BaseTheme.h"
 
+#if FREEINK_DEVICE_PICCO && CROSSINK_BATTERY_DIAG_LOG
+#include "util/BatteryDiagnosticLog.h"
+#endif
+
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
+#include <HalScreenCalibration.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -226,10 +231,6 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
                                        TouchRegistry::Button);
       renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
       renderer.drawRect(x, pageHeight - buttonY, buttonWidth, buttonHeight);
-    } else if (labels[i] != nullptr) {
-      // Fast refreshes retain the previous hint pixels. Clear a label that was
-      // present on the last screen before leaving this button slot inactive.
-      renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
     }
   }
 
@@ -455,8 +456,12 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   }
 }
 
-void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
-                           const bool readerContext, const bool showStatus, const bool filenameTitle) const {
+namespace {
+// Keep FreeInkUI's header props/theme scratch off the status-bar call chain.
+// On C3 this frame is ~4.5 KiB; nesting the status formatter under it can
+// overflow the 8 KiB network render task. A scope alone does not split frames.
+[[gnu::noinline]] void drawHeaderBand(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                                      const bool filenameTitle) {
   namespace fui = freeink::ui;
   const auto spec = uiScaleSpec();
   fui::GfxRendererFrame<1> ui(renderer, spec.smallFontId, spec.bodyFontId, spec.titleFontId);
@@ -476,6 +481,9 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   props.subtitleText = tokens.smallText;
   props.styles = tokens.popup;
   props.sidePadding = tokens.headerSidePadding;
+  // Extend the decoration to the panel edges without moving safe-area content.
+  props.bleed.left = static_cast<int16_t>(rect.x);
+  props.bleed.right = static_cast<int16_t>(renderer.getScreenWidth() - rect.x - rect.width);
   const bool batteryDetached = metrics.headerBatteryDetached;
   if (batteryDetached) {
     const int titleLineHeight = ui.target.lineHeight(fui::GfxRendererTarget::FONT_TITLE);
@@ -487,7 +495,12 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     props.styles.normal.borderWidth = tokens.headerUnderline;
   }
   fui::header(ui.frame, band, props);
+}
+}  // namespace
 
+void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                           const bool readerContext, const bool showStatus, const bool filenameTitle) const {
+  drawHeaderBand(renderer, rect, title, subtitle, filenameTitle);
   if (showStatus) drawDisplayStatusBar(renderer, rect.y);
 }
 
@@ -826,8 +839,8 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
     const size_t bytes = renderer.getRegionByteSize(backupX, backupY, backupW, backupH);
     if (bytes != 0) backdrop = makeUniqueNoThrow<uint8_t[]>(bytes);
     if (!backdrop || !renderer.copyRegionToBuffer(backupX, backupY, backupW, backupH, backdrop.get(), bytes)) {
-      LOG_ERR("GUI", "Unable to preserve loading popup backdrop");
-      return Rect{x, y, w, h};
+      LOG_ERR("GUI", "Unable to preserve popup backdrop");
+      return Rect{};
     }
   }
 
@@ -900,6 +913,9 @@ void BaseTheme::drawReaderStatusBar(const GfxRenderer& renderer, const ReaderSta
 
   int marginTop, marginRight, marginBottom, marginLeft;
   renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
+  const auto corners = renderer.getViewableInsets().corners(static_cast<unsigned>(renderer.getOrientation()));
+  marginLeft = std::max(marginLeft, corners[top ? 0 : 3]);
+  marginRight = std::max(marginRight, corners[top ? 1 : 2]);
   const int screenWidth = renderer.getScreenWidth();
   const int edgeY = content.previewOriginY >= 0
                         ? content.previewOriginY
@@ -1012,6 +1028,10 @@ void BaseTheme::drawReaderStatusBar(const GfxRenderer& renderer, const ReaderSta
       snprintf(percent, sizeof(percent), "%u%%", static_cast<unsigned>(batteryPercentage));
       const bool showPercent = batteryPercent && allowedWidth >= metrics.batteryWidth + batteryPercentSpacing +
                                                                      renderer.getTextWidth(fontId, percent);
+#if FREEINK_DEVICE_PICCO && CROSSINK_BATTERY_DIAG_LOG
+      if (showPercent && !content.previewClock)
+        BatteryDiagnosticLog::noteDisplayPercent(batteryPercentage, textY + renderer.getLineHeight(fontId));
+#endif
       if (top && alignRight) {
         drawBatteryRight(
             renderer, Rect{x + allowedWidth - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
@@ -1033,6 +1053,10 @@ void BaseTheme::drawReaderStatusBar(const GfxRenderer& renderer, const ReaderSta
       width = renderer.getTextWidth(fontId, value);
     }
     renderer.drawText(fontId, x + (alignRight ? allowedWidth - width : 0), textY, value, foregroundBlack);
+#if FREEINK_DEVICE_PICCO && CROSSINK_BATTERY_DIAG_LOG
+    if (item == ReaderStatusBarItem::Battery && clipped.empty() && !content.previewClock)
+      BatteryDiagnosticLog::noteDisplayPercent(batteryPercentage, textY + renderer.getLineHeight(fontId));
+#endif
   };
 
   constexpr int itemGap = 8;

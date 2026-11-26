@@ -4,6 +4,7 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <OwnedFileSwap.h>
 #include <Serialization.h>
 #include <Txt.h>
 #include <Xtc.h>
@@ -23,7 +24,7 @@ constexpr uint32_t EPUB_PERCENT_CACHE_MAGIC = 0x45505250;  // "EPRP"
 constexpr uint8_t EPUB_PERCENT_CACHE_VERSION = 1;
 constexpr char EPUB_PERCENT_CACHE_FILE[] = "/progress_percent.bin";
 constexpr uint32_t TXT_CACHE_MAGIC = 0x54585449;  // "TXTI"
-constexpr uint8_t TXT_CACHE_VERSION = 5;
+constexpr uint8_t TXT_CACHE_VERSION = 9;
 
 float clampProgressPercent(const float progress) { return std::clamp(progress, 0.0f, 100.0f); }
 
@@ -148,7 +149,8 @@ float loadXtcProgressPercent(const RecentBook& book) {
   }
 
   FsFile file;
-  if (!Storage.openFileForRead("RBPR", xtc.getCachePath() + "/progress.bin", file)) {
+  if (!OwnedFileSwap::recover(xtc.getCachePath() + "/progress.bin") ||
+      !Storage.openFileForRead("RBPR", xtc.getCachePath() + "/progress.bin", file)) {
     return -1.0f;
   }
 
@@ -171,7 +173,8 @@ float loadTxtProgressPercent(const RecentBook& book) {
   }
 
   FsFile progressFile;
-  if (!Storage.openFileForRead("RBPR", txt.getCachePath() + "/progress.bin", progressFile)) {
+  if (!OwnedFileSwap::recover(txt.getCachePath() + "/progress.bin") ||
+      !Storage.openFileForRead("RBPR", txt.getCachePath() + "/progress.bin", progressFile)) {
     return -1.0f;
   }
 
@@ -223,7 +226,8 @@ float loadTxtProgressPercent(const RecentBook& book) {
   (void)horizontalMargin;
   (void)alignment;
 
-  if (magic != TXT_CACHE_MAGIC || version != TXT_CACHE_VERSION || fileSize != txt.getFileSize() || totalPages == 0) {
+  if (magic != TXT_CACHE_MAGIC || (version < 5 || version > TXT_CACHE_VERSION) || fileSize != txt.getFileSize() ||
+      totalPages == 0) {
     return -1.0f;
   }
 

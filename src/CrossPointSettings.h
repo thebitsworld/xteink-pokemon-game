@@ -11,6 +11,7 @@
 #include <mutex>
 
 #include "ReaderFontSizeStep.h"
+#include "TiltSensitivity.h"
 #include "util/ReaderStatusBarConfig.h"
 
 class CrossPointSettings : public PersistableStore<CrossPointSettings> {
@@ -517,6 +518,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t extraParagraphSpacing = 1;
   uint8_t forceParagraphIndents = 0;
   uint8_t textAntiAliasing = 1;
+  uint8_t twoToneTextAA = 0;
+  uint8_t textDarkness = 0;
+  uint8_t ruledLines = 0;
   // Touch screen reader zones/gestures on boards with a touch controller.
   // Shortcut-only pause; keep the saved tap/swipe choices unchanged.
   uint8_t disablePageTurnGestures = 0;
@@ -526,6 +530,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t tapToHideStatusBar = 1;
   // Disables all touchscreen input while a reader is active. Reader menus temporarily override this.
   uint8_t disableReaderTouchscreen = 0;
+  enum WordHoldAction : uint8_t { WORD_HOLD_LOOKUP, WORD_HOLD_CLIP, WORD_HOLD_ASK };
+  // Only used by the per-book setting.
+  static constexpr uint8_t WORD_HOLD_USE_GLOBAL = 3;
+  uint8_t wordHoldAction = WORD_HOLD_LOOKUP;
   // Available only on multi-touch hardware; defaults on for pinch font resizing.
   uint8_t pinchFontResizeEnabled = 1;
   // Two-finger twist rotates the reader screen. Multi-touch hardware only.
@@ -684,6 +692,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t uiScale = defaultUiScale();
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
+  static bool fadingFixSupported();
   // Quick-return from footnotes when a footnote shortcut is active.
   uint8_t pwrBtnFootnoteBack = 1;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
@@ -746,6 +755,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t tiltPageTurn = TILT_OFF;
   uint8_t tiltPageTurnDirection = TILT_LEFT_RIGHT;
   uint8_t tiltNextPageOnly = 0;
+  uint8_t tiltSensitivity = TiltSensitivity::NORMAL;
   // Frontlight quick-panel state (boards with FREEINK_CAP_FRONTLIGHT, e.g. X4
   // Pro). Applied at boot, edited only from the frontlight panel; persisted as
   // category-less entries so they stay out of the Settings screen. Writes are
@@ -842,6 +852,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 #else
     return false;
 #endif
+  }
+
+  bool usesQuickResumeSleep(bool fromTimeout) const {
+    return sleepScreen == QUICK_RESUME || (fromTimeout && quickResumeSleepScreen == QUICK_RESUME_AFTER_TIMEOUT);
   }
 
   bool shouldTrackReadingStats() const { return trackReadingStats != 0; }

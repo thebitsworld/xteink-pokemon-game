@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
 #include "EpubReaderMenuModel.h"
 #include "TouchReaderPreviewModel.h"
 #include "activities/Activity.h"
@@ -28,6 +29,7 @@ class EpubReaderDrawerActivity final : public Activity {
  public:
 #ifdef SIMULATOR
   friend struct SliderOrientationSmokeTest;
+  friend struct ClippingSelectionSmokeTest;
 #endif
   using SaveSettingsCallback = void (*)(void* ctx);
   using SaveGlobalSettingsCallback = void (*)(void* ctx);
@@ -52,8 +54,22 @@ class EpubReaderDrawerActivity final : public Activity {
       ReaderDrawerState initialState = initialReaderDrawerState(CROSSINK_APP_CAP_TOUCH),
       std::unique_ptr<EpubReaderPreviewModel> ownedPreviewModel = nullptr);
 
+  using SaveBookWordHoldAction = bool (*)(void* ctx, uint8_t action);
+  // Uses the reader settings context supplied to the constructor.
+  void setBookWordHoldAction(uint8_t action, SaveBookWordHoldAction save) {
+    bookWordHoldAction = action;
+    saveBookWordHoldAction = save;
+  }
+
   // Button menu only: shown under the book title. Set before the activity starts.
   void setChapterTitle(std::string title) { chapterTitle = std::move(title); }
+#if CROSSINK_SCALABLE_FONTS
+  using PublisherBodyFontProbe = uint32_t (*)(void* context);
+  void setPublisherBodyFontProbe(PublisherBodyFontProbe probe, void* context) {
+    publisherBodyFontProbe = probe;
+    publisherBodyFontContext = context;
+  }
+#endif
 
 #ifdef SIMULATOR
   friend struct ReaderDrawerLayoutSmokeTest;
@@ -125,6 +141,15 @@ class EpubReaderDrawerActivity final : public Activity {
   const bool chapterPageCountEstimated = false;
   const uint32_t stablePageSeed = 0;
   std::string chapterTitle;
+#if CROSSINK_SCALABLE_FONTS
+  uint32_t publisherBodyFontFamily = 0;
+  PublisherBodyFontProbe publisherBodyFontProbe = nullptr;
+  void* publisherBodyFontContext = nullptr;
+  char publisherBodyFontName[64] = {};
+  bool publisherBodyFontNameResolved = false;
+  void resolvePublisherBodyFontName();
+#endif
+  bool publisherBodyFontActive() const;
   // Touch uses the Percent keypad directly. Button devices start on the slider
   // and can open this keypad by holding Confirm, as in the old selector.
   char entryText[8] = {0};
@@ -184,6 +209,8 @@ class EpubReaderDrawerActivity final : public Activity {
 
   SaveSettingsCallback saveReaderSettingsCallback = nullptr;
   void* saveReaderSettingsContext = nullptr;
+  SaveBookWordHoldAction saveBookWordHoldAction = nullptr;
+  uint8_t bookWordHoldAction = CrossPointSettings::WORD_HOLD_USE_GLOBAL;
   SaveGlobalSettingsCallback saveGlobalSettingsCallback = nullptr;
   void* saveGlobalSettingsContext = nullptr;
   GlobalSettingsEditCallback beginGlobalSettingsEditCallback = nullptr;
@@ -216,6 +243,7 @@ class EpubReaderDrawerActivity final : public Activity {
   void buildDrawer(UiApp::ScreenType& screen);
   void drawButtonBookHeader();
   bool showsSamplePreview() const;
+  bool showsSamplePreviewAaNote(const ReaderSettingsDraft& settings) const;
   bool samplePreviewBesideControls() const;
   void renderPreviewUnavailable();
   void renderSamplePreviewText(const ReaderSettingsDraft& settings, int fontId);

@@ -1,4 +1,5 @@
 #pragma once
+#include <Epub/RuledLineLayout.h>
 #include <Txt.h>
 
 #include <optional>
@@ -44,13 +45,19 @@ class TxtReaderActivity final : public Activity {
 
   // Streaming text reader - stores file offsets for each page
   std::vector<size_t> pageOffsets;  // File offset for start of each page
-  std::vector<std::string> currentPageLines;
+  struct PageLine {
+    std::string text;
+    RuledLineLayout row;
+  };
+  std::vector<PageLine> currentPageLines;
   int linesPerPage = 0;
   int viewportWidth = 0;
   bool initialized = false;
 
   // Cached settings for cache validation (different fonts/margins require re-indexing)
   int8_t cachedCharacterSpacing = 0;
+  int cachedRuledViewport = -1;
+  int cachedRowHeight = 0;
   int cachedFontId = 0;
   uint8_t cachedVerticalMargin = 0;
   uint8_t cachedHorizontalMargin = 0;
@@ -71,8 +78,11 @@ class TxtReaderActivity final : public Activity {
   void requestPageTurn(bool previous, bool next);
 
   void initializeReader();
-  bool loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset,
-                        uint8_t* scratch = nullptr);
+  static size_t parseAndWrapLines(const uint8_t* buffer, size_t chunkSize, size_t fileOffset, size_t fileSize,
+                                  int linesPerPage, const GfxRenderer& renderer, int fontId, int vw,
+                                  std::vector<PageLine>* outLines, int8_t characterSpacing, int ruledViewportHeight,
+                                  int requestedHeight);
+  bool loadPageAtOffset(size_t offset, std::vector<PageLine>* outLines, size_t& nextOffset, uint8_t* scratch = nullptr);
   void buildPageIndex();
   bool loadPageIndexCache();
   void savePageIndexCache() const;
@@ -134,11 +144,7 @@ class TxtReaderActivity final : public Activity {
   bool isBookReaderActivity() const override { return true; }
   bool usesMenuButtonOrientation() const override { return quickActionsPopup.isActive(); }
   bool usesFullScreenReaderVerticalSwipes() const override {
-#if (defined(FREEINK_DEVICE_STICKY) && FREEINK_DEVICE_STICKY) || (defined(FREEINK_DEVICE_PICCO) && FREEINK_DEVICE_PICCO)
-    return true;
-#else
-    return false;
-#endif
+    return mappedInput.hasTouchHardware() && !mappedInput.hasHomeKey();
   }
   bool canSnapshotForSleepOverlay() const override { return true; }
   bool allowPowerAsConfirmInReaderMode() const override { return quickActionsPopup.isActive(); }

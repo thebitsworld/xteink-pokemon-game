@@ -23,10 +23,14 @@ struct PreservedCacheFile {
 };
 
 constexpr PreservedCacheFile EPUB_USER_STATE_FILES[] = {
+    {"progress-path.bin", "upload_preserve_progress-path.bin"},
+    {"progress-path.bin.bak", "upload_preserve_progress-path.bin.bak"},
+    {"progress-path.bin.tmp", "upload_preserve_progress-path.bin.tmp"},
     {"progress.bin", "upload_preserve_progress.bin"},
     {"progress.bin.bak", "upload_preserve_progress.bin.bak"},
     {"reader_settings.bin", "upload_preserve_reader_settings.bin"},
     {"dictionary_history.txt", "upload_preserve_dictionary_history.txt"},
+    {"dictionary_history.txt.bak", "upload_preserve_dictionary_history.txt.bak"},
     {"reading_stats_off", "upload_preserve_reading_stats_off"},
     {"sync.bin", "upload_preserve_sync.bin"},
     {"sync.bin.bak", "upload_preserve_sync.bin.bak"},
@@ -34,13 +38,17 @@ constexpr PreservedCacheFile EPUB_USER_STATE_FILES[] = {
 };
 
 constexpr PreservedCacheFile PAGE_PROGRESS_FILES[] = {
-    {"progress.bin", "upload_preserve_progress.bin"}, {"reading_stats_off", "upload_preserve_reading_stats_off"},
-    {"sync.bin", "upload_preserve_sync.bin"},         {"sync.bin.bak", "upload_preserve_sync.bin.bak"},
-    {"sync.bin.tmp", "upload_preserve_sync.bin.tmp"},
+    {"progress.bin.bak", "upload_preserve_progress.bin.bak"},   {"progress.bin", "upload_preserve_progress.bin"},
+    {"reading_stats_off", "upload_preserve_reading_stats_off"}, {"sync.bin", "upload_preserve_sync.bin"},
+    {"sync.bin.bak", "upload_preserve_sync.bin.bak"},           {"sync.bin.tmp", "upload_preserve_sync.bin.tmp"},
 };
 
 constexpr PreservedCacheFile CACHE_CLEAR_USER_STATE_FILES[] = {
+    {"progress-path.bin", "clear_preserve_progress-path.bin"},
+    {"progress-path.bin.bak", "clear_preserve_progress-path.bin.bak"},
+    {"progress-path.bin.tmp", "clear_preserve_progress-path.bin.tmp"},
     {"dictionary_history.txt", "clear_preserve_dictionary_history.txt"},
+    {"dictionary_history.txt.bak", "clear_preserve_dictionary_history.txt.bak"},
     {"reading_stats_off", "clear_preserve_reading_stats_off"},
     {"sync.bin", "clear_preserve_sync.bin"},
     {"sync.bin.bak", "clear_preserve_sync.bin.bak"},
@@ -113,6 +121,8 @@ int statsFileVersion(const char* name) {
     return -1;
   int version = 0;
   for (size_t i = prefix.size(); i < payload.size() - suffixLength; ++i) {
+    // Device-qualified names keep the version before the origin suffix.
+    if (payload[i] == '_') break;
     if (payload[i] < '0' || payload[i] > '9') return -1;
     const int digit = payload[i] - '0';
     if (version > (std::numeric_limits<int>::max() - digit) / 10) return -1;
@@ -159,6 +169,11 @@ bool appendStatsPreservedFiles(const std::string& cachePath, std::vector<Resolve
     if (isDirectory || nameLen == 0 || !isStatsFileName(name)) {
       continue;
     }
+    if (candidates.size() == MAX_STATS_FILES_TO_PRESERVE) {
+      dir.close();
+      LOG_ERR("BookCache", "Too many stats files to preserve safely: %s", cachePath.c_str());
+      return false;
+    }
     candidates.push_back({name, statsFileVersion(name)});
   }
   dir.close();
@@ -171,10 +186,6 @@ bool appendStatsPreservedFiles(const std::string& cachePath, std::vector<Resolve
   });
 
   for (size_t i = 0; i < candidates.size(); ++i) {
-    if (i >= MAX_STATS_FILES_TO_PRESERVE) {
-      LOG_DBG("BookCache", "Dropping older stats file during cache preservation: %s", candidates[i].name.c_str());
-      continue;
-    }
     files.push_back({candidates[i].name, std::string(tmpPrefix) + candidates[i].name});
   }
   return true;

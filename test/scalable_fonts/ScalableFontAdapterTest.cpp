@@ -1,5 +1,6 @@
 #include <HalScalableFont.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -20,6 +21,46 @@ static size_t tableCount(const char* path) {
   return (size_t(header[4]) << 8) | header[5];
 }
 
+static void checkRuntimeAdvances(HalScalableFont& adapter, const std::vector<uint8_t>& bytes,
+                                 size_t& doubleRoundedSteps, size_t& shapedGlyphs) {
+  using freeink::font::FtFont;
+  FtFont reference;
+  assert(reference.init(bytes.data(), static_cast<uint32_t>(bytes.size()), 1));
+  FtFont::RenderOptions options;
+  options.hinting = FtFont::HintingMode::Auto;
+  assert(reference.setRenderOptions(options));
+  for (uint8_t points = ScalableContentMinPointSize; points <= ScalableContentMaxPointSize; ++points) {
+    const auto* data = adapter.atSize(points)->data;
+    const auto checkGlyph = [&](uint32_t cp) {
+      const auto* glyph = data->dynamicGlyphHandler(data->glyphMissCtx, cp);
+      assert(glyph);
+      // Ligatures can use a GSUB glyph ID rather than a Unicode cmap entry.
+      const uint32_t id = glyph->dataOffset & 0x80000000u ? glyph->dataOffset & 0x7fffffffu : reference.glyphId(cp);
+      if (glyph->dataOffset & 0x80000000u) ++shapedGlyphs;
+      FtFont::GlyphMetrics metrics;
+      assert(reference.metricsGlyph26_6(id, scalableFontPixelSize26_6(points), metrics));
+      const auto expected = std::clamp<int32_t>(metrics.advance26_6 >> 2, 0, UINT16_MAX);
+      assert(glyph->advanceX == expected);
+      // A second lookup exercises the cached metric, including blank spaces.
+      assert(data->dynamicGlyphHandler(data->glyphMissCtx, cp)->advanceX == expected);
+      if (fp4::toPixel((metrics.advance26_6 + 2) >> 2) != fp4::toPixel(expected)) ++doubleRoundedSteps;
+      for (const uint32_t right : {'A', 'V', 'T', 'o'}) {
+        const auto rawKern =
+            reference.kerningGlyphs26_6(id, reference.glyphId(right), scalableFontPixelSize26_6(points));
+        const int64_t wide = rawKern;
+        const auto expectedKern = std::clamp<int32_t>(wide >= 0 ? (wide + 2) / 4 : -((-wide + 2) / 4), -128, 127);
+        const auto kern = data->kerningHandler(data->glyphMissCtx, cp, right);
+        assert(kern == expectedKern);
+        assert(data->kerningHandler(data->glyphMissCtx, cp, right) == expectedKern);
+        // Compare against a single pixel snap of SDK metrics plus existing fp4 kerning.
+        assert(fp4::toPixel(expected + kern) == (metrics.advance26_6 + kern * 4 + 32) >> 6);
+      }
+    };
+    for (uint32_t cp = 32; cp < 127; ++cp) checkGlyph(cp);
+    for (uint32_t cp = 0xfb00; cp <= 0xfb04; ++cp) checkGlyph(cp);
+  }
+}
+
 int main(int argc, char** argv) {
   assert(argc >= 2);
   // Match the reader's eight built-in faces, which stay alive beside SD fonts.
@@ -33,8 +74,80 @@ int main(int argc, char** argv) {
     assert(builtin[i].openMemory(bytes[i].data(), bytes[i].size()));
     assert(builtin[i].probeGlyph('T', 12));
   }
+  // These real regular/bold glyphs collide in the old direct-mapped cache:
+  // 65 * 31 + face 1 == (98 * 31 + face 2) modulo 512. Page prewarm and
+  // repeated BW/AA passes must retain both without rerasterizing either.
+  {
+    const auto* regular = builtin[0].atSize(18)->data;
+    const auto* bold = builtin[1].atSize(18)->data;
+    const EpdGlyph a = *regular->dynamicGlyphHandler(regular->glyphMissCtx, 'A');
+    const EpdGlyph b = *bold->dynamicGlyphHandler(bold->glyphMissCtx, 'b');
+    const auto* aPixels = regular->bitmapHandler(regular->glyphMissCtx, &a);
+    const auto* bPixels = bold->bitmapHandler(bold->glyphMissCtx, &b);
+    assert(aPixels && bPixels && aPixels != bPixels);
+    const size_t aBytes = (size_t(a.width) * a.height + 3) / 4;
+    const size_t bBytes = (size_t(b.width) * b.height + 3) / 4;
+    const std::vector<uint8_t> expectedA(aPixels, aPixels + aBytes);
+    const std::vector<uint8_t> expectedB(bPixels, bPixels + bBytes);
+    const auto warmStart = std::chrono::steady_clock::now();
+    for (int pass = 0; pass < 30; ++pass) {
+      assert(regular->bitmapHandler(regular->glyphMissCtx, &a) == aPixels);
+      assert(bold->bitmapHandler(bold->glyphMissCtx, &b) == bPixels);
+      assert(std::equal(expectedA.begin(), expectedA.end(), aPixels));
+      assert(std::equal(expectedB.begin(), expectedB.end(), bPixels));
+    }
+    const auto warmUs =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - warmStart).count();
+    std::printf("TTF collision regression: 60 warm bitmap lookups, 0 replacements, %lld us\n", (long long)warmUs);
+  }
+  // Speculative lookahead must leave a foreground glyph resident even when
+  // later pages collide with its slot or fill the shared pixel arena.
+  {
+    const auto* data = builtin[0].atSize(ScalableContentMaxPointSize)->data;
+    const auto* glyph = data->dynamicGlyphHandler(data->glyphMissCtx, 'A');
+    assert(glyph && glyph->width && glyph->height);
+    const EpdGlyph savedGlyph = *glyph;
+    const auto* savedPixels = data->bitmapHandler(data->glyphMissCtx, glyph);
+    assert(savedPixels);
+    const size_t count = (size_t(glyph->width) * glyph->height + 3) / 4;
+    const std::vector<uint8_t> expected(savedPixels, savedPixels + count);
+    size_t refused = 0;
+    {
+      HalScalableFont::IdlePrewarmScope admission;
+      for (uint8_t points = ScalableContentMinPointSize; points <= ScalableContentMaxPointSize; ++points) {
+        const auto* candidate = builtin[1].atSize(points)->data;
+        for (uint32_t cp = 33; cp < 127; ++cp) {
+          const auto* g = candidate->dynamicGlyphHandler(candidate->glyphMissCtx, cp);
+          assert(g);
+          if (g->width && g->height) {
+            const auto result = HalScalableFont::prepareIdleBitmap(candidate, g);
+            assert(result != HalScalableFont::BitmapPreparation::Failed);
+            if (result == HalScalableFont::BitmapPreparation::Skipped) ++refused;
+          }
+        }
+      }
+    }
+    assert(refused > 0);
+    // A prior HAL refusal must not mask a genuine failure from another handler.
+    EpdFontData foreign = *data;
+    foreign.bitmapHandler = [](void*, const EpdGlyph*) -> const uint8_t* { return nullptr; };
+    assert(HalScalableFont::prepareIdleBitmap(&foreign, &savedGlyph) == HalScalableFont::BitmapPreparation::Failed);
+    assert(data->bitmapHandler(data->glyphMissCtx, &savedGlyph) == savedPixels);
+    assert(std::equal(expected.begin(), expected.end(), savedPixels));
+    // Normal foreground rasterization is still allowed after the scope exits.
+    assert(builtin[1].probeGlyph('Z', ScalableContentMaxPointSize));
+  }
   freeink::font::FtFont::RenderOptions options;
   options.hinting = freeink::font::FtFont::HintingMode::Auto;
+  size_t doubleRoundedSteps = 0;
+  size_t shapedGlyphs = 0;
+  for (size_t i = 0; i < builtin.size(); ++i) {
+    checkRuntimeAdvances(builtin[i], bytes[i], doubleRoundedSteps, shapedGlyphs);
+  }
+  assert(doubleRoundedSteps > 0);
+  assert(shapedGlyphs > 0);
+  assert(HalScalableFont::renderingRevision() == 10);
+  std::printf("ADVANCE regression cases=%zu shaped glyphs=%zu\n", doubleRoundedSteps, shapedGlyphs);
   uint32_t residentIdentity = 0;
   uint64_t residentPixels = 0;
   uint32_t temporaryIdentity = 0;

@@ -33,6 +33,10 @@ struct SectionBuildOptions {
   bool referenceUnitsAreCharacters = false;
   uint16_t* resolvedReferencePage = nullptr;
 
+  // Full builds call this between parser steps with no storage lock held.
+  // Callers retain responsibility for any render/display lock.
+  void (*onBuildCheckpoint)() = nullptr;
+
   bool isPreview() const { return previewAnchor && previewAnchor[0] != '\0' && previewMaxPages > 0; }
   bool isCancellationRequested() const { return shouldCancel && shouldCancel(cancelContext); }
 };
@@ -140,6 +144,9 @@ class Section {
   // One slice of the build's deferred font advance prewarm; false when none is left.
   bool prewarmSomeMore();
   void releaseBuildFile();
+#if CROSSINK_SCALABLE_FONTS
+  uint32_t publisherBodyFontFamily();
+#endif
   bool lastBuildImagesWereSuppressed() const { return lastImagesWereSuppressed_; }
   bool lastBuildLayoutAbortedForLowMemory() const { return lastLayoutAbortedForLowMemory_; }
   bool isBuilding() const { return static_cast<bool>(build_); }

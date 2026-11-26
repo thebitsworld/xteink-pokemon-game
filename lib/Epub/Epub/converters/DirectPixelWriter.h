@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BitmapHelpers.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
 #include <stdint.h>
@@ -9,7 +10,7 @@
 // Direct framebuffer writer that eliminates per-pixel overhead from the image
 // rendering hot path.  Pre-computes orientation transform as linear coefficients
 // and caches render-mode state so pixel writes avoid renderer method calls.
-// Monochrome output also maps the four cached shades to a Bayer pattern.
+// The standalone viewer may map shades to B&W; inline pages supply final pixels.
 //
 // Caller is responsible for ensuring (outX, outY) are within screen bounds.
 // ImageBlock::render() already validates this before entering the pixel loop,
@@ -18,6 +19,8 @@ struct DirectPixelWriter {
   uint8_t* fb;
   GfxRenderer::RenderMode mode;
   bool grayscale;
+  bool finalMonochrome;
+  bool absoluteGray;
   int logicalRow;
   uint16_t displayWidthBytes;  // Runtime framebuffer stride (X4: 100, X3: 99)
   // Active write target: for tiled grayscale, fb is the band scratch, originY is
@@ -37,14 +40,16 @@ struct DirectPixelWriter {
   // Row-precomputed: the Y-dependent portion of the physical coords
   int rowPhyXBase, rowPhyYBase;
 
-  void init(GfxRenderer& renderer, const bool imageGrayscale = true) {
+  void init(GfxRenderer& renderer, const bool imageGrayscale = true, const bool monoPixels = false) {
     fb = renderer.getWriteTarget();
     originY = renderer.getWriteOriginY();
     clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
+    absoluteGray = renderer.grayPlanesAreAbsolute();
     // Night Mode suppresses grayscale overlays, so its BW image must retain
     // midtones through dithering instead of leaving an unfinished silhouette.
     grayscale = imageGrayscale && !renderer.isDisplayInverted();
+    finalMonochrome = monoPixels;
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -116,11 +121,10 @@ struct DirectPixelWriter {
     bool state;
     switch (mode) {
       case GfxRenderer::BW:
-        // The grayscale base is a dark silhouette. When it is the final
-        // image, dither the same cached four levels to black/white instead.
-        // Vary the pattern phase by tile so it cannot reinforce the Bayer
-        // pattern already baked into the four-level cache.
-        draw = grayscale
+        // For inline monochrome use the final black/white pixel unchanged.
+        // Keep the standalone viewer's existing four-level fallback.
+        draw = finalMonochrome ? pixelValue == 0
+               : grayscale
                    ? pixelValue < 3
                    : pixelValue * 85 <
                          bayer4x4[(logicalRow + (logicalX >> 2)) & 3][(logicalX + (logicalRow >> 2)) & 3] * 16 + 8;
@@ -130,13 +134,13 @@ struct DirectPixelWriter {
         draw = true;
         break;
       case GfxRenderer::GRAYSCALE_MSB:
-        draw = (pixelValue == 1 || pixelValue == 2);
-        state = false;
+      case GfxRenderer::GRAYSCALE_LSB: {
+        if (finalMonochrome) return;
+        const auto pixel = grayPlanePixel(pixelValue, mode == GfxRenderer::GRAYSCALE_MSB, absoluteGray);
+        draw = pixel.write;
+        state = pixel.black;
         break;
-      case GfxRenderer::GRAYSCALE_LSB:
-        draw = (pixelValue == 1);
-        state = false;
-        break;
+      }
       default:
         return;
     }

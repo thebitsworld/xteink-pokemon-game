@@ -24,6 +24,8 @@ struct portMUX_TYPE {};
   }
 #endif
 
+enum class StrId : uint16_t;
+
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
@@ -80,6 +82,9 @@ class ActivityManager {
 #endif
 
   void exitActivity(const RenderLock& lock);
+  // Apply navigation and render requests without polling the outgoing activity.
+  void processPendingActivities();
+  bool prepareSleepPlugins(bool quickResume, bool fromReaderOrHome);
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
@@ -111,6 +116,9 @@ class ActivityManager {
   // with requestUpdateAndWait(), but stale/asynchronous notifications must wait.
   bool enteringActivity = false;
   bool entryRenderRequested = false;
+#if CROSSINK_APP_CAP_TOUCH
+  bool touchHardwareAvailable = false;
+#endif
   void enterCurrentActivity();
   static void renderTaskTrampoline(void* param);
   [[noreturn]] virtual void renderTaskLoop();
@@ -175,7 +183,7 @@ class ActivityManager {
   void goToSlideshow();
   void goToLibrary();
   void goToBrowser();
-  void goToPlugins();
+  bool goToPlugins(bool networkBootReady = false);
   bool goToOpdsServer(uint32_t serverIndex, bool networkBootReady = false);
   void goToReader(std::string path, bool suppressBackRelease = false, bool allowFastInitialRefresh = false,
                   bool cleanImageBaseOnEntry = false, bool keepWakeFrame = false);
@@ -185,10 +193,10 @@ class ActivityManager {
 #endif
   bool isGameBoyActivity() const;
   void goToReaderAndRunMenuAction(std::string path, uint8_t action);
-  void preparePluginSleep();
-  void goToSleep(bool fromTimeout = false);
+  // Returns true only when sleep rendered a known complete B/W frame.
+  bool goToSleep(bool fromTimeout = false);
   void goToBoot();
-  void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
+  void goToFullScreenMessage(StrId title, StrId message);
   void goToCrashReport();
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE,
               HalDisplay::RefreshMode initialRefreshMode = HalDisplay::FAST_REFRESH);
@@ -215,6 +223,8 @@ class ActivityManager {
   // gestures until it is dismissed.
   bool blocksGlobalInput() const;
   bool isHomeActivity() const;
+  bool canSyncOpenEpubOverUsb() const;
+  bool closeOpenEpubForUsbSync(std::string& path);
   bool isReaderActivity() const;
   bool openReaderSettingsForTouchscreenEscapeHatch();
   bool handleHomeButtonBackOrHome();

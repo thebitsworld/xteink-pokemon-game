@@ -12,13 +12,14 @@
 
 #include "GlobalActions.h"
 #include "MappedInputManager.h"
+#include "ReaderGrayscale.h"
 #include "ReaderStatusBarTapTarget.h"
 #include "ReaderTiltPageTurn.h"
 #include "components/UITheme.h"
 
 namespace ReaderUtils {
 
-constexpr unsigned long SKIP_HOLD_MS = 700;
+constexpr unsigned long SKIP_HOLD_MS = 600;
 constexpr unsigned long GO_HOME_MS = 1000;
 // Hold duration to delete a row in the bookmark and clipping lists. Shared so the
 // same gesture cannot drift apart between the two lists.
@@ -214,7 +215,7 @@ inline bool isTopStatusBarTap(const GfxRenderer& renderer, const int y, const in
                                                statusBarHeight);
 }
 
-// Reader menu opens on its board-specific vertical swipe anywhere on the open
+// Reader menu opens on an upward swipe anywhere on the open
 // page, or a long press of the capacitive home key (a short home tap still goes home).
 inline bool isTouchMenuGesture(const MappedInputManager& input) {
   // The capacitive Home key is independent from screen touch. Its configured
@@ -272,33 +273,6 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
   } else {
     pagesUntilFullRefresh--;
   }
-}
-
-// Grayscale anti-aliasing pass. Renders content twice (LSB + MSB) to build
-// the grayscale buffer. Only the content callback is re-rendered — status bars
-// and other overlays should be drawn before calling this.
-// Kept as a template to avoid std::function overhead; instantiated once per reader type.
-template <typename RenderFn>
-void renderAntiAliased(GfxRenderer& renderer, RenderFn&& renderFn) {
-  if (!renderer.storeBwBuffer()) {
-    LOG_ERR("READER", "Failed to store BW buffer for anti-aliasing");
-    return;
-  }
-
-  renderer.clearScreen(0x00);
-  renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-  renderFn();
-  renderer.copyGrayscaleLsbBuffers();
-
-  renderer.clearScreen(0x00);
-  renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-  renderFn();
-  renderer.copyGrayscaleMsbBuffers();
-
-  renderer.displayGrayBuffer();
-  renderer.setRenderMode(GfxRenderer::BW);
-
-  renderer.restoreBwBuffer();
 }
 
 }  // namespace ReaderUtils

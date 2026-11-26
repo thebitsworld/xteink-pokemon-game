@@ -8,6 +8,9 @@
 #include <string>
 #include <vector>
 
+inline constexpr int O_RDWR = 1;
+inline constexpr int O_CREAT = 2;
+
 struct HostFileData {
   std::vector<uint8_t> bytes;
   bool directory = false;
@@ -18,11 +21,16 @@ struct HostFaults {
   bool failClose = false;
   bool failScan = false;
   bool failOpenWrite = false;
+  std::string failRenameFrom;
   std::string failReadPath;
   std::string readErrorPath;
   size_t readErrorAfter = 0;
   bool shortRead = false;
   size_t writes = 0;
+  size_t existsChecks = 0;
+  size_t readOpens = 0;
+  size_t directoryOpens = 0;
+  size_t directorySteps = 0;
 };
 inline HostFaults faults;
 class HalFile : public Print {
@@ -50,6 +58,7 @@ class HalFile : public Print {
     return length;
   }
   size_t write(const void* input, size_t length) { return write(static_cast<const uint8_t*>(input), length); }
+  void flush() {}
   bool sync() {
     if (faults.failSync) {
       faults.failSync = false;
@@ -79,6 +88,7 @@ class HalFile : public Print {
     return name.size();
   }
   HalFile openNextFile() {
+    ++faults.directorySteps;
     if (faults.failScan) {
       scanFailed_ = true;
       return {};
@@ -107,12 +117,17 @@ class HalStorage {
     failRemovePath_.clear();
   }
   bool mkdir(const char* path) {
+    if (files.contains(path)) return files[path]->directory;
     auto data = std::make_shared<HostFileData>();
     data->directory = true;
     files[path] = data;
     return true;
   }
-  bool exists(const char* path) const { return files.contains(path); }
+  bool exists(const char* path) const {
+    ++faults.existsChecks;
+    return files.contains(path);
+  }
+  bool ensureDirectoryExists(const char* path) { return exists(path) || mkdir(path); }
   bool remove(const char* path) {
     if (failRemovePath_ == path) {
       failRemovePath_.clear();
@@ -121,16 +136,32 @@ class HalStorage {
     return files.erase(path) > 0;
   }
   bool rename(const char* from, const char* to) {
+    if (faults.failRenameFrom == from) {
+      faults.failRenameFrom.clear();
+      return false;
+    }
     if (!files.contains(from) || files.contains(to)) return false;
+    const std::string prefix = std::string(from) + "/";
+    std::vector<std::pair<std::string, std::shared_ptr<HostFileData>>> children;
+    for (auto it = files.begin(); it != files.end();) {
+      if (it->first.starts_with(prefix)) {
+        children.push_back({std::string(to) + it->first.substr(strlen(from)), it->second});
+        it = files.erase(it);
+      } else
+        ++it;
+    }
     files[to] = files[from];
     files.erase(from);
+    for (const auto& entry : children) files.insert(entry);
     return true;
   }
-  HalFile open(const char* path) {
+  HalFile open(const char* path, int flags = 0) {
+    if ((flags & O_CREAT) && !files.contains(path)) files[path] = std::make_shared<HostFileData>();
     auto it = files.find(path);
     if (it == files.end()) return {};
     HalFile file(it->second, path);
     if (it->second->directory) {
+      ++faults.directoryOpens;
       const std::string prefix = std::string(path) + "/";
       for (const auto& entry : files)
         if (entry.first.starts_with(prefix)) file.entries_.push_back(entry);
@@ -138,6 +169,7 @@ class HalStorage {
     return file;
   }
   bool openFileForRead(const char*, const std::string& path, HalFile& file) {
+    ++faults.readOpens;
     if (faults.failReadPath == path) return false;
     const auto it = files.find(path);
     if (it == files.end()) return false;

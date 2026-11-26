@@ -104,9 +104,19 @@ TEST(ReaderDrawerModel, ResumeRestoresScrollToTheActiveRootOrPane) {
 TEST(ReaderDrawerModel, CatalogOrderAndConditionalRowsMatchTouchDesign) {
   const ReaderDrawerCatalog minimal = makeReaderDrawerCatalog({});
   const auto& font = minimal[static_cast<size_t>(ReaderDrawerTab::Font)];
-  EXPECT_EQ(font.count, 6);
+#if FREEINK_DEVICE_EEGO_A4
+  constexpr int extraToneRow = 1;
+  EXPECT_EQ(font.items[4], ReaderDrawerCatalogItem::TwoToneTextAa);
+#else
+  constexpr int extraToneRow = 0;
+#endif
+  EXPECT_EQ(font.count, 8 + extraToneRow);
+  EXPECT_EQ(font.items[3], ReaderDrawerCatalogItem::TextAa);
   EXPECT_EQ(font.items[0], ReaderDrawerCatalogItem::ReaderFont);
-  EXPECT_EQ(font.items[5], ReaderDrawerCatalogItem::GuideDots);
+  EXPECT_EQ(font.items[4 + extraToneRow], ReaderDrawerCatalogItem::TextDarkness);
+  EXPECT_EQ(font.items[5 + extraToneRow], ReaderDrawerCatalogItem::Focus);
+  EXPECT_EQ(font.items[6 + extraToneRow], ReaderDrawerCatalogItem::GuideDots);
+  EXPECT_EQ(font.items[7 + extraToneRow], ReaderDrawerCatalogItem::RuledLines);
 
   const auto& layout = minimal[static_cast<size_t>(ReaderDrawerTab::Layout)];
   EXPECT_EQ(layout.count, 9);
@@ -226,19 +236,23 @@ TEST(FrontlightPanelModel, ActiveReaderBookRequiresReaderAndExistingBook) {
   EXPECT_FALSE(hasFrontlightActiveReaderBook(true, false));
 }
 
-TEST(FrontlightPanelModel, StickyReaderDetailsRequireAnOpenReaderWithoutFrontlight) {
-  EXPECT_TRUE(shouldShowStickyReaderDetails(true, false, true));
-  EXPECT_FALSE(shouldShowStickyReaderDetails(false, false, true));
-  EXPECT_FALSE(shouldShowStickyReaderDetails(true, true, true));
-  EXPECT_FALSE(shouldShowStickyReaderDetails(true, false, false));
+TEST(FrontlightPanelModel, ReaderDetailsRequireAnOpenReaderWithoutFrontlight) {
+  EXPECT_TRUE(shouldShowReaderDetails(false, true));
+  EXPECT_FALSE(shouldShowReaderDetails(true, true));
+  EXPECT_FALSE(shouldShowReaderDetails(false, false));
+  EXPECT_FALSE(shouldShowReaderDetails(true, false));
 }
 
-TEST(FrontlightPanelModel, TouchDrawerSupportsFrontlightOrReaderDetails) {
-  EXPECT_TRUE(supportsFrontlightDrawer(true, true));
-  EXPECT_FALSE(supportsFrontlightDrawer(true, false));
-  EXPECT_FALSE(supportsFrontlightDrawer(false, true));
-  EXPECT_TRUE(supportsFrontlightDrawer(true, false, true));
-  EXPECT_FALSE(supportsFrontlightDrawer(false, false, true));
+TEST(FrontlightPanelModel, ReaderTopDrawerRequiresTouchAndUsefulContent) {
+  EXPECT_FALSE(supportsReaderTopDrawer(false, true, true));
+  EXPECT_FALSE(supportsReaderTopDrawer(false, true, false));
+  EXPECT_FALSE(supportsReaderTopDrawer(false, false, true));
+  EXPECT_TRUE(supportsReaderTopDrawer(true, true, false));
+  EXPECT_TRUE(supportsReaderTopDrawer(true, true, true));
+  // A touch device with a Home key but no light must not expose brightness
+  // controls from Home/Settings. The Home key does not decide drawer content.
+  EXPECT_FALSE(supportsReaderTopDrawer(true, false, false));
+  EXPECT_TRUE(supportsReaderTopDrawer(true, false, true));
 }
 
 TEST(ReaderDrawerModel, PercentStepsDoNotBecomeSettingsChanges) {
@@ -321,7 +335,7 @@ TEST(ReaderDrawerModel, SamplePreviewCoversLiveTextSettingsOnly) {
   EXPECT_TRUE(readerDrawerShowsSamplePreview(Pane::Root, Tab::Font, Row::FontSize));
   for (const auto pane : {Pane::ReaderFont, Pane::FontFamily, Pane::Spacing, Pane::Margins})
     EXPECT_TRUE(readerDrawerShowsSamplePreview(pane, Tab::Layout, Row::FontSize));
-  for (const auto row : {Row::FontSize, Row::Alignment})
+  for (const auto row : {Row::FontSize, Row::Alignment, Row::RuledLines})
     EXPECT_TRUE(readerDrawerShowsSamplePreview(Pane::EnumOptions, Tab::Layout, row));
   for (const auto tab : {Tab::Layout, Tab::More, Tab::Location, Tab::Settings})
     EXPECT_FALSE(readerDrawerShowsSamplePreview(Pane::Root, tab, Row::FontSize));

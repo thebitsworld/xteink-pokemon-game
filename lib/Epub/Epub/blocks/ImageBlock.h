@@ -16,9 +16,9 @@ class ImageBlock final : public Block {
   int16_t getWidth() const { return width; }
   int16_t getHeight() const { return height; }
 
-  void prepareCache() const;
-  bool hasValidCache() const;
-  bool needsDecode() const;
+  void prepareCache(bool grayscale) const;
+  bool hasValidCache(bool grayscale) const;
+  bool needsDecode(bool grayscale) const;
   void renderPlaceholder(GfxRenderer& renderer, int x, int y, bool foregroundBlack) const;
   static void clearSessionRenderFailures();
   static void releaseSessionPixelCache();
@@ -35,7 +35,7 @@ class ImageBlock final : public Block {
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 
-  void render(GfxRenderer& renderer, const int x, const int y, const bool foregroundBlack, bool imageGrayscale = true);
+  bool render(GfxRenderer& renderer, const int x, const int y, const bool foregroundBlack, bool imageGrayscale = true);
   bool serialize(Print& file);
   static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
 

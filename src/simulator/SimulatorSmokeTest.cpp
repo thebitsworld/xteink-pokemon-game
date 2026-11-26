@@ -13,6 +13,7 @@
 #include <LibraryIndexFile.h>
 #include <Logging.h>
 #include <SDL.h>
+#include <SdCardFont.h>
 #include <Utf8.h>
 #include <WiFi.h>
 
@@ -31,10 +32,13 @@
 #include "SilentRestart.h"
 #include "StatsUploadSmokeTest.h"
 #include "UpstreamFeatureSmokeTest.h"
+#include "util/DictionaryRegistry.h"
 #include "util/ImageDisplayMode.h"
 #include "util/WordSelectNavigator.h"
 #if CROSSINK_SCALABLE_FONTS
 #include <HalScalableFont.h>
+#include <ScalableBuiltins.h>
+#include <builtinFonts/bitter_12_regular.h>
 
 #include <fstream>
 
@@ -43,6 +47,7 @@
 #endif
 #include <AppVersion.h>
 #include <ArduinoJson.h>
+#include <Bitmap.h>
 #include <Epub/hyphenation/Hyphenator.h>
 #include <SupportInfo.h>
 
@@ -64,13 +69,17 @@
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#include "activities/boot_sleep/SleepActivity.h"
+#include "activities/boot_sleep/SleepCoverAssets.h"
 #include "activities/home/AlertActivity.h"
 #include "activities/home/BookActions.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/home/HomeActivity.h"
 #include "activities/home/RecentBookProgress.h"
+#include "activities/home/SavedItemsHomeActivity.h"
 #include "activities/library/LibraryActivity.h"
 #include "activities/network/CrossPointWebServerActivity.h"
+#include "activities/network/NetworkModeSelectionActivity.h"
 #include "activities/network/StatsUploadActivity.h"
 #include "activities/network/UsbDriveActivity.h"
 #include "activities/reader/BookLoadingFeedback.h"
@@ -78,6 +87,7 @@
 #include "activities/reader/BookStatsActivity.h"
 #include "activities/reader/BookStatsView.h"
 #include "activities/reader/DictionaryDefinitionActivity.h"
+#include "activities/reader/DictionaryWordSelectActivity.h"
 #include "activities/reader/EndOfBookOptions.h"
 #include "activities/reader/EpubReaderActivity.h"
 #include "activities/reader/EpubReaderBookmarkListActivity.h"
@@ -91,17 +101,21 @@
 #include "activities/reader/QrDisplayActivity.h"
 #include "activities/reader/ReaderButtonShortcuts.h"
 #include "activities/reader/ReaderFontLoading.h"
+#include "activities/reader/ReaderRuling.h"
 #include "activities/reader/ReaderUtils.h"
 #include "activities/reader/TxtReaderActivity.h"
 #include "activities/reader/XtcReaderActivity.h"
 #include "activities/reader/XtcReaderMenuActivity.h"
 #include "activities/settings/AboutActivity.h"
 #include "activities/settings/AssetDownloadActivity.h"
+#include "activities/settings/DictionarySelectActivity.h"
 #include "activities/settings/FontDownloadActivity.h"
 #include "activities/settings/FontSelectionActivity.h"
 #include "activities/settings/FrontlightTimePickerActivity.h"
 #include "activities/settings/HyphenationManagerActivity.h"
 #include "activities/settings/KOReaderSettingsActivity.h"
+#include "activities/settings/KeyboardLayoutsActivity.h"
+#include "activities/settings/OpdsServerListActivity.h"
 #include "activities/settings/OtaUpdateActivity.h"
 #include "activities/settings/QuickActionsActivity.h"
 #include "activities/settings/ReleaseNotesActivity.h"
@@ -114,10 +128,13 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
 #include "components/CompactHeader.h"
+#include "components/CoverGridHomeUi.h"
 #include "components/HeaderDate.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "components/themes/dashboard/DashboardTheme.h"
+#include "components/themes/minimal/MinimalTheme.h"
 #include "simulator/SimulatorHomeKeyInput.h"
 #if defined(CROSSINK_ENABLE_POKEMON)
 #include <Memory.h>
@@ -138,10 +155,18 @@
 extern ActivityManager activityManager;
 extern GfxRenderer renderer;
 extern MappedInputManager mappedInputManager;
+extern bool dispatchButtonShortcut(const ButtonShortcutController::Result& result);
+extern CrossPointSettings::SHORT_PWRBTN getPowerButtonAction();
 
 // Use a detached reader so these boundary checks cannot race its render task.
 struct EpubReaderCompletionSmokeTest {
   static std::optional<uint32_t> statusAnchor;
+  static bool fontBrowserReturn(EpubReaderActivity& reader, const char* family) {
+    RenderLock lock;
+    const int fontId = sdFontSystem.resolveFontId(family, SETTINGS.readerFontPointSize);
+    return fontId && SETTINGS.getReaderFontId() == fontId && reader.section && !reader.section->isBuilding() &&
+           reader.activeSectionFontId == fontId;
+  }
 #if !CROSSINK_SCALABLE_FONTS
   static bool fontReload(EpubReaderActivity& reader) {
     RenderLock lock;
@@ -396,6 +421,7 @@ struct EpubReaderCompletionSmokeTest {
       if (reader->bookPageEstimate.pagesPerByte() != 0) return false;
       reader->section.reset();
       // Deleting book stats must clear both display fallback and text pace.
+      if (!BookReadingStats::remove(reader->epub->getCachePath())) return false;
       reader->resetCurrentBookStatsAfterDelete();
       uint32_t deletedSeconds = 0;
       if (reader->estimateTimeLeftSeconds(true, deletedSeconds) ||
@@ -440,7 +466,42 @@ std::optional<uint32_t> EpubReaderCompletionSmokeTest::statusAnchor;
 // Inspect values after dispatching physical key edges through each real slider loop.
 struct SliderOrientationSmokeTest {
   static int value(const IntervalSelectionActivity& slider) { return slider.value; }
+  static bool clearsHeader(const IntervalSelectionActivity& slider) {
+    const auto header = slider.pickerHeaderRect();
+    const auto layout = slider.legacyLayout();
+    const auto bar = slider.legacyBarRect();
+    return layout.visible && layout.showSteps && layout.valueY > header.y + header.height &&
+           bar.y - IntervalSelectionLayout::knobOverhang >=
+               layout.valueY + slider.renderer.getLineHeight(UI_12_FONT_ID);
+  }
+  static bool routesTouches(IntervalSelectionActivity& slider) {
+#if CROSSINK_APP_CAP_TOUCH
+    const auto bar = slider.legacyBarRect();
+    const auto layout = slider.legacyLayout();
+    auto& input = slider.mappedInput;
+    const int original = slider.value;
+    const auto tap = [&](const int x, const int y) {
+      input.simulatorInjectTouchDown(x, y);
+      slider.loop();
+      input.simulatorClearInputFrame();
+      input.simulatorInjectTouchRelease(x, y);
+      slider.loop();
+      input.simulatorClearInputFrame();
+    };
+    tap(bar.x + bar.width * 3 / 4, bar.y + bar.height / 2);
+    const int raised = slider.value;
+    const auto safe = UITheme::getInstance().getScreenSafeArea(slider.renderer, false, false);
+    tap(safe.x + safe.width / 8, layout.stepsY + 28);
+    const bool ok = raised > original && slider.value == raised - slider.largeStep;
+    slider.value = original;
+    return ok;
+#else
+    (void)slider;
+    return true;
+#endif
+  }
   static int value(const EpubReaderPercentSelectionActivity& slider) { return slider.value; }
+  static void enterKeypad(EpubReaderPercentSelectionActivity& slider) { slider.enterKeypad(); }
   static void open(EpubReaderDrawerActivity& drawer, const ReaderDrawerPane pane, const uint8_t focus) {
     drawer.openPane(pane);
     drawer.buttonSliderState.focus = focus;
@@ -474,13 +535,368 @@ struct SliderOrientationSmokeTest {
 };
 
 struct ReaderDrawerLayoutSmokeTest {
+#if CROSSINK_SCALABLE_FONTS
+  template <typename Capture>
+  static bool verifyTextDarkness(const Capture& capture) {
+    RenderLock lock;
+    JsonDocument original;
+    SETTINGS.toJson(original);
+    bool valid = true;
+    const auto settings = buildReaderFontSettingsList(getBaseSettingsList());
+    valid &= std::any_of(settings.begin(), settings.end(), [](const SettingInfo& info) {
+      return settingKeyIs(info, "textDarkness") && info.enumValues.size() == 3;
+    });
+    for (uint8_t level = 0; level <= 2; ++level) {
+      SETTINGS.textDarkness = level;
+      valid &= SETTINGS.saveToFile();
+      SETTINGS.textDarkness = 255;
+      SETTINGS.loadFromFile();
+      valid &= SETTINGS.textDarkness == level;
+    }
+    EpubReaderDrawerActivity drawer(renderer, mappedInputManager, {}, nullptr, 0.0f, 0, 0, false, false, false, false,
+                                    false, false, false, false, true, true, 0, 0, 5, false);
+    drawer.onEnter();
+    drawer.state.tab = ReaderDrawerTab::Font;
+    for (uint8_t level = 0; level <= 2; ++level) {
+      drawer.showEnumOptions(ReaderDrawerCatalogItem::TextDarkness);
+      valid &= drawer.enumOptionValues.size() == 3;
+      drawer.selectEnumOption(level);
+      valid &= drawer.draft.textDarkness == level;
+    }
+    drawer.showEnumOptions(ReaderDrawerCatalogItem::TextDarkness);
+    drawer.render(std::move(lock));
+    capture("text-darkness-menu");
+    drawer.onExit();
+
+    // Test real bitmap and TTF glyphs through the same renderer. Host-only
+    // vectors reconstruct the display's three passes for visual comparison.
+    EpdFont bitmapFont(&bitter_12_regular);
+    constexpr int bitmapId = 29000;
+    renderer.insertFont(bitmapId, EpdFontFamily(&bitmapFont));
+    const int ttfId = sdFontSystem.ensureBuiltInReaderFont(renderer);
+    const int width = renderer.getScreenWidth(), height = renderer.getScreenHeight();
+    const size_t count = static_cast<size_t>(width) * height;
+    const char* output = std::getenv("CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES");
+    for (const int fontId : {bitmapId, ttfId}) {
+      std::vector<uint8_t> previous;
+      for (uint8_t level = 0; level <= 2; ++level) {
+        std::vector<uint8_t> pixels(count, 255), msb(count);
+        {
+          const GfxRenderer::TextDarknessScope darkness(renderer, level);
+          for (const auto plane : {GfxRenderer::BW, GfxRenderer::GRAYSCALE_MSB, GfxRenderer::GRAYSCALE_LSB}) {
+            renderer.setRenderMode(plane);
+            renderer.clearScreen(plane == GfxRenderer::BW ? 0xff : 0x00);
+            renderer.drawText(fontId, 24, 70, "The quick brown fox jumps.");
+            renderer.drawText(fontId, 24, 115, "Smooth curves: a e g o s 012345");
+            for (int y = 0; y < height; ++y) {
+              for (int x = 0; x < width; ++x) {
+                const size_t i = static_cast<size_t>(y) * width + x;
+                const bool black = renderer.isPixelBlack(x, y);
+                if (plane == GfxRenderer::BW)
+                  pixels[i] = black ? 0 : 255;
+                else if (plane == GfxRenderer::GRAYSCALE_MSB)
+                  msb[i] = !black;
+                else if (pixels[i] == 0 && msb[i])
+                  pixels[i] = black ? 170 : 85;
+              }
+            }
+          }
+        }
+        valid &= renderer.getTextDarkness() == 0;
+        valid &= std::find(pixels.begin(), pixels.end(), 85) != pixels.end();
+        if (!previous.empty()) {
+          bool darker = false;
+          for (size_t i = 0; i < count; ++i) {
+            valid &= pixels[i] <= previous[i];
+            darker |= pixels[i] < previous[i];
+          }
+          valid &= darker;
+        }
+        previous = pixels;
+        if (output) {
+          const auto path = std::filesystem::path(output) /
+                            (std::string(fontId == bitmapId ? "bitmap-" : "ttf-") + std::to_string(level) + ".pgm");
+          FILE* file = std::fopen(path.c_str(), "wb");
+          if (!file) {
+            valid = false;
+            continue;
+          }
+          std::fprintf(file, "P5\n%d %d\n255\n", width, height);
+          valid &= std::fwrite(pixels.data(), 1, pixels.size(), file) == pixels.size();
+          std::fclose(file);
+        }
+      }
+    }
+    renderer.setRenderMode(GfxRenderer::BW);
+    renderer.removeFont(bitmapId);
+    SETTINGS.fromJson(original.as<JsonVariantConst>());
+    valid &= SETTINGS.saveToFile();
+    return valid;
+  }
+#endif
+#if CROSSINK_APP_CAP_TOUCH
+  template <typename Capture>
+  static bool verifySettingsBackZones(RenderLock& lock, const Capture& capture) {
+    const auto savedOrientation = renderer.getOrientation();
+    const auto savedInsets = renderer.getViewableInsets();
+    const auto savedTheme = SETTINGS.uiTheme;
+    const auto savedScale = SETTINGS.uiScale;
+    const auto savedStatusSize = SETTINGS.displayStatusBarTextSize;
+    bool valid = true;
+    unsigned cases = 0;
+    for (uint8_t theme = 0; theme < CrossPointSettings::UI_THEME_COUNT; ++theme) {
+      SETTINGS.uiTheme = theme;
+      UITheme::getInstance().reload();
+      for (unsigned orientation = 0; orientation < 4; ++orientation) {
+        for (uint8_t scale = 0; scale < CrossPointSettings::UI_SCALE_COUNT; ++scale) {
+          SETTINGS.uiScale = scale;
+          for (uint8_t statusSize = 0; statusSize < 3; ++statusSize) {
+            SETTINGS.displayStatusBarTextSize = statusSize;
+            renderer.setViewableInsets(orientation % 2 ? ScreenInsets{{{24, 16, 32, 24}}} : ScreenInsets{});
+            renderer.setOrientation(static_cast<GfxRenderer::Orientation>(orientation));
+            SettingsActivity editor(renderer, mappedInputManager);
+            editor.onEnter();
+            editor.enterCategory(2);
+            editor.openSubmenu(SettingAction::ControlsTapsGestures);
+            editor.render(std::move(lock));
+            const auto header = TouchHeaderBackButton::compactHeaderRect(renderer);
+            const auto back = TouchHeaderBackButton::layout(header).touchRect;
+            const auto standardBackHeader = TouchHeaderBackButton::headerRect(renderer, mappedInputManager);
+            valid &= header.y == standardBackHeader.y && header.height == standardBackHeader.height;
+            valid &= header.height == 81 + UITheme::getDisplayStatusBarHeightIncrease();
+            valid &= back.height >= 80 && back.y + back.height < header.y + header.height;
+            valid &= TouchHeaderBackButton::contentTop(renderer, mappedInputManager) == header.y + header.height;
+            const auto arrowBand = [&]() {
+              uint32_t hash = 2166136261u;
+              // Exclude the last rule pixel shared with the Settings tabs.
+              for (int y = header.y; y < header.y + header.height - 1; ++y) {
+                for (int x = header.x; x < header.x + 52; ++x) {
+                  hash = (hash ^ static_cast<uint32_t>(renderer.isPixelBlack(x, y))) * 16777619u;
+                }
+              }
+              return hash;
+            };
+            const uint32_t expectedArrowBand = arrowBand();
+            freeink::ui::Interaction tab;
+            bool found = false;
+            for (int y = header.y; y < renderer.getScreenHeight(); ++y) {
+              if (editor.app.hitPublished(back.x + 10, y, 2 /* Settings category tab */, tab)) {
+                found = true;
+                break;
+              }
+            }
+            // The larger back target lives inside the taller header, above the tabs.
+            const bool geometry = found && tab.value == 0 && tab.rect.y >= header.y + 80;
+            if (!geometry)
+              LOG_ERR("SMOKE", "Settings geometry: found=%d tab=%d,%d back=%d", found, tab.value, tab.rect.y, back.y);
+            valid &= geometry;
+            if (found) {
+              // At the quiet right edge, header and tab rules must form one
+              // continuous divider band, not two rules with blank rows between.
+              const int x = header.x + header.width - 10;
+              unsigned dividerBands = 0;
+              bool inDivider = false;
+              for (int y = header.y + header.height / 2; y <= tab.rect.y; ++y) {
+                const bool black = renderer.isPixelBlack(x, y);
+                if (black && !inDivider) ++dividerBands;
+                inDivider = black;
+              }
+              if (dividerBands > 1)
+                LOG_ERR("SMOKE", "Settings divider bands=%u x=%d y=%d..%d", dividerBands, x,
+                        header.y + header.height / 2, tab.rect.y);
+              // Classic and RoundedRaff intentionally omit the header rule.
+              valid &= dividerBands <= 1;
+            }
+            const auto tap = [&](int x, int y) {
+              mappedInputManager.simulatorInjectTouchDown(x, y);
+              editor.loop();
+              mappedInputManager.simulatorClearInputFrame();
+              mappedInputManager.simulatorInjectTouchRelease(x, y);
+              editor.loop();
+              mappedInputManager.simulatorClearInputFrame();
+            };
+            if (found) {
+              // The lower-right header edge must go Back rather than select Display.
+              tap(back.x + 79, tab.rect.y - 2);
+              if (editor.selectedCategoryIndex != 2 || editor.activeSubmenu != SettingAction::None)
+                LOG_ERR("SMOKE", "Settings back result: category=%d submenu=%d tap=%d,%d", editor.selectedCategoryIndex,
+                        static_cast<int>(editor.activeSubmenu), back.x + 79, tab.rect.y - 2);
+              valid &= editor.selectedCategoryIndex == 2 && editor.activeSubmenu == SettingAction::None;
+              editor.openSubmenu(SettingAction::ControlsTapsGestures);
+              editor.render(std::move(lock));
+              // The end of the visible heading is also part of the Back target.
+              const int titleEnd = TouchHeaderBackButton::layout(header).titleX +
+                                   renderer.getTextWidth(UI_12_FONT_ID, tr(STR_SETTINGS_TITLE), EpdFontFamily::BOLD) -
+                                   1;
+              tap(titleEnd, tab.rect.y - 32);
+              valid &= editor.selectedCategoryIndex == 2 && editor.activeSubmenu == SettingAction::None;
+              editor.render(std::move(lock));
+              if (scale == 0 && statusSize == 0) {
+                capture("settings-back-theme-" + std::to_string(theme) + "-orientation-" + std::to_string(orientation));
+              }
+              tap(tab.rect.x + tab.rect.width / 2, tab.rect.y + tab.rect.height / 2);
+              valid &= editor.selectedCategoryIndex == 0;
+            }
+            editor.onExit();
+            const auto verifyScreen = [&](Activity& screen, const char* name) {
+              renderer.setOrientation(static_cast<GfxRenderer::Orientation>(orientation));
+              screen.onEnter();
+              screen.render(std::move(lock));
+              if (arrowBand() != expectedArrowBand) {
+                LOG_ERR("SMOKE", "Back header shifted on %s: theme=%u orientation=%u scale=%u status=%u", name, theme,
+                        orientation, scale, statusSize);
+                valid = false;
+              }
+              if (scale == 0 && statusSize == 0 && theme == CrossPointSettings::DASHBOARD) {
+                capture(std::string("back-header-") + name + "-orientation-" + std::to_string(orientation));
+              }
+              screen.onExit();
+              renderer.setOrientation(static_cast<GfxRenderer::Orientation>(orientation));
+            };
+            {
+              AboutActivity screen(renderer, mappedInputManager);
+              verifyScreen(screen, "about");
+            }
+            {
+              KeyboardLayoutsActivity screen(renderer, mappedInputManager);
+              verifyScreen(screen, "keyboard-layouts");
+            }
+            {
+              NetworkModeSelectionActivity screen(renderer, mappedInputManager);
+              verifyScreen(screen, "file-transfer");
+            }
+            {
+              DictionarySelectActivity screen(renderer, mappedInputManager);
+              verifyScreen(screen, "dictionary");
+            }
+            {
+              OpdsServerListActivity screen(renderer, mappedInputManager);
+              verifyScreen(screen, "opds-servers");
+            }
+            {
+              OptionSelectionActivity screen(renderer, mappedInputManager, "HeaderOptions", StrId::STR_LANGUAGE,
+                                             {"First", "Second"}, 0, false, true);
+              verifyScreen(screen, "options");
+            }
+            {
+              SavedItemsHomeActivity screen(renderer, mappedInputManager);
+              verifyScreen(screen, "saved-items");
+            }
+            {
+              XtcReaderMenuActivity screen(renderer, mappedInputManager, "Short XTC title", true, false, true, true);
+              verifyScreen(screen, "xtc-menu");
+            }
+            {
+              XtcReaderMenuActivity screen(
+                  renderer, mappedInputManager,
+                  "A very long XTC book title that needs to wrap across multiple lines without "
+                  "making its Back header taller than Settings or other reader screens",
+                  true, false, true, true);
+              verifyScreen(screen, "xtc-menu-long-title");
+            }
+            ++cases;
+            if (!valid) {
+              LOG_ERR("SMOKE", "Settings back zone failed: theme=%u orientation=%u scale=%u status=%u", theme,
+                      orientation, scale, statusSize);
+              break;
+            }
+          }
+        }
+      }
+    }
+    SETTINGS.uiTheme = savedTheme;
+    SETTINGS.uiScale = savedScale;
+    SETTINGS.displayStatusBarTextSize = savedStatusSize;
+    UITheme::getInstance().reload();
+    renderer.setViewableInsets(savedInsets);
+    renderer.setOrientation(savedOrientation);
+    LOG_INF("SMOKE", "Back header consistency checked: %u configurations across 10 screens", cases);
+    return valid;
+  }
+#endif
+
+#if CROSSINK_SCALABLE_FONTS
+  template <typename Capture>
+  static bool verifyPublisherBodyFont(RenderLock& lock, Epub& book, Section& section, const uint8_t mode,
+                                      const Capture& capture) {
+    const auto family = section.publisherBodyFontFamily();
+    if (family != CssParser::hashFontFamily("Publisher Body")) return false;
+    auto borrowedBook = std::shared_ptr<Epub>(&book, [](Epub*) {});
+    EpubReaderDrawerActivity editor(renderer, mappedInputManager, borrowedBook, nullptr, 0.0f, 0, 0, false, false,
+                                    false, false, false, false, false, false, true, true, 0, 0, 5, false);
+    struct Probe {
+      uint32_t family;
+      unsigned calls = 0;
+    } probe{family};
+    editor.setPublisherBodyFontProbe(
+        [](void* context) {
+          auto& probe = *static_cast<Probe*>(context);
+          ++probe.calls;
+          return probe.family;
+        },
+        &probe);
+    const auto requestedBeforeMenu = bookFontSystem.requestedFaces();
+    const auto loadedBeforeMenu = bookFontSystem.loadedFaces();
+    editor.onEnter();
+    editor.render(std::move(lock));
+    if (probe.calls) return false;
+    editor.openPane(ReaderDrawerPane::ReaderFont);
+    editor.render(std::move(lock));
+    char buffer[64];
+    bool valid = editor.publisherBodyFontActive() == (mode == 2) && probe.calls == (mode == 2 ? 1U : 0U) &&
+                 bookFontSystem.requestedFaces() == requestedBeforeMenu &&
+                 bookFontSystem.loadedFaces() == loadedBeforeMenu;
+    if (mode == 2) {
+      valid &= std::strcmp(editor.rowValue(ReaderDrawerCatalogItem::FontFamily, buffer, sizeof(buffer)), "Bitter") == 0;
+      // A disabled row publishes no touch target, and direct/button activation is inert.
+      freeink::ui::Interaction hit;
+      for (int y = 0; y < renderer.getScreenHeight(); y += 2) {
+        if (editor.app.hitPublished(renderer.getScreenWidth() / 2, y, EpubReaderDrawerActivity::ACTION_ROW, hit) &&
+            hit.value == 0)
+          valid = false;
+      }
+      editor.activateRow(ReaderDrawerCatalogItem::FontFamily);
+      valid &= editor.state.pane == ReaderDrawerPane::ReaderFont;
+      capture("publisher-body-font-" + std::to_string(renderer.getOrientation()));
+      editor.draft.publisherFonts = 0;
+      valid &= !editor.publisherBodyFontActive();
+      editor.draft.publisherFonts = 2;
+      editor.draft.embeddedStyle = false;
+      valid &= !editor.publisherBodyFontActive();
+      editor.draft.embeddedStyle = true;
+      editor.draft.epubRenderMode = static_cast<uint8_t>(EpubRenderMode::Light);
+      valid &= !editor.publisherBodyFontActive();
+      editor.draft.epubRenderMode = 0;
+    }
+    editor.draft.publisherFonts = 0;
+    editor.render(std::move(lock));
+    freeink::ui::Interaction fallbackHit;
+    bool fallbackTouchable = false;
+    for (int y = 0; y < renderer.getScreenHeight(); y += 2) {
+      if (editor.app.hitPublished(renderer.getScreenWidth() / 2, y, EpubReaderDrawerActivity::ACTION_ROW,
+                                  fallbackHit) &&
+          fallbackHit.value == 0)
+        fallbackTouchable = true;
+    }
+    valid &= fallbackTouchable;
+    editor.publisherBodyFontName[0] = '\0';
+    editor.publisherBodyFontNameResolved = false;
+    probe.family = CssParser::hashFontFamily("Missing Body");
+    editor.draft.publisherFonts = 2;
+    editor.resolvePublisherBodyFontName();
+    valid &= !editor.publisherBodyFontActive();
+    editor.onExit();
+    return valid;
+  }
+#endif
   template <typename Capture>
   static bool verifyImageDisplay(const Capture& capture) {
     JsonDocument original;
     SETTINGS.toJson(original);
     bool valid = true;
     const SettingInfo* images = nullptr;
-    for (const auto& setting : getSettingsList()) {
+    const auto settings = getBaseSettingsList();
+    for (const auto& setting : settings) {
       if (settingKeyIs(setting, "imageGrayscale")) return false;
       if (settingKeyIs(setting, "imageRendering")) images = &setting;
     }
@@ -804,6 +1220,7 @@ struct StatusBarFeatureSmokeTest {
 #if CROSSINK_APP_CAP_TOUCH
     if (mappedInputManager.hasTouchHardware()) {
       const auto hit = editor.optionPopup.simulatorOptionRect(index);
+      if (hit.width <= 0 || hit.height <= 0) return false;
       mappedInputManager.simulatorInjectTouchDown(hit.x + hit.width / 2, hit.y + hit.height / 2);
       editor.loop();
       mappedInputManager.simulatorClearInputFrame();
@@ -1072,9 +1489,15 @@ struct StatusBarFeatureSmokeTest {
       renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
       const int topY = UITheme::getTopStatusBarY(renderer);
       const int bottomY = renderer.getScreenHeight() - bottom - 1;
+      // Include near misses beyond the old 32 px targets, both bezel margins,
+      // and the first page-turn pixel just outside each expanded target.
+      const int topEnd = topY + std::max(64, UITheme::getReaderStatusBarHeight(ReaderStatusBarPosition::Top, renderer));
+      const int bottomStart = renderer.getScreenHeight() - bottom - std::max(64, UITheme::getStatusBarHeight(renderer));
       for (const bool hideOnTap : {false, true}) {
         SETTINGS.tapToHideStatusBar = hideOnTap;
-        for (const int y : {topY, bottomY}) {
+        for (const int y : {0, topY, topY + 48, topEnd - 1, topEnd, renderer.getScreenHeight() / 2, bottomStart - 1,
+                            bottomStart, bottomY - 48, bottomY, renderer.getScreenHeight() - 1}) {
+          const bool toggleBars = hideOnTap && (y < topEnd || y >= bottomStart);
           for (const bool previous : {false, true}) {
             reader.currentPage = 5;
             reader.statusBarVisible = true;
@@ -1085,8 +1508,8 @@ struct StatusBarFeatureSmokeTest {
               mappedInputManager.simulatorInjectTouchRelease(x, y);
               reader.loop();
               mappedInputManager.simulatorClearInputFrame();
-              const int expectedPage = hideOnTap ? 5 : 5 + (tap + 1) * (previous ? -1 : 1);
-              if (reader.currentPage != expectedPage || reader.statusBarVisible != (!hideOnTap || tap == 1))
+              const int expectedPage = toggleBars ? 5 : 5 + (tap + 1) * (previous ? -1 : 1);
+              if (reader.currentPage != expectedPage || reader.statusBarVisible != (!toggleBars || tap == 1))
                 return false;
             }
           }
@@ -1238,14 +1661,578 @@ struct StatusBarFeatureSmokeTest {
   }
 };
 
+struct DictionaryPagingSmokeTest {
+  static bool run(RenderLock& lock, const StatusBarFeatureSmokeTest::Capture& capture) {
+    using B = MappedInputManager::Button;
+    using C = CrossPointSettings;
+    std::string definition;
+    for (int i = 0; i < 60; ++i) definition += "Dictionary power button paging keeps this definition readable.\n";
+    if (!Storage.writeFile("/.crosspoint/paging-dictionary.dict", definition.c_str()) ||
+        !Storage.writeFile("/.crosspoint/paging-dictionary.ifo",
+                           "StarDict's dict ifo file\nbookname=Paging\nsametypesequence=m\n"))
+      return false;
+    DictLocation location;
+    location.folderPath = "/.crosspoint/paging-dictionary";
+    location.size = static_cast<uint32_t>(definition.size());
+    location.found = true;
+    const bool compressed = getenv("CROSSINK_SIMULATOR_SMOKE_DICTZIP") != nullptr;
+    if (compressed) {
+      location.folderPath = "/.dictionaries/Dictzip/dict";
+      DictionaryRegistry registry;
+      if (!registry.discover() || registry.indexOf(location.folderPath) < 0) return false;
+    }
+    SETTINGS.sideButtonUpShort = C::PREVIOUS_PAGE;
+    SETTINGS.sideButtonDownShort = C::QUICK_LOCK;
+    mappedInputManager.setReaderMode(false);
+    bool valid = true;
+    for (const bool modal : {false, true}) {
+      auto dictionary =
+          std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInputManager, "Paging", location, true);
+      if (modal) {
+        dictionary->backgroundContext_ = &valid;
+        dictionary->backgroundRender_ = [](void*) { renderer.clearScreen(); };
+      }
+      dictionary->wrapText();
+      if (dictionary->definitionReadFailed_ || dictionary->totalPages < 3) return false;
+      const std::string sourcePath = dictionary->definitionSource_.path();
+      if (compressed && (sourcePath == location.folderPath + ".dict" || !Storage.exists(sourcePath.c_str())))
+        return false;
+      const auto checkPage = [&](const int expected) {
+        if (dictionary->currentPage == expected && !dictionary->isWordSelectMode) return true;
+        LOG_ERR("SMOKE", "Dictionary page expected=%d actual=%d word-select=%d", expected, dictionary->currentPage,
+                dictionary->isWordSelectMode);
+        return false;
+      };
+      const auto releasePower = [&] {
+        mappedInputManager.simulatorInjectRelease(B::Power);
+        // Model the non-reader Power-to-Confirm fallback as well as the page edge.
+        mappedInputManager.injectRelease(B::Confirm);
+        dictionary->loop();
+        mappedInputManager.clearInjectedReleases();
+        mappedInputManager.simulatorClearInputFrame();
+      };
+      SETTINGS.shortPwrBtn = C::PAGE_TURN;
+      SETTINGS.longPwrBtn = C::SLEEP;
+      dictionary->render(std::move(lock));
+      capture(modal ? "dictionary-modal-page-1" : "dictionary-page-1");
+      releasePower();
+      if (!checkPage(1)) return false;
+      dictionary->render(std::move(lock));
+      capture(modal ? "dictionary-modal-page-2" : "dictionary-page-2");
+      releasePower();
+      if (!checkPage(2)) return false;
+      SETTINGS.shortPwrBtn = C::PREVIOUS_PAGE;
+      releasePower();
+      if (!checkPage(1)) return false;
+      releasePower();
+      if (!checkPage(0)) return false;
+      releasePower();
+      if (!checkPage(0)) return false;
+      SETTINGS.shortPwrBtn = C::PAGE_TURN;
+      dictionary->currentPage = dictionary->totalPages - 1;
+      dictionary->loadPage(dictionary->currentPage);
+      releasePower();
+      if (!checkPage(dictionary->totalPages - 1)) return false;
+      // A long release must use the long assignment, not the short one.
+      SETTINGS.longPwrBtn = C::PREVIOUS_PAGE;
+      mappedInputManager.simulatorInjectPress(B::Power);
+      delay(SETTINGS.getPowerButtonLongPressDuration() + 1);
+      dictionary->loop();
+      if (!checkPage(dictionary->totalPages - 1)) return false;
+      releasePower();
+      if (!checkPage(dictionary->totalPages - 2)) return false;
+      // Existing side navigation and word-selection Confirm remain available.
+      mappedInputManager.simulatorInjectRelease(B::PageBack);
+      dictionary->loop();
+      mappedInputManager.simulatorClearInputFrame();
+      if (!checkPage(dictionary->totalPages - 3)) return false;
+      mappedInputManager.simulatorInjectRelease(B::Confirm);
+      dictionary->loop();
+      mappedInputManager.simulatorClearInputFrame();
+      valid &= dictionary->isWordSelectMode;
+      if (compressed) {
+        valid &= dictionary->definitionSource_.path() == sourcePath;
+        dictionary.reset();
+        valid &= !Storage.exists(sourcePath.c_str());
+      }
+    }
+    return valid;
+  }
+};
+
 struct ScreenCalibrationSmokeTest {
+  static bool coverFixture(const std::string& path, const int width, const int height,
+                           const bool pixelPattern = false) {
+    const int stride = ((width + 31) / 32) * 4;
+    BmpHeader header{};
+    header.fileHeader.bfType = 0x4d42;
+    header.fileHeader.bfSize = sizeof(header) + stride * height;
+    header.fileHeader.bfOffBits = sizeof(header);
+    header.infoHeader.biSize = 40;
+    header.infoHeader.biWidth = width;
+    header.infoHeader.biHeight = height;
+    header.infoHeader.biPlanes = 1;
+    header.infoHeader.biBitCount = 1;
+    header.infoHeader.biSizeImage = stride * height;
+    header.infoHeader.biClrUsed = 2;
+    header.colors[1] = {255, 255, 255, 0};
+    auto file = Storage.open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    if (!file) return false;
+    bool ok = file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header);
+    std::vector<uint8_t> row(stride, 0xff);
+    std::fill_n(row.begin(), stride / 2, 0);
+    for (int y = 0; y < height; ++y) {
+      if (pixelPattern) {
+        std::fill(row.begin(), row.end(), 0xff);
+        for (int x = 0; x < width; ++x) {
+          if (((x / 2 + (height - 1 - y) / 2) % 2) == 0) row[x / 8] &= ~(0x80 >> (x % 8));
+        }
+      }
+      ok &= file.write(row.data(), row.size()) == row.size();
+    }
+    file.close();
+    return ok;
+  }
+  static bool themeCoverFixture(const Epub& epub, const int width, const int height, const bool pixelPattern = false) {
+    return coverFixture(epub.getAdaptiveThumbBmpPath(width, height), width, height, pixelPattern);
+  }
+  static bool coverPixels(const Rect& rect) {
+    // Check every interior pixel: scaling an already dithered thumbnail merges
+    // dots and must fail even when the artwork remains inside the safe area.
+    if (rect.width <= 20 || rect.height <= 20) return false;
+    for (int y = 10; y < rect.height - 10; ++y) {
+      for (int x = 10; x < rect.width - 10; ++x) {
+        const bool black = ((x / 2 + y / 2) % 2) == 0;
+        if (renderer.isPixelBlack(rect.x + x, rect.y + y) != black) {
+          LOG_ERR("SMOKE", "Theme thumbnail was rescaled at %d,%d (%dx%d)", x, y, rect.width, rect.height);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  static bool legacyIconPixels() {
+    // Three columns stored right to left, with two bytes per nine-pixel column.
+    constexpr uint8_t icon[] = {0x7f, 0x7f, 0xf7, 0xff, 0xfe, 0xff};
+    for (int rotation = 0; rotation < 4; ++rotation) {
+      renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
+      for (bool black : {true, false}) {
+        renderer.clearScreen(black ? 0xff : 0);
+        if (black) {
+          renderer.drawIcon(icon, 13, 17, 3, 9);
+        } else {
+          renderer.drawIconInverted(icon, 13, 17, 3, 9);
+        }
+        for (int y = -1; y <= 9; ++y) {
+          for (int x = -1; x <= 3; ++x) {
+            const bool marked = (x == 2 && (y == 0 || y == 8)) || (x == 1 && y == 4) || (x == 0 && y == 7);
+            if (renderer.isPixelBlack(13 + x, 17 + y) != (marked == black)) {
+              LOG_ERR("SMOKE", "Legacy icon pixel mismatch: rotation=%d at %d,%d", rotation, x, y);
+              return false;
+            }
+          }
+        }
+      }
+    }
+    return true;
+  }
+  static bool themeArtwork(const StatusBarFeatureSmokeTest::Capture& capture) {
+    const auto originalInsets = renderer.getViewableInsets();
+    const auto originalOrientation = renderer.getOrientation();
+    const auto originalTheme = SETTINGS.uiTheme;
+    const auto originalTracking = SETTINGS.trackReadingStats;
+    bool valid = legacyIconPixels();
+    const ScreenInsets cases[] = {ScreenInsets{}, ScreenInsets{{{32, 32, 32, 32}}}, ScreenInsets{{{32, 0, 32, 32}}},
+                                  ScreenInsets{{{0, 32, 0, 0}}}};
+    RecentBook book;
+    book.path = "/books/calibration.epub";
+    book.title = "A long book title that wraps onto two lines inside the calibrated screen";
+    book.author = "An author with a long name";
+    Epub epub(book.path, "/.crosspoint");
+    Storage.mkdir(epub.getCachePath().c_str());
+    if (!themeCoverFixture(epub, MinimalMetrics::homeCoverImageWidth, MinimalMetrics::homeCoverImageHeight) ||
+        !themeCoverFixture(epub, DashboardMetrics::homeCoverImageWidth, DashboardMetrics::homeCoverImageHeight))
+      return false;
+    BookReadingStats stats{};
+    stats.totalReadingSeconds = 123456789;
+    stats.totalPagesTurned = 12345;
+    stats.sessionCount = 42;
+    GlobalReadingStats global{};
+    global.totalReadingSeconds = 123456789;
+    global.completedBooks = 12345;
+    MinimalTheme minimal;
+    DashboardTheme dashboard;
+    for (const auto theme : {CrossPointSettings::MINIMAL, CrossPointSettings::DASHBOARD}) {
+      SETTINGS.uiTheme = theme;
+      UITheme::getInstance().reload();
+      for (unsigned index = 0; index < 4; ++index) {
+        renderer.setViewableInsets(cases[index]);
+        for (unsigned rotation = 0; rotation < 4; ++rotation) {
+          renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
+          const auto check = [&](const char* screen, const bool backgroundBlack, const bool hints) {
+            const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, hints, false);
+            int ink = 0;
+            for (int y = 0; y < renderer.getScreenHeight(); ++y) {
+              for (int x = 0; x < renderer.getScreenWidth(); ++x) {
+                if (renderer.isPixelBlack(x, y) == backgroundBlack) continue;
+                ++ink;
+                if (x < safe.x || y < safe.y || x >= safe.x + safe.width || y >= safe.y + safe.height) {
+                  LOG_ERR("SMOKE", "Theme calibration: %s theme=%d case=%u rotation=%u pixel=%d,%d", screen, theme,
+                          index, rotation, x, y);
+                  return false;
+                }
+              }
+            }
+            return ink > 100;
+          };
+          const auto homeCover = theme == CrossPointSettings::DASHBOARD ? DashboardTheme::getHomeCoverRect(renderer)
+                                                                        : MinimalTheme::getHomeCoverRect(renderer);
+          const auto sleepCover = theme == CrossPointSettings::DASHBOARD ? DashboardTheme::getSleepCoverRect(renderer)
+                                                                         : MinimalTheme::getSleepCoverRect(renderer);
+          const auto statsCover = MinimalTheme::getSleepCoverRect(renderer, true);
+          if (!themeCoverFixture(epub, homeCover.width, homeCover.height, true) ||
+              !themeCoverFixture(epub, sleepCover.width, sleepCover.height, true) ||
+              (theme == CrossPointSettings::MINIMAL &&
+               !themeCoverFixture(epub, statsCover.width, statsCover.height, true)))
+            return false;
+          for (const bool tracking : {false, true}) {
+            SETTINGS.trackReadingStats = tracking;
+            uint64_t missingCoverHash = 0;
+            for (const int coverMode : {0, 1, 2}) {
+              const bool empty = coverMode == 2;
+              book.coverBmpPath = coverMode == 1 ? "/calibration-cover.bmp" : "";
+              renderer.clearScreen();
+              const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+              const auto& metrics = UITheme::getInstance().getMetrics();
+              const int top = metrics.homeTopPadding + UITheme::getHeaderRect(renderer, 0).y - metrics.topPadding;
+              bool rendered = false, stored = false, restored = false;
+              GUI.drawRecentBookCover(
+                  renderer, Rect{safe.x, top, safe.width, metrics.homeCoverTileHeight},
+                  empty ? std::vector<RecentBook>{} : std::vector<RecentBook>{book}, 0, rendered, stored, restored,
+                  [] { return false; }, &stats, 42.0f, &global, "A long chapter title that must stay above the footer");
+              valid &= check(empty ? "empty-home" : "home", false, true);
+              if (coverMode == 1) valid &= coverPixels(homeCover);
+              uint64_t hash = 1469598103934665603ull;
+              for (size_t i = 0; i < renderer.getBufferSize(); ++i)
+                hash = (hash ^ renderer.getFrameBuffer()[i]) * 1099511628211ull;
+              if (coverMode == 0) missingCoverHash = hash;
+              if (coverMode == 1 && hash == missingCoverHash) {
+                LOG_ERR("SMOKE", "Calibrated cover was replaced by its placeholder");
+                valid = false;
+              }
+              if (coverMode == 1 && tracking && rotation == 0 && index == 2)
+                capture("calibrated-home-" + std::to_string(theme));
+            }
+            book.coverBmpPath = "/calibration-cover.bmp";
+            for (const bool inverted : {false, true}) {
+              if (theme == CrossPointSettings::MINIMAL) {
+                minimal.drawSleepScreen(renderer, book, &stats, 42.0f, inverted);
+                valid &= check("minimal-sleep", !inverted, false);
+                valid &= coverPixels(sleepCover);
+                minimal.drawStatsSleepScreen(renderer, book, &stats, &global, 42.0f, inverted);
+                valid &= check("minimal-stats-sleep", !inverted, false);
+                valid &= coverPixels(statsCover);
+              } else {
+                dashboard.drawSleepScreen(renderer, book, &stats, &global, 42.0f, "Chapter title", inverted);
+                valid &= check("dashboard-sleep", !inverted, false);
+                valid &= coverPixels(sleepCover);
+              }
+              if (tracking && rotation == 0 && index == 2)
+                capture("calibrated-sleep-" + std::to_string(theme) + (inverted ? "-inverted" : ""));
+              if (tracking && !inverted && index == 2 &&
+                  ((theme == CrossPointSettings::MINIMAL && gpio.deviceIsX3() && rotation == 3) ||
+                   (theme == CrossPointSettings::DASHBOARD && rotation == 2)))
+                capture("calibrated-sleep-rotated-" + std::to_string(theme));
+            }
+          }
+        }
+      }
+      // Home can remain alive while its drawer opens Settings. Restoring its
+      // retained cover after a stats toggle must equal a completely fresh draw.
+      renderer.setOrientation(GfxRenderer::Portrait);
+      renderer.setViewableInsets(cases[2]);
+      const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int top = metrics.homeTopPadding + UITheme::getHeaderRect(renderer, 0).y - metrics.topPadding;
+      const Rect content{safe.x, top, safe.width, metrics.homeCoverTileHeight};
+      const auto cover = theme == CrossPointSettings::DASHBOARD ? DashboardTheme::getHomeCoverRect(renderer)
+                                                                : MinimalTheme::getHomeCoverRect(renderer);
+      if (!themeCoverFixture(epub, cover.width, cover.height, true)) return false;
+      std::vector<uint8_t> coverBuffer(renderer.getBufferSize());
+      bool rendered = false, stored = false, restored = false;
+      SETTINGS.trackReadingStats = false;
+      renderer.clearScreen();
+      GUI.drawRecentBookCover(
+          renderer, content, {book}, 0, rendered, stored, restored,
+          [&] {
+            std::copy_n(renderer.getFrameBuffer(), coverBuffer.size(), coverBuffer.data());
+            return true;
+          },
+          &stats, 42.0f, &global, "Chapter title");
+      SETTINGS.trackReadingStats = true;
+      std::copy(coverBuffer.begin(), coverBuffer.end(), renderer.getFrameBuffer());
+      restored = true;
+      GUI.drawRecentBookCover(
+          renderer, content, {book}, 0, rendered, stored, restored, [] { return false; }, &stats, 42.0f, &global,
+          "Chapter title");
+      const std::vector<uint8_t> cached(renderer.getFrameBuffer(),
+                                        renderer.getFrameBuffer() + renderer.getBufferSize());
+      renderer.clearScreen();
+      rendered = stored = restored = false;
+      GUI.drawRecentBookCover(
+          renderer, content, {book}, 0, rendered, stored, restored, [] { return false; }, &stats, 42.0f, &global,
+          "Chapter title");
+      if (!std::equal(cached.begin(), cached.end(), renderer.getFrameBuffer())) {
+        LOG_ERR("SMOKE", "Stats toggle retained stale Home artwork for theme %d", theme);
+        valid = false;
+      }
+    }
+    SETTINGS.uiTheme = originalTheme;
+    SETTINGS.trackReadingStats = originalTracking;
+    UITheme::getInstance().reload();
+    renderer.setViewableInsets(originalInsets);
+    renderer.setOrientation(originalOrientation);
+    return valid;
+  }
+
+  static bool thumbnailFits(const std::string& path, const Rect& cover) {
+    FsFile file;
+    if (!Storage.openFileForRead("SMOKE", path, file)) return false;
+    Bitmap bitmap(file);
+    const bool valid = bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.is1Bit() &&
+                       bitmap.getWidth() <= cover.width && bitmap.getHeight() <= cover.height &&
+                       (bitmap.getWidth() == cover.width || bitmap.getHeight() == cover.height);
+    file.close();
+    return valid;
+  }
+
+  static bool themeCoverGeneration(const StatusBarFeatureSmokeTest::Capture& capture) {
+    RecentBook book;
+    book.path = std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK");
+    Epub epub(book.path, "/.crosspoint");
+    if (!epub.load(true, true, Epub::XLocationLoadMode::Skip) || !epub.hasCoverImage()) return false;
+    book.coverBmpPath = epub.getThumbBmpPath();
+    HomeActivity home(renderer, mappedInputManager);
+    home.recentBooks = {book};
+    for (const auto theme : {CrossPointSettings::MINIMAL, CrossPointSettings::DASHBOARD}) {
+      SETTINGS.uiTheme = theme;
+      UITheme::getInstance().reload();
+      const bool dashboard = theme == CrossPointSettings::DASHBOARD;
+      for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::LandscapeClockwise}) {
+        renderer.setOrientation(orientation);
+        renderer.setViewableInsets(ScreenInsets{{{32, 0, 32, 32}}});
+        const auto cover =
+            dashboard ? DashboardTheme::getHomeCoverRect(renderer) : MinimalTheme::getHomeCoverRect(renderer);
+        const auto path = epub.getAdaptiveThumbBmpPath(cover.width, cover.height);
+        Storage.remove(path.c_str());
+        const auto& metrics = UITheme::getInstance().getMetrics();
+        home.loadRecentCovers(metrics.homeCoverHeight);
+        if (!thumbnailFits(path, cover)) return false;
+        bool rendered = false, stored = false, restored = false;
+        const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+        const int top = metrics.homeTopPadding + UITheme::getHeaderRect(renderer, 0).y - metrics.topPadding;
+        renderer.clearScreen();
+        GUI.drawRecentBookCover(renderer, Rect{safe.x, top, safe.width, metrics.homeCoverTileHeight}, {book}, 0,
+                                rendered, stored, restored, [] { return false; });
+        capture(std::string(dashboard ? "dashboard" : "minimal") + "-generated-" +
+                (orientation == GfxRenderer::Portrait ? "portrait" : "landscape"));
+        // Sleep and Stats Sleep can reserve different amounts of space.
+        if (dashboard) {
+          const auto sleep = DashboardTheme::getSleepCoverRect(renderer);
+          if (!SleepCoverAssets::prepareDashboardCoverForPath(book.path, renderer) ||
+              SleepCoverAssets::cachedDashboardCoverPathFor(book.path, renderer).empty() ||
+              !thumbnailFits(epub.getAdaptiveThumbBmpPath(sleep.width, sleep.height), sleep))
+            return false;
+        } else {
+          for (const bool statsSleep : {false, true}) {
+            const auto sleep = MinimalTheme::getSleepCoverRect(renderer, statsSleep);
+            if (!SleepCoverAssets::prepareMinimalCoverForPath(book.path, renderer, statsSleep) ||
+                SleepCoverAssets::cachedMinimalCoverPathFor(book.path, renderer, statsSleep).empty() ||
+                !thumbnailFits(epub.getAdaptiveThumbBmpPath(sleep.width, sleep.height), sleep))
+              return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  static bool legacyXtcThumbnails() {
+    constexpr uint16_t width = 16, height = 24;
+    constexpr uint32_t bytes = width / 8 * height;
+    xtc::XtcHeader header{};
+    header.magic = xtc::XTC_MAGIC;
+    header.versionMajor = 1;
+    header.pageCount = 1;
+    header.pageTableOffset = sizeof(header);
+    header.dataOffset = sizeof(header) + sizeof(xtc::PageTableEntry);
+    const xtc::PageTableEntry entry{header.dataOffset, static_cast<uint32_t>(sizeof(xtc::XtgPageHeader)) + bytes, width,
+                                    height};
+    const xtc::XtgPageHeader page{xtc::XTG_MAGIC, width, height, 0, 0, bytes, 0};
+    uint8_t pixels[bytes];
+    std::fill_n(pixels, bytes, 0xff);
+    const std::string bookPath = "/books/theme-cover.xtc";
+    auto file = Storage.open(bookPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    if (!file) return false;
+    bool written = file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header);
+    written &= file.write(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry)) == sizeof(entry);
+    written &= file.write(reinterpret_cast<const uint8_t*>(&page), sizeof(page)) == sizeof(page);
+    written &= file.write(pixels, bytes) == bytes;
+    file.close();
+    Xtc xtc(bookPath, "/.crosspoint");
+    if (!written || !xtc.load()) return false;
+    RecentBook book;
+    book.path = bookPath;
+    book.title = "Legacy thumbnail";
+    book.coverBmpPath = xtc.getThumbBmpPath();
+    Storage.mkdir(book.coverBmpPath.substr(0, book.coverBmpPath.find_last_of('/')).c_str());
+    renderer.setOrientation(GfxRenderer::LandscapeClockwise);
+    renderer.setViewableInsets(ScreenInsets{{{32, 0, 32, 32}}});
+    for (const auto theme : {CrossPointSettings::MINIMAL, CrossPointSettings::DASHBOARD}) {
+      SETTINGS.uiTheme = theme;
+      UITheme::getInstance().reload();
+      const bool dashboard = theme == CrossPointSettings::DASHBOARD;
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const auto cover =
+          dashboard ? DashboardTheme::getHomeCoverRect(renderer) : MinimalTheme::getHomeCoverRect(renderer);
+      const auto exact = xtc.getThumbBmpPath(cover.width, cover.height);
+      std::string legacy = xtc.getThumbBmpPath();
+      legacy.replace(legacy.find("[HEIGHT]"), 8, std::to_string(cover.height));
+      Storage.remove(exact.c_str());
+      if (!coverFixture(legacy, cover.width + 32, cover.height, true)) return false;
+      // Without a correctly sized cache, legacy artwork must not replace the
+      // normal placeholder. Compare complete renders with/without a cache path.
+      const auto drawHome = [&](const bool withPath) {
+        RecentBook recent = book;
+        if (!withPath) recent.coverBmpPath.clear();
+        bool rendered = false, stored = false, restored = false;
+        const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+        const int top = metrics.homeTopPadding + UITheme::getHeaderRect(renderer, 0).y - metrics.topPadding;
+        renderer.clearScreen();
+        GUI.drawRecentBookCover(renderer, Rect{safe.x, top, safe.width, metrics.homeCoverTileHeight}, {recent}, 0,
+                                rendered, stored, restored, [] { return false; });
+      };
+      drawHome(false);
+      const std::vector<uint8_t> missing(renderer.getFrameBuffer(),
+                                         renderer.getFrameBuffer() + renderer.getBufferSize());
+      drawHome(true);
+      if (!std::equal(missing.begin(), missing.end(), renderer.getFrameBuffer())) return false;
+      HomeActivity home(renderer, mappedInputManager);
+      home.recentBooks = {book};
+      home.loadRecentCovers(metrics.homeCoverHeight);
+      if (!thumbnailFits(exact, cover)) return false;
+      for (const bool statsSleep : {false, true}) {
+        if (dashboard && statsSleep) continue;
+        const auto sleep = dashboard ? DashboardTheme::getSleepCoverRect(renderer)
+                                     : MinimalTheme::getSleepCoverRect(renderer, statsSleep);
+        const auto sleepExact = xtc.getThumbBmpPath(sleep.width, sleep.height);
+        legacy = xtc.getThumbBmpPath();
+        legacy.replace(legacy.find("[HEIGHT]"), 8, std::to_string(sleep.height));
+        Storage.remove(sleepExact.c_str());
+        if (!coverFixture(legacy, sleep.width + 32, sleep.height, true)) return false;
+        const auto cached = dashboard ? SleepCoverAssets::cachedDashboardCoverPathFor(bookPath, renderer)
+                                      : SleepCoverAssets::cachedMinimalCoverPathFor(bookPath, renderer, statsSleep);
+        if (!cached.empty()) return false;
+        const bool prepared = dashboard ? SleepCoverAssets::prepareDashboardCoverForPath(bookPath, renderer)
+                                        : SleepCoverAssets::prepareMinimalCoverForPath(bookPath, renderer, statsSleep);
+        if (!prepared || !thumbnailFits(sleepExact, sleep)) return false;
+      }
+    }
+    LOG_INF("SMOKE", "Minimal/Dashboard XTC legacy cache regeneration passed");
+    return true;
+  }
+
+  static bool dictionaryHints(RenderLock& lock, const StatusBarFeatureSmokeTest::Capture& capture) {
+    const auto orientation = renderer.getOrientation();
+    const auto insets = renderer.getViewableInsets();
+    const auto theme = SETTINGS.uiTheme;
+    bool valid = true;
+    renderer.setViewableInsets(ScreenInsets{});
+    for (const auto variant : {CrossPointSettings::CLASSIC, CrossPointSettings::LYRA, CrossPointSettings::MINIMAL}) {
+      SETTINGS.uiTheme = variant;
+      UITheme::getInstance().reload();
+      for (unsigned rotation = 0; rotation < 4; ++rotation) {
+        renderer.setOrientation(GfxRenderer::Portrait);
+        const int x = variant == CrossPointSettings::CLASSIC ? (renderer.getScreenWidth() >= 528 ? 43 : 30)
+                                                             : (renderer.getScreenWidth() >= 528 ? 70 : 63);
+        const int y = renderer.getScreenHeight() - UITheme::getButtonHintsBottomInset(renderer) - 30;
+        renderer.clearScreen();
+        renderer.fillRect(x, y, 2, 2);
+        renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
+        GUI.drawButtonHints(renderer, "", nullptr, nullptr, nullptr);
+        valid &= renderer.getOrientation() == static_cast<GfxRenderer::Orientation>(rotation);
+        renderer.setOrientation(GfxRenderer::Portrait);
+        valid &= renderer.isPixelBlack(x, y);  // Above the inactive marker, inside the old full-size clear.
+      }
+
+      // Exercise both entry paths with a real selectable word and ink between the hints.
+      for (const bool prepared : {false, true}) {
+        auto page = std::make_unique<Page>();
+        auto block = std::make_shared<TextBlock>(
+            std::vector<std::string>{"Reader", "text"}, std::vector<int16_t>{0, 120},
+            std::vector<EpdFontFamily::Style>{EpdFontFamily::REGULAR, EpdFontFamily::REGULAR}, std::vector<uint8_t>{},
+            std::vector<uint16_t>{}, std::vector<uint16_t>{}, std::vector<uint8_t>{}, std::vector<bool>{false, true});
+        for (int y = 40; y < renderer.getScreenHeight() - 20; y += 36)
+          page->elements.push_back(std::make_unique<PageLine>(block, 20, y));
+        const int sentinelY = renderer.getScreenHeight() - 30;
+        page->elements.push_back(std::make_unique<PageHorizontalRule>(20, 1, 0, sentinelY));
+        auto selection = std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInputManager, std::move(page),
+                                                                        0, 0, "", "", false, prepared);
+        if (!selection->buildWorkingSet(false) || selection->navigator.isEmpty()) return false;
+        if (prepared) selection->renderDefinitionBackground();
+        selection->render(std::move(lock));
+        valid &= renderer.isPixelBlack(5, sentinelY);
+        capture("dictionary-selection-theme-" + std::to_string(variant) + (prepared ? "-prepared" : "-full"));
+        selection->onExit();
+      }
+
+      // Returning from selection must restore old full-size labels from the book,
+      // rather than letting an inactive marker erase an oversized white rectangle.
+      const char* path = "/.crosspoint/hints-dictionary";
+      constexpr char definitionText[] = "Reader text remains visible around the hints.";
+      if (!Storage.writeFile("/.crosspoint/hints-dictionary.dict", definitionText) ||
+          !Storage.writeFile("/.crosspoint/hints-dictionary.ifo",
+                             "StarDict's dict ifo file\nbookname=Hints\nsametypesequence=m\n"))
+        return false;
+      DictLocation location;
+      location.folderPath = path;
+      location.size = sizeof(definitionText) - 1;
+      location.found = true;
+      int redraws = 0;
+      const auto background = [](void* context) {
+        ++*static_cast<int*>(context);
+        renderer.clearScreen();
+        for (int y = 0; y < renderer.getScreenHeight(); y += 32)
+          renderer.drawText(UI_10_FONT_ID, 4, y, "Reader text visible around dictionary hints");
+      };
+      auto definition = std::make_unique<DictionaryDefinitionActivity>(
+          renderer, mappedInputManager, "Reader", location, false, "", false, "", LookupHistory::Status::NotFound,
+          &redraws, background);
+      definition->onEnter();
+      definition->render(std::move(lock));
+      const std::vector<uint8_t> initial(renderer.getFrameBuffer(),
+                                         renderer.getFrameBuffer() + renderer.getBufferSize());
+      if (!definition->enterWordSelectMode()) return false;
+      definition->render(std::move(lock));
+      definition->isWordSelectMode = false;
+      definition->render(std::move(lock));
+      valid &= redraws == 2 && std::equal(initial.begin(), initial.end(), renderer.getFrameBuffer());
+      capture("dictionary-inactive-hints-theme-" + std::to_string(variant));
+      definition->onExit();
+    }
+    SETTINGS.uiTheme = theme;
+    UITheme::getInstance().reload();
+    renderer.setViewableInsets(insets);
+    renderer.setOrientation(orientation);
+    return valid;
+  }
   // Check actual ink, not just layout metadata, across the default/custom boundary.
   static bool safeAreaContract(RenderLock& lock, const StatusBarFeatureSmokeTest::Capture& capture) {
     const auto original = renderer.getViewableInsets();
     const auto orientation = renderer.getOrientation();
     const auto theme = SETTINGS.uiTheme;
     const ScreenInsets cases[] = {ScreenInsets{}, ScreenInsets{{{9, 3, 3, 3}}}, ScreenInsets{{{32, 32, 32, 32}}},
-                                  ScreenInsets{{{21, 7, 32, 13}}}};
+                                  ScreenInsets{{{21, 7, 32, 13}}}, ScreenInsets{{{16, 8, 16, 8}}}};
     std::string definition;
     for (int i = 0; i < 60; ++i) {
       definition +=
@@ -1267,7 +2254,7 @@ struct ScreenCalibrationSmokeTest {
     for (int variant = 0; variant < CrossPointSettings::UI_THEME_COUNT; ++variant) {
       SETTINGS.uiTheme = variant;
       UITheme::getInstance().reload();
-      for (unsigned index = 0; index < 4; ++index) {
+      for (unsigned index = 0; index < std::size(cases); ++index) {
         renderer.setViewableInsets(cases[index]);
         for (unsigned rotation = 0; rotation < 4; ++rotation) {
           renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
@@ -1276,8 +2263,29 @@ struct ScreenCalibrationSmokeTest {
           valid &= safe.x >= edges[3] && safe.y >= edges[0] &&
                    safe.x + safe.width <= renderer.getScreenWidth() - edges[1] &&
                    safe.y + safe.height <= renderer.getScreenHeight() - edges[2];
-          const auto checkInk = [&](const char* screen) {
+          const auto& metrics = UITheme::getInstance().getMetrics();
+          const auto headerBand =
+              UITheme::getHeaderRect(renderer, std::max(metrics.headerHeight, CompactHeader::height(metrics)));
+          const auto solidRow = [&](int y, int left, int right) {
+            for (int x = left; x < right; ++x) {
+              if (!renderer.isPixelBlack(x, y)) return false;
+            }
+            return true;
+          };
+          const auto checkInkInHeader = [&](const char* screen, const Rect& screenHeaderBand, bool frontHints) {
+            // Landscape button hints paint over the separator at one end. Its
+            // entire uncovered span must still be solid to qualify as header bleed.
+            const int reserve =
+                frontHints && !mappedInputManager.hasTouchHardware() ? UITheme::getButtonHintsReserve(renderer) : 0;
+            const int left = rotation == GfxRenderer::LandscapeClockwise ? reserve : 0;
+            const int right =
+                renderer.getScreenWidth() - (rotation == GfxRenderer::LandscapeCounterClockwise ? reserve : 0);
             for (int y = 0; y < renderer.getScreenHeight(); ++y) {
+              // Only solid header separators may cross the horizontal safe
+              // margins. Text, controls and the remaining UI stay inset.
+              if (y >= screenHeaderBand.y && y < screenHeaderBand.y + screenHeaderBand.height &&
+                  solidRow(y, left, right))
+                continue;
               for (int x = 0; x < renderer.getScreenWidth(); ++x) {
                 if (renderer.isPixelBlack(x, y) &&
                     (x < edges[3] || y < edges[0] || x >= renderer.getScreenWidth() - edges[1] ||
@@ -1290,10 +2298,25 @@ struct ScreenCalibrationSmokeTest {
             }
             return true;
           };
+          const auto checkInk = [&](const char* screen) { return checkInkInHeader(screen, headerBand, false); };
+          renderer.clearScreen();
+          const auto titleHeader = UITheme::getHeaderRect(renderer, metrics.headerHeight);
+          GUI.drawHeader(renderer, titleHeader, "Calibration header", nullptr, false, false);
+          bool separatorSpansScreen = false;
+          for (int y = titleHeader.y + titleHeader.height - 4; y < titleHeader.y + titleHeader.height; ++y) {
+            separatorSpansScreen |= solidRow(y, 0, renderer.getScreenWidth());
+          }
+          const bool hasSeparator = metrics.headerUnderlineSize > 0 || variant == CrossPointSettings::MINIMAL ||
+                                    variant == CrossPointSettings::DASHBOARD;
+          valid &= (!hasSeparator || separatorSpansScreen) && checkInk("Header content");
+          if (index == std::size(cases) - 1) {
+            capture("header-a4-theme-" + std::to_string(variant) + "-rotation-" + std::to_string(rotation));
+          }
           auto list = std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInputManager, entries);
           list->onEnter();
           list->render(std::move(lock));
-          valid &= checkInk("Footnotes");
+          valid &= checkInkInHeader("Footnotes", TouchHeaderBackButton::headerRect(renderer, mappedInputManager, safe),
+                                    true);
           const auto deviceSafe = list->app.device().safeRect();
           valid &= deviceSafe.x == edges[3] && deviceSafe.y == edges[0];
           list->onExit();
@@ -1386,7 +2409,7 @@ struct ScreenCalibrationSmokeTest {
     renderer.setOrientation(orientation);
     SETTINGS.uiTheme = theme;
     UITheme::getInstance().reload();
-    LOG_INF("SMOKE", "Calibration default/legacy/maximum/asymmetric UI matrix: %s", valid ? "passed" : "failed");
+    LOG_INF("SMOKE", "Calibration default/legacy/maximum/asymmetric/A4 UI matrix: %s", valid ? "passed" : "failed");
     return valid;
   }
   static bool geometry(RenderLock& lock, const StatusBarFeatureSmokeTest::Capture& capture) {
@@ -1493,6 +2516,169 @@ struct ScreenCalibrationSmokeTest {
     return valid;
   }
   // Every screen must draw the clock/battery bar on the reader's calibrated row, whichever header rect it passes.
+  static bool calibrationEditor(RenderLock& lock, const StatusBarFeatureSmokeTest::Capture& capture) {
+    const auto saved = renderer.getViewableInsets();
+    auto editor = makeUniqueNoThrow<ScreenCalibrationActivity>(renderer, mappedInputManager);
+    if (!editor) return false;
+    editor->onEnter();
+    bool valid = true;
+    const auto device = editor->uiTarget.deviceContext();
+    for (int height : {768, 800, 960}) {
+      auto sized = device;
+      sized.height = height;
+      sized.safeArea = freeink::ui::Insets{48, 48, 48, 48};
+      editor->app.setDevice(sized);
+      editor->selected = 4;
+      editor->draft = ScreenInsets{{{16, 8, 16, 8}}};
+      editor->render(std::move(lock));
+      std::array<freeink::ui::Rect, 21> hits{};
+      std::array<bool, 21> seen{};
+      for (int y = 0; y < height; y += 2)
+        for (int x = 0; x < renderer.getScreenWidth(); x += 2) {
+          freeink::ui::Interaction hit;
+          if (!editor->simulatorHit(x, y, hit)) continue;
+          if (hit.value < 0 || hit.value >= 21) {
+            valid = false;
+            continue;
+          }
+          seen[hit.value] = true;
+          hits[hit.value] = hit.rect;
+        }
+      for (int i = 0; i < 21; ++i) {
+        valid &= seen[i] && hits[i].y >= 48 && hits[i].bottom() <= height - 48;
+        if (mappedInputManager.hasTouch()) valid &= hits[i].height >= 48;
+      }
+      for (int row = 0; row < 5; ++row) {
+        valid &= hits[9 + row].bottom() + 10 <= hits[10 + row].y;
+        freeink::ui::Interaction hit;
+        valid &= !editor->simulatorHit(hits[9 + row].x + 4, hits[9 + row].bottom() + 4, hit);
+      }
+      valid &= renderer.getViewableInsets() == saved;
+    }
+    auto restored = device;
+    restored.safeArea = freeink::ui::Insets{48, 48, 48, 48};
+    editor->app.setDevice(restored);
+    for (int selected : {0, 4, 5}) {
+      editor->selected = selected;
+      editor->editing = true;
+      editor->draft.cornerInsets = {{64, 64}};
+      editor->render(std::move(lock));
+      valid &= renderer.getViewableInsets() == saved;
+      capture("calibration-redesign-row-" + std::to_string(selected));
+    }
+    editor->onExit();
+    LOG_INF("SMOKE", "Calibration responsive controls, row gaps and draft preview isolation: %s",
+            valid ? "passed" : "failed");
+    return valid;
+  }
+  static bool coverGridCorners(const StatusBarFeatureSmokeTest::Capture& capture) {
+    const auto original = renderer.getViewableInsets();
+    const auto orientation = renderer.getOrientation();
+    const auto originalTheme = SETTINGS.uiTheme;
+    SETTINGS.uiTheme = CrossPointSettings::COVER_GRID;
+    UITheme::getInstance().reload();
+    bool valid = true;
+    for (const bool empty : {false, true}) {
+      std::vector<RecentBook> books(empty ? 0 : CoverGridHomeUi::MAX_BOOKS);
+      for (auto& book : books) {
+        book.title = "Corner calibration";
+        book.author = "Book rows keep their width";
+      }
+      auto ui = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
+      if (!ui) return false;
+      ui->begin(books, true, !empty, 35);
+      for (unsigned rotation = 0; rotation < 4; ++rotation) {
+        renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
+        std::array<freeink::ui::Rect, CoverGridHomeUi::MAX_BOOKS + 5> baseline{};
+        for (const auto& corners : {std::array<uint8_t, 2>{{0, 0}}, std::array<uint8_t, 2>{{96, 0}},
+                                    std::array<uint8_t, 2>{{0, 96}}, std::array<uint8_t, 2>{{96, 96}}}) {
+          ScreenInsets insets{{{16, 8, 16, 8}}};
+          insets.cornerInsets = corners;
+          renderer.setViewableInsets(insets);
+          renderer.clearScreen();
+          ui->render();
+          std::array<bool, CoverGridHomeUi::MAX_BOOKS + 5> seen{};
+          const bool initial = corners[0] == 0 && corners[1] == 0;
+          const auto rotated = insets.corners(rotation);
+          for (int y = 0; y < renderer.getScreenHeight(); y += 4) {
+            for (int x = 0; x < renderer.getScreenWidth(); x += 4) {
+              freeink::ui::Interaction hit;
+              if (!ui->app.hitPublished(x, y, 1, hit)) continue;
+              if (hit.value < 0 || hit.value >= static_cast<int>(books.size() + 5)) {
+                valid = false;
+                continue;
+              }
+              if (seen[hit.value]) continue;
+              seen[hit.value] = true;
+              if (initial) baseline[hit.value] = hit.rect;
+              const auto& before = baseline[hit.value];
+              if (hit.value < static_cast<int>(books.size())) {
+                valid &= hit.rect.x == before.x && hit.rect.y == before.y && hit.rect.width == before.width &&
+                         hit.rect.height == before.height;
+              } else {
+                valid &= hit.rect.x >= rotated[3] && hit.rect.right() <= renderer.getScreenWidth() - rotated[2];
+                valid &= hit.rect.y == before.y && hit.rect.height == before.height;
+              }
+            }
+          }
+          for (size_t i = 0; i < books.size() + 5; ++i) valid &= seen[i];
+          capture(std::string("cover-grid-corners-") + (empty ? "empty-" : "books-") + std::to_string(rotation) + "-" +
+                  std::to_string(corners[0]) + "-" + std::to_string(corners[1]));
+        }
+      }
+    }
+    renderer.setViewableInsets(original);
+    renderer.setOrientation(orientation);
+    SETTINGS.uiTheme = originalTheme;
+    UITheme::getInstance().reload();
+    LOG_INF("SMOKE", "Cover Grid corner clearance preserves book bounds and protects tab targets: %s",
+            valid ? "passed" : "failed");
+    return valid;
+  }
+  static bool cornerClearance(const StatusBarFeatureSmokeTest::Capture& capture) {
+    const auto original = renderer.getViewableInsets();
+    const auto orientation = renderer.getOrientation();
+    bool valid = true;
+    ReaderStatusBarConfig config;
+    config.slots[ReaderStatusBarConfig::LEFT_FIRST] = ReaderStatusBarItem::Clock;
+    config.slots[ReaderStatusBarConfig::RIGHT_FIRST] = ReaderStatusBarItem::Battery;
+    ReaderStatusBarContent content;
+    content.previewClock = "12:34";
+    content.batteryPercentage = 75;
+    ScreenInsets insets{{{16, 8, 16, 8}}};
+    for (unsigned rotation = 0; rotation < 4; ++rotation) {
+      renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
+      for (const auto position : {ReaderStatusBarPosition::Top, ReaderStatusBarPosition::Bottom}) {
+        std::array<int, 4> before{};
+        for (const bool custom : {false, true}) {
+          insets.cornerInsets = custom ? std::array<uint8_t, 2>{{80, 56}} : std::array<uint8_t, 2>{{24, 40}};
+          renderer.setViewableInsets(insets);
+          renderer.clearScreen();
+          GUI.drawReaderStatusBar(renderer, position, content, &config);
+          std::array<int, 4> bounds{{renderer.getScreenWidth(), renderer.getScreenHeight(), -1, -1}};
+          for (int y = 0; y < renderer.getScreenHeight(); ++y)
+            for (int x = 0; x < renderer.getScreenWidth(); ++x)
+              if (renderer.isPixelBlack(x, y)) {
+                bounds[0] = std::min(bounds[0], x);
+                bounds[1] = std::min(bounds[1], y);
+                bounds[2] = std::max(bounds[2], x);
+                bounds[3] = std::max(bounds[3], y);
+              }
+          if (!custom)
+            before = bounds;
+          else
+            valid &= bounds[0] > before[0] && bounds[2] < before[2] && bounds[1] == before[1] && bounds[3] == before[3];
+          capture(std::string("calibration-corners-") +
+                  (position == ReaderStatusBarPosition::Top ? "top-" : "bottom-") + (custom ? "custom-" : "default-") +
+                  std::to_string(rotation));
+        }
+      }
+    }
+    renderer.setViewableInsets(original);
+    renderer.setOrientation(orientation);
+    LOG_INF("SMOKE", "Corner clearance moves bar items horizontally only: %s", valid ? "passed" : "failed");
+    return valid;
+  }
   static bool statusBarOrigin(RenderLock& lock) {
     const auto original = renderer.getViewableInsets();
     const auto orientation = renderer.getOrientation();
@@ -1775,6 +2961,32 @@ int ScreenCalibrationSmokeTest::epubWidth = 0;
 
 struct ReaderMenuOrientationSmokeTest {
   template <typename Reader>
+  static bool resetCounter(Reader& reader, const std::string& cache) {
+    if (!Storage.ensureDirectoryExists(cache.c_str())) return false;
+    reader.stats = BookReadingStats::load(cache);
+    reader.stats.totalReadingSeconds = 3600;
+    if (!reader.stats.save(cache) || !BookReadingStats::remove(cache)) return false;
+    const auto reset = BookReadingStats::load(cache);
+    if (reset.counterId.bytes == StatsCounterId{}.bytes) return false;
+    reader.resetCurrentBookStatsAfterDelete();
+    if (reader.stats.totalReadingSeconds != 0 || reader.stats.counterId.bytes != reset.counterId.bytes) return false;
+    reader.stats.totalReadingSeconds = 60;
+    if (!reader.stats.save(cache)) return false;
+    const auto saved = BookReadingStats::load(cache);
+    return saved.totalReadingSeconds == 60 && saved.counterId.bytes == reset.counterId.bytes;
+  }
+  static bool resetCounters() {
+    auto epub = std::make_unique<Epub>("/books/counter.epub", "/.crosspoint");
+    const auto epubCache = epub->getCachePath();
+    EpubReaderActivity epubReader(renderer, mappedInputManager, std::move(epub),
+                                  EpubReaderActivity::BookReaderSettingsData{}, 1);
+    if (!resetCounter(epubReader, epubCache)) return false;
+    auto xtc = std::make_unique<Xtc>("/books/counter.xtc", "/.crosspoint");
+    const auto xtcCache = xtc->getCachePath();
+    XtcReaderActivity xtcReader(renderer, mappedInputManager, std::move(xtc), 1);
+    return resetCounter(xtcReader, xtcCache);
+  }
+  template <typename Reader>
   static OptionPopup& popup(Reader& reader) {
     return reader.quickActionsPopup;
   }
@@ -1990,6 +3202,10 @@ class SimulatorSmokeTest {
     if (!enabled()) return;
 
     try {
+      if (std::getenv("CROSSINK_SIMULATOR_SMOKE_TOUCH_AVAILABILITY")) {
+        tickTouchAvailability();
+        return;
+      }
       static bool checkedSpaces = false;
       if (!checkedSpaces && std::getenv("CROSSINK_SIMULATOR_SMOKE_UNICODE_SPACES")) {
         checkedSpaces = true;
@@ -2004,6 +3220,148 @@ class SimulatorSmokeTest {
   }
 
  private:
+  void tickTouchAvailability() {
+#if CROSSINK_APP_CAP_TOUCH
+    // Change the simulated hardware readiness without navigation or input.
+    // Exercise the real Home render and activity loop, as with EEGO's async init.
+    struct TouchAvailabilityHome : Activity {
+      HomeActivity home{::renderer, mappedInputManager};
+      unsigned renders = 0;
+      bool renderedTouch = false;
+      TouchAvailabilityHome() : Activity("Home", ::renderer, mappedInputManager) {}
+      bool isHomeActivity() const override { return true; }
+      void onEnter() override { home.onEnter(); }
+      void onExit() override { home.onExit(); }
+      void render(RenderLock&& lock) override {
+        ++renders;
+        renderedTouch = mappedInputManager.hasTouchHardware();
+        home.render(std::move(lock));
+      }
+    };
+    static TouchAvailabilityHome* home = nullptr;
+    static unsigned phase = 0;
+    static unsigned priorRenders = 0;
+    static unsigned stableTicks = 0;
+    static unsigned long started = millis();
+    if (millis() - started > 15000) fail("Touch availability did not refresh Home");
+    if (phase == 0) {
+      {
+        RenderLock lock;
+        SETTINGS.uiTheme = CrossPointSettings::UI_THEME::DASHBOARD;
+        UITheme::getInstance().reload();
+        BoardConfig::selectDevice(BoardConfig::Board::XteinkX4);
+      }
+      auto activity = std::make_unique<TouchAvailabilityHome>();
+      home = activity.get();
+      activityManager.replaceActivity(std::move(activity));
+      ++phase;
+      return;
+    }
+    RenderLock lock;
+    if (phase == 1) {
+      if (!home->renders || home->renderedTouch) return;
+      if (UITheme::getInstance().getMetrics().buttonHintsHeight <= 0) fail("Missing button fallback");
+      captureStatusBarScreen("dashboard-touch-starting");
+      priorRenders = home->renders;
+      BoardConfig::selectDevice(BoardConfig::Board::Sticky);
+      ++phase;
+    } else if (phase == 2) {
+      if (home->renders == priorRenders || !home->renderedTouch) return;
+      if (UITheme::getInstance().getMetrics().buttonHintsHeight != 0) fail("Touch retained hint space");
+      captureStatusBarScreen("dashboard-touch-ready");
+      priorRenders = home->renders;
+      ++phase;
+    } else if (phase == 3) {
+      if (home->renders != priorRenders) fail("Unchanged touch readiness repeated a render");
+      if (++stableTicks < 5) return;
+      BoardConfig::selectDevice(BoardConfig::Board::XteinkX4);
+      ++phase;
+    } else {
+      if (home->renders == priorRenders || home->renderedTouch) return;
+      captureStatusBarScreen("dashboard-touch-unavailable");
+      LOG_INF("SMOKE", "Simulator smoke test passed: touch availability refresh and button fallback");
+      std::_Exit(0);
+    }
+#else
+    fail("Touch availability regression requires a touch simulator");
+#endif
+  }
+
+  static void verifyFrontlightTouchRecovery() {
+#if CROSSINK_APP_CAP_TOUCH
+    if (!deviceUsesGlobalTouchscreenLock()) fail("Touch recovery regression requires the Picco touch-lock policy");
+    for (const bool reader : {false, true}) {
+      for (const bool inheritedRecovery : {false, true}) {
+        SETTINGS.disableReaderTouchscreen = 0;
+        mappedInputManager.setReaderMode(reader);
+        mappedInputManager.setTouchscreenRecoveryOverride(inheritedRecovery);
+        auto panel = std::make_unique<FrontlightPanelActivity>(renderer, mappedInputManager);
+        panel->onEnter();
+        if (!reader && !inheritedRecovery) {
+          activityManager.requestUpdateAndWait();
+          RenderLock lock;
+          panel->render(std::move(lock));
+        }
+        panel->simulatorActivateQuickAction(4);
+        if (!reader && !inheritedRecovery) {
+          RenderLock lock;
+          captureStatusBarScreen("picco-touch-disabled-recovery-hint");
+        }
+        if (!SETTINGS.disableReaderTouchscreen || !mappedInputManager.hasTouch())
+          fail("Frontlight panel lost touch after disabling it");
+        mappedInputManager.simulatorInjectTouchDown(100, 100);
+        mappedInputManager.simulatorInjectTouchRelease(100, 100);
+        int x = 0, y = 0;
+        if (!mappedInputManager.wasScreenTapped(x, y)) fail("Frontlight recovery blocked a real touch event");
+        mappedInputManager.simulatorClearInputFrame();
+        panel->simulatorActivateQuickAction(4);
+        if (SETTINGS.disableReaderTouchscreen) fail("Frontlight panel could not re-enable touch");
+        panel->simulatorActivateQuickAction(4);
+        panel->onExit();
+        if (!SETTINGS.disableReaderTouchscreen || mappedInputManager.hasTouch() != inheritedRecovery ||
+            mappedInputManager.isTouchscreenRecoveryOverrideEnabled() != inheritedRecovery)
+          fail("Frontlight panel did not restore the outer touch-lock state");
+      }
+    }
+    mappedInputManager.setReaderMode(false);
+    mappedInputManager.setTouchscreenRecoveryOverride(false);
+    using Action = ButtonShortcutController::ChordAction;
+    using Event = ButtonShortcutController::Event;
+    for (const auto action : {Action::Disabled, Action::RotateFlip, Action::ToggleTouchscreen}) {
+      for (const bool releaseUpFirst : {false, true}) {
+        SETTINGS.disableReaderTouchscreen = 1;
+        ButtonShortcutController controller;
+        const auto result = controller.updateUpDown(1, true, true, action, true);
+        if (result.event != Event::TouchscreenEscapeHatch || !dispatchButtonShortcut(result) ||
+            SETTINGS.disableReaderTouchscreen || !mappedInputManager.hasTouch())
+          fail("Up + Down did not restore touch outside the reader");
+        if (controller.updateUpDown(2, true, true, action, false).event != Event::None ||
+            controller.updateUpDown(3, !releaseUpFirst, releaseUpFirst, action, false).event != Event::None ||
+            !controller.updateUpDown(4, false, false, action, false).consumeInput)
+          fail("Recovery chord repeated or leaked a button release");
+        SETTINGS.disableReaderTouchscreen = 1;
+        if (!SETTINGS.loadFromFile() || SETTINGS.disableReaderTouchscreen)
+          fail("Recovered touch setting did not survive a reload");
+      }
+    }
+    // A reader without its own menu still opens recovery Settings instead of
+    // silently changing the user's touch preference (the TXT/Markdown path).
+    activityManager.replaceActivity(
+        std::make_unique<HomeReaderSmokeActivity>("TouchRecoveryReader", true, renderer, mappedInputManager));
+    activityManager.loop();
+    SETTINGS.disableReaderTouchscreen = 1;
+    if (!dispatchButtonShortcut({Event::TouchscreenEscapeHatch, true}) || !SETTINGS.disableReaderTouchscreen)
+      fail("Reader recovery changed the touchscreen preference");
+    activityManager.loop();
+    if (!activityManager.isCurrentActivityNamed("Settings") || !mappedInputManager.hasTouch())
+      fail("Reader recovery Settings is not usable");
+    LOG_INF("SMOKE", "Simulator smoke test passed: frontlight touch recovery and outside-reader Up + Down");
+    std::_Exit(0);
+#else
+    fail("Touch recovery regression requires touch hardware");
+#endif
+  }
+
   static void verifyUnicodeSpaces() {
     RenderLock lock;
     // Deliberately omit every special space while providing a visible replacement.
@@ -2096,6 +3454,8 @@ class SimulatorSmokeTest {
     AssertTtfProfileNative,
     OpenSmokeBook,
     OpenHomeSwipeScreen,
+    OpenBackSwipeBrowser,
+    AssertBackSwipeBrowser,
     OpenFrontlightSettings,
     ClearFrontlightSyncBook,
     PrepareFrontlightSync,
@@ -2108,6 +3468,7 @@ class SimulatorSmokeTest {
     TouchDown,
     TouchDrawerHandle,
     TouchFrontlightQuickAction,
+    TouchReaderTopDrawerHome,
     TouchMove,
     TouchRelease,
     AssertReaderMenu,
@@ -2133,6 +3494,7 @@ class SimulatorSmokeTest {
 
   uint8_t savedChapterShortcuts[7]{};
   uint32_t lastInjectedHomeAt = 0;
+  bool reopenedRuledLayout = false;
   SmokeStep step = SmokeStep::Start;
   int settleFrames = 0;
   const char* activeStepName = nullptr;
@@ -2371,6 +3733,68 @@ class SimulatorSmokeTest {
            std::find(setting.enumRawValues.begin(), setting.enumRawValues.end(), raw) == setting.enumRawValues.end()))
         fail("Page gesture shortcut missing from catalog");
     }
+    std::filesystem::create_directories("fs_/page-button-end");
+    for (const char* name : {"a.epub", "b.epub"}) {
+      const auto path = std::filesystem::path("fs_/page-button-end") / name;
+      FILE* file = std::fopen(path.c_str(), "wb");
+      if (!file) fail("Cannot create page-button end-menu fixture");
+      std::fclose(file);
+    }
+    // Page-only buttons should respond before release, exactly once per press.
+    SETTINGS.frontButtonLeftLong = SETTINGS.frontButtonRightLong = C::IGNORE;
+    SETTINGS.sideButtonUpLong = SETTINGS.sideButtonDownLong = C::IGNORE;
+    SETTINGS.sideButtonUpShort = C::PREVIOUS_PAGE;
+    SETTINGS.sideButtonDownShort = C::PAGE_TURN;
+    mappedInputManager.setReaderMode(true);
+    for (const auto button : {MappedInputManager::Button::Left, MappedInputManager::Button::Right,
+                              MappedInputManager::Button::Up, MappedInputManager::Button::Down}) {
+      ReaderButtonShortcuts tracker;
+      const auto action = (button == MappedInputManager::Button::Left || button == MappedInputManager::Button::Up)
+                              ? C::PREVIOUS_PAGE
+                              : C::PAGE_TURN;
+      for (const unsigned long start : {100UL, 2000UL}) {
+        mappedInputManager.simulatorInjectPress(button);
+        const auto result = tracker.update(mappedInputManager, start);
+        if (!result.consumed || !result.triggered || result.longPress || result.action != action)
+          fail("Page-only button did not fire on press");
+        mappedInputManager.simulatorClearInputFrame();
+        if (tracker.update(mappedInputManager, start + 1000).triggered) fail("Page-only hold repeated");
+        mappedInputManager.simulatorInjectRelease(button);
+        // End-of-book menus run before the reader tracker: they must not see
+        // the release from the page turn that opened them.
+        EndOfBookOptions suggestions(renderer);
+        suggestions.loadOnce("/page-button-end/a.epub");
+        if (!suggestions.menuActive()) fail("Page-button end-menu fixture has no suggestions");
+        mappedInputManager.setMenuMode(true);
+        if (suggestions.handleMenuInput(mappedInputManager, nullptr) != EndOfBookOptions::Action::None)
+          fail("Page-button release moved the end-of-book menu");
+        mappedInputManager.setMenuMode(false);
+        if (mappedInputManager.wasReleased(button) || tracker.update(mappedInputManager, start + 1100).triggered)
+          fail("Page-only release was not swallowed");
+        mappedInputManager.simulatorClearInputFrame();
+        mappedInputManager.update();
+        if (tracker.update(mappedInputManager, start + 1200).triggered) fail("Page-only release repeated");
+      }
+      mappedInputManager.simulatorInjectPress(button);
+      mappedInputManager.simulatorClearInputFrame();
+      ReaderButtonShortcuts freshTracker;
+      if (freshTracker.update(mappedInputManager, 4000).triggered) fail("Already-held button fired on reader entry");
+      mappedInputManager.simulatorInjectRelease(button);
+      if (freshTracker.update(mappedInputManager, 4100).triggered) fail("Untracked release fired a shortcut");
+      mappedInputManager.simulatorClearInputFrame();
+    }
+    // Non-page shortcuts still wait for release even without a long action.
+    SETTINGS.sideButtonUpShort = C::LIBRARY;
+    ReaderButtonShortcuts nonPageTracker;
+    mappedInputManager.simulatorInjectPress(MappedInputManager::Button::Up);
+    if (nonPageTracker.update(mappedInputManager, 100).triggered) fail("Non-page shortcut fired on press");
+    mappedInputManager.simulatorClearInputFrame();
+    mappedInputManager.simulatorInjectRelease(MappedInputManager::Button::Up);
+    const auto nonPage = nonPageTracker.update(mappedInputManager, 200);
+    if (!nonPage.triggered || nonPage.longPress || nonPage.action != C::LIBRARY)
+      fail("Non-page shortcut did not fire on release");
+    mappedInputManager.simulatorClearInputFrame();
+    static_assert(ReaderUtils::SKIP_HOLD_MS == 600);
     SETTINGS.frontButtonLeftLong = C::LIBRARY;
     SETTINGS.frontButtonRightLong = C::FORCE_REFRESH;
     mappedInputManager.setReaderMode(true);
@@ -2380,7 +3804,8 @@ class SimulatorSmokeTest {
       auto result = tracker.update(mappedInputManager, 100);
       if (result.triggered || !result.consumed) fail("Front shortcut fired on press");
       mappedInputManager.simulatorClearInputFrame();
-      result = tracker.update(mappedInputManager, 100 + ReaderUtils::SKIP_HOLD_MS);
+      if (tracker.update(mappedInputManager, 699).triggered) fail("Front hold fired before 600 ms");
+      result = tracker.update(mappedInputManager, 700);
       if (!result.triggered || !result.longPress || !result.front ||
           result.action != (button == MappedInputManager::Button::Left ? C::LIBRARY : C::FORCE_REFRESH))
         fail("Independent front long action failed");
@@ -2608,6 +4033,46 @@ class SimulatorSmokeTest {
       for (int x = 0; x < width; ++x) std::fputc(renderer.isPixelBlack(x, y) ? 0 : 255, image);
     }
     std::fclose(image);
+  }
+
+  static void verifyIntervalLayout() {
+    RenderLock lock;
+    applyRequestedTheme();
+    const auto savedInsets = renderer.getViewableInsets();
+    const auto savedOrientation = renderer.getOrientation();
+    const auto savedScale = SETTINGS.uiScale;
+    MappedInputManager input(gpio, renderer);
+    input.setMenuMode(true);
+    ButtonNavigator::setMappedInputManager(input);
+    // Calibration moves the header. Absolute content coordinates must not
+    // creep back in when device geometry or UI scale changes.
+    for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::LandscapeClockwise,
+                                   GfxRenderer::PortraitInverted, GfxRenderer::LandscapeCounterClockwise}) {
+      renderer.setOrientation(orientation);
+      for (const uint8_t scale : {CrossPointSettings::UI_SCALE_SMALL, CrossPointSettings::UI_SCALE_LARGE}) {
+        SETTINGS.uiScale = scale;
+        for (const bool calibrated : {false, true}) {
+          renderer.setViewableInsets(calibrated ? ScreenInsets{{{32, 16, 24, 12}}} : ScreenInsets{});
+          IntervalSelectionActivity autoTurn(renderer, input, "AutoTurnLayout", StrId::STR_AUTO_TURN_INTERVAL_SECONDS,
+                                             30, 5, 120, 1, 5, StrId::STR_NONE_OPT, true);
+          autoTurn.onEnter();
+          if (!SliderOrientationSmokeTest::clearsHeader(autoTurn))
+            fail("Auto page turn overlaps header (orientation=%d scale=%d calibrated=%d)", orientation, scale,
+                 calibrated);
+          if (input.hasTouchHardware() && !SliderOrientationSmokeTest::routesTouches(autoTurn))
+            fail("Auto page turn touch targets do not follow the controls (orientation=%d)", orientation);
+          autoTurn.render(std::move(lock));
+          captureStatusBarScreen(("auto-turn-" + std::to_string(orientation) + "-scale-" + std::to_string(scale) +
+                                  (calibrated ? "-calibrated" : ""))
+                                     .c_str());
+          autoTurn.onExit();
+        }
+      }
+    }
+    renderer.setViewableInsets(savedInsets);
+    renderer.setOrientation(savedOrientation);
+    SETTINGS.uiScale = savedScale;
+    ButtonNavigator::setMappedInputManager(mappedInputManager);
   }
 
   static void verifyMenuOrientation() {
@@ -2924,11 +4389,36 @@ class SimulatorSmokeTest {
           drawer.loop();
         };
         const auto initialTab = drawer.simulatorState().tab;
-        tapDrawer(SETTINGS.frontButtonConfirm);
-        if (drawer.simulatorState().tab == initialTab) fail("Confirm can no longer navigate reader tabs");
+#if CROSSINK_APP_CAP_TOUCH
+        if (input.hasTouchHardware()) {
+          tapDrawer(SETTINGS.frontButtonConfirm);
+          if (drawer.simulatorState().tab != initialTab || drawer.simulatorState().pane != ReaderDrawerPane::ReaderFont)
+            fail("Confirm did not activate the selected touch drawer row");
+          const auto nextTab = adjacentReaderDrawerTab(initialTab, true);
+          const int tabX = (static_cast<int>(nextTab) * 2 + 1) * renderer.getScreenWidth() /
+                           (2 * static_cast<int>(READER_DRAWER_TAB_COUNT));
+          const int tabY = renderer.getScreenHeight() - 28;
+          input.simulatorInjectTouchDown(tabX, tabY);
+          drawer.loop();
+          input.simulatorClearInputFrame();
+          input.simulatorInjectTouchRelease(tabX, tabY);
+          drawer.loop();
+          input.simulatorClearInputFrame();
+          if (drawer.simulatorState().tab != nextTab) fail("Touch could not navigate reader tabs");
+        } else {
+#endif
+          tapDrawer(SETTINGS.frontButtonConfirm);
+          if (drawer.simulatorState().tab == initialTab) fail("Confirm can no longer navigate reader tabs");
+#if CROSSINK_APP_CAP_TOUCH
+        }
+#endif
         const auto tab = drawer.simulatorState().tab;
-        tapDrawer(frontNext);  // Focus the first row from the tab band.
-        tapDrawer(frontNext);
+        if (input.hasTouchHardware()) {
+          tapDrawer(frontNext);
+        } else {
+          tapDrawer(frontNext);  // Focus the first row from the tab band.
+          tapDrawer(frontNext);
+        }
         if (drawer.simulatorState().selectedIndex != 1 || drawer.simulatorState().tab != tab)
           fail("Reader front Down changed tabs instead of moving rows");
         tapDrawer(frontPrevious);
@@ -3048,7 +4538,37 @@ class SimulatorSmokeTest {
         EpubReaderPercentSelectionActivity percentSlider(renderer, input, 50.0f);
         percentSlider.onEnter();
         checkDirections(percentSlider);
+        if (!aware) {
+          percentSlider.render(std::move(lock));
+          captureStatusBarScreen(("slider-percent-" + std::to_string(orientation)).c_str());
+          SliderOrientationSmokeTest::enterKeypad(percentSlider);
+          percentSlider.render(std::move(lock));
+          captureStatusBarScreen(("keypad-percent-" + std::to_string(orientation)).c_str());
+        }
         percentSlider.onExit();
+        EpubReaderPercentSelectionActivity stableSlider(renderer, input, uint32_t{50}, uint32_t{100});
+        stableSlider.onEnter();
+        checkDirections(stableSlider);
+        if (!aware) {
+          const bool swapFront =
+              orientation == GfxRenderer::PortraitInverted || orientation == GfxRenderer::LandscapeCounterClockwise;
+          const uint8_t frontDecrease = swapFront ? SETTINGS.frontButtonRight : SETTINGS.frontButtonLeft;
+          const uint8_t frontIncrease = swapFront ? SETTINGS.frontButtonLeft : SETTINGS.frontButtonRight;
+          const int stableBefore = SliderOrientationSmokeTest::value(stableSlider);
+          tap(stableSlider, frontDecrease);
+          if (SliderOrientationSmokeTest::value(stableSlider) != stableBefore - 1)
+            fail("Stable page front Left did not decrease by one page");
+          tap(stableSlider, frontIncrease);
+          if (SliderOrientationSmokeTest::value(stableSlider) != stableBefore)
+            fail("Stable page front Right did not increase by one page");
+          checks += 2;
+          stableSlider.render(std::move(lock));
+          captureStatusBarScreen(("slider-stable-page-" + std::to_string(orientation)).c_str());
+          SliderOrientationSmokeTest::enterKeypad(stableSlider);
+          stableSlider.render(std::move(lock));
+          captureStatusBarScreen(("keypad-stable-page-" + std::to_string(orientation)).c_str());
+        }
+        stableSlider.onExit();
         EpubReaderDrawerActivity drawer(renderer, input, {}, nullptr, 50.0f, 0, 0, false, false, false, false, false,
                                         false, false, false, true, true, 0, 0, 30, false);
         drawer.onEnter();
@@ -3332,6 +4852,53 @@ class SimulatorSmokeTest {
   }
 
   static void verifyTiltPageTurnSettings() {
+    // Device/web lists own their descriptors. Persistence visits the identical
+    // catalog without retaining a global copy or depending on UI lifetimes.
+    {
+      auto first = getBaseSettingsList();
+      const auto second = getBaseSettingsList();
+      if (first.size() > getBaseSettingsCapacity()) fail("Settings capacity is too small");
+      size_t index = 0;
+      forEachBaseSetting([&](const SettingInfo& setting) {
+        if (index >= second.size()) fail("Streamed catalog has extra descriptors");
+        const auto& expected = second[index++];
+        if (setting.nameId != expected.nameId || setting.type != expected.type ||
+            setting.valuePtr != expected.valuePtr || setting.value16Ptr != expected.value16Ptr ||
+            setting.stringOffset != expected.stringOffset || setting.stringMaxLen != expected.stringMaxLen ||
+            setting.obfuscated != expected.obfuscated || setting.key != expected.key ||
+            setting.enumValues != expected.enumValues || setting.enumRawValues != expected.enumRawValues ||
+            setting.enumStringValues != expected.enumStringValues)
+          fail("Streamed settings descriptor differs from owned catalog");
+      });
+      if (index != second.size()) fail("Streamed catalog is missing descriptors");
+      first.front().enumRawValues.clear();
+      if (second.front().enumRawValues.empty()) fail("Settings lists share mutable storage");
+      JsonDocument saved;
+      SETTINGS.toJson(saved);
+      for (const auto& setting : second) {
+        if (!setting.key || (!setting.valuePtr && !setting.value16Ptr && !setting.stringOffset)) continue;
+        const std::string key = std::string(setting.key) + (setting.obfuscated ? "_obf" : "");
+        if (saved[key].isNull()) fail("Persisted descriptor missing from settings JSON: %s", key.c_str());
+      }
+      const uint8_t originalTracking = SETTINGS.trackReadingStats;
+      const uint8_t originalShortcut = SETTINGS.shortPwrBtn;
+      SETTINGS.trackReadingStats = 0;
+      SETTINGS.shortPwrBtn = CrossPointSettings::READING_STATS;
+      JsonDocument disabled;
+      SETTINGS.toJson(disabled);
+      SETTINGS.fromJson(disabled.as<JsonVariantConst>());
+      if (SETTINGS.shortPwrBtn != CrossPointSettings::READING_STATS)
+        fail("Disabled stats tracking discarded a persisted shortcut");
+      const auto hidden = getSettingsList();
+      const auto power = std::find_if(hidden.begin(), hidden.end(),
+                                      [](const SettingInfo& setting) { return settingKeyIs(setting, "shortPwrBtn"); });
+      if (power == hidden.end() || std::find(power->enumRawValues.begin(), power->enumRawValues.end(),
+                                             CrossPointSettings::READING_STATS) != power->enumRawValues.end())
+        fail("Stats shortcut still offered while tracking is disabled");
+      SETTINGS.trackReadingStats = originalTracking;
+      SETTINGS.shortPwrBtn = originalShortcut;
+      LOG_INF("SMOKE", "Settings catalog ownership and streamed persistence checks passed (%zu entries)", index);
+    }
     JsonDocument original;
     SETTINGS.toJson(original);
     const auto all = getSettingsList();
@@ -3340,15 +4907,26 @@ class SimulatorSmokeTest {
       const auto direction = std::find_if(rows.begin(), rows.end(), [](const SettingInfo& setting) {
         return settingKeyIs(setting, "tiltPageTurnDirection");
       });
+      const auto sensitivity = std::find_if(rows.begin(), rows.end(), [](const SettingInfo& setting) {
+        return settingKeyIs(setting, "tiltSensitivity");
+      });
       const auto nextOnly = std::find_if(rows.begin(), rows.end(), [](const SettingInfo& setting) {
         return settingKeyIs(setting, "tiltNextPageOnly");
       });
       if (!QuickActions::supportsTiltPageTurn()) {
-        if (direction != rows.end() || nextOnly != rows.end()) fail("Tilt settings exposed without a gyroscope");
+        if (direction != rows.end() || sensitivity != rows.end() || nextOnly != rows.end())
+          fail("Tilt settings exposed without a gyroscope");
         return;
       }
-      if (direction == rows.end() || nextOnly == rows.end() || nextOnly != direction + 1 ||
-          nextOnly->type != SettingType::TOGGLE || nextOnly->nameId != StrId::STR_TILT_NEXT_PAGE_ONLY ||
+      if (direction == rows.end() || sensitivity == rows.end() || sensitivity != direction + 1 ||
+          sensitivity->type != SettingType::ENUM || sensitivity->nameId != StrId::STR_TILT_SENSITIVITY ||
+          sensitivity->valuePtr != &CrossPointSettings::tiltSensitivity ||
+          sensitivity->enumValues != std::vector<StrId>({StrId::STR_SENSITIVITY_LOW, StrId::STR_SENSITIVITY_NORMAL,
+                                                         StrId::STR_SENSITIVITY_HIGH}) ||
+          std::count_if(rows.begin(), rows.end(),
+                        [](const SettingInfo& setting) { return settingKeyIs(setting, "tiltSensitivity"); }) != 1 ||
+          nextOnly == rows.end() || nextOnly != sensitivity + 1 || nextOnly->type != SettingType::TOGGLE ||
+          nextOnly->nameId != StrId::STR_TILT_NEXT_PAGE_ONLY ||
           nextOnly->valuePtr != &CrossPointSettings::tiltNextPageOnly ||
           std::count_if(rows.begin(), rows.end(),
                         [](const SettingInfo& setting) { return settingKeyIs(setting, "tiltNextPageOnly"); }) != 1)
@@ -3356,6 +4934,26 @@ class SimulatorSmokeTest {
     };
     verifyRows(all);
     verifyRows(controls);
+    if (SETTINGS.tiltSensitivity != TiltSensitivity::NORMAL) fail("Tilt sensitivity must default to Normal");
+    JsonDocument sensitivitySettings;
+    SETTINGS.toJson(sensitivitySettings);
+    for (const uint8_t sensitivity :
+         {TiltSensitivity::LOW_SENSITIVITY, TiltSensitivity::NORMAL, TiltSensitivity::HIGH_SENSITIVITY}) {
+      sensitivitySettings["tiltSensitivity"] = sensitivity;
+      SETTINGS.fromJson(sensitivitySettings.as<JsonVariantConst>());
+      if (SETTINGS.tiltSensitivity != sensitivity) fail("Tilt sensitivity JSON import changed a valid value");
+      if (!SETTINGS.saveToFile()) fail("Cannot save tilt sensitivity");
+      SETTINGS.tiltSensitivity = 255;
+      if (!SETTINGS.loadFromFile() || SETTINGS.tiltSensitivity != sensitivity)
+        fail("Tilt sensitivity did not survive disk reload");
+    }
+    sensitivitySettings.remove("tiltSensitivity");
+    SETTINGS.fromJson(sensitivitySettings.as<JsonVariantConst>());
+    if (SETTINGS.tiltSensitivity != TiltSensitivity::NORMAL) fail("Old settings must restore Normal tilt sensitivity");
+    sensitivitySettings["tiltSensitivity"] = 255;
+    SETTINGS.tiltSensitivity = TiltSensitivity::HIGH_SENSITIVITY;
+    SETTINGS.fromJson(sensitivitySettings.as<JsonVariantConst>());
+    if (SETTINGS.tiltSensitivity != TiltSensitivity::NORMAL) fail("Invalid tilt sensitivity must fall back to Normal");
     if (!QuickActions::supportsTiltPageTurn()) {
       SETTINGS.tiltPageTurn = 1;
       SETTINGS.tiltPageTurnDirection = 2;
@@ -3417,6 +5015,23 @@ class SimulatorSmokeTest {
     SETTINGS.tiltNextPageOnly = 0;
     if (!SETTINGS.loadFromFile() || SETTINGS.tiltNextPageOnly != 1)
       fail("Controls row did not persist tilt preference");
+    // Exercise the real sensitivity picker and its persisted selection.
+    press(mappedInputManager.menuButton(MappedInputManager::Button::Up));
+    press(MappedInputManager::Button::Confirm);
+    if (!editor.simulatorOptionPopupActive()) fail("Tilt sensitivity picker did not open");
+    editor.render(std::move(lock));
+    captureStatusBarScreen("tilt-sensitivity-options");
+    press(mappedInputManager.menuButton(MappedInputManager::Button::Down));
+    mappedInputManager.simulatorInjectPress(MappedInputManager::Button::Confirm);
+    editor.loop();
+    mappedInputManager.simulatorClearInputFrame();
+    if (editor.simulatorOptionPopupActive() || SETTINGS.tiltSensitivity != TiltSensitivity::HIGH_SENSITIVITY)
+      fail("Tilt sensitivity picker did not select High");
+    editor.render(std::move(lock));
+    captureStatusBarScreen("tilt-sensitivity-high");
+    SETTINGS.tiltSensitivity = TiltSensitivity::NORMAL;
+    if (!SETTINGS.loadFromFile() || SETTINGS.tiltSensitivity != TiltSensitivity::HIGH_SENSITIVITY)
+      fail("Tilt sensitivity picker did not persist High");
     editor.onExit();
     SETTINGS.fromJson(original.as<JsonVariantConst>());
     if (!SETTINGS.saveToFile()) fail("Cannot restore tilt test settings");
@@ -3425,8 +5040,7 @@ class SimulatorSmokeTest {
 
   static void verifyReaderControlsSettings() {
     {
-      const BaseSettingsListHold baseSettings;
-      const auto& base = baseSettings.list();
+      const auto base = getBaseSettingsList();
       if (base.size() > getBaseSettingsCapacity() || base.capacity() < getBaseSettingsCapacity()) {
         fail("Base settings allocation mismatch: size=%zu capacity=%zu", base.size(), base.capacity());
       }
@@ -3501,6 +5115,19 @@ class SimulatorSmokeTest {
       press(MappedInputManager::Button::Confirm);
       if (!editor.simulatorOptionPopupActive()) fail("Enabled page gesture picker unavailable");
       press(MappedInputManager::Button::Back);
+      const auto hold = std::find_if(gestures.begin(), gestures.end(), [](const SettingInfo& setting) {
+        return setting.nameId == StrId::STR_WORD_HOLD_ACTION;
+      });
+      if (hold == gestures.end() || hold->enumValues.size() <= CrossPointSettings::WORD_HOLD_ASK ||
+          hold->enumValues[CrossPointSettings::WORD_HOLD_ASK] != StrId::STR_ASK)
+        fail("Missing Ask option for long-press text");
+      for (int i = 0; i < std::distance(gestures.begin(), hold); ++i)
+        press(mappedInputManager.menuButton(MappedInputManager::Button::Down));
+      press(MappedInputManager::Button::Confirm);
+      if (!editor.simulatorOptionPopupActive()) fail("Long-press text picker unavailable");
+      editor.render(std::move(editorLock));
+      captureStatusBarScreen("long-press-text-options");
+      press(MappedInputManager::Button::Back);
       editor.simulatorOpenFrontButtons();
       editor.render(std::move(editorLock));
       captureStatusBarScreen("front-button-shortcuts");
@@ -3510,8 +5137,7 @@ class SimulatorSmokeTest {
       fail("Touch gestures exposed on a button-only device");
     }
     LOG_INF("SMOKE", "Reader touch device settings visibility and activation passed");
-    const BaseSettingsListHold baseSettingsHold;
-    const auto& base = baseSettingsHold.list();
+    const auto base = getBaseSettingsList();
     const size_t expectedBaseSettingsCapacity = getBaseSettingsCapacity();
     if (base.size() != expectedBaseSettingsCapacity || base.capacity() < expectedBaseSettingsCapacity) {
       fail("Base settings allocation mismatch: size=%zu expected=%zu capacity=%zu", base.size(),
@@ -4173,6 +5799,9 @@ class SimulatorSmokeTest {
         shortcuts.update(mappedInputManager, 2900).triggered)
       fail("Side-button long release leaked into the next activity");
     mappedInputManager.simulatorClearInputFrame();
+    // The synthetic release above is not a physical GPIO release, so update
+    // once after the frame ends to expire the physical release suppression.
+    mappedInputManager.update();
     if (shortcuts.update(mappedInputManager, 3000).triggered) fail("Side-button long action dispatched twice");
 
     ButtonShortcutController lock;
@@ -4206,6 +5835,21 @@ class SimulatorSmokeTest {
     parked.device = "Phone";
     parked.timestamp = 2;
     return !parked.document.empty() && SyncParked::park(parked);
+  }
+
+  static bool writeProgressSnapshot(const char* bookPath, const char* outputPath = "/progress-result.json") {
+    const Epub epub(bookPath, "/.crosspoint");
+    EpubReaderUtils::Progress progress;
+    if (!EpubReaderUtils::loadProgress(epub, progress, "SMOKE")) return false;
+    JsonDocument snapshot;
+    snapshot["spine"] = progress.spineIndex;
+    snapshot["page"] = progress.pageNumber;
+    snapshot["pages"] = progress.pageCount;
+    snapshot["offset"] = progress.visibleTextOffset;
+    snapshot["hasOffset"] = progress.hasVisibleTextOffset;
+    std::string serialized;
+    serializeJson(snapshot, serialized);
+    return Storage.writeFile(outputPath, serialized.c_str());
   }
 
   [[noreturn]] static void fail(const char* message) {
@@ -4928,8 +6572,50 @@ class SimulatorSmokeTest {
   }
 
 #if CROSSINK_SCALABLE_FONTS
+  void verifyScalableDropCaps() {
+    const std::string htmlPath = "/scalable-drop-cap.xhtml";
+    if (!Storage.writeFile(htmlPath.c_str(),
+                           "<html><body><p><span style=\"float:left;font-size:2em\">R</span>"
+                           "eading should start with a sharp letter. This paragraph wraps alongside the opening "
+                           "letter for two lines before returning to the left margin.</p></body></html>"))
+      fail("Cannot write scalable drop-cap excerpt");
+
+    Epub book("/scalable-drop-cap.epub", "/.crosspoint");
+    CssParser css(book.getCachePath());
+    ensureScalableBuiltinFamily(renderer, CrossPointSettings::BITTER);
+    for (const uint8_t points : {14, 16, 22}) {
+      const int body = scalableBuiltinReaderFontId(CrossPointSettings::BITTER, points);
+      if (renderer.getFontPointSize(body) != points) fail("Bitter body font is unavailable at %u pt", unsigned(points));
+      const unsigned expected = points == 14 ? 42 : ScalableContentMaxPointSize;
+      unsigned caps = 0;
+      ChapterHtmlSlimParser parser(
+          book, htmlPath, renderer, body, 1.0f, false, false, CrossPointSettings::BOOK_STYLE,
+          renderer.getScreenWidth() - 40, renderer.getScreenHeight() - 40, false, false, false, 0,
+          [&](std::unique_ptr<Page> page, uint16_t, uint16_t, uint32_t, uint32_t) {
+            for (const auto& element : page->elements) {
+              if (element->getTag() != TAG_PageDropCap) continue;
+              const auto& cap = static_cast<const PageDropCap&>(*element);
+              if (std::strcmp(cap.getText(), "R") || cap.getFontSize() != expected)
+                fail("Bitter %u pt drop cap used a %u pt glyph, expected %u pt", unsigned(points),
+                     unsigned(cap.getFontSize()), expected);
+              ++caps;
+            }
+            renderer.setRenderMode(GfxRenderer::BW);
+            renderer.clearScreen();
+            page->renderText(renderer, body, 20, 20);
+            char name[32];
+            std::snprintf(name, sizeof(name), "bitter-drop-cap-%u-pt", unsigned(points));
+            captureStatusBarScreen(name);
+          },
+          true, "", "", 0, {}, nullptr, &css);
+      if (!parser.parseAndBuildPages() || caps != 1) fail("Expected one Bitter %u pt drop cap", unsigned(points));
+    }
+    LOG_INF("SMOKE", "Bitter drop caps use 42/44/44 pt glyphs at 14/16/22 pt body sizes");
+  }
+
   void verifyPublisherFonts() {
     RenderLock lock;
+    verifyScalableDropCaps();
     const auto savedMode = SETTINGS.publisherFonts;
     if (savedMode != static_cast<uint8_t>(PublisherFonts::Accents))
       fail("Fresh settings did not default to Ignore Body Font");
@@ -4961,6 +6647,32 @@ class SimulatorSmokeTest {
         (legacy.readerSettingsOverrideMask & (1U << 21)))
       fail("Publisher mode broke version 12 inheritance");
     Storage.remove(settingsPath.c_str());
+    // Heading/root fonts and inline overrides must not be mistaken for body prose.
+    auto* bodyCss = book.getCssParser();
+    if (!bodyCss || !bodyCss->loadFromCache()) fail("Cannot load body-font probe CSS");
+    const auto probePath = book.getCachePath() + "/body-font-probe.xhtml";
+    for (const auto html :
+         {"<html><body style=\"font-family:'Publisher Accent'\"><h1>Decorative title</h1>"
+          "<p style=\"font-family:'Publisher Body'\">Ordinary paragraph body text.</p></body></html>",
+          "<html><body><h1 style=\"font-family:'Publisher Accent'\">Decorative title</h1>"
+          "<p><span style=\"font-family:'Publisher Body'\">Ordinary paragraph body text.</span></p></body></html>",
+          "<html><body><div style=\"font-family:'Publisher Body'\">Ordinary body text without a p tag.</div>"
+          "</body></html>"}) {
+      if (!Storage.writeFile(probePath.c_str(), html) ||
+          ChapterHtmlSlimParser::publisherBodyFontFamily(probePath, *bodyCss) !=
+              CssParser::hashFontFamily("Publisher Body"))
+        fail("Body probe selected a decorative font");
+    }
+    for (const auto html :
+         {"<html><body><h1 style=\"font-family:'Publisher Accent'\">Decorative title</h1>"
+          "<p style=\"font-family:serif\">Ordinary reader-font body text.</p></body></html>",
+          "<html><body style=\"font-family:'Publisher Accent'\"><h1>Heading only</h1></body></html>"}) {
+      if (!Storage.writeFile(probePath.c_str(), html) ||
+          ChapterHtmlSlimParser::publisherBodyFontFamily(probePath, *bodyCss) != 0)
+        fail("Body probe invented a publisher body font");
+    }
+    Storage.remove(probePath.c_str());
+    bodyCss->clear();
     const int readerFont = sdFontSystem.ensureBuiltInReaderFont(renderer);
     for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::LandscapeClockwise}) {
       renderer.setOrientation(orientation);
@@ -4975,6 +6687,9 @@ class SimulatorSmokeTest {
         spec.publisherFontSignature = mode ? bookFontSystem.signature() : 0;
         Section section(book, 0, renderer, "-publisher-smoke");
         if (!section.createSectionFile(spec) || !section.loadSectionFile(spec)) fail("Publisher layout/cache failed");
+        if (!ReaderDrawerLayoutSmokeTest::verifyPublisherBodyFont(
+                lock, book, section, mode, [&](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+          fail("Publisher body font name, disabled row or reader fallback failed");
         bool publisherWord = false, readerWord = false;
         for (uint16_t index = 0; index < section.pageCount; ++index) {
           section.currentPage = index;
@@ -5004,6 +6719,17 @@ class SimulatorSmokeTest {
         if (mode == 2 && (!publisherWord || readerWord)) fail("All Text did not use publisher fonts");
         if (mode == 1 && Storage.exists((book.getCachePath() + "/publisher-font-0").c_str()))
           fail("Ignore Body Font extracted the ignored body face");
+        if (mode == 2) {
+          Section incremental(book, 0, renderer, "-publisher-body-incremental");
+          if (!incremental.startBuild(spec) || !incremental.buildSomeMore(1) ||
+              incremental.publisherBodyFontFamily() != CssParser::hashFontFamily("Publisher Body"))
+            fail("Incremental body font probe failed");
+          while (incremental.isBuilding()) {
+            if (!incremental.buildSomeMore(1)) fail("Body font probe prevented incremental build resume");
+          }
+          if (!incremental.loadSectionFile(spec) || incremental.pageCount != section.pageCount)
+            fail("Body font probe changed incremental pages");
+        }
         const uint32_t requested = bookFontSystem.requestedFaces();
         bookFontSystem.close();
         bookFontSystem.ensure(book, renderer, mode != 0);
@@ -5133,6 +6859,8 @@ class SimulatorSmokeTest {
 
   void verifyBitmapBook(const int fontId, const char* label) {
     if (!std::getenv("CROSSINK_SIMULATOR_SMOKE_FONT_SIZE_BOOK")) return;
+    const char* initial = std::getenv("CROSSINK_SIMULATOR_SMOKE_FONT_SIZE_INITIAL");
+    if (!initial) initial = "R";
     RenderLock lock;
     Epub book(std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK"), "/.crosspoint");
     if (!book.load()) fail("Cannot load supplied font-size book");
@@ -5154,7 +6882,7 @@ class SimulatorSmokeTest {
           for (const auto& element : page->elements) {
             if (element->getTag() == TAG_PageDropCap) {
               const auto& cap = static_cast<const PageDropCap&>(*element);
-              if (std::strcmp(cap.getText(), "R")) fail("Opening drop cap lost its letter");
+              if (std::strcmp(cap.getText(), initial)) fail("Opening drop cap lost its letter");
               ++dropCaps;
             }
           }
@@ -5181,6 +6909,195 @@ class SimulatorSmokeTest {
             pages);
   }
 
+  void verifyCpfontHeadingSizes(const char* family) {
+    RenderLock lock;
+    const std::string cssPath = "/cpfont-headings.css";
+    if (!Storage.writeFile(cssPath.c_str(), "h1 { font-size: 1.33em; } h2 { font-size: 1.17em; }"))
+      fail("Cannot write heading stylesheet");
+    CssParser css("/.crosspoint");
+    FsFile file;
+    if (!Storage.openFileForRead("SMOKE", cssPath, file) || !css.loadFromStream(file))
+      fail("Cannot parse heading stylesheet");
+    file.close();
+    if (!css.saveToCache()) fail("Cannot cache heading stylesheet");
+    css.clear();
+    sdFontSystem.setContentSizeScales(css.contentFontSizeScales());
+    SETTINGS.readerFontPointSize = 10;
+    sdFontSystem.ensureLoaded(renderer);
+    const int body = SETTINGS.getReaderFontId();
+    if (renderer.getFontPointSize(body) != 10 || renderer.getFontPointSize(renderer.getFontIdForSize(body, 13)) != 13 ||
+        renderer.getFontPointSize(renderer.getFontIdForSize(body, 12)) != 12)
+      fail("Publisher heading sizes did not match the stylesheet");
+#if !CROSSINK_SCALABLE_FONTS
+    // The fixture has larger sizes available on SD. The heading IDs must
+    // resolve for measurement and drawing without registering those files.
+    if (renderer.getSdCardFonts().size() != 1 || !renderer.isSdCardFont(renderer.getFontIdForSize(body, 13)))
+      fail("Publisher heading did not reuse the loaded SD font");
+#endif
+    const std::string htmlPath = "/cpfont-headings.xhtml";
+    if (!Storage.writeFile(htmlPath.c_str(),
+                           "<html><body><h1>Chapter Length</h1>"
+                           "<h2>Among Oddly Engineered Audio</h2><p>Body text at ten points.</p></body></html>"))
+      fail("Cannot write heading excerpt");
+    Epub book("/cpfont-headings.epub", "/.crosspoint");
+    if (!css.loadFromCache()) fail("Cannot load heading CSS");
+    unsigned headings = 0;
+    ChapterHtmlSlimParser parser(
+        book, htmlPath, renderer, body, 1.0f, false, false, 1, 400, 700, false, false, false, 0,
+        [&](std::unique_ptr<Page> page, uint16_t, uint16_t, uint32_t, uint32_t) {
+          for (const auto& element : page->elements) {
+            if (element->getTag() != TAG_PageLine) continue;
+            const auto& block = *static_cast<const PageLine&>(*element).getBlock();
+            if (!block.wordCount()) continue;
+            const char* word = block.wordText(0);
+            const unsigned size = !std::strcmp(word, "Chapter") ? 13 : !std::strcmp(word, "Among") ? 12 : 10;
+            if (block.getBlockStyle().fontSize != size) fail("Heading layout used the wrong size");
+            if (size != 10) ++headings;
+          }
+          renderer.setRenderMode(GfxRenderer::BW);
+          renderer.clearScreen();
+          page->renderText(renderer, body, 20, 20);
+          captureStatusBarScreen("cpfont-publisher-headings");
+        },
+        true, "", "", 0, {}, nullptr, &css);
+    if (!parser.parseAndBuildPages() || headings != 2) fail("Publisher heading excerpt did not render");
+    css.clear();
+    sdFontSystem.releaseLoadedFont(renderer);
+    sdFontSystem.ensureLoaded(renderer);
+    if (SETTINGS.getReaderFontId() != body) fail("Heading-size identity changed on reload");
+    const auto dictionary = sdFontSystem.activateDictionaryFont(renderer, family, 8);
+    if (!dictionary.usingDictionaryFont || sdFontSystem.restoreReaderFont(renderer) != body)
+      fail("Dictionary return lost the publisher heading sizes");
+    SETTINGS.readerFontPointSize = 12;
+    sdFontSystem.ensureLoaded(renderer);
+    const int resized = SETTINGS.getReaderFontId();
+    if (renderer.getFontPointSize(renderer.getFontIdForSize(resized, 16)) != 16 ||
+        renderer.getFontPointSize(renderer.getFontIdForSize(resized, 14)) != 14)
+      fail("Heading targets did not follow the new body size");
+    sdFontSystem.setContentSizeScales({512, 192});
+    sdFontSystem.ensureLoaded(renderer);
+    LOG_INF("SMOKE", "Publisher cpfont headings: sizes, layout, reload, dictionary and resize passed");
+  }
+
+  void verifyFontCacheIdentity() {
+    RenderLock lock;
+    const char* family = std::getenv("CROSSINK_SIMULATOR_SMOKE_FONT_FAMILY");
+    Epub book(std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK"), "/.crosspoint");
+    if (!family || !book.load() || book.getSpineItemsCount() == 0) fail("Font identity fixtures unavailable");
+    std::snprintf(SETTINGS.sdFontFamilyName, sizeof(SETTINGS.sdFontFamilyName), "%s", family);
+    SETTINGS.readerFontPointSize = 17;
+    sdFontSystem.setContentSizeScales({512, 192});
+    sdFontSystem.ensureLoaded(renderer);
+    const int original = SETTINGS.getReaderFontId();
+    if (!renderer.isSdCardFont(original) || renderer.getFontPointSize(original) != 17 ||
+        renderer.getFontPointSize(renderer.getFontIdForSize(original, 14)) != 14 ||
+        renderer.getFontPointSize(renderer.getFontIdForSize(original, 21)) != 21)
+      fail("Font identity requires installed bitmap sizes 14, 17 and 21");
+    auto spec = SETTINGS.readerRenderSpec(renderer.getScreenWidth() - 40, renderer.getScreenHeight() - 40);
+    spec.fontId = original;
+    Section section(book, std::min(4, book.getSpineItemsCount() - 1), renderer, "-font-identity-smoke");
+    if (!section.createSectionFile(spec) || !section.loadSectionFile(spec)) fail("Cannot create font identity cache");
+    renderer.ensureSdCardFontReady(original, "Cache identity probe", 0x01);
+    for (unsigned pass = 0; pass < 4; ++pass) {
+      // At 17pt both policies choose 14/21pt, in opposite admission order.
+      sdFontSystem.releaseRegistry();
+      sdFontSystem.setContentSizeScales(pass % 2 ? std::array<uint16_t, 2>{512, 192}
+                                                 : std::array<uint16_t, 2>{192, 363});
+      sdFontSystem.ensureLoaded(renderer);
+      const int current = SETTINGS.getReaderFontId();
+      if (current != original || !renderer.getSdCardFonts().at(current)->hasAdvanceTable())
+        fail("Equivalent size hints reloaded the active font or changed its identity");
+      spec.fontId = current;
+      if (!section.loadSectionFile(spec)) fail("Equivalent size hints rejected cached pages");
+    }
+    // A genuinely different font-size set must still invalidate the layout.
+    sdFontSystem.setContentSizeScales({256, 256});
+    sdFontSystem.ensureLoaded(renderer);
+    spec.fontId = SETTINGS.getReaderFontId();
+    if (spec.fontId == original || section.loadSectionFile(spec)) fail("Changed size set reused stale layout");
+    sdFontSystem.setContentSizeScales({192, 363});
+    sdFontSystem.ensureLoaded(renderer);
+    spec.fontId = SETTINGS.getReaderFontId();
+    if (spec.fontId != original) fail("Restored font set lost its cache identity");
+    // Section removes an incompatible file when rejecting the changed set.
+    if (!section.createSectionFile(spec) || !section.loadSectionFile(spec)) fail("Cannot rebuild restored font cache");
+    renderer.ensureSdCardFontReady(original, "Cache identity probe", 0x01);
+    sdFontSystem.markRegistryDirty();
+    sdFontSystem.ensureLoaded(renderer);
+    if (SETTINGS.getReaderFontId() != original || renderer.getSdCardFonts().at(original)->hasAdvanceTable())
+      fail("Font file invalidation did not force reload");
+    LOG_INF("SMOKE", "Font identity: equivalent requests reuse fonts/pages; changed sets and files reload");
+  }
+
+#if !CROSSINK_SCALABLE_FONTS
+  void verifyEnlargedRuledHeading(const int bodyFont, const char* captureName) {
+    RenderLock lock;
+    const std::string path = "/ruled-font-size.xhtml";
+    if (!Storage.writeFile(path.c_str(),
+                           "<html><body><p>Heading control</p>"
+                           "<h2 style=\"font-size:1.45em; margin:0\">Heading</h2>"
+                           "<p>Next paragraph</p></body></html>"))
+      fail("Cannot write ruled heading fixture");
+    Epub book("/ruled-font-size.epub", "/.crosspoint");
+    CssParser css("/.crosspoint/ruled-font-size");
+    unsigned rows = 0;
+    const int width = renderer.getScreenWidth() - 40;
+    const int height = renderer.getScreenHeight() - 40;
+    ChapterHtmlSlimParser parser(
+        book, path, renderer, bodyFont, 1.0f, false, false, 1, width, height, false, false, false, 0,
+        [&](std::unique_ptr<Page> page, uint16_t, uint16_t, uint32_t, uint32_t) {
+          constexpr const char* pagePath = "/ruled-font-page";
+          FsFile file;
+          if (!Storage.openFileForWrite("SMOKE", pagePath, file) || !page->serialize(file))
+            fail("Cannot save ruled heading page");
+          file.close();
+          if (!Storage.openFileForRead("SMOKE", pagePath, file)) fail("Cannot read ruled heading page");
+          auto restored = Page::deserialize(file);
+          file.close();
+          if (!restored) fail("Cannot restore ruled heading page");
+
+          renderer.setRenderMode(GfxRenderer::BW);
+          renderer.clearScreen();
+          restored->renderText(renderer, bodyFont, 20, 20);
+          int previousBottom = 0;
+          int bodyInkHeight = 0;
+          for (const auto& element : restored->elements) {
+            if (element->getTag() != TAG_PageLine) continue;
+            const auto& line = static_cast<const PageLine&>(*element);
+            const auto& block = *line.getBlock();
+            const auto& style = block.getBlockStyle();
+            const int rowTop = line.yPos - style.ruledTextOffset;
+            const int rowBottom = rowTop + style.lineHeight;
+            const int font = block.resolvedFontId(renderer, bodyFont);
+            const unsigned expected = rows == 1 ? 23 : 16;
+            if (renderer.getFontPointSize(font) != expected || rowTop < previousBottom || rowBottom > height)
+              fail("%s row %u (%s): %u pt, expected %u pt, row [%d, %d), previous bottom %d, viewport %d", captureName,
+                   rows, block.wordText(0), unsigned(renderer.getFontPointSize(font)), expected, rowTop, rowBottom,
+                   previousBottom, height);
+            const int x = line.xPos + block.wordXpos(0) + 20;
+            const int y = rowTop + 20;
+            const int wordWidth = renderer.getTextAdvanceX(font, block.wordText(0), block.wordStyle(0));
+            int top = y, bottom = y + style.lineHeight;
+            while (top < bottom && !renderer.hasBlackPixels(x, top, wordWidth, 1)) ++top;
+            while (bottom > top && !renderer.hasBlackPixels(x, bottom - 1, wordWidth, 1)) --bottom;
+            if (rows == 0) bodyInkHeight = bottom - top;
+            if (rows == 1 && (bodyInkHeight <= 0 || bottom - top <= bodyInkHeight))
+              fail("Ruled heading glyphs did not get taller");
+            previousBottom = rowBottom;
+            ++rows;
+          }
+          ReaderRuling{1, 20, width, height + 20, 100}.drawPage(renderer, *restored, bodyFont, 20);
+          captureStatusBarScreen(captureName);
+          Storage.remove(pagePath);
+        },
+        true, "", "", 0, {}, nullptr, &css);
+    parser.setRuled(true);
+    if (!parser.parseAndBuildPages() || rows != 3) fail("Ruled heading did not render all three rows");
+    Storage.remove(path.c_str());
+    LOG_INF("SMOKE", "Ruled heading: 16pt body, 23pt heading, cache and visible glyph height passed");
+  }
+#endif
+
   void verifyBitmapFontSizes() {
     const auto orientation = renderer.getOrientation();
 #if CROSSINK_SCALABLE_FONTS
@@ -5188,11 +7105,13 @@ class SimulatorSmokeTest {
 #else
     for (const int base : {LEXENDDECA_12_FONT_ID}) {
       if (renderer.getFontPointSize(base) != 12) fail("Bitmap body size missing");
-      for (const auto pair : {std::pair<uint8_t, uint8_t>{8, 10}, {11, 10}, {13, 14}, {15, 16}, {44, 16}}) {
+      for (const auto pair : {std::pair<uint8_t, uint8_t>{8, 10}, {11, 10}, {13, 14}, {15, 16}, {44, 44}}) {
         const int chosen = renderer.getFontIdForSize(base, pair.first);
         if (renderer.getFontPointSize(chosen) != pair.second) fail("Bitmap size snapping failed");
       }
       renderer.setOrientation(GfxRenderer::Portrait);
+      verifyEnlargedRuledHeading(renderer.getFontIdForSize(base, 16),
+                                 base == LEXENDDECA_12_FONT_ID ? "c3-bitter-ruled-heading" : "c3-lexend-ruled-heading");
       verifyBlockFontSizes(base, base == LEXENDDECA_12_FONT_ID ? "c3-bitter" : "c3-lexend");
       renderer.setOrientation(GfxRenderer::LandscapeClockwise);
       verifyBlockFontSizes(base, base == LEXENDDECA_12_FONT_ID ? "c3-bitter-landscape" : "c3-lexend-landscape");
@@ -5225,6 +7144,7 @@ class SimulatorSmokeTest {
       if (sdFontSystem.restoreReaderFont(renderer) != original) fail("Bitmap dictionary return lost content sizes");
       verifyBlockFontSizes(original, "bitmap-sd-dictionary-return");
       verifyBitmapBook(original, "sd12");
+      if (std::getenv("CROSSINK_SIMULATOR_SMOKE_CPFONT_HEADINGS")) verifyCpfontHeadingSizes(family);
     }
     renderer.setOrientation(orientation);
     LOG_INF("SMOKE", "Bitmap size snapping, page cache and selection passed");
@@ -5921,6 +7841,18 @@ class SimulatorSmokeTest {
   }
 
   void tickCalibration() {
+    if (std::getenv("CROSSINK_SIMULATOR_SMOKE_THEME_CALIBRATION")) {
+      RenderLock lock;
+      if (!ScreenCalibrationSmokeTest::themeArtwork(
+              [this](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+        fail("Theme calibration artwork escaped the safe area");
+      if (!ScreenCalibrationSmokeTest::themeCoverGeneration(
+              [this](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+        fail("Theme thumbnail generation did not match its displayed size");
+      if (!ScreenCalibrationSmokeTest::legacyXtcThumbnails()) fail("Theme reused an old XTC thumbnail size");
+      LOG_INF("SMOKE", "Simulator smoke test passed: Minimal/Dashboard calibrated home and sleep artwork");
+      std::_Exit(0);
+    }
     if (scriptIndex < inputScript.size()) {
       runInputScript();
       return;
@@ -6029,7 +7961,17 @@ class SimulatorSmokeTest {
             renderer.getViewableInsets() != ScreenInsets{})
           fail("Calibration draft changed live geometry");
         renderCapture("calibration-edited-buttons");
-        for (int i = 0; i < 4; ++i) addTap(MappedInputManager::Button::Down);
+        // Tune both corner rows with buttons, independently of edge calibration.
+        for (int i = 0; i < 3; ++i) addTap(MappedInputManager::Button::Down);
+        addTap(MappedInputManager::Button::Confirm);
+        for (int i = 0; i < 40; ++i) addTap(MappedInputManager::Button::Down);
+        addTap(MappedInputManager::Button::Confirm);
+        addTap(MappedInputManager::Button::Down);
+        addTap(MappedInputManager::Button::Confirm);
+        for (int i = 0; i < 12; ++i) addTap(MappedInputManager::Button::Down);
+        addTap(MappedInputManager::Button::Confirm);
+        calibrationExpected.cornerInsets = {{40, 12}};
+        for (int i = 0; i < 2; ++i) addTap(MappedInputManager::Button::Down);
         addTap(MappedInputManager::Button::Confirm);
         inputScript.push_back(render("Calibration saved back to Settings", 4));
         inputScript.push_back(assertActivity("Settings"));
@@ -6058,7 +8000,8 @@ class SimulatorSmokeTest {
         auto* editor = dynamic_cast<ScreenCalibrationActivity*>(activityManager.simulatorCurrentActivity());
         if (!editor || editor->simulatorDraft() != calibrationExpected)
           fail("Calibration reopen lost persisted values");
-        for (int i = 0; i < 4; ++i) addTap(MappedInputManager::Button::Down);
+        renderCapture("calibration-custom-corners");
+        for (int i = 0; i < 6; ++i) addTap(MappedInputManager::Button::Down);
         addTap(MappedInputManager::Button::Confirm);
         inputScript.push_back(render("Calibration reset draft", 4));
         break;
@@ -6088,8 +8031,12 @@ class SimulatorSmokeTest {
         auto* editor = dynamic_cast<ScreenCalibrationActivity*>(activityManager.simulatorCurrentActivity());
         if (!editor) fail("Calibration touch entry failed");
         if (mappedInputManager.hasTouch()) {
-          tapControl(*editor, 12);  // Right edge increase.
+          tapControl(*editor, 16);  // Right edge increase.
           calibrationExpected.adjust(1, 1);
+          tapControl(*editor, 19);  // Top corner increase.
+          tapControl(*editor, 14);  // Bottom corner decrease.
+          calibrationExpected.adjustCorner(0, 1);
+          calibrationExpected.adjustCorner(1, -1);
         } else {
           addTap(MappedInputManager::Button::Confirm);
           addTap(MappedInputManager::Button::Down);
@@ -6104,9 +8051,9 @@ class SimulatorSmokeTest {
         if (!editor || editor->simulatorDraft() != calibrationExpected) fail("Calibration touch adjustment failed");
         renderCapture("calibration-edited-touch");
         if (mappedInputManager.hasTouch())
-          tapControl(*editor, 5);
+          tapControl(*editor, 7);
         else {
-          for (int i = 0; i < 5; ++i) addTap(MappedInputManager::Button::Down);
+          for (int i = 0; i < 7; ++i) addTap(MappedInputManager::Button::Down);
           addTap(MappedInputManager::Button::Confirm);
         }
         inputScript.push_back(render("Calibration touch saved", 4));
@@ -6132,14 +8079,14 @@ class SimulatorSmokeTest {
         calibrationStoragePath = storage ? storage : ".screen-calibration.nvs";
         setenv("CROSSINK_CALIBRATION_PATH", "/missing-calibration-directory/settings", 1);
         if (mappedInputManager.hasTouch()) {
-          tapControl(*editor, 11);
+          tapControl(*editor, 15);
           inputScript.push_back(render("Calibration unsaved touch edit", 4));
-          tapControl(*editor, 5);
+          tapControl(*editor, 7);
         } else {
           addTap(MappedInputManager::Button::Confirm);
           addTap(MappedInputManager::Button::Down);
           addTap(MappedInputManager::Button::Confirm);
-          for (int i = 0; i < 5; ++i) addTap(MappedInputManager::Button::Down);
+          for (int i = 0; i < 7; ++i) addTap(MappedInputManager::Button::Down);
           addTap(MappedInputManager::Button::Confirm);
         }
         inputScript.push_back(render("Calibration save error", 4));
@@ -6153,7 +8100,7 @@ class SimulatorSmokeTest {
         setenv("CROSSINK_CALIBRATION_PATH", calibrationStoragePath.c_str(), 1);
         if (HalScreenCalibration::load() != calibrationExpected) fail("Failed save changed persisted geometry");
         if (mappedInputManager.hasTouch())
-          tapControl(*editor, 6);
+          tapControl(*editor, 8);
         else
           addTap(MappedInputManager::Button::Back);
         inputScript.push_back(render("Calibration save failure cancelled", 4));
@@ -6169,6 +8116,15 @@ class SimulatorSmokeTest {
         if (!ScreenCalibrationSmokeTest::geometry(
                 lock, [this](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
           fail("Calibration maximum headers, status, touch targets, or list bounds failed");
+        if (!ScreenCalibrationSmokeTest::calibrationEditor(
+                lock, [this](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+          fail("Calibration responsive controls or draft preview failed");
+        if (!ScreenCalibrationSmokeTest::coverGridCorners(
+                [this](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+          fail("Cover Grid corner clearance narrowed book rows or missed bottom tabs");
+        if (!ScreenCalibrationSmokeTest::cornerClearance(
+                [this](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+          fail("Corner clearance changed status bar vertical position");
         if (!ScreenCalibrationSmokeTest::statusBarOrigin(lock))
           fail("Calibration status bar origin differs between screens");
         if (!ScreenCalibrationSmokeTest::keyboardAndHints(
@@ -7070,6 +9026,7 @@ class SimulatorSmokeTest {
     if (!about || !about->simulatorScopePopupActive()) fail("Support scope popup missing");
 #if CROSSINK_APP_CAP_TOUCH
     const auto hit = about->simulatorScopePopup().simulatorOptionRect(scope);
+    if (hit.width <= 0 || hit.height <= 0) fail("Support scope option is not visible");
     inputScript = {touchDown(hit.x + hit.width / 2, hit.y + hit.height / 2),
                    touchRelease(hit.x + hit.width / 2, hit.y + hit.height / 2)};
 #else
@@ -7333,8 +9290,216 @@ class SimulatorSmokeTest {
     }
   }
 
+  void tickFontBrowserReturn() {
+    static unsigned phase = 0;
+    const char* family = std::getenv("CROSSINK_SIMULATOR_SMOKE_FONT_FAMILY");
+    if (!family) fail("Font browser return requires an SD font fixture");
+    if (phase == 0) {
+      if (!activityManager.isCurrentActivityNamed("WifiSelection")) return;
+      if (sdFontSystem.registry().getFamilyCount() || sdFontSystem.resolveFontId(family, 12))
+        fail("Minimal network boot eagerly loaded reader fonts");
+      // Cancel the real network child, then leave Download Fonts through its
+      // normal result/onExit path without installing or deleting anything.
+      ActivityResult cancelled;
+      cancelled.isCancelled = true;
+      activityManager.simulatorCurrentActivity()->setResult(std::move(cancelled));
+      activityManager.simulatorCurrentActivity()->finish();
+      ++phase;
+      return;
+    }
+    if (phase == 1) {
+      if (!activityManager.isCurrentActivityNamed("Home")) return;
+      if (std::strcmp(SETTINGS.sdFontFamilyName, family) != 0) fail("Font browser changed the saved selection");
+      const int fontId = sdFontSystem.resolveFontId(family, SETTINGS.readerFontPointSize);
+      if (!fontId || SETTINGS.getReaderFontId() != fontId) fail("Font browser return lost the SD font resolver");
+      activityManager.goToReader(std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK"));
+      ++phase;
+      return;
+    }
+    auto* reader = dynamic_cast<EpubReaderActivity*>(activityManager.simulatorCurrentActivity());
+    if (!reader) return;
+    if (!EpubReaderCompletionSmokeTest::fontBrowserReturn(*reader, family)) return;
+    {
+      RenderLock lock;
+      captureStatusBarScreen("font-browser-return");
+    }
+    LOG_INF("SMOKE", "Simulator smoke test passed: font browser return");
+    std::_Exit(0);
+  }
+
+  void tickSleepScreenColors() {
+    // A sleep transition must save/exit the outgoing reader without delivering
+    // another input frame, including any stale hold exposed after capture stops.
+    struct SleepInputProbe final : Activity {
+      int& loops;
+      bool& exited;
+      SleepInputProbe(int& loops, bool& exited)
+          : Activity("SleepInputProbe", ::renderer, mappedInputManager), loops(loops), exited(exited) {}
+      void loop() override { ++loops; }
+      void onExit() override { exited = true; }
+    };
+    int outgoingLoops = 0;
+    bool outgoingExited = false;
+    SETTINGS.sleepScreen = CrossPointSettings::OVERLAY;
+    SETTINGS.quickResumeSleepScreen = CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_NEVER;
+    activityManager.replaceActivity(std::make_unique<SleepInputProbe>(outgoingLoops, outgoingExited));
+    activityManager.loop();
+    activityManager.goToSleep();
+    if (outgoingLoops || !outgoingExited || !activityManager.isCurrentActivityNamed("Sleep"))
+      fail("Sleep dispatched outgoing input or skipped reader cleanup");
+
+    // Observe the actual framebuffer at reader exit, while saves would still
+    // be blocking on an SD card. Quick Resume should already be its final frame.
+    struct SleepFeedbackProbe final : Activity {
+      bool readerPage;
+      uint64_t& frameAtPreparation;
+      uint64_t& frameAtExit;
+      SleepFeedbackProbe(bool readerPage, uint64_t& frameAtPreparation, uint64_t& frameAtExit)
+          : Activity("SleepFeedbackProbe", ::renderer, mappedInputManager),
+            readerPage(readerPage),
+            frameAtPreparation(frameAtPreparation),
+            frameAtExit(frameAtExit) {}
+      void prepareForSleep() override {
+        frameAtPreparation = hashBytes(renderer.getFrameBuffer(), renderer.getBufferSize());
+        if (readerPage && SETTINGS.sleepScreen == CrossPointSettings::CUSTOM)
+          captureStatusBarScreen("custom-before-plugins");
+      }
+      bool canSnapshotForSleepOverlay() const override { return readerPage; }
+      void onExit() override {
+        frameAtExit = hashBytes(renderer.getFrameBuffer(), renderer.getBufferSize());
+        if (readerPage && SETTINGS.sleepScreen == CrossPointSettings::QUICK_RESUME)
+          captureStatusBarScreen("quick-resume-at-exit");
+        if (readerPage && SETTINGS.sleepScreen == CrossPointSettings::READING_STATS_SLEEP)
+          captureStatusBarScreen("stats-popup-at-exit");
+      }
+    };
+    SETTINGS.pluginsEnabled = 1;
+    for (const bool readerPage : {false, true}) {
+      APP_STATE.lastSleepFromReader = readerPage;
+      for (int mode = 0; mode < CrossPointSettings::SLEEP_SCREEN_MODE_COUNT; ++mode) {
+        SETTINGS.sleepScreen = mode;
+        uint64_t frameAtPreparation = 0;
+        uint64_t frameAtExit = 0;
+        activityManager.replaceActivity(
+            std::make_unique<SleepFeedbackProbe>(readerPage, frameAtPreparation, frameAtExit));
+        activityManager.loop();
+        uint64_t pageFrame;
+        {
+          RenderLock lock;
+          renderer.clearScreen();
+          renderer.drawText(UI_12_FONT_ID, 30, 40, "A page before sleep");
+          pageFrame = hashBytes(renderer.getFrameBuffer(), renderer.getBufferSize());
+        }
+        activityManager.goToSleep();
+        RenderLock lock;
+        const auto finalFrame = hashBytes(renderer.getFrameBuffer(), renderer.getBufferSize());
+        const bool quickResume = mode == CrossPointSettings::QUICK_RESUME;
+        const bool overlay = mode == CrossPointSettings::OVERLAY;
+        // Transient popups on retained screens restore their pixels in the draw buffer
+        // immediately after refreshing the panel. Other screens keep the popup until final paint.
+        const bool needsCleanBackdrop = overlay || (quickResume && !readerPage);
+        if (!frameAtPreparation || !frameAtExit || (frameAtPreparation == pageFrame) != needsCleanBackdrop)
+          fail("Wrong sleep feedback or damaged backdrop at plugin preparation");
+        if (readerPage && quickResume && (frameAtPreparation != frameAtExit || finalFrame != frameAtExit))
+          fail("Quick Resume must retain its first frame through reader exit");
+        if (mode == CrossPointSettings::READING_STATS_SLEEP &&
+            (frameAtPreparation != frameAtExit || finalFrame == frameAtExit))
+          fail("Reading Stats must paint after reader saves");
+        if (overlay && finalFrame != pageFrame) fail("Page Overlay retained the popup or lost its backdrop");
+      }
+    }
+
+    SETTINGS.sleepScreen = CrossPointSettings::BLANK;
+    if (!activityManager.goToSleep()) fail("Blank sleep frame was not reported as monochrome");
+    RenderLock lock;
+    SETTINGS.shortPwrBtn = CrossPointSettings::SLEEP;
+    SETTINGS.longPwrBtn = CrossPointSettings::TOGGLE_DARK_MODE;
+    mappedInputManager.simulatorInjectRelease(MappedInputManager::Button::Power);
+    if (getPowerButtonAction() != CrossPointSettings::SLEEP) fail("Short Power selected the long-press action");
+    mappedInputManager.simulatorClearInputFrame();
+    SETTINGS.quickResumeSleepScreen = CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_NEVER;
+    APP_STATE.openEpubPath.clear();
+    APP_STATE.lastSleepFromReader = false;
+    const char* captures = std::getenv("CROSSINK_SIMULATOR_SMOKE_STATUS_BAR_CAPTURES");
+    for (const bool inverted : {false, true}) {
+      SETTINGS.screenInverted = inverted;
+      for (const auto mode : {CrossPointSettings::OVERLAY, CrossPointSettings::QUICK_RESUME, CrossPointSettings::DARK,
+                              CrossPointSettings::LIGHT, CrossPointSettings::BLANK}) {
+        SETTINGS.sleepScreen = mode;
+        display.setInverted(inverted);
+        renderer.clearScreen();
+        renderer.drawText(UI_12_FONT_ID, 30, 40, "Page Overlay");
+        renderer.drawText(UI_12_FONT_ID, 30, 80, "Keep the current page colors.");
+        SleepActivity sleep(renderer, mappedInputManager, false);
+        sleep.onEnter();
+        const bool retained = mode == CrossPointSettings::OVERLAY || mode == CrossPointSettings::QUICK_RESUME;
+        if (!retained && !sleep.hasMonochromeFrame()) fail("Generated sleep screen lost monochrome classification");
+        if (mode == CrossPointSettings::QUICK_RESUME && sleep.hasMonochromeFrame())
+          fail("Quick Resume must not assume the retained page is monochrome");
+        if (display.isInverted() != (retained && inverted)) fail("Sleep screen changed page colors");
+        if (SETTINGS.screenInverted != inverted) fail("Sleep screen changed the Dark Mode preference");
+        if (mode == CrossPointSettings::OVERLAY && renderer.isPixelBlack(10, 10))
+          fail("Page Overlay changed the logical background");
+        if (captures && mode == CrossPointSettings::OVERLAY) {
+          std::filesystem::create_directories(captures);
+          const auto path = std::filesystem::path(captures) / (inverted ? "overlay-dark.pgm" : "overlay-light.pgm");
+          FILE* image = std::fopen(path.c_str(), "wb");
+          if (!image) fail("Cannot open sleep screen capture");
+          std::fprintf(image, "P5\n%d %d\n255\n", renderer.getScreenWidth(), renderer.getScreenHeight());
+          for (int y = 0; y < renderer.getScreenHeight(); ++y)
+            for (int x = 0; x < renderer.getScreenWidth(); ++x)
+              std::fputc(renderer.isPixelBlack(x, y) != display.isInverted() ? 0 : 255, image);
+          if (std::fclose(image) != 0) fail("Cannot save sleep screen capture");
+        }
+      }
+    }
+    SETTINGS.sleepScreen = CrossPointSettings::OVERLAY;
+    SETTINGS.screenInverted = 1;
+    if (!Storage.writeFile("/sleep.bmp", "invalid bitmap")) fail("Cannot create broken overlay fixture");
+    SleepActivity fallback(renderer, mappedInputManager, false);
+    fallback.onEnter();
+    if (display.isInverted() || SETTINGS.screenInverted != 1)
+      fail("Page Overlay fallback inverted the default sleep screen or changed Dark Mode");
+    SETTINGS.quickResumeSleepScreen = CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
+    SleepActivity timeout(renderer, mappedInputManager, false, {}, true);
+    timeout.onEnter();
+    if (!display.isInverted()) fail("Timed Quick Resume lost Dark Mode");
+    if (timeout.hasMonochromeFrame()) fail("Timed Quick Resume must preserve unknown retained colors");
+    LOG_INF("SMOKE", "Simulator smoke test passed: sleep screen colors and fallback");
+    std::_Exit(0);
+  }
+
   void tickImpl() {
     mappedInputManager.simulatorClearInputFrame();
+    if (std::getenv("CROSSINK_SIMULATOR_SMOKE_SLEEP_SCREEN_COLORS")) {
+      tickSleepScreenColors();
+      return;
+    }
+    if (std::getenv("CROSSINK_SIMULATOR_SMOKE_QUICK_LOCK_TOUCH_RECOVERY")) {
+      // Drive the real main loop with timed raw Up + Down chords at 4, 6 and
+      // 8 seconds via CROSSPOINT_SIM_INPUT_SCRIPT: lock, unlock, then recover.
+      static bool initialized = false;
+      static bool touchDisabled = false;
+      if (!initialized) {
+        if (!deviceUsesGlobalTouchscreenLock()) fail("Quick Lock recovery requires the Picco touch-lock policy");
+        SETTINGS.sideButtonChordAction = static_cast<uint8_t>(ButtonShortcutController::ChordAction::QuickLock);
+        SETTINGS.disableReaderTouchscreen = 0;
+        initialized = true;
+      }
+      const auto now = millis();
+      if (now >= 5000 && !touchDisabled) {
+        SETTINGS.disableReaderTouchscreen = 1;
+        touchDisabled = true;
+      }
+      if (now >= 7000 && now < 8000 && !SETTINGS.disableReaderTouchscreen)
+        fail("Touch recovery took priority over the Quick Lock unlock chord");
+      if (now >= 9000) {
+        if (SETTINGS.disableReaderTouchscreen) fail("Touch recovery did not work after unlocking Quick Lock");
+        LOG_INF("SMOKE", "Simulator smoke test passed: Quick Lock unlock precedes touch recovery");
+        std::_Exit(0);
+      }
+      return;
+    }
     if (std::getenv("CROSSINK_SIMULATOR_SMOKE_PLUGINS")) {
       runPluginSmokeTestTick();
       return;
@@ -7346,6 +9511,11 @@ class SimulatorSmokeTest {
         renderCurrentStep(activeStepName);
         activeStepName = nullptr;
       }
+      return;
+    }
+
+    if (std::getenv("CROSSINK_SIMULATOR_SMOKE_FONT_BROWSER_RETURN")) {
+      tickFontBrowserReturn();
       return;
     }
 
@@ -7390,11 +9560,32 @@ class SimulatorSmokeTest {
     switch (step) {
       case SmokeStep::Start:
         LOG_INF("SMOKE", "Starting simulator smoke test");
-        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_UNICODE_SPACES")) {
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_DICTIONARY_HINTS")) {
+          RenderLock lock;
+          const auto capture = [&](const std::string& name) { captureStatusBarScreen(name.c_str()); };
+          if (!ScreenCalibrationSmokeTest::dictionaryHints(lock, capture)) fail("Dictionary hint pixels changed");
+          LOG_INF("SMOKE", "Simulator smoke test passed: dictionary hint backgrounds and stale labels");
+          std::_Exit(0);
+        }
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_FRONTLIGHT_TOUCH_RECOVERY")) {
+          verifyFrontlightTouchRecovery();
+          break;
+        }
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_UNICODE_SPACES") ||
+            std::getenv("CROSSINK_SIMULATOR_SMOKE_RULED_LINES")) {
           const char* book = std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK");
-          if (!book || !Storage.exists(book)) fail("Unicode space fixture is missing");
+          if (!book || !Storage.exists(book)) fail("Reader fixture is missing");
+          if (std::getenv("CROSSINK_SIMULATOR_SMOKE_RULED_LINES")) {
+            SETTINGS.ruledLines = reopenedRuledLayout ? 1 : 0;
+            if (!SETTINGS.saveToFile()) fail("Cannot save ruled line preference");
+          }
           activityManager.goToReader(book, true);
-          queueStep("Unicode space EPUB", SmokeStep::Reader, 8);
+          queueStep("Reader fixture", SmokeStep::Reader, 8);
+          break;
+        }
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_READER_TOP_DRAWER")) {
+          activityManager.goToReader(std::getenv("CROSSINK_SIMULATOR_SMOKE_BOOK"), true);
+          queueStep("Reader before top drawer", SmokeStep::Reader, 12);
           break;
         }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_HOME_SWIPE")) {
@@ -7427,6 +9618,12 @@ class SimulatorSmokeTest {
             // Sync Book reconciled the book, so the position kept for it is gone.
             if (std::getenv("CROSSINK_READING_TEST_MENU_KEPT") && !SyncParked::empty())
               fail("Sync Book left the book's kept position");
+            if (std::getenv("CROSSINK_READING_TEST_COLD")) {
+              const bool expected = !std::getenv("CROSSINK_READING_TEST_RECOVERY_CANCEL") &&
+                                    !std::getenv("CROSSINK_READING_TEST_PERCENT_ONLY");
+              if (writeProgressSnapshot("/read/unread.epub", "/unread-progress.json") != expected)
+                fail("Unread-book recovery must save only after a valid, confirmed remote position");
+            }
             LOG_INF("SMOKE", "Stats upload transport smoke passed");
             std::_Exit(0);
           }
@@ -7439,6 +9636,11 @@ class SimulatorSmokeTest {
           scriptIndex = 0;
           inputCompletionStep = SmokeStep::StatsUploadEmptyDone;
           inputScript.push_back(render("Selected book combined sync", 100));
+          if (std::getenv("CROSSINK_READING_TEST_COLD") && !std::getenv("CROSSINK_READING_TEST_PERCENT_ONLY")) {
+            if (std::getenv("CROSSINK_READING_TEST_RECOVERY_CANCEL")) addTap(MappedInputManager::Button::Down);
+            addTap(MappedInputManager::Button::Confirm);
+            inputScript.push_back(render("Explicit remote progress recovery", 100));
+          }
           step = SmokeStep::ReaderInput;
           break;
         }
@@ -7448,6 +9650,13 @@ class SimulatorSmokeTest {
           LOG_INF("SMOKE", "Stats upload transport smoke passed");
           std::_Exit(0);
         }
+        if (std::getenv("CROSSINK_STATS_TEST_READER_RESET")) {
+          if (!ReaderMenuOrientationSmokeTest::resetCounters()) fail("Live reader reset lost its counter identity");
+          LOG_INF("SMOKE", "EPUB and XTC live reader counter resets passed");
+          std::_Exit(0);
+        }
+        if (std::getenv("CROSSINK_SYNC_DIAGNOSTICS_CAPTURES") || std::getenv("CROSSINK_PROGRESS_DISCOVERY_TEST"))
+          verifySyncDiagnosticsScreens(renderer, mappedInputManager);
         verifyStatsUploadContract();
         if (prepareReadingUploadSmokeTest()) {
           WiFi.mode(WIFI_STA);
@@ -7698,7 +9907,8 @@ class SimulatorSmokeTest {
           SETTINGS.trackReadingStats = 1;
           WiFi.mode(WIFI_STA);
           WiFi.begin("stats-smoke");
-          activityManager.replaceActivity(std::make_unique<StatsUploadActivity>(renderer, mappedInputManager));
+          activityManager.replaceActivity(std::make_unique<StatsUploadActivity>(
+              renderer, mappedInputManager, std::string{}, StatsUploadActivity::Scope::ReadingStats));
           inputScript.clear();
           scriptIndex = 0;
           inputCompletionStep = SmokeStep::StatsUploadEmptyDone;
@@ -7723,6 +9933,13 @@ class SimulatorSmokeTest {
                   lock, [&](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
             fail("Reader Font rows overlapped navigation or became unreachable");
           LOG_INF("SMOKE", "Simulator smoke test passed: reader font layout");
+          std::_Exit(0);
+        }
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_TEXT_DARKNESS")) {
+          if (!ReaderDrawerLayoutSmokeTest::verifyTextDarkness(
+                  [&](const std::string& name) { captureStatusBarScreen(name.c_str()); }))
+            fail("Text darkness persistence, menu or glyph comparison failed");
+          LOG_INF("SMOKE", "Simulator smoke test passed: text darkness");
           std::_Exit(0);
         }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_PUBLISHER_FONTS")) {
@@ -7770,6 +9987,20 @@ class SimulatorSmokeTest {
           LOG_INF("SMOKE", "Simulator smoke test passed: font recovery");
           std::_Exit(0);
         }
+#if CROSSINK_APP_CAP_TOUCH
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_SETTINGS_BACK")) {
+          RenderLock lock;
+          const auto capture = [](const std::string& name) { captureStatusBarScreen(name.c_str()); };
+          if (!ReaderDrawerLayoutSmokeTest::verifySettingsBackZones(lock, capture)) fail("Settings back zone failed");
+          LOG_INF("SMOKE", "Simulator smoke test passed: settings back zones");
+          std::_Exit(0);
+        }
+#endif
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_INTERVAL_LAYOUT")) {
+          verifyIntervalLayout();
+          LOG_INF("SMOKE", "Simulator smoke test passed: interval layout");
+          std::_Exit(0);
+        }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_MENU_ORIENTATION")) {
           verifyMenuOrientation();
           LOG_INF("SMOKE", "Simulator smoke test passed: menu orientation");
@@ -7783,9 +10014,21 @@ class SimulatorSmokeTest {
           LOG_INF("SMOKE", "Simulator smoke test passed: gesture shortcuts");
           std::_Exit(0);
         }
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_FONT_CACHE_IDENTITY")) {
+          verifyFontCacheIdentity();
+          LOG_INF("SMOKE", "Simulator smoke test passed: font cache identity");
+          std::_Exit(0);
+        }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_C3_FONT_SIZES")) {
           verifyBitmapFontSizes();
           LOG_INF("SMOKE", "Simulator smoke test passed: bitmap font sizes");
+          std::_Exit(0);
+        }
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_DICTIONARY_PAGING")) {
+          RenderLock lock;
+          const auto capture = [&](const std::string& name) { captureStatusBarScreen(name.c_str()); };
+          if (!DictionaryPagingSmokeTest::run(lock, capture)) fail("Dictionary power-button paging failed");
+          LOG_INF("SMOKE", "Simulator smoke test passed: dictionary power-button paging");
           std::_Exit(0);
         }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_DICTIONARY")) verifyDictionaryElisions();
@@ -8656,6 +10899,9 @@ class SimulatorSmokeTest {
           if (std::getenv("CROSSINK_READING_TEST_FEED")) {
             // Incremental Sync Folder: the first walk prepared /read, so this run
             // pulls the change feed and pushes only the book marked pending.
+            if (std::getenv("CROSSINK_READING_TEST_PROGRESS_SNAPSHOT") &&
+                !writeProgressSnapshot("/read/first.epub", "/progress-before-pull.json"))
+              fail("Cannot read the progress slot before change-feed pull");
             if (!Storage.writeFile("/second-sync-started", "1")) fail("Cannot mark second sync");
             if (!SyncPending::mark("/read/sub/second.EPUB", SyncPending::PROGRESS_BIT))
               fail("Cannot mark book progress pending");
@@ -8701,10 +10947,14 @@ class SimulatorSmokeTest {
         }
         if (std::getenv("CROSSINK_READING_TEST_STATS_ENTRY") && !statsParentHandlerRan)
           fail("Reading Stats parent handler did not run before the sync replaced the stack");
+        if (std::getenv("CROSSINK_READING_TEST_PROGRESS_SNAPSHOT") && !writeProgressSnapshot("/read/first.epub"))
+          fail("Cannot read the winning saved progress slot");
         LOG_INF("SMOKE", "Stats upload transport smoke passed");
         std::_Exit(0);
 
       case SmokeStep::KeptPositionDone: {
+        if (std::getenv("CROSSINK_READING_TEST_PROGRESS_SNAPSHOT") && !writeProgressSnapshot("/read/first.epub"))
+          fail("Cannot read the winning saved progress slot");
         const bool prepared = std::strcmp(std::getenv("CROSSINK_READING_TEST_OPEN_KEPT"), "unprepared") != 0;
         // Offered (and settled either way) only inside a prepared scope.
         if (SyncParked::empty() != prepared) fail("Kept position not settled as expected");
@@ -8905,6 +11155,11 @@ class SimulatorSmokeTest {
       }
 
       case SmokeStep::Reader:
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_READER_TOP_DRAWER")) {
+          buildReaderTopDrawerScript();
+          step = SmokeStep::ReaderInput;
+          break;
+        }
 #if CROSSINK_APP_CAP_TOUCH
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_CLIPPING_SELECTION")) {
           if (ClippingSelectionSmokeTest::tick()) {
@@ -8914,6 +11169,85 @@ class SimulatorSmokeTest {
           break;
         }
 #endif
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_RULED_LINES")) {
+          auto* reader = activityManager.simulatorCurrentActivity();
+          if (!reader || !reader->isReaderActivity()) fail("Expected a reader page for ruled lines");
+          static std::vector<uint8_t> rulePixels;
+          static size_t clippingsBefore;
+          if (!rulePixels.empty()) {
+            RenderLock lock;
+            if (CLIPPINGS.clippingCount() != clippingsBefore + 1) fail("Ruled page clipping was not saved");
+            const auto* frame = renderer.getFrameBuffer();
+            for (size_t i = 0; i < rulePixels.size(); ++i)
+              if (frame[i] & rulePixels[i]) fail("Saved clipping erased ruled line pixels");
+            captureStatusBarScreen("ruled-lines-after-clipping");
+            LOG_INF("SMOKE", "Simulator smoke test passed: ruled lines after clipping");
+            std::_Exit(0);
+          }
+          const auto fontRows = buildReaderFontSettingsList(getSettingsList());
+          auto ruled = std::find_if(fontRows.begin(), fontRows.end(),
+                                    [](const auto& row) { return row.nameId == StrId::STR_RULED_LINES; });
+          if (ruled == fontRows.end() || ruled - fontRows.begin() < 2 ||
+              (ruled - 1)->nameId != StrId::STR_GUIDE_READING || (ruled - 2)->nameId != StrId::STR_FOCUS_READING)
+            fail("Expected Focus Reading, Guide Dots and Ruled Lines together in Font Options");
+          if (!reopenedRuledLayout) {
+            {
+              RenderLock lock;
+              captureStatusBarScreen("ruled-lines-0");
+            }
+            reopenedRuledLayout = true;
+            activityManager.goHome();
+            queueStep("Home before enabling ruled lines", SmokeStep::Start, 8);
+            break;
+          }
+          size_t previousInk = 0;
+          const auto position = reader->getScreenshotInfo();
+          for (uint8_t level = 1; level <= 3; ++level) {
+            {
+              RenderLock lock;
+              SETTINGS.ruledLines = level;
+              if (!SETTINGS.saveToFile()) fail("Cannot save ruled lines");
+              SETTINGS.ruledLines = 255;
+              SETTINGS.loadFromFile();
+              if (SETTINGS.ruledLines != level) fail("Ruled line setting did not persist");
+            }
+            if (reader->requestUpdateAndWait() != RequestUpdateResult::Rendered) fail("Reader redraw was rejected");
+            RenderLock lock;
+            const auto current = reader->getScreenshotInfo();
+            if (current.currentPage != position.currentPage || current.totalPages != position.totalPages)
+              fail("Changing ruled line shade changed pagination");
+            size_t ink = 0;
+            for (int y = 0; y < renderer.getScreenHeight(); ++y)
+              for (int x = 0; x < renderer.getScreenWidth(); ++x) ink += renderer.isPixelBlack(x, y);
+            if (ink <= previousInk) fail("Ruled line shade %u did not add ink", level);
+            if (reader->isEpubReaderActivity()) {
+              const auto* frame = renderer.getFrameBuffer();
+              if (level == 1) rulePixels.assign(frame, frame + renderer.getBufferSize());
+              if (level == 3) {
+                // Track the extra dots between the light and dark shades on the same layout.
+                for (size_t i = 0; i < rulePixels.size(); ++i) rulePixels[i] &= ~frame[i];
+              }
+            }
+            previousInk = ink;
+            captureStatusBarScreen(("ruled-lines-" + std::to_string(level)).c_str());
+          }
+          if (reader->isEpubReaderActivity()) {
+            clippingsBefore = CLIPPINGS.clippingCount();
+            if (!reader->handleShortcutAction(CrossPointSettings::CREATE_CLIPPING)) fail("Cannot start clipping");
+            inputScript = {render("Select text on ruled page", 5), assertActivity("ClipSelection")};
+            scriptIndex = 0;
+            addTap(MappedInputManager::Button::Confirm);
+            addTap(MappedInputManager::Button::Right);
+            addTap(MappedInputManager::Button::Confirm);
+            // Inspect the normal return from clipping without forcing an extra reader redraw.
+            inputScript.push_back(assertActivity("EpubReader"));
+            inputCompletionStep = SmokeStep::Reader;
+            step = SmokeStep::ReaderInput;
+            break;
+          }
+          LOG_INF("SMOKE", "Simulator smoke test passed: ruled lines");
+          std::_Exit(0);
+        }
         if (!activityManager.isCurrentActivityNamed("EpubReader")) fail("Completion test requires EPUB reader");
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_UNICODE_SPACES")) {
           RenderLock lock;
@@ -9424,6 +11758,45 @@ class SimulatorSmokeTest {
 
   unsigned statusBarReaderPass = 0;
 
+  void buildReaderTopDrawerScript() {
+#if CROSSINK_APP_CAP_TOUCH
+    if (!mappedInputManager.hasTouchHardware()) fail("Reader drawers require touch hardware");
+    inputScript.clear();
+    scriptIndex = 0;
+    inputCompletionStep = SmokeStep::Done;
+    const int width = renderer.getScreenWidth();
+    const int height = renderer.getScreenHeight();
+    const auto swipe = [&](const int startY, const int endY) {
+      inputScript.push_back(touchDown(width / 2, startY));
+      inputScript.push_back(touchMove(width / 2, endY));
+      inputScript.push_back(touchRelease(width / 2, endY));
+      inputScript.push_back(render("Reader drawer swipe", 4));
+    };
+    inputScript.push_back(assertActivity("EpubReader"));
+    swipe(height / 3, height * 2 / 3);
+    inputScript.push_back(assertActivity("FrontlightPanel"));
+    inputScript.push_back(
+        {ScriptActionType::CaptureMenuNavigation, MappedInputManager::Button::Down, "reader-top-drawer", 0, 0, 0});
+    inputScript.push_back(touchDown(width / 2, height - 40));
+    inputScript.push_back(touchRelease(width / 2, height - 40));
+    inputScript.push_back(render("Reader after top drawer dismissal", 4));
+    inputScript.push_back(assertActivity("EpubReader"));
+    swipe(height * 2 / 3, height / 3);
+    inputScript.push_back(assertActivity("EpubReaderDrawer"));
+    addTap(MappedInputManager::Button::Back);
+    inputScript.push_back(render("Reader after bottom drawer dismissal", 4));
+    inputScript.push_back(assertActivity("EpubReader"));
+    swipe(height / 3, height * 2 / 3);
+    inputScript.push_back(assertActivity("FrontlightPanel"));
+    inputScript.push_back(
+        {ScriptActionType::TouchReaderTopDrawerHome, MappedInputManager::Button::Back, nullptr, 0, 0, 0});
+    inputScript.push_back(render("Home from top drawer header", 8));
+    inputScript.push_back(assertActivity("Home"));
+#else
+    fail("Reader drawers require a touch simulator");
+#endif
+  }
+
   void buildHomeSwipeScript() {
 #if CROSSINK_APP_CAP_TOUCH
     if (!mappedInputManager.hasTouchHardware()) fail("Home swipe checks require a touch simulator");
@@ -9438,6 +11811,47 @@ class SimulatorSmokeTest {
       inputScript.push_back(touchRelease(width / 2, endY));
       inputScript.push_back(render("Home swipe result", 4));
     };
+    // Back must win over row-reveal gestures, including in empty folders and pickers.
+    if (!Storage.mkdir("/books/back-swipe/empty", true)) fail("Failed to create browser Back swipe fixture");
+    const auto openBrowser = [&](const char* path, FileBrowserActivity::Mode mode) {
+      inputScript.push_back({ScriptActionType::OpenBackSwipeBrowser, MappedInputManager::Button::Back, path, 0,
+                             static_cast<int>(mode), 0});
+      inputScript.push_back(render("Browser before back swipe", 4));
+    };
+    const auto checkBrowser = [&](const char* path, bool revealed = false) {
+      inputScript.push_back(
+          {ScriptActionType::AssertBackSwipeBrowser, MappedInputManager::Button::Back, path, 0, revealed ? 1 : 0, 0});
+    };
+    const auto horizontalSwipe = [&](int startX, int endX, int y) {
+      inputScript.push_back(touchDown(startX, y));
+      inputScript.push_back(touchMove(endX, y));
+      inputScript.push_back(touchRelease(endX, y));
+      inputScript.push_back(render("Browser after horizontal swipe", 4));
+    };
+    for (const auto mode : {FileBrowserActivity::Mode::Books, FileBrowserActivity::Mode::PickFirmware,
+                            FileBrowserActivity::Mode::PickDirectory}) {
+      openBrowser("/books/back-swipe/empty", mode);
+      horizontalSwipe(8, width / 2, height / 2);
+      checkBrowser("/books/back-swipe");
+      horizontalSwipe(8, width / 2, height / 2);
+      checkBrowser("/books");
+      openBrowser("/", mode);
+      horizontalSwipe(8, width / 2, height / 2);
+      inputScript.push_back(assertActivity("Home"));
+    }
+    openBrowser("/books/back-swipe", FileBrowserActivity::Mode::Books);
+    const int rowY = TouchHeaderBackButton::contentTop(renderer, mappedInputManager) +
+                     UITheme::getInstance().getMetrics().verticalSpacing + 24;
+    horizontalSwipe(width / 3, width * 3 / 4, rowY);
+    checkBrowser("/books/back-swipe");  // Ordinary right swipe only closes a reveal.
+    horizontalSwipe(width * 3 / 4, width / 3, rowY);
+    checkBrowser("/books/back-swipe", true);
+    horizontalSwipe(width / 3, width * 3 / 4, rowY);
+    checkBrowser("/books/back-swipe");
+    horizontalSwipe(width * 3 / 4, width / 3, rowY);
+    checkBrowser("/books/back-swipe", true);
+    horizontalSwipe(width / 8, width / 2, rowY);
+    checkBrowser("/books");  // Edge Back navigates even while a delete action is revealed.
     const char* screens[] = {"Settings",     "FileBrowser",       "About",
                              "ReleaseNotes", "StatusBarSettings", "FileBrowserSettings"};
     for (int screen = 0; screen < 6; ++screen) {
@@ -9579,6 +11993,7 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchDown(width / (static_cast<int>(READER_DRAWER_TAB_COUNT) * 2), tabY));
         inputScript.push_back(touchRelease(width / (static_cast<int>(READER_DRAWER_TAB_COUNT) * 2), tabY));
         addTap(MappedInputManager::Button::Confirm);
+        addTap(mappedInputManager.menuButton(MappedInputManager::Button::Down));
         addTap(mappedInputManager.menuButton(MappedInputManager::Button::Down));
         addTap(mappedInputManager.menuButton(MappedInputManager::Button::Down));
         addTap(MappedInputManager::Button::Confirm);
@@ -9731,13 +12146,15 @@ class SimulatorSmokeTest {
         inputScript.push_back(touchMove(width / 2, height * 3 / 4));
         inputScript.push_back(touchRelease(width / 2, height * 3 / 4));
       } else {
-        // Sticky uses the same vertical gesture split as X4 Pro: swipe down
-        // opens reader details/actions and swipe up opens the bottom menu.
+        // Touch readers without a Home key use the same vertical gesture split:
+        // swipe down opens reader details/actions and swipe up opens the bottom menu.
         inputScript.push_back(touchDown(width / 2, 8));
         inputScript.push_back(touchMove(width / 2, height / 4));
         inputScript.push_back(touchRelease(width / 2, height / 4));
-        inputScript.push_back(render("Sticky Reader Details opened from touch gesture", 4));
+        inputScript.push_back(render("Reader details opened from touch gesture", 4));
         inputScript.push_back(assertActivity("FrontlightPanel"));
+        inputScript.push_back({ScriptActionType::CaptureMenuNavigation, MappedInputManager::Button::Down,
+                               "reader-details-drawer", 0, 0, 0});
         inputScript.push_back(touchDown(20, height / 3));
         inputScript.push_back(touchMove(20, 8));
         inputScript.push_back(touchRelease(20, 8));
@@ -9919,6 +12336,15 @@ class SimulatorSmokeTest {
     addTap(menuDown);
     inputScript.push_back(render("Reader Menu Down moves row focus", 3));
     inputScript.push_back(assertReaderMenu(ReaderDrawerTab::Font, ReaderDrawerPane::Root, 1));
+    const int lastFontRow = makeReaderDrawerCatalog({})[static_cast<size_t>(ReaderDrawerTab::Font)].count - 1;
+    for (int row = 2; row <= lastFontRow; ++row) addTap(menuDown);
+    inputScript.push_back(render("Reading aids in Font", 3));
+    inputScript.push_back(assertReaderMenu(ReaderDrawerTab::Font, ReaderDrawerPane::Root, lastFontRow));
+    inputScript.push_back({ScriptActionType::CaptureMenuNavigation, menuDown, "reader-font-reading-aids", 0, 0, 0});
+    addTap(MappedInputManager::Button::Confirm);
+    inputScript.push_back(render("Ruled Lines choices", 3));
+    inputScript.push_back(assertReaderMenu(ReaderDrawerTab::Font, ReaderDrawerPane::EnumOptions, 0));
+    addTap(MappedInputManager::Button::Back);
     addTap(menuRight);
     inputScript.push_back(render("Reader Menu Right switches tab while a row is focused", 3));
     inputScript.push_back(assertReaderMenu(ReaderDrawerTab::Layout, ReaderDrawerPane::Root, 0));
@@ -10692,6 +13118,19 @@ class SimulatorSmokeTest {
         }
 #endif
         break;
+      case ScriptActionType::OpenBackSwipeBrowser:
+        activityManager.replaceActivity(std::make_unique<FileBrowserActivity>(
+            renderer, mappedInputManager, action.label, static_cast<FileBrowserActivity::Mode>(action.x)));
+        break;
+      case ScriptActionType::AssertBackSwipeBrowser: {
+        const auto* browser = dynamic_cast<FileBrowserActivity*>(activityManager.simulatorCurrentActivity());
+        if (!browser || browser->simulatorFolderPath() != action.label ||
+            browser->simulatorDeleteRevealed() != (action.x != 0) || browser->simulatorTouchActive())
+          fail("Browser Back/reveal/press mismatch: expected %s, revealed=%d", action.label, action.x);
+        RenderLock lock;
+        captureStatusBarScreen(action.x ? "browser-delete-revealed" : "browser-back-restored");
+        break;
+      }
       case ScriptActionType::OpenHomeSwipeScreen:
         switch (action.x) {
           case 0:
@@ -10747,6 +13186,18 @@ class SimulatorSmokeTest {
           mappedInputManager.simulatorInjectTouchDown(handle.x + handle.width / 2, handle.y + handle.height / 2);
         } else {
           fail("No visible drawer handle for touch gesture");
+        }
+#endif
+        break;
+      case ScriptActionType::TouchReaderTopDrawerHome:
+#if CROSSINK_APP_CAP_TOUCH
+        if (auto* panel = dynamic_cast<FrontlightPanelActivity*>(activityManager.simulatorCurrentActivity())) {
+          const auto hit = panel->simulatorHomeButtonRect();
+          mappedInputManager.simulatorInjectTouchDown(hit.x + hit.width / 2, hit.y + hit.height / 2);
+          inputScript.insert(inputScript.begin() + scriptIndex,
+                             touchRelease(hit.x + hit.width / 2, hit.y + hit.height / 2));
+        } else {
+          fail("No reader top drawer for Home action");
         }
 #endif
         break;
@@ -10844,6 +13295,12 @@ class SimulatorSmokeTest {
       }
       case ScriptActionType::AssertActivity:
         if (!activityManager.isCurrentActivityNamed(action.label)) fail("Expected current activity: %s", action.label);
+        if (std::getenv("CROSSINK_SIMULATOR_SMOKE_READER_TOP_DRAWER")) {
+          if (auto* panel = dynamic_cast<FrontlightPanelActivity*>(activityManager.simulatorCurrentActivity())) {
+            if (panel->simulatorShowsReaderDetails() == Frontlight.present())
+              fail("Reader top drawer did not match frontlight capability");
+          }
+        }
         if (std::getenv("CROSSINK_SIMULATOR_SMOKE_HOME_SWIPE")) {
           RenderLock lock;
           captureStatusBarScreen(action.label);

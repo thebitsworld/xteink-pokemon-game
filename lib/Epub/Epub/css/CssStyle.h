@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings
@@ -11,14 +12,24 @@ enum class CssTextDirection : uint8_t { Ltr = 0, Rtl = 1 };
 
 // Represents a CSS length value with its unit, allowing deferred resolution to pixels
 struct CssLength {
-  float value = 0.0f;
+ private:
+  // Preserve the full float without its three padding bytes. memcpy also keeps
+  // length records safe at byte-aligned addresses on C3 (no packed float access).
+  uint8_t valueBytes_[sizeof(float)]{};
+
+ public:
+  float value() const {
+    float result;
+    memcpy(&result, valueBytes_, sizeof(result));
+    return result;
+  }
   CssUnit unit = CssUnit::Pixels;
 
   CssLength() = default;
-  CssLength(const float v, const CssUnit u) : value(v), unit(u) {}
+  CssLength(const float v, const CssUnit u) : unit(u) { memcpy(valueBytes_, &v, sizeof(v)); }
 
   // Convenience constructor for pixel values (most common case)
-  explicit CssLength(const float pixels) : value(pixels) {}
+  explicit CssLength(const float pixels) : CssLength(pixels, CssUnit::Pixels) {}
 
   // Returns true if this length can be resolved to pixels with the given context.
   // Percentage units require a non-zero containerWidth to resolve.
@@ -32,13 +43,13 @@ struct CssLength {
     switch (unit) {
       case CssUnit::Em:
       case CssUnit::Rem:
-        return value * emSize;
+        return value() * emSize;
       case CssUnit::Points:
-        return value * 1.33f;  // Approximate pt to px conversion
+        return value() * 1.33f;  // Approximate pt to px conversion
       case CssUnit::Percent:
-        return value * containerWidth / 100.0f;
+        return value() * containerWidth / 100.0f;
       default:
-        return value;
+        return value();
     }
   }
 
@@ -47,6 +58,8 @@ struct CssLength {
     return static_cast<int16_t>(toPixels(emSize, containerWidth));
   }
 };
+
+static_assert(sizeof(CssLength) == 5, "CSS lengths must not retain float alignment padding");
 
 // Font style options matching CSS font-style property
 enum class CssFontStyle : uint8_t { Normal = 0, Italic = 1 };
@@ -72,7 +85,7 @@ constexpr uint8_t CSS_TEXT_DECORATION_MASK =
     static_cast<uint8_t>(CssTextDecoration::Underline) | static_cast<uint8_t>(CssTextDecoration::LineThrough);
 
 // Keep inline distinct so replaced elements can participate in text layout.
-enum class CssDisplay : uint8_t { Block = 0, None = 1, Inline = 2 };
+enum class CssDisplay : uint8_t { Block = 0, None = 1, Inline = 2, Other = 3 };
 
 // Vertical alignment options for inline elements (e.g. superscript/subscript)
 enum class CssVerticalAlign : uint8_t { Baseline = 0, Super = 1, Sub = 2 };
@@ -119,6 +132,8 @@ struct CssPropertyFlags {
   uint32_t floatLeft : 1;
   uint32_t initialLetter : 1;
   uint32_t fontFamily : 1;
+  uint32_t backgroundImage : 1;
+  uint32_t visibility : 1;
 
   CssPropertyFlags()
       : textAlign(0),
@@ -150,14 +165,16 @@ struct CssPropertyFlags {
         shaded(0),
         floatLeft(0),
         initialLetter(0),
-        fontFamily(0) {}
+        fontFamily(0),
+        backgroundImage(0),
+        visibility(0) {}
 
   [[nodiscard]] bool anySet() const {
-    return fontFamily || shaded || floatLeft || initialLetter || whiteSpace || border || fontSize || textAlign ||
-           fontStyle || fontWeight || textDecoration || textIndent || marginTop || marginBottom || marginLeft ||
-           marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight || imageHeight || imageWidth ||
-           display || backgroundBlack || verticalAlign || direction || pageBreakBefore || pageBreakAfter ||
-           fontVariantCaps || listStyleType;
+    return visibility || backgroundImage || fontFamily || shaded || floatLeft || initialLetter || whiteSpace ||
+           border || fontSize || textAlign || fontStyle || fontWeight || textDecoration || textIndent || marginTop ||
+           marginBottom || marginLeft || marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight ||
+           imageHeight || imageWidth || display || backgroundBlack || verticalAlign || direction || pageBreakBefore ||
+           pageBreakAfter || fontVariantCaps || listStyleType;
   }
 
   void clearAll() {
@@ -166,7 +183,7 @@ struct CssPropertyFlags {
     paddingTop = paddingBottom = paddingLeft = paddingRight = 0;
     imageHeight = imageWidth = display = backgroundBlack = verticalAlign = direction = 0;
     pageBreakBefore = pageBreakAfter = fontVariantCaps = listStyleType = fontSize = border = whiteSpace = shaded =
-        floatLeft = initialLetter = fontFamily = 0;
+        floatLeft = initialLetter = fontFamily = backgroundImage = visibility = 0;
   }
 };
 
@@ -199,6 +216,7 @@ struct CssStyle {
   CssLength imageWidth;     // Width for img when both or only width set
   CssDisplay display = CssDisplay::Block;
   CssBorderSide borders[4];  // top, right, bottom, left; shares the existing defined edge masks
+  bool visibilityHidden = false;
   bool shaded = false;
   bool floatLeft = false;
   uint8_t initialLetter = 0;
@@ -207,7 +225,8 @@ struct CssStyle {
                        [](const CssBorderSide& side) { return side.visible(); });
   }
   bool preserveWhitespace = false;
-  bool backgroundBlack = false;                                 // Simple black inline/block background support
+  bool backgroundBlack = false;  // Simple black inline/block background support
+  bool backgroundImage = false;  // Presence only: unsupported background images need an hr fallback.
   CssVerticalAlign verticalAlign = CssVerticalAlign::Baseline;  // vertical-align (super/sub positioning)
   bool pageBreakBefore = false;
   bool pageBreakAfter = false;
@@ -221,7 +240,7 @@ struct CssStyle {
   uint8_t borderWidthDefined = 0;
 
   [[nodiscard]] bool suppressesHorizontalRule() const {
-    return (borderStyleSuppressed | borderWidthSuppressed) == 0x0F;
+    return !backgroundImage && (borderStyleSuppressed | borderWidthSuppressed) == 0x0F;
   }
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
@@ -328,9 +347,17 @@ struct CssStyle {
       display = base.display;
       defined.display = 1;
     }
+    if (base.defined.visibility) {
+      visibilityHidden = base.visibilityHidden;
+      defined.visibility = 1;
+    }
     if (base.hasBackgroundBlack()) {
       backgroundBlack = base.backgroundBlack;
       defined.backgroundBlack = 1;
+    }
+    if (base.defined.backgroundImage) {
+      backgroundImage = base.backgroundImage;
+      defined.backgroundImage = 1;
     }
     if (base.hasDirection()) {
       direction = base.direction;

@@ -59,7 +59,7 @@ def main():
                 archive.writestr('META-INF/encryption.xml', manifest)
                 archive.writestr('chapter.xhtml', iv + cipher)
                 archive.writestr('plain.txt', 'plain resource')
-        tilt_preferences = {'tiltPageTurn': 1, 'tiltPageTurnDirection': 2, 'tiltNextPageOnly': 1}
+        tilt_preferences = {'tiltPageTurn': 1, 'tiltPageTurnDirection': 2, 'tiltNextPageOnly': 1, 'tiltSensitivity': 2}
         if args.env == 'simulator':
             write('/.crosspoint/crossink-settings.json', tilt_preferences)
         event_attempts = []
@@ -154,7 +154,12 @@ def main():
         fixture.socket = context.wrap_socket(fixture.socket, server_side=True)
         threading.Thread(target=fixture.serve_forever, daemon=True).start()
         origin = f'https://localhost:{fixture.server_port}'
-        write('/plugins/events/device.json', {'title': 'Event fixture', 'events': {name: {'connect': name == 'reader.exit', 'request': {'url': origin + '/events', 'body': '{event.id}:{event.book}:{event.ts}'}} for name in ['reader.open', 'reader.exit', 'reader.session', 'book.downloaded', 'sleep.enter']}})
+        subscriptions = {}
+        for name in ('reader.open', 'reader.exit', 'reader.session', 'book.downloaded', 'sleep.enter'):
+            body = ('book.downloaded:{event.id}:{event.path}:{event.plugin}' if name == 'book.downloaded'
+                    else '{event.id}:{event.book}:{event.ts}')
+            subscriptions[name] = {'connect': name == 'reader.exit', 'request': {'url': origin + '/events', 'body': body}}
+        write('/plugins/events/device.json', {'title': 'Event fixture', 'events': subscriptions})
         write('/plugins/json/device.json', {'title': 'Library catalog', 'browse': {'url': origin + '/json',
               'fields': {'title': 'title', 'id': 'id', 'version': 'version', 'url': 'url',
                          'description': 'description', 'detail_author': 'author', 'repository': 'repository',
@@ -225,6 +230,22 @@ def main():
                     assert settings['shortPwrBtn']['value'] == last_action
                     saved = json.loads((sd / '.crosspoint/crossink-settings.json').read_text())
                     assert all(saved[key] == value for key, value in tilt_preferences.items()), saved
+                elif args.env == 'simulator-X3':
+                    settings_body, _ = request('/api/settings')
+                    settings = {row['key']: row for row in json.loads(settings_body)}
+                    assert settings['tiltSensitivity']['options'] == ['Low', 'Normal', 'High']
+                    assert settings['tiltSensitivity']['value'] == 1
+                    for value in (0, 1, 2):
+                        request('/api/settings', {'tiltSensitivity': value})
+                        settings_body, _ = request('/api/settings')
+                        settings = {row['key']: row for row in json.loads(settings_body)}
+                        assert settings['tiltSensitivity']['value'] == value
+                        saved = json.loads((sd / '.crosspoint/crossink-settings.json').read_text())
+                        assert saved['tiltSensitivity'] == value
+                    request('/api/settings', {'tiltSensitivity': 255})
+                    settings_body, _ = request('/api/settings')
+                    settings = {row['key']: row for row in json.loads(settings_body)}
+                    assert settings['tiltSensitivity']['value'] == 2
                 assert len(event_attempts) >= 6 and event_attempts[0] == event_attempts[1], event_attempts
                 assert any(p['name'] == 'json' for p in json.loads(plugins))
                 script, script_headers = request('/plugin?name=json&file=plugin.js')
@@ -262,7 +283,7 @@ def main():
                 offset = 0
                 for _ in range(20):
                     result, _ = request('/api/fetch', {'url': origin + '/book', 'dest': '/Books/browser.txt',
-                                                      'maxBytes': 5, 'offset': offset})
+                                                      'plugin': 'json', 'maxBytes': 5, 'offset': offset})
                     result = json.loads(result)
                     assert not result.get('error'), result
                     if result['complete']: break
@@ -270,6 +291,27 @@ def main():
                     offset = result['bytes']
                 else: raise AssertionError('fetch never completed')
                 assert (sd / 'Books/browser.txt').read_bytes() == b'fixture book contents\n'
+                result, _ = request('/api/fetch', {'url': origin + '/book', 'dest': '/Books/unnamed.txt'})
+                assert json.loads(result)['complete']
+                expected_sources = {'/Books/browser.txt': 'json', '/Books/unnamed.txt': ''}
+                outbox = sd / 'plugins/events/events.jsonl'
+                try:
+                    queued = outbox.read_text().splitlines()
+                except FileNotFoundError:
+                    queued = []
+                fetch_sources = {}
+                for line in queued:
+                    event = json.loads(line)
+                    values = event['vars']
+                    if event['e'] == 'book.downloaded' and values.get('path') in expected_sources:
+                        fetch_sources[event['id']] = (values['path'], values['plugin'])
+                # The simulator may deliver an event between requests. Include any already received.
+                for body in event_attempts:
+                    if body.startswith(b'book.downloaded:'):
+                        _, event_id, path, plugin = body.decode().split(':', 3)
+                        if path in expected_sources:
+                            fetch_sources[event_id] = (path, plugin)
+                assert sorted(fetch_sources.values()) == sorted(expected_sources.items()), fetch_sources
                 result, _ = request('/api/fetch', {'url': origin + '/missing', 'dest': '/Books/browser.txt'})
                 assert json.loads(result).get('error') or not json.loads(result)['complete']
                 assert (sd / 'Books/browser.txt').read_bytes() == b'fixture book contents\n'

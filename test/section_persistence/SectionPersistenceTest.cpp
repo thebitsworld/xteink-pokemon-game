@@ -23,16 +23,37 @@ extern uint32_t testHyphenationIdentity;
 extern std::vector<BookMetadataCache::TocEntry> testTocEntries;
 
 namespace {
-constexpr uint8_t kFullVersion = 85;
-constexpr uint8_t kPartialVersion = 0xC6;
+constexpr uint8_t kFullVersion = 160;  // this fork (Section.cpp)
+constexpr uint8_t kUpstreamFullVersion = 118;
+constexpr uint8_t kPreRoundingFullVersion = 100;
+constexpr uint8_t kPreRoundingPartialVersion = 0xD5;
+constexpr uint8_t kStablePageFullVersion = 99;
+constexpr uint8_t kStablePagePartialVersion = 0xD4;
+constexpr uint8_t kPreDropCapFullVersion = 98;
+constexpr uint8_t kPreDropCapPartialVersion = 0xD3;
+constexpr uint8_t kPreImageAlignmentFullVersion = 94;
+constexpr uint8_t kPreImageAlignmentPartialVersion = 0xCF;
+constexpr uint8_t kPreFieldsetFullVersion = 93;
+constexpr uint8_t kPreFieldsetPartialVersion = 0xCE;
+constexpr uint8_t kS3BitmapFullVersion = 90;
+constexpr uint8_t kPartialVersion = 0xA1;  // this fork (Section.cpp)
+constexpr uint8_t kUpstreamPartialVersion = 0xE7;
+constexpr uint8_t kS3BitmapPartialVersion = 0xCB;
+constexpr uint8_t kC3BitmapFullVersion = 89;
+constexpr uint8_t kC3BitmapPartialVersion = 0xCA;
+constexpr uint8_t kPreviousFullVersion = 87;
+constexpr uint8_t kParagraphSpacingFullVersion = 85;
+constexpr uint8_t kBorderSuppressionFullVersion = 84;
+constexpr uint8_t kPreviousPartialVersion = 0xC8;
+constexpr uint8_t kParagraphSpacingPartialVersion = 0xC6;
+constexpr uint8_t kBorderSuppressionPartialVersion = 0xC5;
+constexpr uint8_t kOlderFullVersion = 79;
+constexpr uint8_t kOlderPartialVersion = 0xF4;
+constexpr uint8_t kEarlierFullVersion = 78;
+constexpr uint8_t kEarlierPartialVersion = 0xF2;
 constexpr uint8_t kLastReleaseFullVersion = 83;
 constexpr uint8_t kLastReleasePartialVersion = 0xC4;
-constexpr uint8_t kReleaseCandidateFullVersion = 80;
-constexpr uint8_t kReleaseCandidatePartialVersion = 0xC1;
-constexpr uint8_t kDevelopmentFullVersion = 102;
-constexpr uint8_t kDevelopmentPartialVersion = 0xD7;
-constexpr uint8_t kUnicodeDevelopmentFullVersion = 103;
-constexpr uint8_t kUnicodeDevelopmentPartialVersion = 0xD8;
+constexpr uint8_t kPreviousReleasePrepPartialVersion = 0x80;
 
 ReaderRenderSpec renderSpec() {
   ReaderRenderSpec spec;
@@ -98,6 +119,21 @@ class SectionPersistenceTest : public testing::Test {
     testHyphenationIdentity = 1;
   }
 };
+
+TEST_F(SectionPersistenceTest, IsolatesChapterBucketsAndIgnoresLegacyFlatCaches) {
+  SectionHarness harness;
+  Section first(harness.epub, 31, harness.renderer);
+  Section next(harness.epub, 32, harness.renderer);
+  EXPECT_EQ(first.filePath, "/cache/layout/0/31.bin");
+  EXPECT_EQ(next.filePath, "/cache/layout/1/32.bin");
+  Storage.put("/cache/html/32.html", {1});
+  Storage.put("/cache/sections/32.bin", {1});
+  EXPECT_FALSE(next.hasHtmlCache());
+  EXPECT_FALSE(next.loadSectionFile(harness.spec));
+  Storage.put("/cache/content/1/32.html", {2});
+  EXPECT_TRUE(next.hasHtmlCache());
+  EXPECT_FALSE(first.hasHtmlCache());
+}
 
 TEST_F(SectionPersistenceTest, FullCommitReopensAndResolvesMetadataAcrossAChunkBoundary) {
   SectionHarness harness;
@@ -172,10 +208,73 @@ TEST_F(SectionPersistenceTest, FailedCommitKeepsThePreviousReadableCache) {
 }
 
 TEST_F(SectionPersistenceTest, RejectsCachesFromPreviousLayoutRevisions) {
-  for (const uint8_t staleVersion :
-       {kLastReleaseFullVersion, kLastReleasePartialVersion, kReleaseCandidateFullVersion,
-        kReleaseCandidatePartialVersion, kDevelopmentFullVersion, kDevelopmentPartialVersion,
-        kUnicodeDevelopmentFullVersion, kUnicodeDevelopmentPartialVersion}) {
+  for (const uint8_t staleVersion : {uint8_t{114},
+                                     uint8_t{0xE3},
+                                     uint8_t{113},
+                                     uint8_t{0xE2},
+                                     uint8_t{112},
+                                     uint8_t{0xE1},
+                                     uint8_t{111},
+                                     uint8_t{0xE0},
+                                     uint8_t{110},
+                                     uint8_t{0xDF},
+                                     uint8_t{109},
+                                     uint8_t{0xDE},
+                                     uint8_t{108},
+                                     uint8_t{0xDD},
+                                     kUpstreamFullVersion,
+                                     kUpstreamPartialVersion,
+                                     uint8_t{107},
+                                     uint8_t{0xDC},
+                                     uint8_t{106},
+                                     uint8_t{0xDB},
+                                     uint8_t{105},
+                                     uint8_t{0xDA},
+                                     uint8_t{103},
+                                     uint8_t{0xD8},
+                                     uint8_t{102},
+                                     uint8_t{0xD7},
+                                     uint8_t{101},
+                                     uint8_t{0xD6},
+                                     uint8_t{104},
+                                     uint8_t{0xD9},
+                                     kPreRoundingFullVersion,
+                                     kPreRoundingPartialVersion,
+                                     kStablePageFullVersion,
+                                     kStablePagePartialVersion,
+                                     kPreDropCapFullVersion,
+                                     kPreDropCapPartialVersion,
+                                     uint8_t{97},
+                                     uint8_t{0xD2},
+                                     uint8_t{96},
+                                     uint8_t{0xD1},
+                                     uint8_t{95},
+                                     uint8_t{0xD0},
+                                     kPreImageAlignmentFullVersion,
+                                     kPreImageAlignmentPartialVersion,
+                                     kPreFieldsetFullVersion,
+                                     kPreFieldsetPartialVersion,
+                                     kS3BitmapFullVersion,
+                                     kS3BitmapPartialVersion,
+                                     kC3BitmapFullVersion,
+                                     kC3BitmapPartialVersion,
+                                     kPreviousFullVersion,
+                                     kPreviousPartialVersion,
+                                     kParagraphSpacingFullVersion,
+                                     kParagraphSpacingPartialVersion,
+                                     kBorderSuppressionFullVersion,
+                                     kBorderSuppressionPartialVersion,
+                                     kOlderFullVersion,
+                                     kOlderPartialVersion,
+                                     kEarlierFullVersion,
+                                     kEarlierPartialVersion,
+                                     kLastReleaseFullVersion,
+                                     kLastReleasePartialVersion,
+                                     kPreviousReleasePrepPartialVersion,
+                                     uint8_t{77},
+                                     uint8_t{0xF3},
+                                     uint8_t{80},
+                                     uint8_t{0xC1}}) {
     SectionHarness harness;
     harness.begin();
     harness.appendPages(1);
@@ -255,6 +354,25 @@ TEST_F(SectionPersistenceTest, SyncLookupsUseTheSelectedRenderModesCache) {
     Section section(epub, 0, renderer, sectionCacheSuffixForRenderMode(modes[i]));
     EXPECT_EQ(section.getCachedPageCount(), i + 2);
     EXPECT_EQ(section.getPageForParagraphIndex((i + 1) * 3), i + 1);
+  }
+}
+
+TEST_F(SectionPersistenceTest, RuledLayoutInvalidatesCompleteAndSuspendedSections) {
+  for (const auto version : {kFullVersion, kPartialVersion}) {
+    Storage.reset();
+    SectionHarness harness;
+    harness.spec.ruled = true;
+    harness.begin();
+    harness.appendPages(1);
+    ASSERT_TRUE(harness.commit(version, version == kPartialVersion ? 100 : 0, 200));
+    harness.finishSuccessfulCommit();
+    {
+      Section same(harness.epub, 0, harness.renderer);
+      EXPECT_TRUE(same.loadSectionFile(harness.spec));
+    }
+    harness.spec.ruled = false;
+    Section changed(harness.epub, 0, harness.renderer);
+    EXPECT_FALSE(changed.loadSectionFile(harness.spec));
   }
 }
 

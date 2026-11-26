@@ -119,7 +119,8 @@ TEST_F(TextLayoutBackingTest, MixedWordSizesSurviveCacheRoundTripAcrossPools) {
     fakeheap::reset(psram);
     ParsedText text(false, false, false, false, false, 0, BlockStyle{});
     text.addWord("Base", EpdFontFamily::REGULAR, false, false, false, 0, 0);
-    text.addWord("Large", EpdFontFamily::BOLD, false, false, false, 0, 5, 5, 0, false, 36);
+    text.addWord("Large", EpdFontFamily::BOLD, false, false, true, 0, 5, 5, 0, false,
+                 TextBlock::packWordSize(36, true, true));
     text.addWord("Base", EpdFontFamily::REGULAR, false, false, false, 0, 11);
     GfxRenderer renderer;
     FsFile output;
@@ -137,6 +138,8 @@ TEST_F(TextLayoutBackingTest, MixedWordSizesSurviveCacheRoundTripAcrossPools) {
     EXPECT_EQ(restored->wordFontSize(0), 0);
     EXPECT_EQ(restored->wordFontSize(1), 36);
     EXPECT_EQ(restored->wordFontSize(2), 0);
+    EXPECT_TRUE(restored->wordHidden(1));
+    EXPECT_TRUE(restored->wordBackgroundSpace(1));
     EXPECT_STREQ(restored->wordText(1), "Large");
   }
 }
@@ -232,4 +235,27 @@ TEST_F(TextLayoutBackingTest, PublisherBaselineIsComputedOncePerRender) {
   ASSERT_TRUE(block.valid());
   block.render(renderer, 0, 0, 0);
   EXPECT_LE(renderer.ascenderCalls, count * 2 + 1);
+}
+
+TEST_F(TextLayoutBackingTest, SourceRangesSurviveCacheRoundTrip) {
+  ParsedText text(false);
+  text.addWord("same", EpdFontFamily::REGULAR, false, false, false, 0, 20);
+  text.addWord("phrase", EpdFontFamily::REGULAR, false, false, false, 0, 25);
+  GfxRenderer renderer;
+  FsFile output;
+  ASSERT_TRUE(Storage.openFileForWrite("test", "source-line", output));
+  ASSERT_TRUE(text.layoutAndExtractLines(renderer, 0, 480, [&](std::shared_ptr<TextBlock> line, uint32_t, uint32_t) {
+    ASSERT_TRUE(line->serialize(output));
+  }));
+  output.close();
+  FsFile input;
+  ASSERT_TRUE(Storage.openFileForRead("test", "source-line", input));
+  auto restored = TextBlock::deserialize(input);
+  input.close();
+  ASSERT_NE(restored, nullptr);
+  ASSERT_EQ(restored->wordCount(), 2);
+  EXPECT_EQ(restored->wordSourceRange(0).start, 20U);
+  EXPECT_EQ(restored->wordSourceRange(0).end, 24U);
+  EXPECT_EQ(restored->wordSourceRange(1).start, 25U);
+  EXPECT_EQ(restored->wordSourceRange(1).end, 31U);
 }

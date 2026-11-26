@@ -74,7 +74,9 @@ class KOReaderSyncActivity final : public Activity {
   // Reads section caches, so the caller must keep the render task off the book.
   static CrossPointPosition mapRemotePosition(const std::shared_ptr<Epub>& epub, GfxRenderer& renderer,
                                               const KOReaderProgress& remote, DocumentMatchMethod method,
-                                              int localSpineIndex, int localSpinePages);
+                                              int localSpineIndex, int localSpinePages,
+                                              bool requireSavedCoordinate = false);
+  static bool sameReadingProgress(float reader, float server);
 
   void onEnter() override;
   void onExit() override;
@@ -85,6 +87,9 @@ class KOReaderSyncActivity final : public Activity {
   bool allowPowerAsConfirmInReaderMode() const override { return true; }
 
  private:
+#ifdef SIMULATOR
+  friend struct SyncDiagnosticsSmokeTest;
+#endif
   enum State {
     WIFI_SELECTION,
     CONNECTING,
@@ -118,6 +123,7 @@ class KOReaderSyncActivity final : public Activity {
   // Resolved before Wi-Fi on a fresh single-book network boot; deferred in batches.
   KOReaderPosition localProgress;
   bool localProgressDeferred = false;
+  bool localPositionUnavailable = false;
   bool restartBeforeNetwork = false;
   bool folderSync = false;
   bool includeGlobalStats = true;
@@ -132,6 +138,7 @@ class KOReaderSyncActivity final : public Activity {
   bool exitingBatch = false;
   ReadingSyncUpload::ExtrasResult extrasResult;
   ReadingSyncUpload::GlobalStatsStep globalStatsFailedStep = ReadingSyncUpload::GlobalStatsStep::None;
+  int globalStatsHttpCode = 0;
   StatsUploadClient::Result globalStatsResult = StatsUploadClient::Result::Skipped;
   ProgressSyncResult syncResult() const;
   // The reader can use a book-specific orientation that its teardown restores
@@ -157,6 +164,8 @@ class KOReaderSyncActivity final : public Activity {
 
   void onWifiSelectionComplete(bool success);
   void performSync();
+  void finishComparison(KOReaderSyncClient::Error result);
+  std::optional<KOReaderMetadata> preparedMetadata;
   void performUpload();
   bool uploadExtras();
   // Per-data result rows; `withProgress` adds a Progress row (failure screen).

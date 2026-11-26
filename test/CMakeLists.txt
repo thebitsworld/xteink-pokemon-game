@@ -56,6 +56,7 @@ add_subdirectory(text_pool)
 add_subdirectory(clip_word_store)
 add_subdirectory(clipping_preview)
 add_subdirectory(clipping_store)
+add_subdirectory(hal_file_write_anchor)
 add_subdirectory(dict_layout)
 add_subdirectory(reader_progress_save_debouncer)
 add_subdirectory(koreader_sync_http_status)
@@ -98,6 +99,7 @@ add_subdirectory(pokemon_art_pack)
 add_subdirectory(pokemon_dashboard_layout)
 add_subdirectory(pokemon_ui_layout)
 add_subdirectory(reader_menu_items)
+add_subdirectory(calibre_progress)
 add_subdirectory(reader_tilt_page_turn)
 add_subdirectory(epub_link_return_state)
 add_subdirectory(manual_page_turn_queue)
@@ -128,12 +130,16 @@ add_subdirectory(stable_page_navigation)
 add_subdirectory(xtc_navigation)
 add_subdirectory(touch_reader_preview)
 add_subdirectory(dictionary_word_parts)
+add_subdirectory(dictionary_lookup)
+add_subdirectory(lookup_history)
 add_subdirectory(ligature_guard)
 add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(korean_line_breaking)
 add_subdirectory(input_release_guard)
 add_subdirectory(release_suppression)
 add_subdirectory(bitmap_resample)
+add_subdirectory(png_tone_mapper)
+add_subdirectory(bmp_to_bmp)
 add_subdirectory(jpeg_decoder)
 add_subdirectory(pxc_v2)
 add_subdirectory(memory_policy)
@@ -154,6 +160,7 @@ add_subdirectory(library_text)
 add_subdirectory(library_format)
 add_subdirectory(library_index_file)
 add_subdirectory(content_opf_parser)
+add_subdirectory(toc_spine_memo)
 add_subdirectory(adobe_font_obfuscation)
 add_subdirectory(library_builder)
 add_subdirectory(library_input_buffer)
@@ -162,6 +169,7 @@ add_subdirectory(scalable_fonts)
 add_subdirectory(glyph_bitmap)
 add_subdirectory(lua_apps)
 add_subdirectory(daily_reading_stats)
+add_subdirectory(stats_storage)
 add_subdirectory(sync_files)
 add_subdirectory(sync_pending)
 add_subdirectory(sync_ids)
@@ -171,10 +179,23 @@ add_subdirectory(support_info)
 add_subdirectory(log_retention)
 add_subdirectory(screen_calibration)
 add_subdirectory(keyboard_tips)
+add_subdirectory(interval_selection_layout)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME CrashTaskContextRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_crash_task_context.py)
+add_test(NAME EpubBookMetadataBounds
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_epub_book_metadata_bounds.py)
+add_test(NAME EpubMetadataBuildIo
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_epub_metadata_build_io.py)
 add_subdirectory(frontlight_settings_boot)
+add_subdirectory(eego_frontlight)
+add_subdirectory(eego_uid)
 add_test(NAME TransferReliabilityRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_transfer_reliability.py)
+add_test(NAME UsbDriveStorageRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_usb_drive_storage.py)
+add_test(NAME ReaderCopyRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_reader_copy_regressions.py)
 add_test(NAME WebDavGetRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_webdav_get.py)
 add_test(NAME ImageProbeFramebufferRegression
@@ -183,6 +204,8 @@ add_test(NAME UploadFailureRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_upload_cancellation.py)
 add_test(NAME StorageAndBrowsingRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_storage_and_browsing_ports.py)
+add_test(NAME PiccoSleepRenderLockRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_picco_sleep_render_lock.py)
 add_test(NAME RecentTxtProgressRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_recent_txt_progress.py)
 add_test(NAME DecodedImageRevisionRegression
@@ -196,17 +219,18 @@ add_subdirectory(otf_fonts)
 
 
 add_subdirectory(http_header)
-
 add_subdirectory(swipe_delete)
 add_subdirectory(touch_action_buttons)
 
 add_test(NAME ReleaseDownloadPreparationRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_release_download_preparation.py)
+add_test(NAME SleepChargeOverlayRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_sleep_charge_overlay.py)
+add_test(NAME DisplaySdkCompatibilityRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_display_sdk_compatibility.py)
 
 add_subdirectory(reading_session_journal)
-
 add_subdirectory(reading_session_checkpoint)
-
 add_subdirectory(protected_paths)
 add_subdirectory(asset_cache_storage)
 add_subdirectory(language_cache)
@@ -219,14 +243,14 @@ add_subdirectory(plugin_manifest_classification)
 add_subdirectory(plugin_catalog_paging)
 add_subdirectory(plugin_http_policy)
 add_subdirectory(plugin_bundle)
-
+add_test(NAME PluginDownloadLifecycleRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_plugin_download_lifecycle.py)
 add_subdirectory(plugin_picker_layout)
-
 add_subdirectory(plugin_details)
-
 add_subdirectory(reader_session)
 add_subdirectory(reader_plugin_events)
-
+add_subdirectory(plugin_event_outbox)
+add_subdirectory(ipc_task_stack)
 add_subdirectory(hal_power_manager)
 add_subdirectory(hal_frontlight)
 add_subdirectory(picco_slide_switch)
@@ -238,22 +262,40 @@ add_test(NAME LanguageBundleTest
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_language_bundle.py)
 add_test(NAME ReaderRestartStatsRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_reader_restart_stats.py)
-
 add_test(NAME ReaderStatsLatencyRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_reader_stats_latency.py)
-
 add_test(NAME BookmarkListMemoryRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_bookmark_list_memory.py)
-
 add_subdirectory(bookmark_store)
-
 add_test(NAME UpstreamPortRegressions
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_upstream_ports.py)
-
+add_test(NAME SharedBuiltinFontTables
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_shared_builtin_font_tables.py)
 add_subdirectory(gif_support)
-
 add_subdirectory(clipping_sync)
 add_subdirectory(progress_slots)
 add_subdirectory(desk)
 add_test(NAME PiccoDisplayIdleRegression
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_picco_display_idle.py)
+add_test(NAME PluginNetworkBootRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_plugin_network_boot.py)
+FetchContent_GetProperties(arduinojson)
+add_test(NAME PluginJobHeapRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_plugin_job_heap.py
+    --json-include ${arduinojson_SOURCE_DIR}/src)
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+  add_test(NAME TransferWebSocketRegression
+    COMMAND ${NODE_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_transfer_websocket.cjs)
+endif()
+add_subdirectory(progress_sync)
+add_test(NAME WebDavCredentialsRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_webdav_credentials.py)
+add_test(NAME TlsFragmentConfigRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_tls_fragment_config.py)
+add_test(NAME IdleTtfLookaheadGuardsTest
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_idle_ttf_lookahead.py)
+add_subdirectory(xtc_parser)
+
+add_test(NAME EegoPanelIdleRegression
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/scripts/test_eego_panel_idle.py)

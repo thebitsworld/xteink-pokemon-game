@@ -6,7 +6,7 @@ nav_order: 5
 # Dictionary
 
 > [!TIP]
-> For the best experience, prepare your dictionary on a computer using CrossInk's web companion tool [Inky](https://inky.crossink.dev/#dictionary-tools). It prepares the files for faster lookups. A dictionary you have not prepared also works if its `.dict` and `.idx` files are uncompressed: the first lookup may take longer while the reader prepares it.
+> For the best experience, prepare your dictionary on a computer using CrossInk's web companion tool [Inky](https://inky.crossink.dev/#dictionary-tools). It prepares the files for faster lookups. A dictionary you have not prepared also works if its `.idx` file is uncompressed: the first lookup may take longer while the reader prepares it.
 
 ## Supported Format
 
@@ -14,12 +14,12 @@ The reader supports **StarDict** dictionaries. When searching for dictionaries o
 
 A dictionary folder typically contains:
 
-- `.dict` -- definition data (required; compressed `.dict.dz` files must be prepared on a computer first)
+- `.dict` or `.dict.dz` -- definition data (required; dictzip-compressed `.dict.dz` works directly)
 - `.idx` -- word index (required)
 - `.ifo` -- dictionary name and word count (recommended)
 - `.syn` -- alternate forms and synonyms (optional, enhances lookup coverage)
 
-Minimum requirement: one `.dict` and one `.idx` file in the same folder. Use matching names, such as `english.dict` and `english.idx`. Keep `.ifo` too when it is supplied so the dictionary name and formatting display correctly.
+Minimum requirement: one `.dict` or `.dict.dz` and one uncompressed `.idx` file in the same folder. Use matching names, such as `english.dict` and `english.idx`. Keep `.ifo` too when it is supplied so the dictionary name and formatting display correctly.
 
 ---
 
@@ -34,12 +34,18 @@ Example folder structure: `SDCARD/.dictionaries/Cambridge/*.dict`. Make sure the
 
 ### Preparing Compressed or Large Dictionaries
 
-If your download contains `.dict.dz` or `.syn.dz` files, prepare it with
-[Inky](https://inky.crossink.dev/#dictionary-tools) before copying it to the SD
-card. Preparation is also recommended for large dictionaries to make lookups
-faster.
+Dictzip-compressed `.dict.dz` files work directly. Keep the matching uncompressed
+`.idx` alongside them. CrossInk decompresses only the selected entry to a temporary
+SD file, then reuses it for paging. The file is removed when changing definitions
+or leaving the viewer. If both `.dict` and `.dict.dz` exist, `.dict` is preferred.
 
-Uncompressed dictionaries can be used without preparation. The first lookup
+Decompress `.idx.gz` on a computer first. Use
+[Inky](https://inky.crossink.dev/#dictionary-tools) to prepare `.syn.dz` files.
+Preparation is also recommended
+for large dictionaries to make lookups faster. If compressed lookup fails because
+memory is tight, prepare the dictionary with Inky or decompress `.dict.dz` on a computer.
+
+Both `.dict` and `.dict.dz` dictionaries can be used without preparation. The first lookup
 may take longer; later lookups should be quicker. If you cancel that first
 lookup, the reader can try preparing it again next time.
 
@@ -59,9 +65,12 @@ The **Look Up Word** option in the reader menu is only visible when a dictionary
 
 ### Touchscreen
 
-In an EPUB reader with **Touch Reader Controls** enabled, touch and hold a
-word for about one second. CrossInk opens word selection on that word; lift
-your finger to show the floating **Look Up** and **Clip** toolbar.
+In an EPUB with the touchscreen enabled, touch and hold a
+word for about one second, then lift your finger to open its definition.
+Under **Settings > Controls > Taps & Gestures > Long-press Text**, choose
+**Clip** to save the word immediately or **Ask** to show the floating
+**Look Up** and **Clip** toolbar. Dragging across words opens the toolbar
+in all three modes.
 Drag either selection handle to adjust the highlighted range. To select a phrase,
 keep holding after selection opens, drag to the last word, then lift your
 finger. Hold on the page's final word for about one second to continue onto
@@ -83,11 +92,12 @@ Set a shortcut to **Look Up Word** in **Settings > Controls**. Holding that shor
 
 When you select a word, the reader searches for it in this order:
 
-1. **Direct match** - the word is found as-is in the dictionary index.
+1. **Direct match** - the cleaned word is searched first, preserving pointed headwords, capitalization preference, and existing NFC normalization. If it is absent, Hebrew niqqud and cantillation marks and basic Arabic vowel marks (U+064B–U+0650, U+0652, U+0670) are removed from the query and it is retried. Arabic shaddah, hamza, and maddah remain significant. Exact pointed spellings win when both pointed and unpointed headwords exist. Dictionary indexes and their sort order are unchanged; this fallback does not merge differently pointed headwords.
 2. **Stemming** - the reader automatically tries common word forms (plurals, verb conjugations, comparatives). For example, "running" finds "run".
-3. **Alternate forms** - if the dictionary includes a synonym/alternate forms file and no match was found yet, a prompt appears. Press **Confirm** to search alternate forms, or **Back** to skip.
-4. **Suggestions** - if nothing matched, a list of similar words from the dictionary is shown. Select one to view its definition.
-5. **Not found** - if no matches or suggestions exist, a not-found message appears. Press **Back** to return to word-select, or **Confirm** to exit to the reader.
+3. **Other installed dictionaries** - if the selected dictionary has no match, CrossInk searches the remaining dictionaries one at a time in alphabetical order by folder name. The first match opens and its dictionary name appears below the definition. Using **Switch Dictionary** limits that lookup to the dictionary you choose.
+4. **Alternate forms** - if any searched dictionary includes a synonym file and no match was found, a prompt appears. Press **Confirm** to search alternate forms, or **Back** to skip. Alternate forms also try the supplied spelling before the vowel-stripped fallback.
+5. **Suggestions** - if nothing matched, a list of similar words from the dictionary is shown. Select one to view its definition.
+6. **Not found** - if no matches or suggestions exist, a not-found message appears. Press **Back** to return to word-select, or **Confirm** to exit to the reader.
 
 ---
 

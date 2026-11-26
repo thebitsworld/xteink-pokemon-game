@@ -9,11 +9,21 @@
 
 #include "Block.h"
 #include "BlockStyle.h"
+#include "Epub/RuledLineLayout.h"
 
 // Represents one rendered line. Per-word data is packed into one heap arena
 // instead of separate vectors/strings, which reduces heap fragmentation when
 // pages are loaded and discarded repeatedly on the ESP32-C3.
 class TextBlock final : public Block {
+ public:
+  struct SourceRange {
+    uint32_t start = UINT32_MAX;
+    uint32_t end = UINT32_MAX;
+    bool known() const { return start <= end && end != UINT32_MAX; }
+    bool valid() const { return known() && start < end; }
+    bool wellFormed() const { return known() || (start == UINT32_MAX && end == UINT32_MAX); }
+  };
+
  private:
   int baselineOffset(int baseline, int ascender, EpdFontFamily::Style style) const;
   BlockStyle blockStyle;
@@ -26,9 +36,18 @@ class TextBlock final : public Block {
   bool wordSpacesPresent = false;
   uint8_t initialLetterBytes = 0;  // logical prefix drawn separately as a drop cap
   std::unique_ptr<uint32_t[]> wordFamilies;
+  bool sourceRangesPresent = false;
+  const SourceRange* sourceRangesArr = nullptr;
   bool wordSizesPresent = false;
   const uint8_t* wordSizesArr = nullptr;
   bool isValid = true;
+  // Ephemeral physical ink bounds: reused only within one grayscale replay.
+  // Inline metadata avoids allocations and is deliberately not serialized.
+  mutable uint64_t stripBoundsGeneration = 0;
+  static constexpr uint16_t STRIP_GROUPS = 4;
+  mutable uint16_t stripBounds[STRIP_GROUPS][2] = {};  // half-open, clipped to physical rows
+  mutable int stripBoundsX = 0, stripBoundsY = 0, stripBoundsFont = 0;
+
   std::unique_ptr<uint8_t[]> arena;
 
   const uint16_t* textOffArr = nullptr;
@@ -47,7 +66,7 @@ class TextBlock final : public Block {
   TextBlock() = default;  // deserialize() fills the fields directly.
   static constexpr size_t wordSpacesBytes(const uint16_t wordCount) { return (wordCount + 7U) / 8U; }
   static size_t arenaSize(uint16_t wordCount, bool hasFocus, bool hasGuideDots, bool hasWordFlags, bool hasWordSpaces,
-                          uint16_t textBytes, bool hasWordSizes = false);
+                          uint16_t textBytes, bool hasWordSizes = false, bool hasSourceRanges = false);
   void bindArenaPointers();
 
  public:
@@ -62,16 +81,21 @@ class TextBlock final : public Block {
                      const std::vector<uint8_t>& wordFlags, const std::vector<bool>& wordHasSpaceBefore,
                      const BlockStyle& blockStyle = BlockStyle(), std::vector<std::string> rubyTexts = {},
                      const std::vector<uint8_t>& wordSizes = {}, const char* initialLetter = "",
-                     int8_t characterSpacing = 0, const std::vector<uint32_t>& fontFamilies = {});
+                     int8_t characterSpacing = 0, const std::vector<uint32_t>& fontFamilies = {},
+                     const std::vector<SourceRange>& sourceRanges = {});
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
 
-  void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
+  void setBlockStyle(const BlockStyle& blockStyle) {
+    this->blockStyle = blockStyle;
+    stripBoundsGeneration = 0;
+  }
   const BlockStyle& getBlockStyle() const { return blockStyle; }
   bool isEmpty() override { return numWords == 0; }
   bool valid() const { return isValid; }
   uint16_t wordCount() const { return numWords; }
+  SourceRange wordSourceRange(uint16_t i) const { return sourceRangesPresent ? sourceRangesArr[i] : SourceRange{}; }
   const char* wordText(const uint16_t i) const { return textArr + textOffArr[i]; }
   uint16_t wordTextLen(const uint16_t i) const {
     const uint16_t end = (i + 1 < numWords) ? textOffArr[i + 1] : textBytes;
@@ -99,12 +123,28 @@ class TextBlock final : public Block {
   const char* visibleWordText(uint16_t i) const { return wordText(i) + (i == 0 ? initialLetterBytes : 0); }
   uint16_t visibleWordTextLen(uint16_t i) const { return wordTextLen(i) - (i == 0 ? initialLetterBytes : 0); }
   int wordYOffset(const GfxRenderer& renderer, int fontId, uint16_t i) const;
-  uint8_t wordFontSize(uint16_t i) const { return wordSizesPresent ? wordSizesArr[i] : 0; }
+  // Font sizes occupy the low six bits of the optional per-word byte.
+  static constexpr uint8_t HIDDEN_WORD = 0x80;
+  static constexpr uint8_t BACKGROUND_SPACE = 0x40;
+  static constexpr uint8_t packWordSize(uint8_t size, bool hidden, bool backgroundSpace = false) {
+    return size | (hidden ? HIDDEN_WORD : 0) | (backgroundSpace ? BACKGROUND_SPACE : 0);
+  }
+  bool wordBackgroundSpace(uint16_t i) const { return wordSizesPresent && (wordSizesArr[i] & BACKGROUND_SPACE); }
+  static constexpr uint8_t unpackWordSize(uint8_t packed) { return packed & ~(HIDDEN_WORD | BACKGROUND_SPACE); }
+  bool wordHidden(uint16_t i) const { return wordSizesPresent && (wordSizesArr[i] & HIDDEN_WORD); }
+  uint8_t wordFontSize(uint16_t i) const { return wordSizesPresent ? unpackWordSize(wordSizesArr[i]) : 0; }
   int wordFontId(const GfxRenderer& renderer, int fontId, uint16_t i) const;
   int maxAscender(const GfxRenderer& renderer, int fontId) const;
   int maxLineHeight(const GfxRenderer& renderer, int fontId) const;
   int resolvedFontId(const GfxRenderer& renderer, int fontId) const;
   void render(const GfxRenderer& renderer, int fontId, int x, int y, bool foregroundBlack = true) const;
+  RuledLineLayout ruledLayout(const GfxRenderer& renderer, int fontId, int requested) const;
+
+ private:
+  void renderOrMeasure(const GfxRenderer& renderer, int fontId, int x, int y, bool foregroundBlack,
+                       RuledLineLayout::Ink* ink) const;
+
+ public:
   BlockType getType() override { return TEXT_BLOCK; }
   bool serialize(Print& file) const;
   static std::unique_ptr<TextBlock> deserialize(HalFile& file);

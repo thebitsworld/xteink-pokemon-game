@@ -12,6 +12,7 @@
 #include <cstring>
 #include <iterator>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -82,7 +83,7 @@ inline bool settingKeyIs(const SettingInfo& setting, const char* key) {
 
 inline bool isTiltPageTurnSetting(const SettingInfo& setting) {
   return settingKeyIs(setting, "tiltPageTurn") || settingKeyIs(setting, "tiltPageTurnDirection") ||
-         settingKeyIs(setting, "tiltNextPageOnly");
+         settingKeyIs(setting, "tiltNextPageOnly") || settingKeyIs(setting, "tiltSensitivity");
 }
 
 inline bool isPageGestureSettingDisabled(const SettingInfo& setting) {
@@ -301,7 +302,7 @@ inline SettingInfo buildDictionaryFontSizeSetting(const SdCardFontRegistry* regi
   return s;
 }
 
-inline SettingInfo buildDictionarySetting(const DictionaryRegistry* dictRegistry) {
+inline SettingInfo buildDictionarySetting(const DictionaryRegistry& dictRegistry) {
   SettingInfo s;
   s.nameId = StrId::STR_DICTIONARY;
   s.type = SettingType::ENUM;
@@ -309,36 +310,23 @@ inline SettingInfo buildDictionarySetting(const DictionaryRegistry* dictRegistry
   s.category = StrId::STR_CAT_READER;
   s.enumStringValues.push_back(I18N.get(StrId::STR_NONE_OPT));
 
-  std::vector<DictionaryEntry> entries;
-  if (dictRegistry) {
-    entries = dictRegistry->getEntries();
-    s.enumStringValues.reserve(entries.size() + 1);
-    for (const auto& entry : entries) {
-      s.enumStringValues.push_back(entry.name);
-    }
+  const auto& entries = dictRegistry.getEntries();
+  std::vector<std::string> paths;
+  paths.reserve(entries.size());
+  s.enumStringValues.reserve(entries.size() + 1);
+  for (const auto& entry : entries) {
+    paths.push_back(entry.basePath);
+    s.enumStringValues.push_back(entry.name);
   }
 
-  s.valueGetter = [entries]() -> uint8_t {
-    const std::string activePath = Dictionary::readDictPath();
-    if (activePath.empty()) {
-      return 0;
-    }
-    for (size_t i = 0; i < entries.size(); i++) {
-      if (entries[i].basePath == activePath) {
-        return static_cast<uint8_t>(i + 1);
-      }
-    }
-    return 0;
+  s.valueGetter = [paths]() -> uint8_t {
+    const auto path = Dictionary::readConfiguredDictPath();
+    const auto it = std::find(paths.begin(), paths.end(), path);
+    return it == paths.end() ? 0 : static_cast<uint8_t>(std::distance(paths.begin(), it) + 1);
   };
-
-  s.valueSetter = [entries](uint8_t v) {
-    if (v == 0) {
-      Dictionary::saveGlobalDictPath("");
-      return;
-    }
-    const size_t entryIndex = static_cast<size_t>(v - 1);
-    if (entryIndex < entries.size()) {
-      Dictionary::saveGlobalDictPath(entries[entryIndex].basePath.c_str());
+  s.valueSetter = [paths = std::move(paths)](uint8_t value) {
+    if (value <= paths.size()) {
+      Dictionary::saveGlobalDictPath(value == 0 ? "" : paths[value - 1].c_str());
     }
   };
 
@@ -574,7 +562,10 @@ inline void appendShortcutOptions(SettingInfo& setting, const ShortcutOptionCata
     if (catalog == ShortcutOptionCatalog::HomeButton &&
         (action == CrossPointSettings::HOME_READER || action == CrossPointSettings::BACK_HOME))
       continue;
-    if (!QuickActions::isActionAvailable(static_cast<uint8_t>(action))) continue;
+    // Persist a saved stats shortcut even while tracking is disabled. The UI
+    // removes it in getSettingsList(); availability must not invalidate storage.
+    if (action != CrossPointSettings::READING_STATS && !QuickActions::isActionAvailable(static_cast<uint8_t>(action)))
+      continue;
     const uint8_t rawValue = shortcutRawValue(catalog, action);
     if (rawValue == SHORTCUT_OPTION_UNAVAILABLE) continue;
     setting.enumValues.push_back(QuickActions::actionLabel(static_cast<uint8_t>(action)));
@@ -622,15 +613,11 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 // Each entry has a key (for JSON API) and category (for grouping).
 // ACTION-type entries and entries without a key are device-only.
 //
-// The static list is constructed exactly once (master's optimization, #1086 +
-// #1636) so the per-entry SettingInfo cost is paid once. Read-only consumers
-// can use it directly; mutable device UI lists use getSettingsList(), which
-// returns an owned copy and can add SD-card font and dictionary options.
-// Sized from the measured pokemon-x3 count: this fork adds 3 Slideshow entries, 1 entry gated behind
-// CROSSINK_ENABLE_POKEMON and 3 feature switches (Pokemon, Applications, Slideshow) on top of upstream's 110 (measured 8 with the merge of CrossInk 2.0.0),
-// plus Publisher Fonts on scalable-font builds and four edge gestures on touch devices; reserved for the max
-// case. Keep it exact: one entry too many doubles the vector, and on the X3 those extra SettingInfo slots stayed
-// allocated - the simulator smoke test checks it. getBaseSettingsCapacity() adds the three persisted IMU entries.
+// UI consumers own their descriptors; persistence visits and releases each entry.
+// Counts include conditional publisher-font, touch and slide-switch entries.
+// This fork adds 8 entries to upstream's 112 (3 Slideshow, 2 Pokemon, 3 feature switches: Pokemon,
+// Applications, Slideshow), plus Bluetooth and Desk where built. Keep it exact: one entry too many
+// doubles the vector - the simulator smoke test checks it.
 #if CROSSINK_BLUETOOTH
 inline constexpr size_t BLUETOOTH_SETTINGS_COUNT = 1;
 #else
@@ -643,10 +630,10 @@ inline constexpr size_t DESK_SETTINGS_COUNT = 0;
 #endif
 #if CROSSINK_SCALABLE_FONTS
 inline constexpr size_t BASE_SETTINGS_CAPACITY =
-    119 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT + DESK_SETTINGS_COUNT;
+    121 + (CROSSINK_APP_CAP_TOUCH ? 5 : 0) + BLUETOOTH_SETTINGS_COUNT + DESK_SETTINGS_COUNT;
 #else
 inline constexpr size_t BASE_SETTINGS_CAPACITY =
-    118 + (CROSSINK_APP_CAP_TOUCH ? 4 : 0) + BLUETOOTH_SETTINGS_COUNT + DESK_SETTINGS_COUNT;
+    120 + (CROSSINK_APP_CAP_TOUCH ? 5 : 0) + BLUETOOTH_SETTINGS_COUNT + DESK_SETTINGS_COUNT;
 #endif
 
 #if FREEINK_DEVICE_PICCO
@@ -655,29 +642,26 @@ inline constexpr size_t SLIDE_SWITCH_SETTINGS_COUNT = 1;
 inline constexpr size_t SLIDE_SWITCH_SETTINGS_COUNT = 0;
 #endif
 
-inline size_t getBaseSettingsCapacity() {
-  // The IMU entries are always in the list: getSettingsList() hides them, so their values survive a save.
-  return BASE_SETTINGS_CAPACITY + 3 + SLIDE_SWITCH_SETTINGS_COUNT;
+inline size_t getBaseSettingsCapacity() { return BASE_SETTINGS_CAPACITY + 4 + SLIDE_SWITCH_SETTINGS_COUNT; }
+
+using SettingVisitor = void (*)(SettingInfo&&, void*);
+// Inspect or move each descriptor during the callback; borrowed references expire on return.
+void forEachBaseSetting(SettingVisitor visitor, void* context);
+
+template <typename Visitor>
+void forEachBaseSetting(Visitor&& visitor) {
+  forEachBaseSetting(
+      [](SettingInfo&& setting, void* context) {
+        (*static_cast<std::remove_reference_t<Visitor>*>(context))(std::move(setting));
+      },
+      &visitor);
 }
 
-// Keeps the shared base settings list alive while it exists; the list is
-// built by the first hold and freed when the last one ends. Hold it for as
-// long as references into list() are used.
-class BaseSettingsListHold {
- public:
-  BaseSettingsListHold();
-  ~BaseSettingsListHold();
-  BaseSettingsListHold(const BaseSettingsListHold&) = delete;
-  BaseSettingsListHold& operator=(const BaseSettingsListHold&) = delete;
-  const std::vector<SettingInfo>& list() const { return *list_; }
-
- private:
-  const std::vector<SettingInfo>* list_;
-};
+std::vector<SettingInfo> getBaseSettingsList();
 
 inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
                                                 const DictionaryRegistry* dictRegistry = nullptr) {
-  std::vector<SettingInfo> v = BaseSettingsListHold().list();
+  std::vector<SettingInfo> v = getBaseSettingsList();
   // Availability controls the UI, never whether preferences survive a save.
   if (!QuickActions::supportsTiltPageTurn()) {
     v.erase(std::remove_if(v.begin(), v.end(), isTiltPageTurnSetting), v.end());
@@ -721,7 +705,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   if (!hasTouch) {
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const SettingInfo& s) {
-                             return s.nameId == StrId::STR_DISABLE_TOUCHSCREEN || s.nameId == StrId::STR_NEXT_PAGE ||
+                             return s.nameId == StrId::STR_WORD_HOLD_ACTION ||
+                                    s.nameId == StrId::STR_DISABLE_TOUCHSCREEN || s.nameId == StrId::STR_NEXT_PAGE ||
                                     s.nameId == StrId::STR_PREV_PAGE || s.nameId == StrId::STR_TAP_HIDE_STATUS_BAR ||
                                     s.nameId == StrId::STR_PINCH_FONT_RESIZE ||
                                     s.nameId == StrId::STR_TWO_FINGER_ROTATION ||
@@ -849,7 +834,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     auto guideIt =
         std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_GUIDE_READING; });
     const auto insertPos = guideIt == v.end() ? v.end() : guideIt + 1;
-    v.insert(insertPos, buildDictionarySetting(dictRegistry));
+    v.insert(insertPos, buildDictionarySetting(*dictRegistry));
   }
   return v;
 }
@@ -865,7 +850,7 @@ inline void addSettingByName(std::vector<SettingInfo>& target, const std::vector
 
 inline std::vector<SettingInfo> buildReaderSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> readerSettings;
-  readerSettings.reserve(13);
+  readerSettings.reserve(11);
   readerSettings.push_back(SettingInfo::Submenu(StrId::STR_READER_FONT_OPTIONS, SettingAction::ReaderFontOptions));
   readerSettings.push_back(SettingInfo::Submenu(StrId::STR_READER_PAGE_LAYOUT, SettingAction::ReaderPageLayout));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_STATUS_BARS, SettingAction::CustomiseStatusBar));
@@ -873,8 +858,6 @@ inline std::vector<SettingInfo> buildReaderSettingsParentList(const std::vector<
   addSettingByName(readerSettings, allSettings, StrId::STR_DISABLE_TOUCHSCREEN);
   addSettingByName(readerSettings, allSettings, StrId::STR_EMBEDDED_STYLE);
   addSettingByName(readerSettings, allSettings, StrId::STR_IMAGES);
-  addSettingByName(readerSettings, allSettings, StrId::STR_FOCUS_READING);
-  addSettingByName(readerSettings, allSettings, StrId::STR_GUIDE_READING);
   addSettingByName(readerSettings, allSettings, StrId::STR_DICTIONARY);
   addSettingByName(readerSettings, allSettings, StrId::STR_INDEXING_METHOD);
   return readerSettings;
@@ -891,7 +874,7 @@ inline std::vector<SettingInfo> buildBookReaderSettingsParentList(const std::vec
 
 inline std::vector<SettingInfo> buildReaderFontSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
-  settings.reserve(11);
+  settings.reserve(16);
   addSettingByName(settings, allSettings, StrId::STR_FONT_FAMILY);
   addSettingByName(settings, allSettings, StrId::STR_FONT_SIZE);
   addSettingByName(settings, allSettings, StrId::STR_PUBLISHER_FONTS);
@@ -901,6 +884,13 @@ inline std::vector<SettingInfo> buildReaderFontSettingsList(const std::vector<Se
   addSettingByName(settings, allSettings, StrId::STR_WORD_SPACING);
   addSettingByName(settings, allSettings, StrId::STR_CHARACTER_SPACING);
   addSettingByName(settings, allSettings, StrId::STR_TEXT_AA);
+#if FREEINK_DEVICE_EEGO_A4
+  addSettingByName(settings, allSettings, StrId::STR_TWO_TONE_TEXT_AA);
+#endif
+  addSettingByName(settings, allSettings, StrId::STR_TEXT_DARKNESS);
+  addSettingByName(settings, allSettings, StrId::STR_FOCUS_READING);
+  addSettingByName(settings, allSettings, StrId::STR_GUIDE_READING);
+  addSettingByName(settings, allSettings, StrId::STR_RULED_LINES);
   settings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FONTS, SettingAction::DownloadFonts));
   addSettingByName(settings, allSettings, StrId::STR_SD_FONT_SIZE_RANGE);
   return settings;
@@ -949,6 +939,7 @@ inline std::vector<SettingInfo> buildControlsSettingsParentList(const std::vecto
   const bool hasTiltPageTurnSetting = hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN);
   const bool hasTiltPageTurnDirectionSetting = hasSettingByName(allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION);
   const bool hasTiltNextPageOnlySetting = hasSettingByName(allSettings, StrId::STR_TILT_NEXT_PAGE_ONLY);
+  const bool hasTiltSensitivitySetting = hasSettingByName(allSettings, StrId::STR_TILT_SENSITIVITY);
   const bool hasTapsGestures = hasSettingByName(allSettings, StrId::STR_NEXT_PAGE);
   const bool hasFrontButtons = deviceHasFrontButtons();
   const bool hasHomeKey = gpio.hasHomeKey();
@@ -956,7 +947,8 @@ inline std::vector<SettingInfo> buildControlsSettingsParentList(const std::vecto
   std::vector<SettingInfo> settings;
   settings.reserve(3 + SLIDE_SWITCH_SETTINGS_COUNT + (hasHomeKey ? 1u : 0u) + (hasFrontButtons ? 2u : 0u) +
                    (hasTiltPageTurnSetting ? 1u : 0u) + (hasTiltPageTurnDirectionSetting ? 1u : 0u) +
-                   (hasTiltNextPageOnlySetting ? 1u : 0u) + (hasTapsGestures ? 1u : 0u));
+                   (hasTiltNextPageOnlySetting ? 1u : 0u) + (hasTiltSensitivitySetting ? 1u : 0u) +
+                   (hasTapsGestures ? 1u : 0u));
   if (hasHomeKey) {
     settings.push_back(SettingInfo::Submenu(StrId::STR_HOME_BUTTON, SettingAction::ControlsHomeButton));
   }
@@ -971,6 +963,7 @@ inline std::vector<SettingInfo> buildControlsSettingsParentList(const std::vecto
   }
   if (hasTiltPageTurnSetting) addSettingByName(settings, allSettings, StrId::STR_TILT_PAGE_TURN);
   if (hasTiltPageTurnDirectionSetting) addSettingByName(settings, allSettings, StrId::STR_TILT_PAGE_TURN_DIRECTION);
+  if (hasTiltSensitivitySetting) addSettingByName(settings, allSettings, StrId::STR_TILT_SENSITIVITY);
   if (hasTiltNextPageOnlySetting) addSettingByName(settings, allSettings, StrId::STR_TILT_NEXT_PAGE_ONLY);
   if (hasFrontButtons) addSettingByKey(settings, allSettings, "menuNavigation");
 #if FREEINK_DEVICE_PICCO
@@ -985,10 +978,11 @@ inline std::vector<SettingInfo> buildControlsTapsGesturesSettingsList(const std:
   const bool hasRotation = hasSettingByName(allSettings, StrId::STR_TWO_FINGER_ROTATION);
   const bool hasTwoFingerSwipe = hasSettingByName(allSettings, StrId::STR_TWO_FINGER_SWIPE_UP);
   const bool hasEdgeGestures = hasSettingByName(allSettings, StrId::STR_LEFT_EDGE_UP);
-  settings.reserve(4 + (hasPinch ? 1u : 0u) + (hasRotation ? 1u : 0u) + (hasTwoFingerSwipe ? 1u : 0u) +
+  settings.reserve(5 + (hasPinch ? 1u : 0u) + (hasRotation ? 1u : 0u) + (hasTwoFingerSwipe ? 1u : 0u) +
                    (hasEdgeGestures ? 1u : 0u));
   addSettingByName(settings, allSettings, StrId::STR_NEXT_PAGE);
   addSettingByName(settings, allSettings, StrId::STR_PREV_PAGE);
+  addSettingByName(settings, allSettings, StrId::STR_WORD_HOLD_ACTION);
   if (hasPinch) addSettingByName(settings, allSettings, StrId::STR_PINCH_FONT_RESIZE);
   if (hasRotation) addSettingByName(settings, allSettings, StrId::STR_TWO_FINGER_ROTATION);
   addSettingByName(settings, allSettings, StrId::STR_TAP_HIDE_STATUS_BAR);

@@ -44,8 +44,8 @@ struct String : std::string {
 struct FontSystem { int changes=0; void markRegistryDirty() { ++changes; } } sdFontSystem;
 class CrossPointWebServer {
  public:
-  struct UploadState { bool success=false; String fileName="book.epub", error; };
-  struct FontUpload { bool valid=false; std::string filePath; } fontUpload;
+  struct UploadState { bool success=false; int errorStatus=0; String fileName="book.epub", error; };
+  struct FontUpload { bool valid=false; int errorStatus=0; std::string filePath; } fontUpload;
   CrossPointHttpServer* server;
   void handleUploadPost(UploadState&) const;
   void handleFontUpload();
@@ -198,6 +198,42 @@ int main() {
   assert(server.output==expected && server.output.size()>20000 && server.chunks>100);
 }
 ''')
+
+    def test_font_tls_reservation_is_payload_only(self):
+        source = (ROOT / "src/activities/settings/FontDownloadActivity.cpp").read_text()
+        manifest = between(source, "  HttpDownloader::DownloadOptions manifestOptions;",
+                           "  // The font list is fetched again")
+        payload = between(source, "    HttpDownloader::DownloadOptions downloadOptions;",
+                          "    // Poll Back and the touch Cancel controls")
+        self.compile_and_run(r'''
+#include <cassert>
+#include "HttpDownloader.h"
+struct FontDownloadActivity {
+  bool pollCancelInput(bool) { return false; }
+  HttpDownloader::DownloadOptions manifestOptions(const char* FONT_MANIFEST_URL) {
+''' + manifest + r'''
+    return manifestOptions;
+  }
+  HttpDownloader::DownloadOptions payloadOptions(const std::string& url) {
+''' + payload + r'''
+    return downloadOptions;
+  }
+};
+int main() {
+  FontDownloadActivity activity;
+  assert(!HttpDownloader::DownloadOptions{}.reserveFullRecord);
+  for (const bool https : {false, true}) {
+    const std::string url = https ? "https://fonts.example/font.cpfont" : "http://fonts.example/font.cpfont";
+    const auto transport = https ? HttpDownloader::Transport::WOLFSSL : HttpDownloader::Transport::ESP_HTTP;
+    const auto manifest = activity.manifestOptions(url.c_str());
+    assert(manifest.transport == transport && !manifest.reserveFullRecord);
+    assert(manifest.shouldCancel && !manifest.shouldCancel());
+    const auto payload = activity.payloadOptions(url);
+    assert(payload.transport == transport && payload.reserveFullRecord == https);
+    assert(payload.preservePartial && payload.resumePartial);
+  }
+}
+''', {"HalStorage.h": "#pragma once\n", "Stream.h": "#pragma once\nclass Stream {};\n"})
 
     def test_retry_uses_same_path_for_touch_and_button(self):
         source = (ROOT / "src/activities/settings/FontDownloadActivity.cpp").read_text()

@@ -16,10 +16,12 @@ enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
 class FontCacheManager;
 class SdCardFont;
 
+#include <array>
 #include <cassert>
 #include <cstring>
 #include <deque>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -55,6 +57,7 @@ class GfxRenderer {
 
   HalDisplay& display;
   RenderMode renderMode;
+  uint8_t textDarkness_ = 0;
   mutable bool absoluteGrayPlanes = false;
   Orientation orientation;
   bool fadingFix;
@@ -66,6 +69,26 @@ class GfxRenderer {
   uint32_t frameBufferSize = HalDisplay::BUFFER_SIZE;
   std::vector<uint8_t*> bwBufferChunks;
   std::map<int, EpdFontFamily> fontMap;
+  struct BitmapTextSize {
+    int sourceId;
+    int sourcePoints = 1;
+    int points = 1;
+
+    bool enlarged() const { return points > sourcePoints; }
+    int scale(int value) const {
+      if (!enlarged()) return value;
+      return (value * points + (value >= 0 ? sourcePoints / 2 : -sourcePoints / 2)) / sourcePoints;
+    }
+  };
+#if !CROSSINK_SCALABLE_FONTS
+  // Eight built-in reader faces and up to three active SD sizes, with room
+  // for temporary fonts. Slots own no font data and are used only at runtime.
+  static constexpr int BITMAP_SIZE_ID_BASE = 0x7FFD0000;
+  std::array<int, 16> bitmapSizeSources_{};
+  BitmapTextSize bitmapTextSize(int fontId) const;
+#else
+  static constexpr BitmapTextSize bitmapTextSize(int fontId) { return {fontId}; }
+#endif
   void* bookFontContext_ = nullptr;
   int (*bookFontResolver_)(void*, uint32_t, uint8_t) = nullptr;
   uint32_t (*bookFontUsage_)(void*) = nullptr;
@@ -87,6 +110,9 @@ class GfxRenderer {
   mutable int _stripY0 = 0;
   mutable int _stripRows = 0;
   mutable bool _stripActive = false;
+  mutable uint64_t textCullGeneration_ = 0;
+  mutable uint32_t textBoundsLookupFailures_ = 0;
+  mutable int* textBounds_ = nullptr;  // two physical row bounds, owned by the line render
 
   // Optional logical-space clip used while a TextBlock is rendered inside a
   // table cell. Glyph bitmaps and background fills both pass through this
@@ -130,6 +156,7 @@ class GfxRenderer {
   void freeBitmapScratchBuffers();
   bool ensureBitmapScratchBuffers(size_t outputRowSize, size_t rowBytesSize) const;
   bool bitmapScratchLockHeldByCurrentTask() const;
+  void drawLegacyIcon(const uint8_t bitmap[], int x, int y, int width, int height, bool black) const;
   template <Color color>
   void drawPixelDither(int x, int y) const;
   template <Color color>
@@ -170,19 +197,22 @@ class GfxRenderer {
   // Clears both the flash-font map and any SD-font registration for fontId.
   // Coupled to avoid dangling SdCardFont* in sdCardFonts_ when callers free
   // the underlying SdCardFont and forget the SD-side unregister.
-  void removeFont(int fontId) {
-    fontMap.erase(fontId);
-    sdCardFonts_.erase(fontId);
-  }
+  void removeFont(int fontId);
   void setFontCacheManager(FontCacheManager* m) { fontCacheManager_ = m; }
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
   bool isFontCacheScanning() const;
   const std::map<int, EpdFontFamily>& getFontMap() const { return fontMap; }
-  void registerSdCardFont(int fontId, SdCardFont* font) { sdCardFonts_[fontId] = font; }
+  void registerSdCardFont(int fontId, SdCardFont* font) {
+    ruledFontCached_ = false;
+    sdCardFonts_[fontId] = font;
+  }
   void unregisterSdCardFont(int fontId) { removeFont(fontId); }
-  void clearSdCardFonts() { sdCardFonts_.clear(); }
+  void clearSdCardFonts() {
+    ruledFontCached_ = false;
+    sdCardFonts_.clear();
+  }
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
-  bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
+  bool isSdCardFont(int fontId) const { return sdCardFonts_.count(bitmapTextSize(fontId).sourceId) > 0; }
   // Shared UI families fill missing characters; legacy metadata aliases use
   // the same composites. Clear all borrowed pointers before releasing faces.
   int filenameFontId(int primaryFontId) const;
@@ -245,6 +275,21 @@ class GfxRenderer {
   void beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const;
   void endStripTarget() const;
   bool glyphIntersectsStrip(int x0, int y0, int x1, int y1) const;
+  // One immutable page replay, under the renderer's RenderLock. Bounds must not
+  // survive font/layout changes or the next page turn. No heap allocation.
+  class TextCullingScope {
+    const GfxRenderer& renderer_;
+
+   public:
+    explicit TextCullingScope(const GfxRenderer& renderer, bool enabled = true);
+    ~TextCullingScope();
+    TextCullingScope(const TextCullingScope&) = delete;
+    TextCullingScope& operator=(const TextCullingScope&) = delete;
+  };
+  uint64_t textCullGeneration() const { return _stripActive ? textCullGeneration_ : 0; }
+  void beginTextBounds(int* bounds) const;
+  void endTextBounds() const;
+  void recordTextBounds(int x0, int y0, int x1, int y1) const;
   bool isStripTargetActive() const { return _stripActive; }
   uint8_t* getWriteTarget() const { return _stripActive ? _stripBuf : frameBuffer; }
   int getWriteOriginY() const { return _stripActive ? _stripY0 : 0; }
@@ -252,6 +297,7 @@ class GfxRenderer {
 
   // Drawing
   bool isPixelBlack(int x, int y) const;
+  bool hasBlackPixels(int x, int y, int width, int height) const;
   void drawPixel(int x, int y, bool state = true) const;
   // Unscaled glyphs share one clipped, orientation-aware rasterizer.
   void drawGlyphBitmap(const uint8_t* bitmap, int width, int height, const glyphBitmap::Frame& frame, bool twoBit,
@@ -285,6 +331,11 @@ class GfxRenderer {
   // Dark Mode leaves their original polarity unchanged.
   void preserveImagePolarity(int x, int y, int width, int height) const;
   bool isDisplayInverted() const { return display.isInverted(); }
+  enum class RefreshContent { Ui, Text, TwoToneText, Image };
+  void setReaderRefresh(RefreshContent content) const;
+  bool supportsTextGrayscale() const;
+  bool combinesGrayscaleBase() const;
+  bool displayRetainedGrayscaleOverlay(int x, int y, int width, int height, bool restore = false) const;
   // Trapezoidal blit used by Flow/iPod-style carousels. Fits the bitmap into a
   // bounding box of width `w` and height `max(hL, hR)` whose top-left is (x, y).
   void drawPerspectiveBitmap(const Bitmap& bitmap, int x, int y, int w, int hL, int hR) const;
@@ -299,9 +350,43 @@ class GfxRenderer {
   struct TextVerticalBounds {
     int top = 0;
     int bottom = 0;
+    void include(int y, int height) {
+      if (height <= 0) return;
+      if (top == bottom) {
+        top = y;
+        bottom = y + height;
+      } else {
+        if (y < top) top = y;
+        if (y + height > bottom) bottom = y + height;
+      }
+    }
   };
-  // Visible regular-text glyph bounds relative to the y coordinate passed to drawText().
-  TextVerticalBounds getTextVerticalBounds(int fontId, const char* text) const;
+
+ private:
+  // One entry for the last regular face. Font registration changes run with readers quiesced.
+  mutable std::mutex ruledFontMutex_;
+  mutable bool ruledFontCached_ = false;
+  struct LetterInk {
+    uint8_t encodedTop = 0;  // Zero is empty, 1..255 encodes -127..127.
+    uint8_t height = 0;
+  };
+  mutable std::array<LetterInk, 95> latinLetters_{};
+  void selectRuledFont(int fontId) const;
+  mutable bool latinBodyValid_ = false;
+  mutable int ruledFontId_ = 0;
+  mutable TextVerticalBounds latinBody_{}, latinExtent_{};
+  void drawOrMeasureText(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
+                         BidiUtils::BidiBaseDir baseDir, int8_t spacing, TextVerticalBounds* bounds,
+                         LetterInk* letters = nullptr) const;
+
+ public:
+  // Regular ascender-to-baseline band and ordinary ink extents, relative to the text origin.
+  bool getLatinBodyBounds(int fontId, TextVerticalBounds& body, TextVerticalBounds& extent) const;
+  // Visible glyph bounds relative to the y coordinate passed to drawText().
+  TextVerticalBounds getTextVerticalBounds(int fontId, const char* text,
+                                           EpdFontFamily::Style style = EpdFontFamily::REGULAR,
+                                           BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO,
+                                           int8_t spacing = 0) const;
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                    BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO, int8_t characterSpacing = 0) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
@@ -333,7 +418,7 @@ class GfxRenderer {
                           bool pixelState = true) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
-  // Zero means bitmap font: EPUB content sizing stays disabled.
+  // Zero means the font has no reader point-size registration.
   uint8_t getFontPointSize(int fontId) const;
   int getFontIdForSize(int fontId, uint8_t points) const;
   void setBookFontResolver(void* context, int (*resolve)(void*, uint32_t, uint8_t), uint32_t (*usage)(void*) = nullptr,
@@ -387,6 +472,23 @@ class GfxRenderer {
   bool supportsDirectGrayscale() const;
   bool displayDirectGrayscaleBase(HalDisplay::RefreshMode fallback = HalDisplay::HALF_REFRESH) const;
   RenderMode getRenderMode() const { return renderMode; }
+  uint8_t getTextDarkness() const { return textDarkness_; }
+
+  // Scope reader-only drawing, including all grayscale replays. Restores on
+  // every return path so menus and other activities keep their normal text.
+  class TextDarknessScope {
+   public:
+    TextDarknessScope(GfxRenderer& renderer, uint8_t level) : renderer_(renderer), previous_(renderer.textDarkness_) {
+      renderer_.textDarkness_ = level <= 2 ? level : 0;
+    }
+    ~TextDarknessScope() { renderer_.textDarkness_ = previous_; }
+    TextDarknessScope(const TextDarknessScope&) = delete;
+    TextDarknessScope& operator=(const TextDarknessScope&) = delete;
+
+   private:
+    GfxRenderer& renderer_;
+    uint8_t previous_;
+  };
   // Grayscale preconditioning settle pass (no-op on X4). The rect overload
   // takes the gray region in LOGICAL screen coordinates and rotates it to the
   // panel; the no-arg overload settles the full frame. Call after the BW base

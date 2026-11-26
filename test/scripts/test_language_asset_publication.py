@@ -5,11 +5,13 @@ import copy
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -21,11 +23,11 @@ spec.loader.exec_module(publisher)
 import export_github_language_assets as github_export
 
 
-def bundle(source='a', keyset='b', revision='c', text=b'French', channel='stable', kind='translation'):
+def bundle(source='a', keyset='b', revision='c', text=b'French', channel='stable', kind='translation', code=None):
     prefix = f'snapshots/{revision * 40}/'
     notice = b'Pattern source and notices'
     ref = {'path': prefix + 'source/notice.txt', 'bytes': len(notice), 'sha256': publisher.sha(notice)}
-    code = 'FR' if kind == 'translation' else 'fr'
+    code = code or ('FR' if kind == 'translation' else 'fr')
     entry = {'code': code, 'bytes': len(text), 'sha256': publisher.sha(text)}
     catalog = {'schema': 1, 'kind': kind, 'channel': channel, 'revision': revision * 40,
                'format': 1, 'requires': 0, 'notices': 'notices.json', 'sources': 'sources.json', 'entries': [entry]}
@@ -50,6 +52,7 @@ class PublicationTest(unittest.TestCase):
         self.reads = []
         self.current = bundle()
         self.hyphenation = bundle(kind='hyphenation', revision='f')
+        self.finnish = bundle(kind='hyphenation', revision='e', text=b'Finnish', code='fi')
         self.fail_key = None
         self.corrupt_key = None
 
@@ -84,11 +87,19 @@ class PublicationTest(unittest.TestCase):
         self.writes.append(key)
         return {}
 
+    def hyphenation_for_channel(self, fixture):
+        catalog, files = copy.deepcopy(fixture)
+        catalog['channel'] = publisher.args.channel
+        return catalog, files
+
     def run_publisher(self, *options, clean=False):
         with patch.object(publisher, 'root', self.root), \
              patch.object(publisher, 'aws', self.aws), \
              patch.object(publisher, 'build_languages', side_effect=lambda *_: copy.deepcopy(self.current)), \
-             patch.object(publisher, 'build_hyphenation', side_effect=lambda: copy.deepcopy(self.hyphenation)), \
+             patch.object(publisher, 'build_hyphenation',
+                          side_effect=lambda: self.hyphenation_for_channel(self.hyphenation)), \
+             patch.object(publisher, 'build_finnish_hyphenation',
+                          side_effect=lambda: self.hyphenation_for_channel(self.finnish)), \
              patch.object(publisher.subprocess, 'check_output', side_effect=lambda command, **_:
                           '' if clean and 'status' in command else '1' * 40), \
              patch.object(publisher.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '')), \
@@ -179,7 +190,20 @@ class PublicationTest(unittest.TestCase):
             self.assertEqual(self.store[key], data)
         self.assertIn('catalogs/rc/translation.json', self.store)
         self.assertIn('catalogs/stable/hyphenation.json', self.store)
+        self.assertIn('catalogs/stable/hyphenation/fi.json', self.store)
         self.assertNotIn('catalogs/rc/hyphenation.json', self.store)
+        self.assertNotIn('catalogs/rc/hyphenation/fi.json', self.store)
+
+        self.run_publisher('--publish', '--channel', 'rc', '--assets', 'hyphenation')
+        for key, data in stable.items():
+            self.assertEqual(self.store[key], data)
+        legacy = json.loads(self.store['catalogs/rc/hyphenation.json'])
+        finnish = json.loads(self.store['catalogs/rc/hyphenation/fi.json'])
+        self.assertEqual([entry['code'] for entry in legacy['entries']], ['fr'])
+        self.assertEqual([entry['code'] for entry in finnish['entries']], ['fi'])
+        writes = len(self.writes)
+        self.run_publisher('--publish', '--channel', 'rc', '--assets', 'hyphenation')
+        self.assertEqual(len(self.writes), writes)
 
     def test_build_is_offline_and_check_is_read_only(self):
         self.run_publisher()
@@ -438,7 +462,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 self.assertIn('prepare-language-assets', self.needs(draft))
                 self.assertIn(build_job, self.needs(gate))
                 self.assertIn('scripts/prepare_release_downloads.py --tag', gate)
-                self.assertIn('SOURCE_COMMIT: ${{ github.sha }}', gate)
+                source = ('${{ github.sha }}' if filename == 'release.yml' else
+                          '${{ inputs.source_commit || github.sha }}')
+                self.assertIn('SOURCE_COMMIT: ' + source, gate)
                 self.assertIn('GH_TOKEN: ${{ secrets.RELEASE_PAT }}', gate)
                 self.assertNotIn('continue-on-error:', draft + gate)
                 self.assertNotIn('always()', draft + gate)
@@ -448,6 +474,60 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     results = {job: 'success' for job in self.needs(draft)}
                     results['prepare-language-assets'] = outcome
                     self.assertFalse(all(results[job] == 'success' for job in self.needs(draft)))
+
+    def test_rc_override_pins_firmware_downloads_and_release_to_one_source(self):
+        jobs = self.jobs('release_candidate.yml')
+        source = '${{ inputs.source_commit || github.sha }}'
+        for name in ('build-release-candidate', 'prepare-language-assets',
+                     'publish-release-candidate'):
+            with self.subTest(job=name):
+                job = jobs[name]
+                self.assertIn('ref: ' + source, job)
+                variable = 'SOURCE_COMMIT' if name == 'prepare-language-assets' else 'RC_HASH'
+                self.assertIn(variable + ': ' + source, job)
+        draft = jobs['publish-release-candidate']
+        self.assertIn('target_commitish: ' + source, draft)
+        self.assertIn('--source-commit "$RC_HASH" --status release-build', draft)
+        self.assertIn('--source-commit "$SOURCE_COMMIT"', jobs['prepare-language-assets'])
+
+    def test_rc_metadata_executes_exact_source_validation_and_tag_derivation(self):
+        # Run the actual shell steps locally: no release or network operations.
+        # The workflow wiring above checks the GitHub expression; these cases
+        # exercise the selected SHA against the actual checkout in both jobs.
+        jobs = self.jobs('release_candidate.yml')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', directory], check=True)
+            subprocess.run(['git', '-C', directory, '-c', 'user.name=Release test',
+                            '-c', 'user.email=release-test@example.invalid',
+                            '-c', 'commit.gpgsign=false', 'commit', '--allow-empty',
+                            '-qm', 'source'], check=True)
+            commit = subprocess.check_output(['git', '-C', directory, 'rev-parse', 'HEAD'],
+                                             text=True).strip()
+            for name in ('build-release-candidate', 'publish-release-candidate'):
+                step = jobs[name].split('      - name: Resolve release-candidate metadata\n', 1)[1]
+                script = textwrap.dedent(step.split('        run: |\n', 1)[1]
+                                        .split('\n      - ', 1)[0])
+                for source in (commit, 'f' * 40, commit[:7], 'main'):
+                    with self.subTest(job=name, source=source):
+                        env_file, output = root / 'env', root / 'output'
+                        env_file.write_text('')
+                        output.write_text('')
+                        result = subprocess.run(['bash', '-e', '-c', script], cwd=root,
+                                                env={**os.environ, 'RC_BRANCH': 'release/next',
+                                                     'RC_HASH': source, 'GITHUB_ENV': str(env_file),
+                                                     'GITHUB_OUTPUT': str(output)},
+                                                capture_output=True, text=True)
+                        if source == commit:
+                            self.assertEqual(result.returncode, 0, result.stderr)
+                            self.assertIn('RC_TAG=rc-next-' + commit[:7], env_file.read_text())
+                            if name == 'build-release-candidate':
+                                self.assertIn('rc_tag=rc-next-' + commit[:7], output.read_text())
+                        else:
+                            self.assertNotEqual(result.returncode, 0)
+                            self.assertIn('exact source commit', result.stdout)
+                            self.assertEqual(env_file.read_text(), '')
+                            self.assertEqual(output.read_text(), '')
 
     def test_shared_workflow_prepares_both_destinations_without_release_events(self):
         path = ROOT / '.github/workflows/publish-language-assets.yml'

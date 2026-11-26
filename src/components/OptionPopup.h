@@ -16,11 +16,19 @@
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 
+#if FREEINK_DEVICE_PICCO && CROSSINK_BATTERY_DIAG_LOG
+#include "util/BatteryDiagnosticLog.h"
+#endif
+
 class OptionPopup {
  public:
 #ifdef SIMULATOR
   int simulatorSelectedIndex() const { return selectedIndex; }
-  Rect simulatorOptionRect(const int index) const { return layout.options.at(index); }
+  Rect simulatorOptionRect(const int index) const {
+    const int visibleIndex = index - layout.firstOptionIndex;
+    if (visibleIndex < 0 || visibleIndex >= static_cast<int>(layout.options.size())) return Rect{};
+    return layout.options[visibleIndex];
+  }
   bool simulatorOptionDisabled(const int index) const { return isDisabled(index); }
   const char* simulatorOptionLabel(const int index) const { return labels()[index]; }
 #endif
@@ -326,6 +334,11 @@ class OptionPopup {
         confirmationMode && footerFocused ? tr(STR_SAVE) : tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, popupLabels.btn1, popupLabels.btn2, popupLabels.btn3, popupLabels.btn4, true);
     render(renderer);
+#if FREEINK_DEVICE_PICCO && CROSSINK_BATTERY_DIAG_LOG
+    // The in-place popup and bottom hints leave the strip above the dialog on screen.
+    BatteryDiagnosticLog::retainDisplayAbove(getLayout(renderer).dialog.y -
+                                             UITheme::getInstance().getMetrics().popupFrameThickness);
+#endif
     renderer.displayBuffer();
     return true;
   }
