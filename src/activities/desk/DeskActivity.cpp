@@ -952,7 +952,8 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     const uint32_t drawMs = millis() - drawStartMs;
     // The X4 Pro's first frame in the saver (a half refresh, then deep sleep at once) came out
     // partly faded (owner's report 2026-11-25): let the panel settle before the deep sleep.
-    if (drewHalf && deskpower::deepSleepTicks()) delay(600);
+    // 600 ms was not enough (the first frame still came out faded, 2026-11-26): 3 s.
+    if (drewHalf && deskpower::deepSleepTicks()) delay(3000);
     deskpower::setCrumb(6);
     // A run that stops after "tick" hangs drawing, after "drawn" sleeping. With how long the draw
     // took ("h": a half refresh was asked for) and the panel controller ("u": UC8279), so a tick
