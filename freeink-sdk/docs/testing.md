@@ -34,8 +34,13 @@ sh libs/book/FreeInkBook/test/host/run.sh
 sh libs/book/ContentProtection/test/host/run.sh
 sh libs/hardware/InputManager/test/host/run.sh
 sh libs/hardware/InputManager/test/host/run_metalio.sh
+sh libs/hardware/InputManager/test/host/run_papermono.sh
 sh libs/hardware/HapticManager/test/host/run.sh
 ```
+
+The Paper Mono input suite disables touch and models PMIC click reports. It checks
+that delayed polling does not lengthen clicks and that two-button Power chords
+retain their hold duration, including clicks that overlap a chord.
 
 The book suite also needs `zip`. It uses `sips` or ImageMagick's `convert` for
 JPEG fixtures and optionally Pillow for progressive JPEG fixtures; the related
@@ -100,6 +105,7 @@ the configuration file, so the sensor's data path still needs a device.
 ```sh
 sh libs/font/FreeInkFont/test/host/run.sh
 sh libs/font/FreeInkFont/test/host/run_ligature.sh
+sh libs/font/FreeInkFont/test/host/run_gpos.sh
 ```
 
 Covers `FtFont::RenderOptions` (every `HintingMode` plus monochrome) against a
@@ -111,6 +117,11 @@ Covers `FtFont::ligature()`/`ligatureGlyphId()` (GSUB-based) against a real
 bundled font: exact-value assertions for the five standard Latin ligatures,
 the codepoint-vs-glyph-ID contract boundary, deinit()/re-init cache
 invalidation, and a null-pointer safety check on `Gsub::LigatureGlyphId`.
+
+The GPOS suite covers pair formats and extension lookups, GDEF-based LookupFlag
+filtering (glyph classes, mark attachment classes, and mark filtering sets), and
+truncated/corrupt tables under ASan/UBSan. It checks resident and streamed kerning,
+the combined GPOS/GDEF stream budget, and cache release/reinitialization.
 
 ## BLE HID host
 
@@ -147,6 +158,7 @@ python3 libs/display/FreeInkDisplay/test/host/run_uc8279.py
 python3 libs/display/FreeInkDisplay/test/host/run_uc8279c_a4.py
 python3 libs/display/FreeInkDisplay/test/host/run_uc8253_power.py
 python3 libs/display/FreeInkDisplay/test/host/run_picco.py
+python3 libs/display/FreeInkDisplay/test/host/run_e1001.py
 ```
 
 These compile production drivers against recording buses. The Pro suite also
@@ -203,3 +215,49 @@ sh libs/network/JsonSax/test/host/run.sh
 
 Checks optional bounded string prefixes, unchanged default overflow handling,
 continued parsing after long strings, and rejection of oversized keys under ASan/UBSan.
+
+## OPDS authentication
+
+```sh
+sh libs/network/Opds/test/host/run.sh
+```
+
+Requires host Expat headers and library. Runs the production OPDS client and
+parsers with a scripted transport under ASan/UBSan. Covers guest-view catalogs
+that need the login sent first, protected acquisitions, Basic challenge headers
+and OPDS documents, rejected credentials, OAuth login/refresh (including after
+a rejected first Basic), and cross-origin challenge rejection. Device
+tests must still verify the consumer's download retry, cancellation, and heap.
+
+## SD save recovery and USB Drive
+
+```sh
+sh libs/hardware/SDCardManager/test/host/run.sh
+sh libs/hardware/UsbMassStorage/test/host/run.sh
+```
+
+The SD suite interrupts every save mutation and injects short writes, failed
+sync/close, failed publication and failed recovery. It checks the previous
+contents, unrelated files and successful retry. Its in-memory filesystem models
+individual operations, so power interruption inside FAT sector updates still
+requires device validation.
+
+The USB suite runs production callbacks with a model card and USB stack. It
+checks partial-sector writes and one multi-sector device call plus one checked
+sync for each aligned write buffer. Invalid ranges and read/write/sync failures
+latch `IoError` and reject subsequent I/O until a successful end/begin cycle.
+It also checks failed-eject and shutdown retry, host suspend, teardown concurrent
+with an active write, and rejection of a changed card capacity with restart
+guidance followed by successful matching-capacity retry. Late callbacks must be
+rejected before touching the card.
+
+The checked write sync is retained because Arduino USBMSC exposes no
+SYNCHRONIZE CACHE callback. Current SDCardManager transports use shared SPI
+(which already stops each multi-sector write) or synchronous SDMMC, making this
+sync a no-op. A future dedicated-SPI or buffered block device must finish each
+USB write buffer before acknowledging it; deferring sync until eject would
+weaken the write-through contract. Eject and teardown also check sync before
+releasing storage ownership.
+
+Real-device checks must include host sleep/resume, clean eject, slow writes and
+SPI/SDMMC card flush failures.

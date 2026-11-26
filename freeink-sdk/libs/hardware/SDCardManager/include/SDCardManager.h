@@ -4,7 +4,7 @@
 // names. Two interchangeable backends behind one FsVolume& seam, so every op
 // returns ordinary FsFile objects:
 //   * SPI / SdFat (default).
-//   * Native 4-bit SDMMC (FREEINK_SD_SDMMC, e.g. de-link) — SdFat can't drive
+//   * Native 4-bit SDMMC (FREEINK_SD_SDMMC, e.g. Silkscreen) — SdFat can't drive
 //     SDIO, so a plain FsVolume is mounted on an esp-idf SDMMC block device
 //     (src/SdmmcBlockDevice). Requires the build to set USE_BLOCK_DEVICE_INTERFACE=1.
 // Boards whose SD rail needs more than a GPIO (e.g. an I2C PMIC) register their
@@ -15,11 +15,13 @@
 // forces SdFat's USE_UTF8_LONG_NAMES on for the whole build — without it,
 // SdFat mangles any non-ASCII long filename into an unopenable path.
 
-#include <WString.h>
-#include <vector>
-#include <string>
-#include <SdFat.h>
 #include <BoardConfig.h>
+#include <SdFat.h>
+#include <WString.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
 
 #if FREEINK_SD_SDMMC
 namespace freeink {
@@ -29,8 +31,21 @@ class SdmmcBlockDevice;  // native esp-idf SDMMC block device (src/SdmmcBlockDev
 
 class SDCardManager {
  public:
+  enum class StartupError : uint8_t {
+    None,
+    // The card did not answer its reset/initialization command.
+    CardNotDetected,
+    // A sector read or other card communication failed.
+    CardCommunicationFailure,
+    // The card was readable, but no supported FAT/exFAT volume mounted.
+    VolumeMountFailed,
+    // Initialization failed without enough evidence to classify the cause.
+    Unknown,
+  };
+
   SDCardManager();
   bool begin();
+  StartupError startupError() const { return startupError_; }
   bool ready() const;
   // Returns the total card capacity in bytes. Cached at begin(); 0 if not mounted.
   uint64_t sdTotalBytes() const;
@@ -38,19 +53,27 @@ class SDCardManager {
   // scans the FAT and is too slow to call on every frame). 0 if not mounted or
   // the cluster count cannot be determined.
   uint64_t sdUsedBytes();
+  // Checked form: false if unmounted or the FAT scan failed; usedBytes is then 0.
+  bool sdUsedBytes(uint64_t& usedBytes);
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
-  // Read the entire file at `path` into a String. Returns empty string on failure.
+  // Read the entire file at `path` into a String. If the main path is missing,
+  // convenience reads fall back to the reserved `.bak` sibling without changing
+  // either file. An existing main file always takes precedence. Returns an empty
+  // string on failure, including when the file is larger than 50,000 bytes.
   String readFile(const char* path);
   // Low-memory helpers:
   // Stream the file contents to a `Print` (e.g. `Serial`, or any `Print`-derived object).
   // Returns true only when every byte is accepted by `out`. Retries positive
   // short writes; returns false on a stalled write, read error, or premature EOF.
+  // Uses the `.bak` fallback described by readFile() when the main path is missing.
   // On failure, `out` may already contain a prefix of the file.
   bool readFileToStream(const char* path, Print& out, size_t chunkSize = 256);
   // Read up to `bufferSize-1` bytes into `buffer`, null-terminating it. Returns bytes read.
+  // Uses the `.bak` fallback described by readFile() when the main path is missing.
   size_t readFileToBuffer(const char* path, char* buffer, size_t bufferSize, size_t maxBytes = 0);
   // Write a string to `path` on the SD card, replacing any existing file only
-  // once the new content is fully written. Returns true on success.
+  // once the new content is fully written. The .tmp and .bak siblings are
+  // reserved for this API. Returns true on success.
   bool writeFile(const char* path, const String& content);
   // Ensure a directory exists, creating it if necessary. Returns true on success.
   bool ensureDirectoryExists(const char* path);
@@ -61,12 +84,14 @@ class SDCardManager {
   bool remove(const char* path) { return vol().remove(path); }
   bool rmdir(const char* path) { return vol().rmdir(path); }
   bool rename(const char* path, const char* newPath) { return vol().rename(path, newPath); }
-  // Move a fully written temp file over `path`. FAT rename does not replace an
-  // existing file, so the old one is removed first.
-  bool replaceFile(const char* tmpPath, const char* path) {
-    return (!vol().exists(path) || vol().remove(path)) && vol().rename(tmpPath, path);
-  }
+  // Restore the previous complete write after interrupted publication.
+  // Use only for paths owned by writeFile(), whose sidecars are reserved.
+  bool recoverWrittenFile(const char* path);
+  // Publish a closed, complete caller-owned temporary using the reserved .bak sibling.
+  // The caller retains ownership of the temporary if publication fails.
+  bool replaceFile(const char* tmpPath, const char* path);
 
+  // Opens exactly `path`; it does not apply the convenience-read .bak fallback.
   bool openFileForRead(const char* moduleName, const char* path, FsFile& file);
   bool openFileForRead(const char* moduleName, const std::string& path, FsFile& file);
   bool openFileForRead(const char* moduleName, const String& path, FsFile& file);
@@ -93,26 +118,31 @@ class SDCardManager {
   FsBlockDeviceInterface* rawBlockDevice();
   // End the FsVolume mount while keeping the block device alive for a raw
   // USB-MSC owner. The caller must reinitialize the manager (begin()) after the
-  // owner releases the card. Returns null when nothing is mounted.
+  // owner releases the card. Returns null when unmounted or a checked volume
+  // flush fails; a failed flush retains the firmware's mount.
   FsBlockDeviceInterface* detachFilesystemForRawAccess();
+  // Call after checked file saves have drained all writers. Flushes volume
+  // metadata without dropping the mount; failure leaves the card available.
+  bool syncFilesystem();
 #if FREEINK_SD_SDMMC
   // Stop the card for deep sleep: unmount the volume, stop the SDMMC host, and
   // float the bus pads so their pull-ups stop back-feeding the card's VDD net
   // through sleep. Idempotent; call only after all file users have stopped. A
   // deep-sleep wake resets the MCU and remounts through begin().
-  void shutdown();
+  bool shutdown();
 #else
   // SPI/SdFat boards: sleep either cuts power entirely (C3 Xteink) or gates the
   // SD rail in powerDownRailsForSleep(); there is no host to stop.
-  void shutdown() {}
+  bool shutdown() { return !initialized || syncFilesystem(); }
 #endif
 
- static SDCardManager& getInstance() { return instance; }
+  static SDCardManager& getInstance() { return instance; }
 
  private:
   static SDCardManager instance;
 
   bool initialized = false;
+  StartupError startupError_ = StartupError::Unknown;
   PowerHook _powerHook = nullptr;
 
   static constexpr uint32_t USED_BYTES_CACHE_TTL_MS = 20000;
@@ -120,6 +150,9 @@ class SDCardManager {
   uint64_t cachedUsedBytes = 0;
   uint32_t cachedUsedBytesAt = 0;
   bool cachedUsedBytesValid = false;
+  bool cachedUsedBytesAvailable = false;
+
+  bool openFileForReadWithBackup(const char* path, FsFile& file);
 
   // All filesystem ops route through one FsVolume& so the backend is swappable.
   // SPI boards: `sd` (SdFs is-a FsVolume). SDMMC boards: a bare FsVolume mounted
