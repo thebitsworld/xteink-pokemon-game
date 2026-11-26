@@ -55,6 +55,10 @@ uint32_t waitPowerButtonRelease();
 // RTC-memory markers (kept through the watchdog's system reset, lost on a power cut).
 bool batteryRunArmed();
 void setBatteryRunArmed(bool armed);
+// Diagnostic: the way of light-sleeping the current run is on (changes at each reset, see
+// sleepFor), and the chip's own reset reason (soc_reset_reason_t, finer than esp_reset_reason).
+int sleepVariant();
+int rawResetReason();
 // The task that called esp_restart() during the last battery run, once (false: none recorded).
 bool takeRestartTask(char* out, size_t size);
 // Light sleeps since the last call: returned OK, rejected, the last rejection's error, the

@@ -21,6 +21,7 @@
 #include <esp_private/esp_clk.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <esp_rom_sys.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <hal/wdt_hal.h>
@@ -231,13 +232,19 @@ Wake sleepFor(const uint32_t ms) {
   const bool touchWake = touchPin >= 0 && gpio_intr_disable(touchGpio) == ESP_OK;
   if (touchWake) gpio_wakeup_enable(touchGpio, touchActiveLow ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
   if (gpioWake || touchWake) esp_sleep_enable_gpio_wakeup();
-  esp_sleep_enable_gpio_switch(false);
-  holdPins(true);
+  // Diagnostic (X3, 2026-11-26): the X3 resets about every 10 s inside light sleep, at any
+  // battery level and with the 23/11 build that once slept for hours. Each reset of a run moves
+  // to the next way of sleeping, and the log says which one a run is on (-v): 0 as before,
+  // 1 no pin holds, 2 GPIO sleep switching left on, 3 two-second sleeps.
+  const int variant = sleepVariant();
+  if (variant != 2) esp_sleep_enable_gpio_switch(false);
+  if (variant != 1) holdPins(true);
+  const uint32_t chunkMs = variant == 3 ? 2000 : kChunkMs;
   Wake result = Wake::Timer;
   const uint32_t start = millis();
   while (millis() - start + 20 < ms) {
     const uint32_t left = ms - (millis() - start);
-    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < kChunkMs ? left : kChunkMs) * 1000ULL);
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < chunkMs ? left : chunkMs) * 1000ULL);
     watchdogFeed();
     setCrumb(1);
     const uint32_t sleepStartMs = millis();
@@ -344,6 +351,22 @@ void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& sl
   ok = rejected = slept = 0;
   lastErr = 0;
   rejectCause = -1;
+#endif
+}
+
+int sleepVariant() {
+#ifndef SIMULATOR
+  return runMagic == kRunMagic ? static_cast<int>(runResets % 4) : 0;
+#else
+  return 0;
+#endif
+}
+
+int rawResetReason() {
+#ifndef SIMULATOR
+  return static_cast<int>(esp_rom_get_reset_reason(0));
+#else
+  return 0;
 #endif
 }
 
