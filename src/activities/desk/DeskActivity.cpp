@@ -859,8 +859,10 @@ void DeskActivity::runBatteryLoop(const bool fromBoot, const deskpower::TickStat
     // task that restarted it ("-t<name>") when that was a software restart.
     char task[12] = "";
     const bool haveTask = deskpower::takeRestartTask(task, sizeof(task));
-    snprintf(event, sizeof(event), "%s-r%d-c%u%s%s", fromBoot ? "resume" : "enter", reason,
-             static_cast<unsigned>(deskpower::lastCrumb()), haveTask ? "-t" : "", haveTask ? task : "");
+    // "-x": the chip's own reset reason.
+    snprintf(event, sizeof(event), "%s-r%d-c%u%s%s-x%d", fromBoot ? "resume" : "enter", reason,
+             static_cast<unsigned>(deskpower::lastCrumb()), haveTask ? "-t" : "", haveTask ? task : "",
+             deskpower::rawResetReason());
     batteryLogNow(event);
     deskpower::setCrumb(0);
   }

@@ -21,6 +21,7 @@
 #include <esp_private/esp_clk.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <esp_rom_sys.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <hal/wdt_hal.h>
@@ -231,13 +232,18 @@ Wake sleepFor(const uint32_t ms) {
   const bool touchWake = touchPin >= 0 && gpio_intr_disable(touchGpio) == ESP_OK;
   if (touchWake) gpio_wakeup_enable(touchGpio, touchActiveLow ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
   if (gpioWake || touchWake) esp_sleep_enable_gpio_wakeup();
-  esp_sleep_enable_gpio_switch(false);
+  // GPIO sleep switching stays at its default (on). Turning it off was what made the X3's light
+  // sleep wake reliably in the 23/11 probes, but by 2026-11-26 it reset the chip about every
+  // 10 s inside the sleep (at any battery level, also with the 23/11 build). A diagnostic build
+  // tried four ways of sleeping on the reader: only leaving the switching on slept, 59 s a
+  // minute with no reset for 15 minutes, and woke on the power button.
   holdPins(true);
+  const uint32_t chunkMs = kChunkMs;
   Wake result = Wake::Timer;
   const uint32_t start = millis();
   while (millis() - start + 20 < ms) {
     const uint32_t left = ms - (millis() - start);
-    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < kChunkMs ? left : kChunkMs) * 1000ULL);
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(left < chunkMs ? left : chunkMs) * 1000ULL);
     watchdogFeed();
     setCrumb(1);
     const uint32_t sleepStartMs = millis();
@@ -344,6 +350,14 @@ void takeSleepStats(uint32_t& ok, uint32_t& rejected, int& lastErr, uint32_t& sl
   ok = rejected = slept = 0;
   lastErr = 0;
   rejectCause = -1;
+#endif
+}
+
+int rawResetReason() {
+#ifndef SIMULATOR
+  return static_cast<int>(esp_rom_get_reset_reason(0));
+#else
+  return 0;
 #endif
 }
 
