@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import socket
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -281,6 +284,87 @@ def advertise(port: int, host: str, address: str):
     return zc, info
 
 
+CLAUDE_PING_ARGS = [
+    "-p", "ok", "--model", "haiku", "--output-format", "stream-json", "--verbose",
+    "--system-prompt", "Reply with OK.", "--tools", "", "--strict-mcp-config",
+    "--disable-slash-commands", "--no-session-persistence",
+]
+
+
+def find_claude() -> str | None:
+    found = shutil.which("claude")
+    if found:
+        return found
+    for candidate in (Path.home() / ".local" / "bin" / "claude.exe", Path.home() / ".local" / "bin" / "claude"):
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def ping_claude(command: str) -> bool:
+    """One tiny `claude -p` turn (about 1,100 tokens on Haiku); saves the limits it reports.
+
+    Claude Code reports the subscription limits in its stream-json output (rate_limit_event,
+    unifiedWindows) after every API call, so this refreshes them without a session open.
+    """
+    try:
+        done = subprocess.run([command, *CLAUDE_PING_ARGS], capture_output=True, text=True, timeout=120,
+                              encoding="utf-8", errors="replace",
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    windows = None
+    for line in done.stdout.splitlines():
+        if '"rate_limit_event"' not in line:
+            continue
+        try:
+            windows = json.loads(line)["rate_limit_info"]["unifiedWindows"]
+        except (ValueError, KeyError, TypeError):
+            continue
+    if not isinstance(windows, dict):
+        return False
+    limits = {}
+    for key in ("five_hour", "seven_day"):
+        window = windows.get(key)
+        if isinstance(window, dict) and window.get("utilization") is not None:
+            limits[key] = {"used_percentage": round(float(window["utilization"]) * 100, 1),
+                           "resets_at": int(window.get("resetsAt") or 0)}
+    if not limits:
+        return False
+    merged = {}
+    try:
+        saved = json.loads(CLAUDE_LIMITS_PATH.read_text(encoding="utf-8")).get("rate_limits")
+        if isinstance(saved, dict):
+            merged.update(saved)
+    except (OSError, ValueError, AttributeError):
+        pass
+    merged.update(limits)
+    try:
+        CLAUDE_LIMITS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CLAUDE_LIMITS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"saved": int(time.time()), "rate_limits": merged}), encoding="utf-8")
+        os.replace(tmp, CLAUDE_LIMITS_PATH)
+    except OSError:
+        return False
+    return True
+
+
+def claude_ping_loop(command: str, minutes: int) -> None:
+    """Pings Claude when the saved limits are older than `minutes` (a CLI session refreshes them too)."""
+    interval = max(5, minutes) * 60
+    while True:
+        try:
+            saved = json.loads(CLAUDE_LIMITS_PATH.read_text(encoding="utf-8")).get("saved", 0)
+        except (OSError, ValueError, AttributeError):
+            saved = 0
+        age = time.time() - float(saved or 0)
+        if age >= interval:
+            ping_claude(command)
+            time.sleep(interval)
+        else:
+            time.sleep(max(60, interval - age))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -288,7 +372,18 @@ def main() -> int:
     parser.add_argument("--name", default=socket.gethostname(), help="name shown on the reader")
     parser.add_argument("--no-mdns", action="store_true", help="do not advertise _xdesk._tcp")
     parser.add_argument("--photos", default=None, help="folder of photos for Desk's photo frame (needs Pillow)")
+    parser.add_argument("--claude-ping", type=int, default=0, metavar="MINUTES",
+                        help="refresh the Claude limits with a tiny `claude -p` turn when they are older than "
+                             "MINUTES (0: off). Each turn uses a little of the subscription, and starts a new "
+                             "five-hour window when none is running")
     args = parser.parse_args()
+
+    if args.claude_ping > 0:
+        command = find_claude()
+        if command:
+            threading.Thread(target=claude_ping_loop, args=(command, args.claude_ping), daemon=True).start()
+        else:
+            print("--claude-ping: claude not found on PATH or in ~/.local/bin")
 
     sampler = Sampler()
     photos = Photos(args.photos)

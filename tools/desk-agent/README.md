@@ -66,3 +66,13 @@ In `~/.claude/settings.json`:
 
 The numbers only move while a Claude Code session is open and has talked to the API; a window
 whose reset time has passed reads 0 % until Claude Code reports it again.
+
+To keep them current without a session open, `--claude-ping MINUTES` has the agent run one tiny
+`claude -p` turn (Haiku, a one-line system prompt, no tools: about 1,100 tokens) whenever the
+saved limits are older than MINUTES, and save the limits Claude Code reports with it
+(`rate_limit_event` in its stream-json output). Each turn uses a little of the subscription, and
+when no five-hour window is running it starts one.
+
+```sh
+python desk_agent.py --claude-ping 30
+```
